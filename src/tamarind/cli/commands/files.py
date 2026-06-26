@@ -39,7 +39,9 @@ def list_files(
             include_all=all_dirs,
             include_metadata=metadata,
         )
-    files = resp.get("files", []) if isinstance(resp, dict) else resp
+    files = resp.get("files") if isinstance(resp, dict) else resp
+    if not isinstance(files, list):
+        files = []
     if files and isinstance(files[0], dict):
         rows = [{"name": f.get("name"), "size": f.get("size"), "lastModified": f.get("lastModified")} for f in files]
         human = output.render_table(rows, ["name", "size", "lastModified"])
@@ -58,7 +60,9 @@ def folders(
     state = ctx.obj
     with state.rest_client() as client:
         resp = rest.get_folders(client, limit=limit, load_all=all_folders)
-    folder_list = resp.get("folders", []) if isinstance(resp, dict) else resp
+    folder_list = resp.get("folders") if isinstance(resp, dict) else resp
+    if not isinstance(folder_list, list):
+        folder_list = []
     output.emit(resp, state.output, human="\n".join(str(f) for f in folder_list) or "(none)")
 
 

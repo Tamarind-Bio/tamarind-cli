@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -265,7 +266,13 @@ def register(app: typer.Typer) -> None:
         state = ctx.obj
         with state.catalog_client() as client:
             resp = client.get_json(f"catalog/jobs/{job_name}/logs", params={"maxLines": max_lines})
-        text = resp.get("logs") if isinstance(resp, dict) else resp
+        if isinstance(resp, dict):
+            # getJobLogs returns {"log": "..."} on success, {"error": "..."} otherwise.
+            if resp.get("error"):
+                raise TamarindError(str(resp["error"]))
+            text = resp.get("log") or resp.get("hint") or json.dumps(resp, indent=2)
+        else:
+            text = resp
         output.emit(resp, state.output, human=str(text))
 
     @app.command()
