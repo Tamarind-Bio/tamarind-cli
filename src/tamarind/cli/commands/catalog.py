@@ -74,6 +74,12 @@ def register(app: typer.Typer) -> None:
         state = ctx.obj
         with state.catalog_client() as client:
             resp = catalog.get_schema(client, tool)
+        # The catalog returns HTTP 200 with {"error": ...} for an unknown/hidden
+        # tool; turn that into a not-found exit instead of printing it as success.
+        if isinstance(resp, dict) and resp.get("error"):
+            from ...errors import NotFoundError
+
+            raise NotFoundError(resp["error"])
 
         if example:
             import yaml

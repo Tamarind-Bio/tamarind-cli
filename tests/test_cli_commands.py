@@ -54,3 +54,24 @@ def test_files_list_survives_non_list_response():
     res = runner.invoke(app, ["files", "list"], env=ENV)
     assert res.exit_code == 0
     assert res.exception is None
+
+
+@respx.mock
+def test_schema_unknown_tool_exits_nonzero():
+    # The catalog returns 200 + {"error": ...} for an unknown tool; must not be exit 0.
+    respx.get(f"{CAT}catalog/tools/notarealtool/schema").mock(
+        return_value=httpx.Response(200, json={"error": "Tool 'notarealtool' not found"})
+    )
+    res = runner.invoke(app, ["schema", "notarealtool"], env=ENV)
+    assert res.exit_code != 0
+
+
+@respx.mock
+def test_upload_handles_non_dict_sentinel(tmp_path):
+    # Staging /uploadFile can return a bare -1; the command must fail cleanly, not crash.
+    f = tmp_path / "x.txt"
+    f.write_text("hi")
+    respx.post(f"{API}uploadFile").mock(return_value=httpx.Response(200, text="-1"))
+    res = runner.invoke(app, ["files", "upload", str(f)], env=ENV)
+    assert res.exit_code != 0
+    assert not isinstance(res.exception, AttributeError)
