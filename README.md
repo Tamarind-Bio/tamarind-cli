@@ -11,15 +11,24 @@ server](https://mcp.tamarind.bio) uses, so the two stay in lockstep. See
 
 ## Install
 
+Once published to PyPI:
+
 ```bash
 curl -fsSL https://install.tamarind.bio/cli/install.sh | sh
-```
-
-Or with Python tooling:
-
-```bash
+# or:
 uv tool install tamarind-cli      # or: pipx install tamarind-cli
 ```
+
+Before then (or to track the repo directly), install from git:
+
+```bash
+uv tool install "git+https://github.com/Tamarind-Bio/tamarind-cli"
+# or: pipx install "git+https://github.com/Tamarind-Bio/tamarind-cli"
+```
+
+> Releasing: tag a GitHub Release and the [`publish.yml`](.github/workflows/publish.yml)
+> workflow builds and uploads to PyPI via Trusted Publishing (configure the
+> trusted publisher for `tamarind-cli` on PyPI first).
 
 ## Authenticate
 

@@ -1,0 +1,41 @@
+name: Publish to PyPI
+
+# Publishes tamarind-cli to PyPI on a GitHub Release (or manual dispatch).
+#
+# Uses PyPI Trusted Publishing (OIDC) — no API token in the repo. One-time setup
+# on PyPI: add a trusted publisher for project `tamarind-cli` pointing at this
+# repo + this workflow (`publish.yml`). If you prefer a token instead, delete the
+# `permissions:`/OIDC bits and set a `PYPI_API_TOKEN` secret, then pass
+# `password: ${{ secrets.PYPI_API_TOKEN }}` to the publish step.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Build sdist + wheel
+        run: uv build
+      - name: Smoke-check the build
+        run: uv run --with dist/*.whl tamarind --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # required for PyPI Trusted Publishing (OIDC)
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
