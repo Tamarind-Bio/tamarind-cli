@@ -138,15 +138,15 @@ def delete_file(
 ) -> Any:
     """Delete a file, or every file under a folder.
 
-    The OpenAPI spec declares this as GET, but some backends require DELETE/POST
-    (they answer GET with 405). Try the spec's GET, then fall back to DELETE.
+    The API expects DELETE (a GET returns 405 "Use DELETE or POST"); some older
+    deployments may still want GET, so fall back on a 405.
     """
     params = {"filePath": file_path, "folder": folder}
     try:
-        return client.get_json("delete-file", params=params)
+        return client.delete_json("delete-file", params=params)
     except APIError as exc:
         if getattr(exc, "status_code", None) == 405:
-            return client.delete_json("delete-file", params=params)
+            return client.get_json("delete-file", params=params)
         raise
 
 

@@ -105,17 +105,27 @@ def test_missing_key_raises_auth():
 
 
 @respx.mock
-def test_delete_file_falls_back_to_delete_on_405():
-    # Spec says GET; backend may answer GET with 405 ("Use DELETE or POST").
-    respx.get(f"{BASE}delete-file").mock(
-        return_value=httpx.Response(405, json={"error": "Method not allowed. Use DELETE or POST."})
-    )
+def test_delete_file_uses_delete():
     route = respx.delete(f"{BASE}delete-file").mock(
         return_value=httpx.Response(200, json={"message": "deleted"})
     )
     out = rest.delete_file(client(), file_path="x.txt")
     assert route.called
     assert out["message"] == "deleted"
+
+
+@respx.mock
+def test_delete_file_falls_back_to_get_on_405():
+    # Older deployments may only accept GET; fall back when DELETE returns 405.
+    respx.delete(f"{BASE}delete-file").mock(
+        return_value=httpx.Response(405, json={"error": "Method not allowed"})
+    )
+    route = respx.get(f"{BASE}delete-file").mock(
+        return_value=httpx.Response(200, json={"message": "deleted via get"})
+    )
+    out = rest.delete_file(client(), file_path="x.txt")
+    assert route.called
+    assert out["message"] == "deleted via get"
 
 
 @respx.mock
