@@ -3,7 +3,7 @@ import io
 import pytest
 
 from tamarind.cli.inputs import resolve_job_input
-from tamarind.errors import TamarindError
+from tamarind.errors import ExitCode, ValidationError
 
 
 def test_bare_settings(tmp_path):
@@ -52,10 +52,27 @@ def test_stdin(monkeypatch):
 
 
 def test_bad_set():
-    with pytest.raises(TamarindError):
+    with pytest.raises(ValidationError) as exc:
         resolve_job_input(None, ["noequalshere"])
+    assert exc.value.exit_code == ExitCode.VALIDATION
 
 
 def test_missing_file():
-    with pytest.raises(TamarindError):
+    # A bad --input path is an input/validation error (exit 5), not a generic one.
+    with pytest.raises(ValidationError) as exc:
         resolve_job_input("/no/such/file.yaml", [])
+    assert exc.value.exit_code == ExitCode.VALIDATION
+
+
+def test_malformed_document(tmp_path):
+    f = tmp_path / "bad.yaml"
+    f.write_text("{:::not yaml::")
+    with pytest.raises(ValidationError):
+        resolve_job_input(str(f), [])
+
+
+def test_non_mapping_document(tmp_path):
+    f = tmp_path / "list.json"
+    f.write_text("[1, 2, 3]")
+    with pytest.raises(ValidationError):
+        resolve_job_input(str(f), [])

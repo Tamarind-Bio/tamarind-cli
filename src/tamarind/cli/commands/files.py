@@ -77,7 +77,9 @@ def upload(
     remote = name or path.name
     with state.rest_client() as client:
         signed = rest.upload_file_url(client, filename=remote)
-    url = signed.get("signedUrl")
+    # The endpoint may return a non-dict error sentinel (e.g. -1) instead of an
+    # object; don't crash on .get — surface a clean error.
+    url = signed.get("signedUrl") if isinstance(signed, dict) else None
     if not url:
         raise TamarindError("Upload did not return a signed URL.", detail=signed)
     output.info(f"Uploading {path} → {remote}…", state.output)

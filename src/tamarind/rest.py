@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .errors import APIError
 from .http import HTTPClient
 
 # Query params that the API expects as the literal string "true" rather than a
@@ -134,9 +135,19 @@ def delete_job(client: HTTPClient, *, job_name: str) -> Any:
 
 def delete_file(
     client: HTTPClient, *, file_path: str | None = None, folder: str | None = None
-) -> dict:
-    """GET /delete-file — delete a file, or every file under a folder."""
-    return client.get_json("delete-file", params={"filePath": file_path, "folder": folder})
+) -> Any:
+    """Delete a file, or every file under a folder.
+
+    The API expects DELETE (a GET returns 405 "Use DELETE or POST"); some older
+    deployments may still want GET, so fall back on a 405.
+    """
+    params = {"filePath": file_path, "folder": folder}
+    try:
+        return client.delete_json("delete-file", params=params)
+    except APIError as exc:
+        if getattr(exc, "status_code", None) == 405:
+            return client.get_json("delete-file", params=params)
+        raise
 
 
 def get_files(

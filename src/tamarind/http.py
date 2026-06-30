@@ -97,8 +97,10 @@ class HTTPClient:
     def post_json(self, path: str, *, json: Any | None = None) -> Any:
         return _parse_json(self.request("POST", path, json=json))
 
-    def delete_json(self, path: str, *, json: Any | None = None) -> Any:
-        return _parse_json(self.request("DELETE", path, json=json))
+    def delete_json(
+        self, path: str, *, params: dict[str, Any] | None = None, json: Any | None = None
+    ) -> Any:
+        return _parse_json(self.request("DELETE", path, params=params, json=json))
 
 
 def _parse_json(resp: httpx.Response) -> Any:
@@ -129,6 +131,9 @@ def _extract_message(resp: httpx.Response) -> str:
 def _map_error(resp: httpx.Response) -> TamarindError:
     msg = _extract_message(resp)
     code = resp.status_code
+    ml = msg.lower()
+    auth_ish = "api key" in ml or "api-key" in ml or "apikey" in ml or "unauthorized" in ml
+    notfound_ish = "not found" in ml or "does not exist" in ml or "no such" in ml
     if code == 401:
         return AuthError(f"Unauthorized: {msg}")
     if code == 403:
@@ -136,6 +141,13 @@ def _map_error(resp: httpx.Response) -> TamarindError:
     if code == 404:
         return NotFoundError(msg)
     if code == 400:
+        # The API uses 400 for several distinct failures; classify by message so
+        # exit codes are consistent: bad/missing key -> auth (3), missing job/file
+        # -> not-found (4), otherwise a genuine validation error (5).
+        if auth_ish:
+            return AuthError(f"Unauthorized: {msg}")
+        if notfound_ish:
+            return NotFoundError(msg)
         return ValidationError(msg)
     if code == 429:
         return RateLimitError(f"Rate limited: {msg}")

@@ -81,10 +81,51 @@ def test_error_mapping(status, exc):
         rest.get_jobs(client())
 
 
+@respx.mock
+@pytest.mark.parametrize(
+    "message,exc",
+    [
+        ("Missing or incorrect API key", AuthError),       # bad key -> auth (3)
+        ("Job 'x' not found", NotFoundError),               # -> not-found (4)
+        ("file does not exist", NotFoundError),             # -> not-found (4)
+        ("Unrecognized setting: foo", ValidationError),     # genuine -> validation (5)
+    ],
+)
+def test_400_subtype_classification(message, exc):
+    # The API overloads HTTP 400; the client classifies by message for stable exit codes.
+    respx.get(f"{BASE}jobs").mock(return_value=httpx.Response(400, json={"error": message}))
+    with pytest.raises(exc):
+        rest.get_jobs(client())
+
+
 def test_missing_key_raises_auth():
     c = HTTPClient(BASE, None)
     with pytest.raises(AuthError):
         rest.get_jobs(c)
+
+
+@respx.mock
+def test_delete_file_uses_delete():
+    route = respx.delete(f"{BASE}delete-file").mock(
+        return_value=httpx.Response(200, json={"message": "deleted"})
+    )
+    out = rest.delete_file(client(), file_path="x.txt")
+    assert route.called
+    assert out["message"] == "deleted"
+
+
+@respx.mock
+def test_delete_file_falls_back_to_get_on_405():
+    # Older deployments may only accept GET; fall back when DELETE returns 405.
+    respx.delete(f"{BASE}delete-file").mock(
+        return_value=httpx.Response(405, json={"error": "Method not allowed"})
+    )
+    route = respx.get(f"{BASE}delete-file").mock(
+        return_value=httpx.Response(200, json={"message": "deleted via get"})
+    )
+    out = rest.delete_file(client(), file_path="x.txt")
+    assert route.called
+    assert out["message"] == "deleted via get"
 
 
 @respx.mock

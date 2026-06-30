@@ -22,7 +22,7 @@ from typing import Any
 
 import yaml
 
-from ..errors import TamarindError
+from ..errors import ValidationError
 
 
 @dataclass
@@ -46,7 +46,7 @@ def _load_text(source: str) -> str:
         source = body
     path = Path(source).expanduser()
     if not path.exists():
-        raise TamarindError(f"Input file not found: {path}")
+        raise ValidationError(f"Input file not found: {path}")
     return path.read_text()
 
 
@@ -58,7 +58,7 @@ def _parse_document(text: str) -> Any:
     try:
         return yaml.safe_load(text)
     except yaml.YAMLError as exc:
-        raise TamarindError(f"Could not parse input as YAML/JSON: {exc}") from exc
+        raise ValidationError(f"Could not parse input as YAML/JSON: {exc}") from exc
 
 
 def _coerce_scalar(raw: str) -> Any:
@@ -71,7 +71,7 @@ def _coerce_scalar(raw: str) -> Any:
 def _apply_sets(settings: dict[str, Any], pairs: list[str]) -> None:
     for pair in pairs:
         if "=" not in pair:
-            raise TamarindError(f"--set expects key=value, got: {pair!r}")
+            raise ValidationError(f"--set expects key=value, got: {pair!r}")
         key, raw = pair.split("=", 1)
         settings[key.strip()] = _coerce_scalar(raw)
 
@@ -94,7 +94,7 @@ def resolve_job_input(
         if doc is None:
             doc = {}
         if not isinstance(doc, dict):
-            raise TamarindError(
+            raise ValidationError(
                 "Input must be a mapping (the job settings, or a "
                 "{jobName, type, settings} object)."
             )
