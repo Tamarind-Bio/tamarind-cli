@@ -12,7 +12,7 @@ import typer
 
 from ... import jobs as jobs_helpers
 from ... import rest
-from ...errors import TamarindError, ValidationError
+from ...errors import NotFoundError, TamarindError, ValidationError
 from .. import output
 from ..inputs import resolve_job_input
 
@@ -269,7 +269,11 @@ def register(app: typer.Typer) -> None:
         if isinstance(resp, dict):
             # getJobLogs returns {"log": "..."} on success, {"error": "..."} otherwise.
             if resp.get("error"):
-                raise TamarindError(str(resp["error"]))
+                msg = str(resp["error"])
+                ml = msg.lower()
+                if "not found" in ml or "no such" in ml or "does not exist" in ml:
+                    raise NotFoundError(msg)
+                raise TamarindError(msg)
             text = resp.get("log") or resp.get("hint") or json.dumps(resp, indent=2)
         else:
             text = resp

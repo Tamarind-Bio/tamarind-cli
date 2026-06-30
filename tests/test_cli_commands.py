@@ -7,6 +7,7 @@ import respx
 from typer.testing import CliRunner
 
 from tamarind.cli.main import app
+from tamarind.errors import NotFoundError, TamarindError
 
 runner = CliRunner()
 
@@ -30,12 +31,26 @@ def test_logs_renders_log_field():
 
 
 @respx.mock
-def test_logs_surfaces_error():
+def test_logs_not_found_maps_to_not_found_error():
+    # getJobLogs returns {"error": "...not found..."} for a missing job; that must
+    # raise NotFoundError (exit 4 via the entry point), not a generic error (exit 1).
+    # CliRunner bypasses the run() exit-code mapping, so assert the exception type.
     respx.get(f"{CAT}catalog/jobs/job1/logs").mock(
-        return_value=httpx.Response(200, json={"error": "Log file not found"})
+        return_value=httpx.Response(200, json={"error": "Log file not found at s3://..."})
     )
     res = runner.invoke(app, ["logs", "job1"], env=ENV)
-    assert res.exit_code != 0
+    assert isinstance(res.exception, NotFoundError)
+    assert res.exception.exit_code == 4
+
+
+@respx.mock
+def test_logs_other_error_is_generic():
+    respx.get(f"{CAT}catalog/jobs/job1/logs").mock(
+        return_value=httpx.Response(200, json={"error": "internal boom"})
+    )
+    res = runner.invoke(app, ["logs", "job1"], env=ENV)
+    assert isinstance(res.exception, TamarindError)
+    assert not isinstance(res.exception, NotFoundError)
 
 
 @respx.mock
@@ -54,3 +69,24 @@ def test_files_list_survives_non_list_response():
     res = runner.invoke(app, ["files", "list"], env=ENV)
     assert res.exit_code == 0
     assert res.exception is None
+
+
+@respx.mock
+def test_schema_unknown_tool_exits_nonzero():
+    # The catalog returns 200 + {"error": ...} for an unknown tool; must not be exit 0.
+    respx.get(f"{CAT}catalog/tools/notarealtool/schema").mock(
+        return_value=httpx.Response(200, json={"error": "Tool 'notarealtool' not found"})
+    )
+    res = runner.invoke(app, ["schema", "notarealtool"], env=ENV)
+    assert res.exit_code != 0
+
+
+@respx.mock
+def test_upload_handles_non_dict_sentinel(tmp_path):
+    # Staging /uploadFile can return a bare -1; the command must fail cleanly, not crash.
+    f = tmp_path / "x.txt"
+    f.write_text("hi")
+    respx.post(f"{API}uploadFile").mock(return_value=httpx.Response(200, text="-1"))
+    res = runner.invoke(app, ["files", "upload", str(f)], env=ENV)
+    assert res.exit_code != 0
+    assert not isinstance(res.exception, AttributeError)
