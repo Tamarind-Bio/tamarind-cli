@@ -82,11 +82,46 @@ def test_schema_unknown_tool_exits_nonzero():
 
 
 @respx.mock
-def test_upload_handles_non_dict_sentinel(tmp_path):
-    # Staging /uploadFile can return a bare -1; the command must fail cleanly, not crash.
-    f = tmp_path / "x.txt"
-    f.write_text("hi")
-    respx.post(f"{API}uploadFile").mock(return_value=httpx.Response(200, text="-1"))
+def test_upload_gets_presigned_url_then_puts_to_s3(tmp_path):
+    # `files upload` is a two-step presigned PUT: POST /getPresignedUploadUrl to
+    # get a PUT-able uploadUrl, then PUT the bytes straight to S3 (not multipart
+    # through the API). The Content-Type on the PUT must match what was signed.
+    import json
+
+    f = tmp_path / "target.pdb"
+    f.write_bytes(b"ATOM      1  N   MET A   1\n")
+    upload_url = "https://s3.amazonaws.com/alphafold-dbs-tamarind/user%40x.com/target.pdb"
+
+    post_route = respx.post(f"{API}getPresignedUploadUrl").mock(
+        return_value=httpx.Response(
+            200,
+            json={"uploadUrl": upload_url, "headUrl": "https://h", "key": "user@x.com/target.pdb", "bucket": "b"},
+        )
+    )
+    put_route = respx.put(upload_url).mock(return_value=httpx.Response(200))
+
+    res = runner.invoke(app, ["files", "upload", str(f)], env=ENV)
+
+    assert res.exit_code == 0, res.stdout
+    assert post_route.called and put_route.called
+    # POST carried the filename + contentType the URL is signed with
+    body = json.loads(post_route.calls.last.request.content)
+    assert body == {"filename": "target.pdb", "contentType": "application/octet-stream"}
+    # PUT streamed the exact bytes with the matching Content-Type
+    put_req = put_route.calls.last.request
+    assert put_req.content == b"ATOM      1  N   MET A   1\n"
+    assert put_req.headers["content-type"] == "application/octet-stream"
+
+
+@respx.mock
+def test_upload_surfaces_clean_error_on_non_dict_response(tmp_path):
+    # An auth/sentinel failure (e.g. bare -1) must not crash on .get — it should
+    # raise a clean TamarindError and never attempt the PUT.
+    f = tmp_path / "target.pdb"
+    f.write_bytes(b"x")
+    respx.post(f"{API}getPresignedUploadUrl").mock(return_value=httpx.Response(200, json=-1))
     res = runner.invoke(app, ["files", "upload", str(f)], env=ENV)
     assert res.exit_code != 0
-    assert not isinstance(res.exception, AttributeError)
+    # A clean, typed error (the isinstance(dict) guard worked) — NOT an
+    # AttributeError from calling .get on an int.
+    assert isinstance(res.exception, TamarindError)

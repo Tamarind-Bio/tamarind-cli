@@ -103,9 +103,18 @@ def get_result(
     return client.post_json("result", json=body)
 
 
-def upload_file_url(client: HTTPClient, *, filename: str) -> dict:
-    """POST /uploadFile — returns {signedUrl, filename}; PUT the bytes to signedUrl."""
-    return client.post_json("uploadFile", json={"filename": filename})
+def upload_file_url(
+    client: HTTPClient, *, filename: str, content_type: str = "application/octet-stream"
+) -> dict:
+    """POST /getPresignedUploadUrl — returns {uploadUrl, headUrl, key, bucket}.
+
+    PUT the file bytes directly to ``uploadUrl`` with a matching ``Content-Type``
+    header (the presigned signature covers the content type). This uploads
+    straight to S3, bypassing the API's request-body size limit.
+    """
+    return client.post_json(
+        "getPresignedUploadUrl", json={"filename": filename, "contentType": content_type}
+    )
 
 
 def cancel_job(
