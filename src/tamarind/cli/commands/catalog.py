@@ -100,7 +100,8 @@ def register(app: typer.Typer) -> None:
                     "type": p.get("type"),
                     "required": "yes" if p.get("required") else "",
                     "default": p.get("default"),
-                    "description": (p.get("descr") or p.get("displayName") or "")[:60],
+                    # Full text — render_table truncates it (with an ellipsis) to fit.
+                    "description": p.get("descr") or p.get("description") or p.get("displayName") or "",
                 }
             )
         human = (

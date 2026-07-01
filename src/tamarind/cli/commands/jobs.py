@@ -89,7 +89,7 @@ def register(app: typer.Typer) -> None:
                 client, job_name=job_name, job_type=job.job_type or tool, settings=job.settings
             )
         valid = bool(result.get("valid"))
-        human = "valid ✓" if valid else f"invalid ✗  {result.get('error', '')}"
+        human = "valid ✓" if valid else f"invalid ✗ {result.get('error', '')}"
         output.emit(result, state.output, human=human)
         if not valid:
             raise typer.Exit(ValidationError.exit_code)
@@ -230,28 +230,30 @@ def register(app: typer.Typer) -> None:
                 next_key = resp.get("startKey") if isinstance(resp, dict) else None
         if status:
             job_list = [j for j in job_list if (jobs_helpers.job_status(j) or "").lower() == status.lower()]
+        # The raw Score is a large per-tool JSON blob — keep it out of the human
+        # table (it's noise there) but retain it in the --json payload / `status`.
         rows = [
             {
                 "JobName": jobs_helpers.job_name(j),
                 "Type": j.get("Type"),
                 "JobStatus": jobs_helpers.job_status(j),
                 "Created": j.get("Created"),
-                "Score": j.get("Score"),
             }
             for j in job_list
         ]
         out = {"jobs": job_list, "count": len(job_list)}
         if statuses:
             out["statuses"] = statuses
-        human = output.render_table(rows, ["JobName", "Type", "JobStatus", "Created", "Score"])
+        human = output.render_table(rows, ["JobName", "Type", "JobStatus", "Created"])
         if next_key:
+            # Keep the raw cursor out of the human footer (it's a 36-char UUID that
+            # blows past narrow terminals) — it's always available in --json output.
             out["startKey"] = next_key
-            tail = (
-                f"stopped at the {_MAX_AUTO_PAGES}-page cap; use --start-key {next_key} to continue"
+            human += "\n\n" + (
+                f"More results — hit the {_MAX_AUTO_PAGES}-page cap; the startKey to continue is in --json."
                 if all_jobs
-                else f"use --start-key {next_key} for the next page"
+                else "More results — re-run with --all to fetch them all (startKey is in --json)."
             )
-            human += f"\n\nMore results — {tail}."
         output.emit(out, state.output, human=human)
 
     @app.command()
