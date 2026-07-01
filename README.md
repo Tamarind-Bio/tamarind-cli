@@ -11,15 +11,17 @@ server](https://mcp.tamarind.bio) uses, so the two stay in lockstep. See
 
 ## Install
 
-Once published to PyPI:
-
 ```bash
-curl -fsSL https://install.tamarind.bio/cli/install.sh | sh
-# or:
 uv tool install tamarind-cli      # or: pipx install tamarind-cli
 ```
 
-Before then (or to track the repo directly), install from git:
+Or with the bootstrap installer (installs `uv` if needed):
+
+```bash
+curl -fsSL https://app.tamarind.bio/cli/install.sh | sh
+```
+
+To track the repo directly instead of the PyPI release:
 
 ```bash
 uv tool install "git+https://github.com/Tamarind-Bio/tamarind-cli"
