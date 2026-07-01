@@ -1,6 +1,6 @@
 [project]
 name = "tamarind-cli"
-version = "0.1.1"
+version = "0.1.2"
 description = "Command-line interface for the Tamarind Bio platform — submit, monitor, and download protein/molecule jobs from your terminal or an AI agent."
 readme = "README.md"
 requires-python = ">=3.10"

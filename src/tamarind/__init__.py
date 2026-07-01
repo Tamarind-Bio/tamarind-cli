@@ -13,4 +13,11 @@ This package is a thin client over the Tamarind platform. Two surfaces:
   database directly.
 """
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+try:
+    # Single source of truth: the installed package version (pyproject.toml),
+    # so `tamarind --version` can never drift from the released version.
+    __version__ = _pkg_version("tamarind-cli")
+except PackageNotFoundError:  # running from a source tree with no install metadata
+    __version__ = "0.0.0+dev"
