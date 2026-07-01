@@ -99,6 +99,38 @@ def list_files(
     output.emit(result, state.output, human=human)
 
 
+def _file_type_counts(files: list) -> dict:
+    """Count workspace files by extension, mirroring the MCP getFileStats tool."""
+    counts: dict = {}
+    for f in files:
+        name = _file_name(f)
+        ext = name.rsplit(".", 1)[1].lower() if "." in name else "no_extension"
+        counts[ext] = counts.get(ext, 0) + 1
+    # Sort by count desc (then name for stable ties); keep the top 20 like getFileStats.
+    ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:20]
+    return dict(ordered)
+
+
+@app.command()
+def stats(ctx: typer.Context) -> None:
+    """Summarize workspace files by type (counts), like the MCP getFileStats tool."""
+    state = ctx.obj
+    with state.rest_client() as client:
+        resp = rest.get_files(client)
+    files = resp.get("files") if isinstance(resp, dict) else resp
+    if not isinstance(files, list):
+        files = []
+    file_types = _file_type_counts(files)
+    out = {
+        "totalFiles": len(files),
+        "fileTypes": file_types,
+        "hint": "Use `tamarind files list --types pdb` to list a specific type.",
+    }
+    rows = [{"type": k, "count": v} for k, v in file_types.items()]
+    human = output.render_table(rows, ["type", "count"]) + f"\n\n{len(files)} files total."
+    output.emit(out, state.output, human=human)
+
+
 @app.command()
 def folders(
     ctx: typer.Context,
