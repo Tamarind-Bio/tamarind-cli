@@ -75,16 +75,19 @@ def upload(
     """Upload a local file to your workspace (two-step presigned PUT)."""
     state = ctx.obj
     remote = name or path.name
+    content_type = "application/octet-stream"
     with state.rest_client() as client:
-        signed = rest.upload_file_url(client, filename=remote)
-    # The endpoint may return a non-dict error sentinel (e.g. -1) instead of an
-    # object; don't crash on .get — surface a clean error.
-    url = signed.get("signedUrl") if isinstance(signed, dict) else None
+        signed = rest.upload_file_url(client, filename=remote, content_type=content_type)
+    # The endpoint returns {uploadUrl, headUrl, key, bucket}; PUT the bytes to
+    # uploadUrl. Don't crash on a non-dict error body — surface a clean error.
+    url = signed.get("uploadUrl") if isinstance(signed, dict) else None
     if not url:
-        raise TamarindError("Upload did not return a signed URL.", detail=signed)
+        raise TamarindError("Upload did not return a presigned URL.", detail=signed)
     output.info(f"Uploading {path} → {remote}…", state.output)
+    # Content-Type must match what the presigned URL was signed with, or S3
+    # rejects the PUT with SignatureDoesNotMatch.
     with path.open("rb") as fh:
-        put = httpx.put(url, content=fh.read(), timeout=300.0)
+        put = httpx.put(url, content=fh.read(), headers={"Content-Type": content_type}, timeout=300.0)
     put.raise_for_status()
     output.emit(
         {"ok": True, "filename": remote, "bytes": path.stat().st_size},
