@@ -2,6 +2,8 @@
 live testing against staging surfaced: the logs response shape and a non-list
 folders response."""
 
+import json
+
 import httpx
 import respx
 from typer.testing import CliRunner
@@ -125,3 +127,83 @@ def test_upload_surfaces_clean_error_on_non_dict_response(tmp_path):
     # A clean, typed error (the isinstance(dict) guard worked) — NOT an
     # AttributeError from calling .get on an int.
     assert isinstance(res.exception, TamarindError)
+
+
+# --- files list filtering (the /files endpoint ignores query filters; the CLI
+#     applies them client-side, mirroring the MCP getFiles tool) ---------------
+
+_WORKSPACE_FILES = ["a.pdb", "b.PDB", "c.cif", "notes.txt", "run.log", "seqs.fasta"]
+
+
+@respx.mock
+def test_files_list_filters_by_type_client_side():
+    # The endpoint returns the FULL list regardless of ?types=; the CLI must still
+    # narrow it (this is the bug: the filter used to be silently ignored).
+    respx.get(f"{API}files").mock(return_value=httpx.Response(200, json=_WORKSPACE_FILES))
+    res = runner.invoke(app, ["--json", "files", "list", "--types", "pdb"], env=ENV)
+    assert res.exit_code == 0, res.stdout
+    out = json.loads(res.stdout)
+    assert set(out["files"]) == {"a.pdb", "b.PDB"}  # case-insensitive extension match
+    assert out["count"] == 2
+    assert out["total"] == 2
+    assert out["totalUnfiltered"] == 6
+
+
+@respx.mock
+def test_files_list_filters_by_multiple_types():
+    respx.get(f"{API}files").mock(return_value=httpx.Response(200, json=_WORKSPACE_FILES))
+    res = runner.invoke(app, ["--json", "files", "list", "--types", "pdb,cif"], env=ENV)
+    out = json.loads(res.stdout)
+    assert set(out["files"]) == {"a.pdb", "b.PDB", "c.cif"}
+
+
+@respx.mock
+def test_files_list_filters_by_search():
+    respx.get(f"{API}files").mock(return_value=httpx.Response(200, json=_WORKSPACE_FILES))
+    res = runner.invoke(app, ["--json", "files", "list", "--search", "SEQ"], env=ENV)
+    out = json.loads(res.stdout)
+    assert out["files"] == ["seqs.fasta"]  # substring, case-insensitive
+    assert out["total"] == 1
+
+
+@respx.mock
+def test_files_list_paginates_client_side():
+    respx.get(f"{API}files").mock(return_value=httpx.Response(200, json=_WORKSPACE_FILES))
+    page1 = json.loads(
+        runner.invoke(app, ["--json", "files", "list", "--limit", "2", "--offset", "0"], env=ENV).stdout
+    )
+    assert page1["count"] == 2 and page1["total"] == 6 and page1["hasMore"] is True
+    page3 = json.loads(
+        runner.invoke(app, ["--json", "files", "list", "--limit", "2", "--offset", "4"], env=ENV).stdout
+    )
+    assert page3["count"] == 2 and page3["hasMore"] is False
+
+
+# --- jobs pagination cursor --------------------------------------------------
+
+
+@respx.mock
+def test_jobs_forwards_and_surfaces_start_key():
+    route = respx.get(f"{API}jobs").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "jobs": [{"JobName": "j1", "JobStatus": "Complete"}],
+                "startKey": "CURSOR123",
+                "statuses": {"Complete": 1},
+            },
+        )
+    )
+    res = runner.invoke(app, ["--json", "jobs", "--limit", "1", "--start-key", "PREV"], env=ENV)
+    assert res.exit_code == 0, res.stdout
+    out = json.loads(res.stdout)
+    assert out["startKey"] == "CURSOR123"  # next-page cursor surfaced
+    url = str(route.calls.last.request.url)
+    assert "startKey=PREV" in url and "limit=1" in url  # our cursor was forwarded
+
+
+@respx.mock
+def test_jobs_omits_start_key_when_backend_has_none():
+    respx.get(f"{API}jobs").mock(return_value=httpx.Response(200, json={"jobs": [], "statuses": {}}))
+    out = json.loads(runner.invoke(app, ["--json", "jobs"], env=ENV).stdout)
+    assert "startKey" not in out

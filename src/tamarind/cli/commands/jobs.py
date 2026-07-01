@@ -162,16 +162,20 @@ def register(app: typer.Typer) -> None:
         status: Optional[str] = typer.Option(None, "--status", help="Filter by status (client-side)."),
         batch: Optional[str] = typer.Option(None, "--batch", help="Only jobs in this batch."),
         limit: int = typer.Option(50, "--limit", help="Max jobs to return."),
+        start_key: Optional[str] = typer.Option(
+            None, "--start-key", help="Pagination cursor: the 'startKey' from a previous listing."
+        ),
         organization: bool = typer.Option(False, "--organization", help="All jobs across your org."),
         include_subjobs: bool = typer.Option(False, "--include-subjobs", help="Include batch subjobs."),
         email: Optional[str] = typer.Option(None, "--email", help="Jobs for another org member."),
     ) -> None:
-        """List your jobs."""
+        """List your jobs. When more remain, a 'startKey' is returned; pass it to --start-key to page."""
         state = ctx.obj
         with state.rest_client() as client:
             resp = rest.get_jobs(
                 client,
                 batch=batch,
+                start_key=start_key,
                 limit=limit,
                 organization=organization,
                 include_subjobs=include_subjobs,
@@ -193,7 +197,12 @@ def register(app: typer.Typer) -> None:
         out = {"jobs": job_list, "count": len(job_list)}
         if isinstance(resp, dict) and resp.get("statuses"):
             out["statuses"] = resp["statuses"]
-        output.emit(out, state.output, human=output.render_table(rows, ["JobName", "Type", "JobStatus", "Created", "Score"]))
+        next_key = resp.get("startKey") if isinstance(resp, dict) else None
+        human = output.render_table(rows, ["JobName", "Type", "JobStatus", "Created", "Score"])
+        if next_key:
+            out["startKey"] = next_key
+            human += f"\n\nMore results — use --start-key {next_key} for the next page."
+        output.emit(out, state.output, human=human)
 
     @app.command()
     def status(

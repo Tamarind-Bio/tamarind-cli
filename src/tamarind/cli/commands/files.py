@@ -15,6 +15,53 @@ from .. import output
 app = typer.Typer(no_args_is_help=True)
 
 
+def _file_name(f: object) -> str:
+    """A file entry is usually a bare name string, but be tolerant of dicts."""
+    if isinstance(f, str):
+        return f
+    if isinstance(f, dict):
+        return str(f.get("name") or f.get("filename") or f.get("key") or "")
+    return str(f)
+
+
+def _apply_file_filters(
+    files: list,
+    *,
+    types: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
+) -> dict:
+    """Filter a workspace file list client-side, mirroring the MCP ``getFiles`` tool.
+
+    The ``/files`` REST endpoint returns the full, unfiltered list and ignores the
+    ``types``/``search``/``limit``/``offset`` query params, so the CLI applies them
+    here — using the same rules as ``getFiles`` (main.py) — to keep the two surfaces
+    in parity. Returns the same envelope shape the MCP tool returns.
+    """
+    total_unfiltered = len(files)
+    if types:
+        exts = [t.strip().lower().lstrip(".") for t in types.split(",") if t.strip()]
+        files = [f for f in files if any(_file_name(f).lower().endswith(f".{e}") for e in exts)]
+    if search:
+        needle = search.lower()
+        files = [f for f in files if needle in _file_name(f).lower()]
+    filtered_count = len(files)
+    start = max(offset or 0, 0)
+    page = files[start : start + limit] if limit is not None else files[start:]
+    has_more = (start + limit) < filtered_count if limit is not None else False
+    return {
+        "files": page,
+        "count": len(page),
+        "total": filtered_count,
+        "totalUnfiltered": total_unfiltered,
+        "hasMore": has_more,
+        "offset": start,
+        "limit": limit,
+        "filters": {"types": types, "search": search},
+    }
+
+
 @app.command("list")
 def list_files(
     ctx: typer.Context,
@@ -28,13 +75,11 @@ def list_files(
 ) -> None:
     """List files in your workspace."""
     state = ctx.obj
+    # The /files endpoint ignores query filters and returns the whole list, so
+    # fetch it unfiltered (only folder scoping is server-side) and filter locally.
     with state.rest_client() as client:
         resp = rest.get_files(
             client,
-            limit=limit,
-            offset=offset,
-            types=types,
-            search=search,
             folder=folder,
             include_all=all_dirs,
             include_metadata=metadata,
@@ -42,12 +87,16 @@ def list_files(
     files = resp.get("files") if isinstance(resp, dict) else resp
     if not isinstance(files, list):
         files = []
-    if files and isinstance(files[0], dict):
-        rows = [{"name": f.get("name"), "size": f.get("size"), "lastModified": f.get("lastModified")} for f in files]
+    result = _apply_file_filters(files, types=types, search=search, limit=limit, offset=offset)
+    page = result["files"]
+    if page and isinstance(page[0], dict):
+        rows = [{"name": _file_name(f), "size": f.get("size"), "lastModified": f.get("lastModified")} for f in page]
         human = output.render_table(rows, ["name", "size", "lastModified"])
     else:
-        human = "\n".join(str(f) for f in files) or "(none)"
-    output.emit(resp, state.output, human=human)
+        human = "\n".join(_file_name(f) for f in page) or "(none)"
+    if result["hasMore"]:
+        human += f"\n\n{result['count']} of {result['total']} shown — use --offset {result['offset'] + limit} for the next page."
+    output.emit(result, state.output, human=human)
 
 
 @app.command()
