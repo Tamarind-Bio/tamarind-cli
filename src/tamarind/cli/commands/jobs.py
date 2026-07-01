@@ -41,6 +41,36 @@ def _download(url: str, dest: Path) -> int:
     return total
 
 
+# Safety bound on `jobs --all` so a runaway cursor can't loop forever.
+_MAX_AUTO_PAGES = 100
+
+
+def _fetch_all_jobs(client, **kwargs):
+    """Follow the ``startKey`` cursor, accumulating every job (bounded by a page cap).
+
+    Returns ``(jobs, statuses, next_key, pages)``. ``next_key`` is non-None only if
+    the page cap was hit before the cursor ran out — surface it so the caller can
+    resume with ``--start-key``. ``statuses`` is recomputed from the full set (the
+    server's per-response ``statuses`` only counts that page).
+    """
+    all_jobs: list = []
+    key = kwargs.pop("start_key", None)
+    pages = 0
+    while True:
+        resp = rest.get_jobs(client, start_key=key, **kwargs)
+        all_jobs.extend(resp.get("jobs", resp if isinstance(resp, list) else []))
+        key = resp.get("startKey") if isinstance(resp, dict) else None
+        pages += 1
+        if not key or pages >= _MAX_AUTO_PAGES:
+            break
+    statuses: dict = {}
+    for j in all_jobs:
+        statuses[jobs_helpers.job_status(j) or "Unknown"] = (
+            statuses.get(jobs_helpers.job_status(j) or "Unknown", 0) + 1
+        )
+    return all_jobs, statuses, key, pages
+
+
 def register(app: typer.Typer) -> None:
     @app.command()
     def validate(
@@ -161,27 +191,43 @@ def register(app: typer.Typer) -> None:
         ctx: typer.Context,
         status: Optional[str] = typer.Option(None, "--status", help="Filter by status (client-side)."),
         batch: Optional[str] = typer.Option(None, "--batch", help="Only jobs in this batch."),
-        limit: int = typer.Option(50, "--limit", help="Max jobs to return."),
+        limit: int = typer.Option(50, "--limit", help="Max jobs to return (page size when --all)."),
         start_key: Optional[str] = typer.Option(
             None, "--start-key", help="Pagination cursor: the 'startKey' from a previous listing."
+        ),
+        all_jobs: bool = typer.Option(
+            False, "--all", help="Auto-paginate: follow startKey until every job is fetched."
         ),
         organization: bool = typer.Option(False, "--organization", help="All jobs across your org."),
         include_subjobs: bool = typer.Option(False, "--include-subjobs", help="Include batch subjobs."),
         email: Optional[str] = typer.Option(None, "--email", help="Jobs for another org member."),
     ) -> None:
-        """List your jobs. When more remain, a 'startKey' is returned; pass it to --start-key to page."""
+        """List your jobs. When more remain, a 'startKey' is returned; pass it to --start-key (or use --all)."""
         state = ctx.obj
         with state.rest_client() as client:
-            resp = rest.get_jobs(
-                client,
-                batch=batch,
-                start_key=start_key,
-                limit=limit,
-                organization=organization,
-                include_subjobs=include_subjobs,
-                job_email=email,
-            )
-        job_list = resp.get("jobs", resp if isinstance(resp, list) else [])
+            if all_jobs:
+                job_list, statuses, next_key, _pages = _fetch_all_jobs(
+                    client,
+                    batch=batch,
+                    start_key=start_key,
+                    limit=limit,
+                    organization=organization,
+                    include_subjobs=include_subjobs,
+                    job_email=email,
+                )
+            else:
+                resp = rest.get_jobs(
+                    client,
+                    batch=batch,
+                    start_key=start_key,
+                    limit=limit,
+                    organization=organization,
+                    include_subjobs=include_subjobs,
+                    job_email=email,
+                )
+                job_list = resp.get("jobs", resp if isinstance(resp, list) else [])
+                statuses = resp.get("statuses") if isinstance(resp, dict) else None
+                next_key = resp.get("startKey") if isinstance(resp, dict) else None
         if status:
             job_list = [j for j in job_list if (jobs_helpers.job_status(j) or "").lower() == status.lower()]
         rows = [
@@ -195,13 +241,17 @@ def register(app: typer.Typer) -> None:
             for j in job_list
         ]
         out = {"jobs": job_list, "count": len(job_list)}
-        if isinstance(resp, dict) and resp.get("statuses"):
-            out["statuses"] = resp["statuses"]
-        next_key = resp.get("startKey") if isinstance(resp, dict) else None
+        if statuses:
+            out["statuses"] = statuses
         human = output.render_table(rows, ["JobName", "Type", "JobStatus", "Created", "Score"])
         if next_key:
             out["startKey"] = next_key
-            human += f"\n\nMore results — use --start-key {next_key} for the next page."
+            tail = (
+                f"stopped at the {_MAX_AUTO_PAGES}-page cap; use --start-key {next_key} to continue"
+                if all_jobs
+                else f"use --start-key {next_key} for the next page"
+            )
+            human += f"\n\nMore results — {tail}."
         output.emit(out, state.output, human=human)
 
     @app.command()

@@ -207,3 +207,46 @@ def test_jobs_omits_start_key_when_backend_has_none():
     respx.get(f"{API}jobs").mock(return_value=httpx.Response(200, json={"jobs": [], "statuses": {}}))
     out = json.loads(runner.invoke(app, ["--json", "jobs"], env=ENV).stdout)
     assert "startKey" not in out
+
+
+@respx.mock
+def test_jobs_all_follows_cursor_to_exhaustion():
+    page1 = {
+        "jobs": [{"JobName": "a", "JobStatus": "Complete"}, {"JobName": "b", "JobStatus": "Running"}],
+        "startKey": "K1",
+        "statuses": {"Complete": 1, "Running": 1},
+    }
+    page2 = {"jobs": [{"JobName": "c", "JobStatus": "Complete"}], "statuses": {"Complete": 1}}
+    respx.get(f"{API}jobs").mock(
+        side_effect=[httpx.Response(200, json=page1), httpx.Response(200, json=page2)]
+    )
+    out = json.loads(runner.invoke(app, ["--json", "jobs", "--all"], env=ENV).stdout)
+    assert [j["JobName"] for j in out["jobs"]] == ["a", "b", "c"]  # both pages accumulated
+    assert out["count"] == 3
+    assert out["statuses"] == {"Complete": 2, "Running": 1}  # recomputed across pages
+    assert "startKey" not in out  # cursor exhausted
+
+
+@respx.mock
+def test_jobs_all_respects_page_cap(monkeypatch):
+    from tamarind.cli.commands import jobs as jobs_cmd
+
+    monkeypatch.setattr(jobs_cmd, "_MAX_AUTO_PAGES", 2)
+    # Every page returns a startKey — without the cap this would loop forever.
+    respx.get(f"{API}jobs").mock(
+        return_value=httpx.Response(
+            200, json={"jobs": [{"JobName": "x", "JobStatus": "Complete"}], "startKey": "NEXT"}
+        )
+    )
+    out = json.loads(runner.invoke(app, ["--json", "jobs", "--all"], env=ENV).stdout)
+    assert out["count"] == 2  # 2 pages * 1 job, stopped by the cap
+    assert out["startKey"] == "NEXT"  # resume cursor surfaced
+
+
+@respx.mock
+def test_files_stats_counts_by_type():
+    files = ["a.pdb", "b.pdb", "c.cif", "readme", "notes.txt"]
+    respx.get(f"{API}files").mock(return_value=httpx.Response(200, json=files))
+    out = json.loads(runner.invoke(app, ["--json", "files", "stats"], env=ENV).stdout)
+    assert out["totalFiles"] == 5
+    assert out["fileTypes"] == {"pdb": 2, "cif": 1, "no_extension": 1, "txt": 1}
