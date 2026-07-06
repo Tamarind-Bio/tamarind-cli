@@ -190,9 +190,10 @@ def test_files_delete_refuses_without_yes_non_interactive():
 
 
 def test_delete_prompts_in_interactive_mode(monkeypatch):
-    # With a real TTY (monkeypatched) and human output, the legacy interactive
-    # confirmation still applies: answering "n" aborts before any HTTP call.
+    # With a real terminal on BOTH ends (monkeypatched) and human output, the
+    # legacy interactive confirmation still applies: "n" aborts before any HTTP.
     monkeypatch.setattr(output, "is_tty", lambda: True)
+    monkeypatch.setattr(output, "is_stdin_tty", lambda: True)
     with respx.mock:
         route = respx.request("DELETE", f"{API}delete-job").mock(
             return_value=httpx.Response(200, json={"message": "deleted"})
@@ -200,6 +201,33 @@ def test_delete_prompts_in_interactive_mode(monkeypatch):
         res = runner.invoke(app, ["delete", "somejob"], env=ENV, input="n\n")
         assert res.exit_code != 0  # aborted
         assert not route.called
+
+
+def test_confirm_destructive_refuses_piped_stdin(monkeypatch):
+    # stdout is a TTY but stdin is piped (`printf 'y\n' | tamarind delete x`):
+    # no human to answer, so refuse rather than let typer.confirm eat the piped
+    # 'y' as a confirmation. Isolates the `not is_stdin_tty()` disjunct.
+    monkeypatch.setattr(output, "is_tty", lambda: True)
+    monkeypatch.setattr(output, "is_stdin_tty", lambda: False)
+    with pytest.raises(typer.Exit) as exc:
+        output.confirm_destructive(
+            "delete job 'x'", yes=False, mode=OutputMode(json=False, quiet=False)
+        )
+    assert exc.value.exit_code == ExitCode.USAGE
+
+
+@respx.mock
+def test_delete_refuses_piped_yes_with_tty_stdout(monkeypatch):
+    # End-to-end `printf 'y\n' | tamarind delete somejob`: the piped 'y' must NOT
+    # delete — the guard refuses (exit 2) and never hits the backend.
+    monkeypatch.setattr(output, "is_tty", lambda: True)
+    monkeypatch.setattr(output, "is_stdin_tty", lambda: False)
+    route = respx.request("DELETE", f"{API}delete-job").mock(
+        return_value=httpx.Response(200, json={"message": "deleted"})
+    )
+    res = runner.invoke(app, ["delete", "somejob"], env=ENV, input="y\n")
+    assert res.exit_code == ExitCode.USAGE
+    assert not route.called
 
 
 def test_confirm_destructive_refuses_non_tty_human_mode(monkeypatch):
