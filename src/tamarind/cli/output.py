@@ -15,6 +15,8 @@ from typing import Any, Sequence
 
 import typer
 
+from ..errors import ExitCode
+
 # Smallest a column may be shrunk to when fitting the table to the terminal.
 _MIN_COL = 6
 _ELLIPSIS = "…"
@@ -45,6 +47,34 @@ def info(message: str, mode: OutputMode) -> None:
 
 def error(message: str) -> None:
     typer.secho(f"error: {message}", err=True, fg=typer.colors.RED)
+
+
+def confirm_destructive(action: str, *, yes: bool, mode: OutputMode) -> None:
+    """Guard a destructive action (``action`` is a verb phrase, e.g.
+    ``"permanently delete job 'x'"``).
+
+    - Already confirmed with ``--yes``/``-y``: proceed.
+    - Interactive human terminal: prompt, aborting on "no".
+    - Non-interactive or JSON mode (agents, scripts, pipes): there is no one to
+      prompt, so *refuse* unless ``--yes`` was passed. This stops an agent from
+      destroying data it never explicitly confirmed, and exits with the usage
+      code (2) so the caller can tell it apart from a real failure.
+
+    A real prompt needs a human at a terminal on BOTH ends — stdout to show the
+    question and stdin to read the answer. If either is redirected/piped (e.g.
+    ``printf 'y\\n' | tamarind delete …``), we refuse rather than let
+    ``typer.confirm`` consume the piped input as a "yes".
+    """
+    if yes:
+        return
+    if mode.json or not is_tty() or not is_stdin_tty():
+        error(
+            f"Refusing to {action} without confirmation in non-interactive mode. "
+            "Pass --yes/-y to confirm."
+        )
+        raise typer.Exit(ExitCode.USAGE)
+    prompt = action[:1].upper() + action[1:]
+    typer.confirm(f"{prompt}?", abort=True)
 
 
 def _terminal_width(default: int = 100) -> int:
@@ -130,3 +160,7 @@ def render_table(
 
 def is_tty() -> bool:
     return sys.stdout.isatty()
+
+
+def is_stdin_tty() -> bool:
+    return sys.stdin.isatty()

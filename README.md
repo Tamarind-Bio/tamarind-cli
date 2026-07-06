@@ -52,7 +52,7 @@ tamarind tools --search boltz
 
 # 2. Inspect its parameters and grab a runnable example
 tamarind schema boltz
-tamarind schema boltz --example > job.yaml
+tamarind schema boltz --example > job.yaml   # most tools ship an example; some don't
 
 # 3. Validate, then submit
 tamarind validate boltz --input job.yaml
@@ -76,7 +76,14 @@ tamarind submit boltz \
 ## Output for agents
 
 Every command emits JSON when stdout is not a TTY, or with `--json`. Exit codes
-are stable: `0` ok, `3` auth, `4` not-found, `5` validation, `6` rate-limit.
+are stable: `0` ok, `3` auth, `4` not-found, `5` validation, `6` rate-limit,
+`7` timeout (a `--wait`/`--timeout` deadline elapsed).
+
+Not every tool ships a runnable example — `schema <tool> --example` exits non-zero
+(with a clear message) when one isn't available, so a `> job.yaml` redirect never
+silently produces an empty file. Destructive commands (`delete`, `files delete`)
+require `--yes`/`-y` when run non-interactively (piped or `--json`), so an agent
+never removes data without an explicit confirmation.
 
 ```bash
 tamarind jobs --json | jq '.jobs[] | select(.JobStatus=="Running")'

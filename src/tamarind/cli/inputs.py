@@ -80,6 +80,28 @@ def _looks_like_envelope(doc: dict[str, Any]) -> bool:
     return "settings" in doc and ("type" in doc or "jobName" in doc)
 
 
+def effective_job_type(cli_tool: str, file_type: object | None) -> str:
+    """Reconcile the explicit ``<tool>`` argument with a ``type`` in the input file.
+
+    The command's ``<tool>`` argument is authoritative. A ``type`` in the input
+    file (envelope form) is only allowed to *agree* with it — a file whose
+    ``type`` differs (e.g. running ``submit boltz`` on an ``type: esmfold``
+    envelope) is a mistake and is rejected, rather than silently overriding the
+    tool you named. Comparison ignores surrounding whitespace and case.
+
+    ``file_type`` comes straight from YAML, so it may parse as a non-string
+    (``type: 1`` → int, ``type: true`` → bool). Compare it as text so such
+    malformed input fails with the normal validation error instead of crashing.
+    """
+    if file_type and str(file_type).strip().lower() != cli_tool.strip().lower():
+        raise ValidationError(
+            f"Tool mismatch: the command targets '{cli_tool}' but the input "
+            f"file's type is '{file_type}'. Remove the file's 'type' field, or "
+            f"re-run the command with '{file_type}' as the tool."
+        )
+    return cli_tool
+
+
 def resolve_job_input(
     input_source: str | None,
     set_pairs: list[str] | None,

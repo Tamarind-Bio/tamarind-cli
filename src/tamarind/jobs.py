@@ -12,7 +12,7 @@ import time
 from typing import Any, Callable
 
 from . import rest
-from .errors import NotFoundError
+from .errors import JobTimeoutError, NotFoundError
 from .http import HTTPClient
 
 # Compared case-insensitively.
@@ -89,8 +89,9 @@ def wait_for_job(
 ) -> dict[str, Any]:
     """Block until ``name`` reaches a terminal status (or ``timeout`` elapses).
 
-    Returns the final job object. Raises TimeoutError if a timeout is set and
-    the job is still running when it elapses.
+    Returns the final job object. Raises :class:`JobTimeoutError` (exit code 7)
+    if a timeout is set and the job is still running when it elapses — a clean,
+    stably-coded error rather than a bare builtin ``TimeoutError`` traceback.
     """
     deadline = None if timeout is None else time.monotonic() + timeout
     while True:
@@ -100,7 +101,7 @@ def wait_for_job(
         if is_terminal(job_status(job)):
             return job
         if deadline is not None and time.monotonic() >= deadline:
-            raise TimeoutError(
+            raise JobTimeoutError(
                 f"Job '{name}' still {job_status(job)!r} after {timeout:.0f}s"
             )
         time.sleep(poll_interval)
