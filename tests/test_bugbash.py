@@ -48,6 +48,28 @@ def test_effective_job_type_rejects_conflict():
     assert "boltz" in exc.value.message and "esmfold" in exc.value.message
 
 
+def test_effective_job_type_non_string_is_clean_error_not_crash():
+    # YAML may parse `type: 1` as int / `type: true` as bool. These are truthy
+    # but have no .strip(); compare as text so they raise a clean ValidationError
+    # (a mismatch) instead of an uncaught AttributeError.
+    for bad in (1, True, [1, 2]):
+        with pytest.raises(ValidationError):
+            effective_job_type("boltz", bad)
+    # falsy non-strings behave like "no type" — the explicit tool arg wins
+    assert effective_job_type("boltz", 0) == "boltz"
+
+
+@respx.mock
+def test_validate_non_string_file_type_no_traceback(tmp_path):
+    route = respx.post(f"{API}validate-job").mock(return_value=httpx.Response(200, json={"valid": True}))
+    f = tmp_path / "job.yaml"
+    f.write_text("type: 1\nsettings:\n  sequence: MKT\n")
+    res = runner.invoke(app, ["validate", "boltz", "-i", str(f)], env=ENV)
+    assert res.exit_code != 0
+    assert isinstance(res.exception, ValidationError)  # clean, not AttributeError
+    assert not route.called
+
+
 @respx.mock
 def test_validate_rejects_mismatched_file_type(tmp_path):
     # The bug: `validate boltz -i esmfold.yaml` validated as esmfold and returned
