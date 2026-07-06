@@ -14,7 +14,7 @@ from ... import jobs as jobs_helpers
 from ... import rest
 from ...errors import NotFoundError, TamarindError, ValidationError
 from .. import output
-from ..inputs import resolve_job_input
+from ..inputs import effective_job_type, resolve_job_input
 
 
 def _gen_name(tool: str) -> str:
@@ -83,10 +83,11 @@ def register(app: typer.Typer) -> None:
         """Validate a job's settings without submitting (catches errors early)."""
         state = ctx.obj
         job = resolve_job_input(input, set_)
+        job_type = effective_job_type(tool, job.job_type)
         job_name = name or job.job_name or _gen_name(tool)
         with state.rest_client() as client:
             result = rest.validate_job(
-                client, job_name=job_name, job_type=job.job_type or tool, settings=job.settings
+                client, job_name=job_name, job_type=job_type, settings=job.settings
             )
         valid = bool(result.get("valid"))
         human = "valid ✓" if valid else f"invalid ✗ {result.get('error', '')}"
@@ -109,7 +110,7 @@ def register(app: typer.Typer) -> None:
         """Submit a single job. Validates first unless --skip-validate."""
         state = ctx.obj
         job = resolve_job_input(input, set_)
-        job_type = job.job_type or tool
+        job_type = effective_job_type(tool, job.job_type)
         job_name = name or job.job_name or _gen_name(tool)
 
         with state.rest_client() as client:
@@ -169,7 +170,7 @@ def register(app: typer.Typer) -> None:
         elif isinstance(doc, dict) and isinstance(doc.get("settings"), list):
             settings_list = doc["settings"]
             batch_name = name or doc.get("batchName") or batch_name
-            job_type = doc.get("type") or tool
+            job_type = effective_job_type(tool, doc.get("type"))
             job_names = doc.get("jobNames")
         else:
             raise TamarindError("Batch --input must be a list of settings or a {settings:[...]} object.")
@@ -365,8 +366,9 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Permanently delete a job (and its subjobs, for batches)."""
         state = ctx.obj
-        if not yes and not state.output.json:
-            typer.confirm(f"Permanently delete job '{job_name}'?", abort=True)
+        output.confirm_destructive(
+            f"permanently delete job '{job_name}'", yes=yes, mode=state.output
+        )
         with state.rest_client() as client:
             resp = rest.delete_job(client, job_name=job_name)
         output.emit(resp, state.output, human=_message(resp))

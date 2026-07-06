@@ -68,7 +68,7 @@ def register(app: typer.Typer) -> None:
     def schema(
         ctx: typer.Context,
         tool: str = typer.Argument(..., help="Tool name (lowercase, e.g. 'boltz')."),
-        example: bool = typer.Option(False, "--example", help="Print only the runnable example settings (YAML)."),
+        example: bool = typer.Option(False, "--example", help="Print only the runnable example settings (YAML). Not every tool ships an example."),
     ) -> None:
         """Show a tool's parameters and a runnable example job."""
         state = ctx.obj
@@ -85,6 +85,17 @@ def register(app: typer.Typer) -> None:
             import yaml
 
             settings = catalog.example_settings(resp)
+            # Not every tool ships an example. Fail loudly instead of printing an
+            # empty `{}` at exit 0 — otherwise `tamarind schema <tool> --example
+            # > job.yaml` silently writes an empty file that looks like success.
+            if not settings:
+                from ...errors import NotFoundError
+
+                raise NotFoundError(
+                    f"No runnable example is available for '{tool}'. "
+                    f"Run `tamarind schema {tool}` to see its parameters and "
+                    "build the settings by hand."
+                )
             output.emit(
                 {"type": tool, "settings": settings},
                 state.output,

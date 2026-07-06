@@ -189,8 +189,7 @@ def delete(
     if not path and not folder:
         raise TamarindError("Provide a file path or --folder <name>.")
     target = path or f"folder {folder}"
-    if not yes and not state.output.json:
-        typer.confirm(f"Delete {target}?", abort=True)
+    output.confirm_destructive(f"delete {target}", yes=yes, mode=state.output)
     with state.rest_client() as client:
         resp = rest.delete_file(client, file_path=path, folder=folder)
     human = resp.get("message", resp) if isinstance(resp, dict) else resp

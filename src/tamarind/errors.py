@@ -9,6 +9,7 @@ Exit codes are stable so agents and CI can branch on them:
     4  not found (404)
     5  validation error (a job's settings failed validate-job, or a 400)
     6  rate limited (429)
+    7  timed out (a --wait / --timeout deadline elapsed before a terminal state)
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ class ExitCode:
     NOT_FOUND = 4
     VALIDATION = 5
     RATE_LIMIT = 6
+    TIMEOUT = 7
 
 
 class TamarindError(Exception):
@@ -49,6 +51,16 @@ class ValidationError(TamarindError):
 
 class RateLimitError(TamarindError):
     exit_code = ExitCode.RATE_LIMIT
+
+
+class JobTimeoutError(TamarindError):
+    """A `wait`/`--wait` deadline elapsed before the job reached a terminal state.
+
+    Its own exit code so agents can tell "still running when I gave up" apart
+    from a real failure. Named to avoid shadowing the builtin ``TimeoutError``.
+    """
+
+    exit_code = ExitCode.TIMEOUT
 
 
 class APIError(TamarindError):
