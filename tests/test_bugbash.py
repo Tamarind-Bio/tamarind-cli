@@ -21,7 +21,7 @@ from tamarind.cli import output
 from tamarind.cli.inputs import effective_job_type
 from tamarind.cli.main import app
 from tamarind.cli.output import OutputMode
-from tamarind.errors import ExitCode, JobTimeoutError, NotFoundError, ValidationError
+from tamarind.errors import ExitCode, JobTimeoutError, NotFoundError, TamarindError, ValidationError
 from tamarind import jobs as jh
 from tamarind.http import HTTPClient
 
@@ -200,3 +200,77 @@ def test_delete_prompts_in_interactive_mode(monkeypatch):
         res = runner.invoke(app, ["delete", "somejob"], env=ENV, input="n\n")
         assert res.exit_code != 0  # aborted
         assert not route.called
+
+
+def test_confirm_destructive_refuses_non_tty_human_mode(monkeypatch):
+    # The guard is `mode.json or not is_tty()`. Human (--no-json) output over a
+    # pipe hits the `not is_tty()` half — which the --json tests never reach
+    # (they short-circuit on mode.json). Isolate it directly: json=False + no TTY
+    # must still refuse, so a piped `tamarind delete x` can't destroy data.
+    monkeypatch.setattr(output, "is_tty", lambda: False)
+    with pytest.raises(typer.Exit) as exc:
+        output.confirm_destructive(
+            "delete job 'x'", yes=False, mode=OutputMode(json=False, quiet=False)
+        )
+    assert exc.value.exit_code == ExitCode.USAGE
+
+
+# --- #3: the batch command shares the type-conflict guard --------------------
+
+@respx.mock
+def test_batch_rejects_mismatched_file_type(tmp_path):
+    route = respx.post(f"{API}submit-batch").mock(return_value=httpx.Response(200, json={"message": "ok"}))
+    f = tmp_path / "batch.yaml"
+    f.write_text("type: esmfold\nsettings:\n  - sequence: MKT\n  - sequence: MKV\n")
+    res = runner.invoke(app, ["batch", "boltz", "-i", str(f)], env=ENV)
+    assert res.exit_code != 0
+    assert isinstance(res.exception, ValidationError)
+    assert not route.called  # errored before the backend
+
+
+@respx.mock
+def test_batch_bare_list_uses_tool_arg(tmp_path):
+    route = respx.post(f"{API}submit-batch").mock(return_value=httpx.Response(200, json={"message": "ok"}))
+    f = tmp_path / "batch.yaml"
+    f.write_text("- {inputFormat: sequence, sequence: MKT}\n- {inputFormat: sequence, sequence: MKV}\n")
+    res = runner.invoke(app, ["--json", "batch", "boltz", "-i", str(f)], env=ENV)
+    assert res.exit_code == 0, res.stdout
+    out = json.loads(res.stdout)
+    assert out["type"] == "boltz" and out["count"] == 2
+    assert json.loads(route.calls.last.request.content)["type"] == "boltz"
+
+
+@respx.mock
+def test_batch_matching_envelope_type(tmp_path):
+    route = respx.post(f"{API}submit-batch").mock(return_value=httpx.Response(200, json={"message": "ok"}))
+    f = tmp_path / "batch.yaml"
+    f.write_text("type: boltz\nbatchName: b1\nsettings:\n  - {inputFormat: sequence, sequence: MKT}\n")
+    res = runner.invoke(app, ["--json", "batch", "boltz", "-i", str(f)], env=ENV)
+    assert res.exit_code == 0, res.stdout
+    body = json.loads(route.calls.last.request.content)
+    assert body["type"] == "boltz" and body["batchName"] == "b1"
+
+
+# --- #4: files delete --folder and the empty-args guard ----------------------
+
+@respx.mock
+def test_files_delete_folder_refuses_without_yes_non_interactive():
+    # The higher-blast-radius --folder form (deletes every file under a folder)
+    # must also refuse non-interactively without --yes.
+    route = respx.request("DELETE", f"{API}delete-file").mock(
+        return_value=httpx.Response(200, json={"message": "deleted"})
+    )
+    res = runner.invoke(app, ["--json", "files", "delete", "--folder", "foo"], env=ENV)
+    assert res.exit_code == ExitCode.USAGE
+    assert not route.called
+
+
+@respx.mock
+def test_files_delete_requires_path_or_folder():
+    route = respx.request("DELETE", f"{API}delete-file").mock(
+        return_value=httpx.Response(200, json={"message": "deleted"})
+    )
+    res = runner.invoke(app, ["--json", "files", "delete"], env=ENV)
+    assert res.exit_code != 0
+    assert isinstance(res.exception, TamarindError)
+    assert not route.called
