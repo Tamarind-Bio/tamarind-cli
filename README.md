@@ -1,5 +1,8 @@
 # Tamarind CLI
 
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+
 Command-line interface for the [Tamarind Bio](https://tamarind.bio) platform.
 Discover tools, submit and monitor protein / nucleic-acid / small-molecule jobs,
 and download results — from your terminal, a script, CI, or an AI coding agent
@@ -96,7 +99,7 @@ tamarind jobs --json | jq '.jobs[] | select(.JobStatus=="Running")'
 | Discover | `tools`, `modalities`, `functions`, `schema` |
 | Submit | `validate`, `submit`, `batch` |
 | Monitor | `jobs`, `status`, `wait`, `results`, `logs` |
-| Files | `files list`, `files upload`, `files delete`, `files folders` |
+| Files | `files list`, `files stats`, `files upload`, `files delete`, `files folders` |
 | Lifecycle | `cancel`, `delete` |
 | Auth | `auth login`, `auth status`, `auth logout` |
 
@@ -118,3 +121,15 @@ profile to point at staging:
 tamarind --profile staging --api-base https://staging.tamarind.bio/api/ auth login
 TAMARIND_PROFILE=staging tamarind tools
 ```
+
+## Links
+
+- [CLI docs](https://app.tamarind.bio/api-docs/cli) — the hosted quickstart and command reference
+- [MCP server](https://app.tamarind.bio/api-docs/mcp-server) — the hosted option for claude.ai, ChatGPT, and other MCP clients
+- [API key](https://app.tamarind.bio/api-docs/api-key) — get your key and review rate limits
+
+Questions or need help? Contact us at [info@tamarind.bio](mailto:info@tamarind.bio).
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).
