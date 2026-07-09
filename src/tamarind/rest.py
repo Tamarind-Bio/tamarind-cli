@@ -17,14 +17,24 @@ from .http import HTTPClient
 # JSON boolean.
 _TRUE = "true"
 
+# Stamped onto every job the CLI creates so the backend can attribute usage by
+# origin (the MCP server sends "MCP"). Validation calls are NOT tagged — they
+# don't create a job.
+_JOB_SOURCE = "CLI"
+
 
 def submit_job(
     client: HTTPClient, *, job_name: str, job_type: str, settings: dict[str, Any]
 ) -> Any:
-    """POST /submit-job — submit a single job. Body: {jobName, type, settings}."""
+    """POST /submit-job — submit a single job. Body: {jobName, type, settings, jobSource}."""
     return client.post_json(
         "submit-job",
-        json={"jobName": job_name, "type": job_type, "settings": settings},
+        json={
+            "jobName": job_name,
+            "type": job_type,
+            "settings": settings,
+            "jobSource": _JOB_SOURCE,
+        },
     )
 
 
@@ -52,6 +62,7 @@ def submit_batch(
         "batchName": batch_name,
         "type": job_type,
         "settings": settings,
+        "jobSource": _JOB_SOURCE,
     }
     if job_names is not None:
         body["jobNames"] = job_names
