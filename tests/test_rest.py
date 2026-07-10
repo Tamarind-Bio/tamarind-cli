@@ -21,8 +21,37 @@ def test_submit_job_body():
     route = respx.post(f"{BASE}submit-job").mock(return_value=httpx.Response(200, json={"ok": True}))
     rest.submit_job(client(), job_name="run1", job_type="boltz", settings={"sequence": "ABC"})
     body = json.loads(route.calls.last.request.content)
-    assert body == {"jobName": "run1", "type": "boltz", "settings": {"sequence": "ABC"}}
+    # jobSource="CLI" is stamped on every submission for usage tracking.
+    assert body == {
+        "jobName": "run1",
+        "type": "boltz",
+        "settings": {"sequence": "ABC"},
+        "jobSource": "CLI",
+    }
     assert route.calls.last.request.headers["x-api-key"] == "test-key"
+
+
+@respx.mock
+def test_submit_batch_body():
+    route = respx.post(f"{BASE}submit-batch").mock(return_value=httpx.Response(200, json={"ok": True}))
+    rest.submit_batch(
+        client(),
+        batch_name="b1",
+        job_type="boltz",
+        settings=[{"sequence": "ABC"}],
+        job_names=["b1-1"],
+    )
+    body = json.loads(route.calls.last.request.content)
+    assert body["jobSource"] == "CLI"
+    assert body["batchName"] == "b1" and body["jobNames"] == ["b1-1"]
+
+
+@respx.mock
+def test_validate_job_not_tagged():
+    # Validation never creates a job, so it carries no jobSource.
+    route = respx.post(f"{BASE}validate-job").mock(return_value=httpx.Response(200, json={"valid": True}))
+    rest.validate_job(client(), job_name="x", job_type="boltz", settings={})
+    assert "jobSource" not in json.loads(route.calls.last.request.content)
 
 
 @respx.mock
