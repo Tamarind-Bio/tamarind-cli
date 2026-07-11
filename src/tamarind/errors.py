@@ -10,6 +10,7 @@ Exit codes are stable so agents and CI can branch on them:
     5  validation error (a job's settings failed validate-job, or a 400)
     6  rate limited (429)
     7  timed out (a --wait / --timeout deadline elapsed before a terminal state)
+    8  budget/quota exhausted (a 403 that explicitly names usage or credits)
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ class ExitCode:
     VALIDATION = 5
     RATE_LIMIT = 6
     TIMEOUT = 7
+    BUDGET = 8
 
 
 class TamarindError(Exception):
@@ -51,6 +53,12 @@ class ValidationError(TamarindError):
 
 class RateLimitError(TamarindError):
     exit_code = ExitCode.RATE_LIMIT
+
+
+class BudgetError(TamarindError):
+    """The request was rejected because account usage/credits are exhausted."""
+
+    exit_code = ExitCode.BUDGET
 
 
 class JobTimeoutError(TamarindError):

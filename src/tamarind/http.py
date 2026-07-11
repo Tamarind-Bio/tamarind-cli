@@ -14,6 +14,7 @@ import httpx
 from .errors import (
     APIError,
     AuthError,
+    BudgetError,
     NotFoundError,
     RateLimitError,
     TamarindError,
@@ -91,8 +92,14 @@ class HTTPClient:
             return resp
         raise _map_error(resp)
 
-    def get_json(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
-        return _parse_json(self.request("GET", path, params=params))
+    def get_json(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        timeout: float | None = None,
+    ) -> Any:
+        return _parse_json(self.request("GET", path, params=params, timeout=timeout))
 
     def post_json(self, path: str, *, json: Any | None = None) -> Any:
         return _parse_json(self.request("POST", path, json=json))
@@ -133,11 +140,32 @@ def _map_error(resp: httpx.Response) -> TamarindError:
     code = resp.status_code
     ml = msg.lower()
     auth_ish = "api key" in ml or "api-key" in ml or "apikey" in ml or "unauthorized" in ml
+    budget_ish = any(
+        term in ml
+        for term in (
+            "budget",
+            "weighted hour",
+            "weighted-hour",
+            "weighted_hour",
+            "quota",
+            "credit",
+            "account balance",
+            "insufficient funds",
+            "spend limit",
+            "spending limit",
+            "usage limit",
+            "usage cap",
+        )
+    )
     notfound_ish = "not found" in ml or "does not exist" in ml or "no such" in ml
     if code == 401:
         return AuthError(f"Unauthorized: {msg}")
     if code == 403:
-        return AuthError(f"Access denied: {msg}")
+        if auth_ish:
+            return AuthError(f"Access denied: {msg}")
+        if budget_ish:
+            return BudgetError(f"Budget or quota rejected the request: {msg}")
+        return APIError(f"Access denied: {msg}", status_code=code)
     if code == 404:
         return NotFoundError(msg)
     if code == 400:

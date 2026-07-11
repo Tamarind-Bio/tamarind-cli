@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
+from typing import BinaryIO
 from typing import Optional
 
 import httpx
@@ -13,6 +15,54 @@ from ...errors import TamarindError
 from .. import output
 
 app = typer.Typer(no_args_is_help=True)
+
+_UPLOAD_CHUNK_SIZE = 1024 * 1024
+_UPLOAD_TIMEOUT = 300.0
+
+
+def _iter_file_chunks(fh: BinaryIO) -> Iterator[bytes]:
+    """Read an upload incrementally instead of buffering the whole file."""
+    while chunk := fh.read(_UPLOAD_CHUNK_SIZE):
+        yield chunk
+
+
+def _put_presigned_upload(url: str, path: Path, *, content_type: str, remote: str) -> int:
+    """Stream ``path`` to a presigned URL and translate transport failures.
+
+    Presigned URLs contain temporary credentials, so error messages deliberately
+    omit the URL rather than echoing ``httpx``'s exception text.
+    """
+    try:
+        size = path.stat().st_size
+        headers = {
+            "Content-Type": content_type,
+            # Supplying the size avoids chunked transfer encoding, which is not
+            # accepted by every S3-compatible presigned PUT endpoint.
+            "Content-Length": str(size),
+        }
+        with path.open("rb") as fh:
+            put = httpx.put(
+                url,
+                content=_iter_file_chunks(fh),
+                headers=headers,
+                timeout=_UPLOAD_TIMEOUT,
+            )
+        put.raise_for_status()
+    except httpx.TimeoutException as exc:
+        raise TamarindError(
+            f"Upload of '{remote}' timed out after {_UPLOAD_TIMEOUT:g} seconds."
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        raise TamarindError(
+            f"Upload of '{remote}' failed with HTTP {exc.response.status_code}."
+        ) from exc
+    except (httpx.RequestError, httpx.InvalidURL) as exc:
+        raise TamarindError(
+            f"Upload transfer failed for '{remote}' ({type(exc).__name__})."
+        ) from exc
+    except OSError as exc:
+        raise TamarindError(f"Could not read '{path}' during upload: {exc}.") from exc
+    return size
 
 
 def _file_name(f: object) -> str:
@@ -162,16 +212,19 @@ def upload(
     # The endpoint returns {uploadUrl, headUrl, key, bucket}; PUT the bytes to
     # uploadUrl. Don't crash on a non-dict error body — surface a clean error.
     url = signed.get("uploadUrl") if isinstance(signed, dict) else None
-    if not url:
-        raise TamarindError("Upload did not return a presigned URL.", detail=signed)
+    if not isinstance(url, str) or not url:
+        # Never echo the response values here: sibling fields such as headUrl
+        # can also be credential-bearing presigned URLs.
+        detail = {"responseType": type(signed).__name__}
+        if isinstance(signed, dict):
+            detail["fields"] = sorted(str(key) for key in signed)
+        raise TamarindError("Upload did not return a presigned URL.", detail=detail)
     output.info(f"Uploading {path} → {remote}…", state.output)
     # Content-Type must match what the presigned URL was signed with, or S3
     # rejects the PUT with SignatureDoesNotMatch.
-    with path.open("rb") as fh:
-        put = httpx.put(url, content=fh.read(), headers={"Content-Type": content_type}, timeout=300.0)
-    put.raise_for_status()
+    size = _put_presigned_upload(url, path, content_type=content_type, remote=remote)
     output.emit(
-        {"ok": True, "filename": remote, "bytes": path.stat().st_size},
+        {"ok": True, "filename": remote, "bytes": size},
         state.output,
         human=f"uploaded {remote}",
     )

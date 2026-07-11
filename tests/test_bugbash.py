@@ -115,7 +115,7 @@ def test_wait_for_job_raises_typed_timeout():
     with pytest.raises(JobTimeoutError) as exc:
         jh.wait_for_job(HTTPClient(API, "k"), "x", poll_interval=0, timeout=0)
     assert exc.value.exit_code == ExitCode.TIMEOUT == 7
-    assert "Running" in exc.value.message
+    assert "after 0s" in exc.value.message
 
 
 @respx.mock

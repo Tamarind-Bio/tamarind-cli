@@ -1,9 +1,9 @@
 """Typed wrappers over the Tamarind REST API (the job/file surface).
 
-Every function here maps 1:1 onto an operation in ``openapi-mcp.yaml`` — the
-same spec the Tamarind MCP server is built from. Keeping this a thin, literal
-mapping (no business logic) is what keeps the CLI and the MCP from drifting on
-the REST surface. Discovery/catalog calls live in :mod:`tamarind.catalog`.
+Every function here maps onto an operation in ``openapi-mcp.yaml`` — the same
+server contract used by the Tamarind MCP surface. Keeping this mapping thin and
+free of business logic reduces drift; contract tests and coordinated releases
+remain necessary. Discovery/catalog calls live in :mod:`tamarind.catalog`.
 """
 
 from __future__ import annotations
@@ -81,6 +81,7 @@ def get_jobs(
     organization: bool = False,
     include_subjobs: bool = False,
     job_email: str | None = None,
+    timeout: float | None = None,
 ) -> Any:
     """GET /jobs — list jobs, or fetch one when ``job_name`` is given."""
     params = {
@@ -92,7 +93,7 @@ def get_jobs(
         "includeSubjobs": _TRUE if include_subjobs else None,
         "jobEmail": job_email,
     }
-    return client.get_json("jobs", params=params)
+    return client.get_json("jobs", params=params, timeout=timeout)
 
 
 def get_result(

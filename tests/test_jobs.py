@@ -1,9 +1,11 @@
+import time
+
 import httpx
 import pytest
 import respx
 
 from tamarind import jobs as jh
-from tamarind.errors import NotFoundError
+from tamarind.errors import NotFoundError, ValidationError
 from tamarind.http import HTTPClient
 
 BASE = "https://api.test/"
@@ -16,6 +18,9 @@ def client():
 def test_status_normalization():
     assert jh.job_status({"JobStatus": "Running"}) == "Running"
     assert jh.job_status({"status": "completed"}) == "completed"
+    assert jh.job_status({"batchStatus": "AggregationFailed"}) == "AggregationFailed"
+    # Batch lifecycle is authoritative if a parent also carries JobStatus.
+    assert jh.job_status({"batchStatus": "Complete", "JobStatus": "Running"}) == "Complete"
     assert jh.job_status({}) is None
 
 
@@ -23,9 +28,11 @@ def test_terminal_and_success():
     assert jh.is_terminal("Complete")
     assert jh.is_terminal("Stopped")
     assert jh.is_terminal("Deleted")
+    assert jh.is_terminal("AggregationFailed")
     assert not jh.is_terminal("Running")
     assert jh.is_success("complete")
     assert not jh.is_success("Stopped")
+    assert not jh.is_success("AggregationFailed")
 
 
 def test_extract_single_from_list():
@@ -37,6 +44,12 @@ def test_extract_single_from_list():
 
 def test_extract_single_object():
     assert jh._extract_single({"JobName": "a", "JobStatus": "Running"}, "a")["JobName"] == "a"
+
+
+def test_extract_single_batch_parent_object():
+    parent = {"batchName": "batch-1", "batchStatus": "Complete"}
+    assert jh._extract_single(parent, "batch-1") == parent
+    assert jh.job_name(parent) == "batch-1"
 
 
 def test_extract_single_indexed_shape():
@@ -76,3 +89,63 @@ def test_wait_polls_until_terminal():
     )
     assert jh.job_status(final) == "Complete"
     assert seen == ["Running", "Running", "Complete"]
+
+
+@respx.mock
+def test_wait_polls_batch_parent_until_batch_status_terminal():
+    respx.get(f"{BASE}jobs").mock(
+        side_effect=[
+            httpx.Response(200, json={"batchName": "batch-1", "batchStatus": "Aggregating"}),
+            httpx.Response(200, json={"batchName": "batch-1", "batchStatus": "Complete"}),
+        ]
+    )
+    final = jh.wait_for_job(client(), "batch-1", poll_interval=0)
+    assert jh.job_status(final) == "Complete"
+    assert jh.is_success(jh.job_status(final))
+
+
+@respx.mock
+def test_wait_returns_failed_batch_aggregation_without_polling_forever():
+    route = respx.get(f"{BASE}jobs").mock(
+        return_value=httpx.Response(
+            200, json={"batchName": "batch-1", "batchStatus": "AggregationFailed"}
+        )
+    )
+    final = jh.wait_for_job(client(), "batch-1", poll_interval=0)
+    assert route.call_count == 1
+    assert jh.job_status(final) == "AggregationFailed"
+    assert not jh.is_success(jh.job_status(final))
+
+
+@respx.mock
+def test_wait_timeout_caps_sleep_to_remaining_deadline():
+    respx.get(f"{BASE}jobs").mock(
+        return_value=httpx.Response(200, json={"JobName": "x", "JobStatus": "Running"})
+    )
+    started = time.monotonic()
+    with pytest.raises(jh.JobTimeoutError):
+        jh.wait_for_job(client(), "x", poll_interval=10, timeout=0.01)
+    assert time.monotonic() - started < 0.5
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"poll_interval": -1},
+        {"poll_interval": float("nan")},
+        {"poll_interval": float("inf")},
+        {"timeout": -1},
+        {"timeout": float("nan")},
+        {"timeout": float("inf")},
+    ],
+)
+@respx.mock
+def test_wait_rejects_invalid_timing_values_before_polling(kwargs):
+    route = respx.get(f"{BASE}jobs").mock(
+        return_value=httpx.Response(200, json={"JobName": "x", "JobStatus": "Running"})
+    )
+
+    with pytest.raises(ValidationError):
+        jh.wait_for_job(client(), "x", **kwargs)
+
+    assert not route.called

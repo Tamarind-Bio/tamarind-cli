@@ -18,7 +18,8 @@ server](https://mcp.tamarind.bio) uses, so the two stay in lockstep. See
 uv tool install tamarind-cli      # or: pipx install tamarind-cli
 ```
 
-Or with the bootstrap installer (installs `uv` if needed):
+Or with the bootstrap installer (uses `uv`, `pipx`, or Python/pip already on
+your `PATH`):
 
 ```bash
 curl -fsSL https://app.tamarind.bio/cli/install.sh | sh
@@ -59,7 +60,8 @@ tamarind schema boltz --example > job.yaml   # most tools ship an example; some 
 
 # 3. Validate, then submit
 tamarind validate boltz --input job.yaml
-tamarind submit   boltz --input job.yaml --name my-run --wait --download ./out
+tamarind submit boltz --input job.yaml --name my-run \
+  --wait --timeout 3600 --download ./out
 
 # 4. Monitor / fetch
 tamarind jobs
@@ -78,9 +80,21 @@ tamarind submit boltz \
 
 ## Output for agents
 
-Every command emits JSON when stdout is not a TTY, or with `--json`. Exit codes
-are stable: `0` ok, `3` auth, `4` not-found, `5` validation, `6` rate-limit,
-`7` timeout (a `--wait`/`--timeout` deadline elapsed).
+Every command emits JSON when stdout is not a TTY, or with `--json`. Result
+documents are written to stdout. Typed command, transport, and usage errors are
+written to stderr as
+`{"error":{"type":...,"message":...,"exitCode":...,"detail":...}}`; `detail`
+is omitted when unavailable. A domain verdict can deliberately combine a
+nonzero exit with a result document: invalid `validate` output remains on
+stdout with exit 5, and a terminal unsuccessful job remains on stdout with exit
+1 so callers can inspect its status. Exit codes are stable: `0` ok, `1`
+job/generic failure, `2` usage, `3` auth, `4` not-found, `5` validation, `6`
+rate-limit, `7` timeout (a bounded wait elapsed while the remote job may still
+run), and `8` budget/quota exhaustion.
+
+For agent workflows, always put a deadline on blocking commands. `submit --wait`
+and `results --wait` accept `--timeout`; the standalone `wait` command remains
+the easiest way to reattach to a durable job name.
 
 Not every tool ships a runnable example — `schema <tool> --example` exits non-zero
 (with a clear message) when one isn't available, so a `> job.yaml` redirect never
@@ -89,8 +103,11 @@ require `--yes`/`-y` when run non-interactively (piped or `--json`), so an agent
 never removes data without an explicit confirmation.
 
 ```bash
-tamarind jobs --json | jq '.jobs[] | select(.JobStatus=="Running")'
+tamarind --json jobs | jq '.jobs[] | select(.JobStatus=="Running")'
 ```
+
+`--json`, `--profile`, and the endpoint/auth overrides are global options, so
+place them before the command name.
 
 ## Commands
 
