@@ -45,7 +45,31 @@ def info(message: str, mode: OutputMode) -> None:
     typer.secho(message, err=True, fg=typer.colors.BRIGHT_BLACK)
 
 
-def error(message: str) -> None:
+def error(
+    message: str,
+    mode: OutputMode | None = None,
+    *,
+    error_type: str = "TamarindError",
+    exit_code: int = ExitCode.ERROR,
+    detail: Any = None,
+) -> None:
+    """Emit a stable error representation to stderr.
+
+    Human mode keeps the existing compact red ``error: ...`` rendering. JSON
+    mode emits one JSON document so agents never need to scrape Rich-formatted
+    stderr. ``detail`` is deliberately nested under the error object and is
+    omitted when absent, keeping the common shape small and stable.
+    """
+    if mode is not None and mode.json:
+        err: dict[str, Any] = {
+            "type": error_type,
+            "message": message,
+            "exitCode": int(exit_code),
+        }
+        if detail is not None:
+            err["detail"] = detail
+        typer.echo(json.dumps({"error": err}, indent=2, default=str), err=True)
+        return
     typer.secho(f"error: {message}", err=True, fg=typer.colors.RED)
 
 
@@ -70,7 +94,10 @@ def confirm_destructive(action: str, *, yes: bool, mode: OutputMode) -> None:
     if mode.json or not is_tty() or not is_stdin_tty():
         error(
             f"Refusing to {action} without confirmation in non-interactive mode. "
-            "Pass --yes/-y to confirm."
+            "Pass --yes/-y to confirm.",
+            mode,
+            error_type="UsageError",
+            exit_code=ExitCode.USAGE,
         )
         raise typer.Exit(ExitCode.USAGE)
     prompt = action[:1].upper() + action[1:]

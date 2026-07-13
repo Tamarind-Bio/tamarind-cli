@@ -8,6 +8,40 @@ import typer
 
 from ... import catalog
 from .. import output
+from ..guidance import rewrite_legacy_guidance
+
+
+def _with_cli_tools_hint(response: object) -> object:
+    """Preserve catalog guidance and add instructions valid in this CLI."""
+    if not isinstance(response, dict):
+        return response
+    result = dict(response)
+    if "hint" in result:
+        result["hint"] = rewrite_legacy_guidance(result["hint"])
+    result["cliHint"] = (
+        "Inspect a tool with `tamarind --json schema NAME`. Pass the exact lowercase "
+        "tool name, and narrow discovery with `--modality` or `--function`."
+    )
+    return result
+
+
+def _with_cli_schema_hints(response: object, tool: str) -> object:
+    """Keep live schema data while preventing MCP-only instructions from leaking in."""
+    if not isinstance(response, dict) or response.get("error"):
+        return response
+    result = dict(response)
+    if "hint" in result:
+        result["hint"] = rewrite_legacy_guidance(result["hint"])
+    result["cliHint"] = (
+        f"Validate settings with `tamarind --json validate {tool} --input FILE`. "
+        "Upload local file inputs with `tamarind --json files upload PATH`; download "
+        "completed outputs with `tamarind --json results JOB --download DIR`."
+    )
+    if "exampleJobNote" in result:
+        result["exampleJobNote"] = rewrite_legacy_guidance(
+            result["exampleJobNote"]
+        )
+    return result
 
 
 def register(app: typer.Typer) -> None:
@@ -25,6 +59,7 @@ def register(app: typer.Typer) -> None:
             resp = catalog.list_tools(
                 client, modality=modality, function=function, search=search, custom=custom or None
             )
+        resp = _with_cli_tools_hint(resp)
         rows = [
             {
                 "name": t.get("name"),
@@ -74,6 +109,7 @@ def register(app: typer.Typer) -> None:
         state = ctx.obj
         with state.catalog_client() as client:
             resp = catalog.get_schema(client, tool)
+        resp = _with_cli_schema_hints(resp, tool)
         # The catalog returns HTTP 200 with {"error": ...} for an unknown/hidden
         # tool; turn that into a not-found exit instead of printing it as success.
         if isinstance(resp, dict) and resp.get("error"):

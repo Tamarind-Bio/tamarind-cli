@@ -7,6 +7,7 @@ callers (and the CLI's exit codes) get consistent behaviour.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import httpx
@@ -14,6 +15,7 @@ import httpx
 from .errors import (
     APIError,
     AuthError,
+    BudgetError,
     NotFoundError,
     RateLimitError,
     TamarindError,
@@ -91,8 +93,14 @@ class HTTPClient:
             return resp
         raise _map_error(resp)
 
-    def get_json(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
-        return _parse_json(self.request("GET", path, params=params))
+    def get_json(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        timeout: float | None = None,
+    ) -> Any:
+        return _parse_json(self.request("GET", path, params=params, timeout=timeout))
 
     def post_json(self, path: str, *, json: Any | None = None) -> Any:
         return _parse_json(self.request("POST", path, json=json))
@@ -133,11 +141,29 @@ def _map_error(resp: httpx.Response) -> TamarindError:
     code = resp.status_code
     ml = msg.lower()
     auth_ish = "api key" in ml or "api-key" in ml or "apikey" in ml or "unauthorized" in ml
+    resource = (
+        r"(?:budget|quota|weighted[-_\s]?hours?|credits?|account balance|funds|"
+        r"spend(?:ing)? limit|usage (?:limit|cap))"
+    )
+    exhausted = (
+        r"(?:exceed(?:ed|s)?|exhaust(?:ed|ion)?|deplet(?:ed|ion)?|reached|"
+        r"insufficient|empty|zero|out of|not enough|unavailable)"
+    )
+    # A resource word alone is not enough: policy/admin endpoints can mention
+    # "budget", "quota", or "credit" without the account being exhausted.
+    budget_ish = bool(
+        re.search(rf"\b{resource}\b.{{0,80}}\b{exhausted}\b", ml)
+        or re.search(rf"\b{exhausted}\b.{{0,80}}\b{resource}\b", ml)
+    )
     notfound_ish = "not found" in ml or "does not exist" in ml or "no such" in ml
     if code == 401:
         return AuthError(f"Unauthorized: {msg}")
     if code == 403:
-        return AuthError(f"Access denied: {msg}")
+        if auth_ish:
+            return AuthError(f"Access denied: {msg}")
+        if budget_ish:
+            return BudgetError(f"Budget or quota rejected the request: {msg}")
+        return APIError(f"Access denied: {msg}", status_code=code)
     if code == 404:
         return NotFoundError(msg)
     if code == 400:

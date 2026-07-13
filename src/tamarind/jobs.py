@@ -1,35 +1,64 @@
 """Job-status helpers: normalization and polling.
 
-The REST job objects use capitalized keys (``JobName``, ``JobStatus``, ...).
-The status enum is {Complete, In Queue, Running, Stopped, Deleted}; we also
-treat Failed/Cancelled/Error as terminal defensively in case the backend grows
-new terminal states.
+The REST job objects use capitalized keys (``JobName``, ``JobStatus``, ...),
+while batch-parent objects report their lifecycle in ``batchStatus``. The job
+status enum is {Complete, In Queue, Running, Stopped, Deleted}; we also treat
+Failed/Cancelled/Error and the batch-specific AggregationFailed as terminal.
 """
 
 from __future__ import annotations
 
+import math
 import time
 from typing import Any, Callable
 
 from . import rest
-from .errors import JobTimeoutError, NotFoundError
+from .errors import JobTimeoutError, NotFoundError, TamarindError, ValidationError
 from .http import HTTPClient
 
 # Compared case-insensitively.
-TERMINAL_STATUSES = {"complete", "completed", "stopped", "deleted", "failed", "cancelled", "error"}
+TERMINAL_STATUSES = {
+    "complete",
+    "completed",
+    "stopped",
+    "deleted",
+    "failed",
+    "cancelled",
+    "error",
+    "aggregationfailed",
+    "aggregation failed",
+}
 SUCCESS_STATUSES = {"complete", "completed"}
 
 
 def job_status(job: dict[str, Any]) -> str | None:
-    """Read a job's status regardless of which casing the API used."""
-    for key in ("JobStatus", "status", "Status"):
+    """Read a job or batch-parent status regardless of API casing.
+
+    ``batchStatus`` is authoritative for an identifiable batch parent, which
+    can retain a nonterminal per-job field while aggregation has completed.
+    A subjob's own ``JobStatus`` remains authoritative even if a future API
+    response also includes parent batch metadata.
+    """
+    kind = str(job.get("Type") or job.get("type") or "").strip().lower()
+    has_batch_name = any(job.get(key) for key in ("batchName", "BatchName"))
+    has_job_name = any(job.get(key) for key in ("JobName", "jobName"))
+    # Subjob rows may carry their parent's batchName and batchStatus. A row is
+    # a parent only when the API identifies its type as batch, or when it uses
+    # a batch name without also carrying its own durable job name.
+    is_batch_parent = kind == "batch" or (has_batch_name and not has_job_name)
+    keys = (
+        ("batchStatus", "BatchStatus", "JobStatus", "status", "Status")
+        if is_batch_parent
+        else ("JobStatus", "status", "Status", "batchStatus", "BatchStatus")
+    )
+    for key in keys:
         if job.get(key):
             return str(job[key])
     return None
 
 
 def job_name(job: dict[str, Any]) -> str | None:
-    for key in ("JobName", "jobName", "name"):
+    for key in ("JobName", "jobName", "batchName", "BatchName", "name"):
         if job.get(key):
             return str(job[key])
     return None
@@ -43,9 +72,11 @@ def is_success(status: str | None) -> bool:
     return bool(status) and status.lower() in SUCCESS_STATUSES
 
 
-def fetch_job(client: HTTPClient, name: str) -> dict[str, Any]:
+def fetch_job(
+    client: HTTPClient, name: str, *, timeout: float | None = None
+) -> dict[str, Any]:
     """Fetch a single job by name. Raises NotFoundError if it doesn't exist."""
-    resp = rest.get_jobs(client, job_name=name)
+    resp = rest.get_jobs(client, job_name=name, timeout=timeout)
     job = _extract_single(resp, name)
     if job is None:
         raise NotFoundError(f"Job '{name}' not found")
@@ -74,7 +105,19 @@ def _extract_single(resp: Any, name: str) -> dict[str, Any] | None:
         return indexed[0]
 
     # Shape C: a bare JobInfo object.
-    if any(k in resp for k in ("JobName", "JobStatus", "jobName", "status")):
+    if any(
+        k in resp
+        for k in (
+            "JobName",
+            "JobStatus",
+            "jobName",
+            "status",
+            "batchName",
+            "BatchName",
+            "batchStatus",
+            "BatchStatus",
+        )
+    ):
         return resp
     return None
 
@@ -93,15 +136,53 @@ def wait_for_job(
     if a timeout is set and the job is still running when it elapses — a clean,
     stably-coded error rather than a bare builtin ``TimeoutError`` traceback.
     """
-    deadline = None if timeout is None else time.monotonic() + timeout
+    validate_wait_options(poll_interval=poll_interval, timeout=timeout)
+    deadline = None if timeout is None else time.monotonic() + max(0.0, timeout)
+    last_status: str | None = None
     while True:
-        job = fetch_job(client, name)
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if remaining is not None and remaining <= 0:
+            status_text = f" still {last_status!r}" if last_status is not None else ""
+            raise JobTimeoutError(
+                f"Job '{name}'{status_text} after {timeout:.0f}s"
+            )
+        try:
+            job = fetch_job(client, name, timeout=remaining)
+        except TamarindError as exc:
+            # Only a generic transport timeout is eligible for deadline
+            # translation. Preserve typed API failures (auth, budget, rate
+            # limit, not-found, validation) even if the clock crossed while
+            # the request was in flight.
+            if (
+                type(exc) is TamarindError
+                and deadline is not None
+                and time.monotonic() >= deadline
+            ):
+                raise JobTimeoutError(
+                    f"Job '{name}' did not return status before the {timeout:.0f}s deadline"
+                ) from exc
+            raise
         if on_poll is not None:
             on_poll(job)
-        if is_terminal(job_status(job)):
+        last_status = job_status(job)
+        if is_terminal(last_status):
             return job
-        if deadline is not None and time.monotonic() >= deadline:
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if remaining is not None and remaining <= 0:
             raise JobTimeoutError(
-                f"Job '{name}' still {job_status(job)!r} after {timeout:.0f}s"
+                f"Job '{name}' still {last_status!r} after {timeout:.0f}s"
             )
-        time.sleep(poll_interval)
+        sleep_for = poll_interval if remaining is None else min(poll_interval, remaining)
+        time.sleep(max(0.0, sleep_for))
+
+
+def validate_wait_options(
+    *, poll_interval: float = 10.0, timeout: float | None = None
+) -> None:
+    """Reject invalid local wait timing without making a remote request."""
+    if not math.isfinite(poll_interval) or math.copysign(1.0, poll_interval) < 0:
+        raise ValidationError("Poll interval must be a finite, non-negative number.")
+    if timeout is not None and (
+        not math.isfinite(timeout) or math.copysign(1.0, timeout) < 0
+    ):
+        raise ValidationError("Wait timeout must be a finite, non-negative number.")

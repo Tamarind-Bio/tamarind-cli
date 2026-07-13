@@ -10,11 +10,15 @@ the CLI and the MCP from drifting as the platform evolves.
 ### 1. Job/file REST surface — source of truth: the OpenAPI spec
 
 `submit`, `validate`, `batch`, `jobs`, `status`/`wait`, `results`, `files`,
-`cancel`, `delete` map 1:1 onto operations in `openapi-mcp.yaml` — the same
-spec the MCP server is generated from (`FastMCP.from_openapi`). The CLI's
-[`rest.py`](../src/tamarind/rest.py) is a literal, logic-free mapping of that
-spec. Because both clients derive from one spec, a contract test can fail CI if
-they diverge.
+`cancel`, and `delete` map onto operations in `openapi-mcp.yaml` — the same
+server contract used to generate the MCP surface. The CLI's
+[`rest.py`](../src/tamarind/rest.py) is intentionally a small mapping of those
+operations.
+
+The CLI mapping is still client code and can drift. Unit tests cover request and
+response shapes, and authenticated no-spend smoke tests should exercise auth,
+catalog lookup, schema lookup, and validation before a release. Changes to the
+server contract should update the CLI tests in the same change or release train.
 
 These calls go directly to the job API (`https://app.tamarind.bio/api/`) with
 the `x-api-key` header.
@@ -37,10 +41,9 @@ detail that can change without any client change and without drift.
 
 A from-scratch client in another language would re-encode the request shapes and
 the catalog logic — two copies that drift the moment the platform changes.
-Keeping the CLI a thin, spec-derived Python client that shares the OpenAPI
-contract (and, server-side, the catalog module) with the MCP makes drift a
-structural impossibility plus a CI-enforced check, rather than something to
-remember.
+Keeping the CLI thin and anchored to the same OpenAPI contract (and,
+server-side, the same catalog module) reduces drift and makes it testable. It
+does not eliminate the need for compatibility tests and coordinated releases.
 
 ## Configuration indirection
 

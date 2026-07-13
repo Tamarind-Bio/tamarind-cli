@@ -3,12 +3,14 @@ live testing against staging surfaced: the logs response shape and a non-list
 folders response."""
 
 import json
+from io import BytesIO
 
 import httpx
 import respx
 from typer.testing import CliRunner
 
 from tamarind.cli.main import app
+from tamarind.cli.commands.files import _UPLOAD_CHUNK_SIZE, _iter_file_chunks
 from tamarind.errors import NotFoundError, TamarindError
 
 runner = CliRunner()
@@ -20,6 +22,17 @@ ENV = {
     "TAMARIND_API_BASE": API,
     "TAMARIND_CATALOG_BASE": CAT,
 }
+
+
+class _NoUnboundedRead(BytesIO):
+    def read(self, size=-1):
+        assert size == _UPLOAD_CHUNK_SIZE
+        return super().read(size)
+
+
+def test_upload_chunk_iterator_never_reads_the_whole_file_at_once():
+    payload = b"x" * (_UPLOAD_CHUNK_SIZE + 1)
+    assert b"".join(_iter_file_chunks(_NoUnboundedRead(payload))) == payload
 
 
 @respx.mock
@@ -84,6 +97,89 @@ def test_schema_unknown_tool_exits_nonzero():
 
 
 @respx.mock
+def test_tools_replaces_mcp_only_server_hint_with_cli_guidance():
+    respx.get(f"{CAT}catalog/tools").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "totalTools": 1,
+                "tools": [{"name": "boltz", "displayName": "Boltz", "categories": []}],
+                "hint": "Use getJobSchema(jobType='<name>') next",
+            },
+        )
+    )
+
+    res = runner.invoke(app, ["--json", "tools"], env=ENV)
+
+    assert res.exit_code == 0, res.stdout
+    payload = json.loads(res.stdout)
+    assert "tamarind --json schema NAME" in payload["hint"]
+    assert "tamarind --json schema NAME" in payload["cliHint"]
+    assert "getJobSchema" not in payload["hint"]
+
+
+@respx.mock
+def test_schema_replaces_mcp_only_server_hints_with_cli_guidance():
+    respx.get(f"{CAT}catalog/tools/boltz/schema").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "displayName": "Boltz",
+                "parameters": [],
+                "hint": "Use listJobFiles()",
+                "exampleJobNote": (
+                    "Scientific caveat: replace placeholder files. "
+                    "Use uploadFile('input.pdb'), validateJob, then submitJob"
+                ),
+            },
+        )
+    )
+
+    res = runner.invoke(app, ["--json", "schema", "boltz"], env=ENV)
+
+    assert res.exit_code == 0, res.stdout
+    payload = json.loads(res.stdout)
+    combined = payload["hint"] + payload["exampleJobNote"] + payload["cliHint"]
+    assert "tamarind --json validate boltz" in combined
+    assert "tamarind --json results JOB" in combined
+    assert "Scientific caveat: replace placeholder files." in combined
+    for legacy in ("listJobFiles", "uploadFile", "validateJob", "submitJob"):
+        assert legacy not in combined
+
+
+@respx.mock
+def test_auth_status_never_emits_even_a_masked_key_fragment():
+    secret = "codex-super-secret-key"
+    endpoint_secret = "endpoint-secret"
+    respx.get(f"{API}jobs").mock(
+        return_value=httpx.Response(200, json={"jobs": []})
+    )
+    env = {
+        **ENV,
+        "TAMARIND_API_KEY": secret,
+        "TAMARIND_CATALOG_BASE": (
+            f"https://catalog.test/?X-Amz-Signature={endpoint_secret}"
+        ),
+    }
+
+    machine = runner.invoke(app, ["--json", "auth", "status"], env=env)
+    human = runner.invoke(app, ["--no-json", "auth", "status"], env=env)
+
+    assert machine.exit_code == 0, machine.stdout
+    payload = json.loads(machine.stdout)
+    assert "apiKey" not in payload
+    assert "apiBase" not in payload
+    assert "catalogBase" not in payload
+    assert payload["hasKey"] is True
+    assert secret not in machine.stdout + human.stdout
+    assert endpoint_secret not in machine.stdout + human.stdout
+    assert "X-Amz" not in machine.stdout + human.stdout
+    assert "code" not in machine.stdout + human.stdout
+    assert "-key" not in machine.stdout + human.stdout
+    assert "configured (verified)" in human.stdout
+
+
+@respx.mock
 def test_upload_gets_presigned_url_then_puts_to_s3(tmp_path):
     # `files upload` is a two-step presigned PUT: POST /getPresignedUploadUrl to
     # get a PUT-able uploadUrl, then PUT the bytes straight to S3 (not multipart
@@ -113,6 +209,7 @@ def test_upload_gets_presigned_url_then_puts_to_s3(tmp_path):
     put_req = put_route.calls.last.request
     assert put_req.content == b"ATOM      1  N   MET A   1\n"
     assert put_req.headers["content-type"] == "application/octet-stream"
+    assert put_req.headers["content-length"] == str(f.stat().st_size)
 
 
 @respx.mock
@@ -127,6 +224,110 @@ def test_upload_surfaces_clean_error_on_non_dict_response(tmp_path):
     # A clean, typed error (the isinstance(dict) guard worked) — NOT an
     # AttributeError from calling .get on an int.
     assert isinstance(res.exception, TamarindError)
+
+
+@respx.mock
+def test_upload_missing_url_error_detail_does_not_leak_sibling_presigned_url(tmp_path):
+    f = tmp_path / "target.pdb"
+    f.write_bytes(b"ATOM")
+    secret = "https://storage.test/head?signature=do-not-leak"
+    respx.post(f"{API}getPresignedUploadUrl").mock(
+        return_value=httpx.Response(200, json={"headUrl": secret, "bucket": "workspace"})
+    )
+
+    res = runner.invoke(app, ["files", "upload", str(f)], env=ENV)
+
+    assert res.exit_code != 0
+    assert isinstance(res.exception, TamarindError)
+    assert "do-not-leak" not in res.exception.message
+    assert "do-not-leak" not in str(res.exception.detail)
+    assert res.exception.detail == {
+        "responseType": "dict",
+        "fields": ["bucket", "headUrl"],
+    }
+
+
+@respx.mock
+def test_upload_maps_presigned_put_http_failure_without_leaking_url(tmp_path):
+    f = tmp_path / "target.pdb"
+    f.write_bytes(b"ATOM")
+    upload_url = "https://s3.amazonaws.com/bucket/target.pdb?X-Amz-Signature=secret"
+    respx.post(f"{API}getPresignedUploadUrl").mock(
+        return_value=httpx.Response(200, json={"uploadUrl": upload_url})
+    )
+    respx.put(upload_url).mock(return_value=httpx.Response(403, text="SignatureDoesNotMatch"))
+
+    res = runner.invoke(app, ["files", "upload", str(f)], env=ENV)
+
+    assert res.exit_code != 0
+    assert isinstance(res.exception, TamarindError)
+    assert "HTTP 403" in res.exception.message
+    assert "secret" not in res.exception.message
+
+
+@respx.mock
+def test_upload_maps_presigned_put_network_failure_without_leaking_url(tmp_path):
+    f = tmp_path / "target.pdb"
+    f.write_bytes(b"ATOM")
+    upload_url = "https://s3.amazonaws.com/bucket/target.pdb?X-Amz-Signature=secret"
+    respx.post(f"{API}getPresignedUploadUrl").mock(
+        return_value=httpx.Response(200, json={"uploadUrl": upload_url})
+    )
+    request = httpx.Request("PUT", upload_url)
+    respx.put(upload_url).mock(side_effect=httpx.ConnectError("boom", request=request))
+
+    res = runner.invoke(app, ["files", "upload", str(f)], env=ENV)
+
+    assert res.exit_code != 0
+    assert isinstance(res.exception, TamarindError)
+    assert "ConnectError" in res.exception.message
+    assert "secret" not in res.exception.message
+
+
+@respx.mock
+def test_upload_maps_invalid_presigned_url_without_traceback_or_leak(tmp_path, monkeypatch):
+    from tamarind.cli.commands import files as files_commands
+
+    f = tmp_path / "target.pdb"
+    f.write_bytes(b"ATOM")
+    respx.post(f"{API}getPresignedUploadUrl").mock(
+        return_value=httpx.Response(200, json={"uploadUrl": "not-a-valid-secret-url"})
+    )
+
+    def invalid_put(*args, **kwargs):
+        raise httpx.InvalidURL("not-a-valid-secret-url")
+
+    monkeypatch.setattr(files_commands.httpx, "put", invalid_put)
+
+    res = runner.invoke(app, ["files", "upload", str(f)], env=ENV)
+
+    assert res.exit_code != 0
+    assert isinstance(res.exception, TamarindError)
+    assert "InvalidURL" in res.exception.message
+    assert "not-a-valid-secret-url" not in res.exception.message
+
+
+@respx.mock
+def test_upload_maps_stream_protocol_failure_without_leaking_url(tmp_path, monkeypatch):
+    from tamarind.cli.commands import files as files_commands
+
+    f = tmp_path / "target.pdb"
+    f.write_bytes(b"ATOM")
+    upload_url = "https://storage.test/object?X-Amz-Signature=do-not-leak"
+    respx.post(f"{API}getPresignedUploadUrl").mock(
+        return_value=httpx.Response(200, json={"uploadUrl": upload_url})
+    )
+
+    def broken_put(*args, **kwargs):
+        raise httpx.StreamError("stream consumed")
+
+    monkeypatch.setattr(files_commands.httpx, "put", broken_put)
+    result = runner.invoke(app, ["files", "upload", str(f)], env=ENV)
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, TamarindError)
+    assert "StreamError" in result.exception.message
+    assert "do-not-leak" not in result.exception.message
 
 
 # --- files list filtering (the /files endpoint ignores query filters; the CLI

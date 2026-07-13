@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build release artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Build source and wheel distributions
+        run: uv build
+      - name: Reject local caches in the source distribution
+        run: >-
+          python -c "import glob, tarfile;
+          names = tarfile.open(glob.glob('dist/*.tar.gz')[0]).getnames();
+          assert not any('/.uv-cache/' in name or '/.venv/' in name for name in names)"
+      - name: Smoke-check the built wheel
+        run: uv run --isolated --no-project --with dist/*.whl tamarind --version
+
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+      - name: Install project and development dependencies
+        run: uv sync --extra dev
+      - name: Test
+        run: uv run pytest
+      - name: Lint
+        run: uv run ruff check .
+
+  cross-platform:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install project and development dependencies
+        run: uv sync --extra dev
+      - name: Test
+        run: uv run pytest

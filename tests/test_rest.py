@@ -5,7 +5,14 @@ import pytest
 import respx
 
 from tamarind import catalog, rest
-from tamarind.errors import AuthError, NotFoundError, RateLimitError, ValidationError
+from tamarind.errors import (
+    APIError,
+    AuthError,
+    BudgetError,
+    NotFoundError,
+    RateLimitError,
+    ValidationError,
+)
 from tamarind.http import HTTPClient
 
 BASE = "https://api.test/"
@@ -102,7 +109,7 @@ def test_delete_job_tolerates_string_response():
 @respx.mock
 @pytest.mark.parametrize(
     "status,exc",
-    [(401, AuthError), (403, AuthError), (404, NotFoundError), (400, ValidationError), (429, RateLimitError)],
+    [(401, AuthError), (403, APIError), (404, NotFoundError), (400, ValidationError), (429, RateLimitError)],
 )
 def test_error_mapping(status, exc):
     respx.get(f"{BASE}jobs").mock(return_value=httpx.Response(status, json={"error": "boom"}))
@@ -124,6 +131,45 @@ def test_400_subtype_classification(message, exc):
     # The API overloads HTTP 400; the client classifies by message for stable exit codes.
     respx.get(f"{BASE}jobs").mock(return_value=httpx.Response(400, json={"error": message}))
     with pytest.raises(exc):
+        rest.get_jobs(client())
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "message,exc",
+    [
+        ("Invalid API key", AuthError),
+        ("Weighted hours budget exceeded", BudgetError),
+        ("Weighted-hours quota exhausted", BudgetError),
+        ("Organization spend limit reached", BudgetError),
+        ("Monthly usage cap exceeded", BudgetError),
+        ("Insufficient credits", BudgetError),
+        ("This resource is forbidden by policy", APIError),
+    ],
+)
+def test_403_subtype_classification(message, exc):
+    respx.get(f"{BASE}jobs").mock(
+        return_value=httpx.Response(403, json={"error": message})
+    )
+    with pytest.raises(exc):
+        rest.get_jobs(client())
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Budget administration is forbidden by policy",
+        "Quota settings are not accessible",
+        "Credit report access is forbidden",
+        "The organization is accredited but this resource is forbidden",
+    ],
+)
+def test_403_resource_words_without_exhaustion_are_not_budget_errors(message):
+    respx.get(f"{BASE}jobs").mock(
+        return_value=httpx.Response(403, json={"error": message})
+    )
+    with pytest.raises(APIError):
         rest.get_jobs(client())
 
 
