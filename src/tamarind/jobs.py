@@ -34,10 +34,24 @@ SUCCESS_STATUSES = {"complete", "completed"}
 def job_status(job: dict[str, Any]) -> str | None:
     """Read a job or batch-parent status regardless of API casing.
 
-    ``batchStatus`` is authoritative when present: a batch parent can retain a
-    nonterminal per-job field while its aggregation lifecycle has completed.
+    ``batchStatus`` is authoritative for an identifiable batch parent, which
+    can retain a nonterminal per-job field while aggregation has completed.
+    A subjob's own ``JobStatus`` remains authoritative even if a future API
+    response also includes parent batch metadata.
     """
-    for key in ("batchStatus", "BatchStatus", "JobStatus", "status", "Status"):
+    kind = str(job.get("Type") or job.get("type") or "").strip().lower()
+    has_batch_name = any(job.get(key) for key in ("batchName", "BatchName"))
+    has_job_name = any(job.get(key) for key in ("JobName", "jobName"))
+    # Subjob rows may carry their parent's batchName and batchStatus. A row is
+    # a parent only when the API identifies its type as batch, or when it uses
+    # a batch name without also carrying its own durable job name.
+    is_batch_parent = kind == "batch" or (has_batch_name and not has_job_name)
+    keys = (
+        ("batchStatus", "BatchStatus", "JobStatus", "status", "Status")
+        if is_batch_parent
+        else ("JobStatus", "status", "Status", "batchStatus", "BatchStatus")
+    )
+    for key in keys:
         if job.get(key):
             return str(job[key])
     return None
@@ -138,7 +152,15 @@ def wait_for_job(
         try:
             job = fetch_job(client, name, timeout=remaining)
         except TamarindError as exc:
-            if deadline is not None and time.monotonic() >= deadline:
+            # Only a generic transport timeout is eligible for deadline
+            # translation. Preserve typed API failures (auth, budget, rate
+            # limit, not-found, validation) even if the clock crossed while
+            # the request was in flight.
+            if (
+                type(exc) is TamarindError
+                and deadline is not None
+                and time.monotonic() >= deadline
+            ):
                 raise JobTimeoutError(
                     f"Job '{name}' did not return status before the {timeout:.0f}s deadline"
                 ) from exc

@@ -7,6 +7,7 @@ callers (and the CLI's exit codes) get consistent behaviour.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import httpx
@@ -140,22 +141,19 @@ def _map_error(resp: httpx.Response) -> TamarindError:
     code = resp.status_code
     ml = msg.lower()
     auth_ish = "api key" in ml or "api-key" in ml or "apikey" in ml or "unauthorized" in ml
-    budget_ish = any(
-        term in ml
-        for term in (
-            "budget",
-            "weighted hour",
-            "weighted-hour",
-            "weighted_hour",
-            "quota",
-            "credit",
-            "account balance",
-            "insufficient funds",
-            "spend limit",
-            "spending limit",
-            "usage limit",
-            "usage cap",
-        )
+    resource = (
+        r"(?:budget|quota|weighted[-_\s]?hours?|credits?|account balance|funds|"
+        r"spend(?:ing)? limit|usage (?:limit|cap))"
+    )
+    exhausted = (
+        r"(?:exceed(?:ed|s)?|exhaust(?:ed|ion)?|deplet(?:ed|ion)?|reached|"
+        r"insufficient|empty|zero|out of|not enough|unavailable)"
+    )
+    # A resource word alone is not enough: policy/admin endpoints can mention
+    # "budget", "quota", or "credit" without the account being exhausted.
+    budget_ish = bool(
+        re.search(rf"\b{resource}\b.{{0,80}}\b{exhausted}\b", ml)
+        or re.search(rf"\b{exhausted}\b.{{0,80}}\b{resource}\b", ml)
     )
     notfound_ish = "not found" in ml or "does not exist" in ml or "no such" in ml
     if code == 401:

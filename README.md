@@ -87,10 +87,10 @@ written to stderr as
 is omitted when unavailable. A domain verdict can deliberately combine a
 nonzero exit with a result document: invalid `validate` output remains on
 stdout with exit 5, and a terminal unsuccessful job remains on stdout with exit
-1 so callers can inspect its status. Exit codes are stable: `0` ok, `1`
-job/generic failure, `2` usage, `3` auth, `4` not-found, `5` validation, `6`
+9 so callers can inspect its status. Exit codes are stable: `0` ok, `1`
+generic failure, `2` usage, `3` auth, `4` not-found, `5` validation, `6`
 rate-limit, `7` timeout (a bounded wait elapsed while the remote job may still
-run), and `8` budget/quota exhaustion.
+run), `8` budget/quota exhaustion, and `9` remote job failure.
 
 For agent workflows, always put a deadline on blocking commands. `submit --wait`
 and `results --wait` accept `--timeout`; the standalone `wait` command remains

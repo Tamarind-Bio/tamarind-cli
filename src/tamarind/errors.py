@@ -11,6 +11,7 @@ Exit codes are stable so agents and CI can branch on them:
     6  rate limited (429)
     7  timed out (a --wait / --timeout deadline elapsed before a terminal state)
     8  budget/quota exhausted (a 403 that explicitly names usage or credits)
+    9  remote job reached an unsuccessful terminal state
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ class ExitCode:
     RATE_LIMIT = 6
     TIMEOUT = 7
     BUDGET = 8
+    JOB_FAILED = 9
 
 
 class TamarindError(Exception):

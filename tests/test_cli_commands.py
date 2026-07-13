@@ -307,6 +307,29 @@ def test_upload_maps_invalid_presigned_url_without_traceback_or_leak(tmp_path, m
     assert "not-a-valid-secret-url" not in res.exception.message
 
 
+@respx.mock
+def test_upload_maps_stream_protocol_failure_without_leaking_url(tmp_path, monkeypatch):
+    from tamarind.cli.commands import files as files_commands
+
+    f = tmp_path / "target.pdb"
+    f.write_bytes(b"ATOM")
+    upload_url = "https://storage.test/object?X-Amz-Signature=do-not-leak"
+    respx.post(f"{API}getPresignedUploadUrl").mock(
+        return_value=httpx.Response(200, json={"uploadUrl": upload_url})
+    )
+
+    def broken_put(*args, **kwargs):
+        raise httpx.StreamError("stream consumed")
+
+    monkeypatch.setattr(files_commands.httpx, "put", broken_put)
+    result = runner.invoke(app, ["files", "upload", str(f)], env=ENV)
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, TamarindError)
+    assert "StreamError" in result.exception.message
+    assert "do-not-leak" not in result.exception.message
+
+
 # --- files list filtering (the /files endpoint ignores query filters; the CLI
 #     applies them client-side, mirroring the MCP getFiles tool) ---------------
 

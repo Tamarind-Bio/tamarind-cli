@@ -5,7 +5,14 @@ import pytest
 import respx
 
 from tamarind import jobs as jh
-from tamarind.errors import NotFoundError, ValidationError
+from tamarind.errors import (
+    APIError,
+    AuthError,
+    BudgetError,
+    NotFoundError,
+    RateLimitError,
+    ValidationError,
+)
 from tamarind.http import HTTPClient
 
 BASE = "https://api.test/"
@@ -20,7 +27,16 @@ def test_status_normalization():
     assert jh.job_status({"status": "completed"}) == "completed"
     assert jh.job_status({"batchStatus": "AggregationFailed"}) == "AggregationFailed"
     # Batch lifecycle is authoritative if a parent also carries JobStatus.
-    assert jh.job_status({"batchStatus": "Complete", "JobStatus": "Running"}) == "Complete"
+    assert jh.job_status({
+        "Type": "batch", "batchStatus": "Complete", "JobStatus": "Running"
+    }) == "Complete"
+    assert jh.job_status({
+        "Type": "boltz",
+        "JobName": "batch-1-subjob-1",
+        "batchName": "batch-1",
+        "batchStatus": "Complete",
+        "JobStatus": "Running",
+    }) == "Running"
     assert jh.job_status({}) is None
 
 
@@ -149,3 +165,24 @@ def test_wait_rejects_invalid_timing_values_before_polling(kwargs):
         jh.wait_for_job(client(), "x", **kwargs)
 
     assert not route.called
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        AuthError("bad key"),
+        BudgetError("budget exhausted"),
+        NotFoundError("missing"),
+        RateLimitError("slow down"),
+        APIError("forbidden", status_code=403),
+    ],
+)
+def test_wait_preserves_typed_error_when_deadline_crosses(monkeypatch, exc):
+    ticks = iter([0.0, 0.1, 2.0])
+    monkeypatch.setattr(jh.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(jh, "fetch_job", lambda *args, **kwargs: (_ for _ in ()).throw(exc))
+
+    with pytest.raises(type(exc)) as raised:
+        jh.wait_for_job(client(), "x", timeout=1.0)
+
+    assert raised.value is exc

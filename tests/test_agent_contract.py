@@ -26,6 +26,67 @@ ENV = {
 }
 
 
+@respx.mock
+@pytest.mark.parametrize(
+    ("message", "expected_code", "expected_type"),
+    [
+        ("Weighted hours budget exceeded", ExitCode.BUDGET, "BudgetError"),
+        ("This resource is forbidden by policy", ExitCode.ERROR, "APIError"),
+    ],
+)
+def test_auth_status_preserves_non_auth_403_type(
+    message, expected_code, expected_type, monkeypatch, capsys
+):
+    for key, value in ENV.items():
+        monkeypatch.setenv(key, value)
+    respx.get(f"{API}jobs").mock(
+        return_value=httpx.Response(403, json={"error": message})
+    )
+    monkeypatch.setattr(sys, "argv", ["tamarind", "--json", "auth", "status"])
+
+    with pytest.raises(SystemExit) as raised:
+        main_module.run()
+
+    captured = capsys.readouterr()
+    assert raised.value.code == expected_code
+    assert captured.out == ""
+    assert json.loads(captured.err)["error"]["type"] == expected_type
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    ("message", "expected_code", "expected_type"),
+    [
+        ("Invalid API key", ExitCode.AUTH, "AuthError"),
+        ("Weighted hours budget exceeded", ExitCode.BUDGET, "BudgetError"),
+        ("This resource is forbidden by policy", ExitCode.ERROR, "APIError"),
+    ],
+)
+def test_auth_login_never_saves_when_verification_fails(
+    message, expected_code, expected_type, tmp_path, monkeypatch, capsys
+):
+    config_dir = tmp_path / "config"
+    monkeypatch.setenv("TAMARIND_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("TAMARIND_API_BASE", API)
+    respx.get(f"{API}jobs").mock(
+        return_value=httpx.Response(403, json={"error": message})
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["tamarind", "--json", "auth", "login", "--api-key", "candidate"],
+    )
+
+    with pytest.raises(SystemExit) as raised:
+        main_module.run()
+
+    captured = capsys.readouterr()
+    assert raised.value.code == expected_code
+    assert captured.out == ""
+    assert json.loads(captured.err)["error"]["type"] == expected_type
+    assert not (config_dir / "config.json").exists()
+
+
 def test_entrypoint_emits_json_error_with_stable_exit_code(tmp_path, monkeypatch, capsys):
     job = tmp_path / "job.yaml"
     job.write_text("type: esmfold\nsettings: {sequence: MKT}\n")
@@ -183,7 +244,7 @@ def test_wait_returns_final_payload_but_exits_nonzero(status, monkeypatch):
 
     result = runner.invoke(app, ["--json", "wait", "job-1"], env=ENV)
 
-    assert result.exit_code == ExitCode.ERROR
+    assert result.exit_code == ExitCode.JOB_FAILED
     assert json.loads(result.stdout)["JobStatus"] == status
 
 
@@ -199,7 +260,7 @@ def test_wait_failed_batch_parent_exits_nonzero(monkeypatch):
 
     result = runner.invoke(app, ["--json", "wait", "batch-1"], env=ENV)
 
-    assert result.exit_code == ExitCode.ERROR
+    assert result.exit_code == ExitCode.JOB_FAILED
     assert json.loads(result.stdout)["batchStatus"] == "AggregationFailed"
 
 
@@ -231,7 +292,7 @@ def test_submit_wait_forwards_timeout_and_failed_job_exits_nonzero(monkeypatch):
         env=ENV,
     )
 
-    assert result.exit_code == ExitCode.ERROR
+    assert result.exit_code == ExitCode.JOB_FAILED
     assert observed["timeout"] == 12.5
     assert json.loads(result.stdout)["final"]["JobStatus"] == "Failed"
 
@@ -345,7 +406,7 @@ def test_results_wait_failure_never_requests_presigned_url(monkeypatch):
         env=ENV,
     )
 
-    assert result.exit_code == ExitCode.ERROR
+    assert result.exit_code == ExitCode.JOB_FAILED
     assert observed["timeout"] == 9
     assert json.loads(result.stdout)["final"]["JobStatus"] == "Stopped"
     assert not route.called
@@ -467,6 +528,24 @@ def test_validation_guidance_rewrite_does_not_mutate_user_settings_text():
 
 
 @respx.mock
+@pytest.mark.parametrize("token", ["validateJob", "submitJob", "uploadFile()"])
+def test_validation_error_preserves_echoed_user_tokens(token):
+    message = f"Unknown setting value: {token}"
+    respx.post(f"{API}validate-job").mock(
+        return_value=httpx.Response(200, json={"valid": False, "error": message})
+    )
+
+    result = runner.invoke(
+        app,
+        ["--json", "validate", "custom-tool", "--set", "sequence=MKT"],
+        env=ENV,
+    )
+
+    assert result.exit_code == ExitCode.VALIDATION
+    assert json.loads(result.stdout)["error"] == message
+
+
+@respx.mock
 def test_status_and_job_lists_redact_presigned_result_urls():
     secret = "https://storage.test/result.zip?signature=do-not-leak"
     respx.get(f"{API}jobs").mock(
@@ -504,6 +583,45 @@ def test_status_and_job_lists_redact_presigned_result_urls():
             "redactedFields",
             json.loads(text).get("jobs", [{}])[0].get("redactedFields", []),
         )
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "https://storage.test/object?X-Amz-Signature=do-not-leak",
+        "https://storage.googleapis.test/object?X-Goog-Signature=do-not-leak",
+        "https://account.blob.core.windows.net/object?sv=2024-01-01&sig=do-not-leak",
+    ],
+)
+def test_sanitizer_redacts_signed_urls_by_value_and_preserves_ordinary_urls(secret):
+    ordinary = "https://docs.tamarind.bio/results"
+    payload = {
+        "artifactLink": secret,
+        "nested": {"futureField": secret, "docs": ordinary},
+        "items": [secret, ordinary],
+    }
+
+    sanitized = jobs_commands._sanitize_job_output(payload)
+    rendered = json.dumps(sanitized)
+
+    assert "do-not-leak" not in rendered
+    assert sanitized["redactedFields"] == ["artifactLink"]
+    assert sanitized["nested"]["futureField"] == "<redacted credential URL>"
+    assert sanitized["nested"]["docs"] == ordinary
+    assert sanitized["items"] == ["<redacted credential URL>", ordinary]
+    assert jobs_commands._sanitize_job_output(secret) == "<redacted credential URL>"
+
+
+def test_sanitizer_does_not_overwrite_existing_redaction_metadata():
+    payload = {
+        "resultUrl": "https://storage.test/result",
+        "redactedFields": {"upstream": True},
+    }
+
+    sanitized = jobs_commands._sanitize_job_output(payload)
+
+    assert sanitized["redactedFields"] == {"upstream": True}
+    assert sanitized["tamarindRedactedFields"] == ["resultUrl"]
 
 
 @respx.mock
@@ -580,6 +698,12 @@ class _InterruptedStream(httpx.SyncByteStream):
         raise KeyboardInterrupt
 
 
+class _BrokenProtocolStream(httpx.SyncByteStream):
+    def __iter__(self):
+        yield b"partial-download"
+        raise httpx.StreamError("stream was consumed incorrectly")
+
+
 @respx.mock
 def test_midstream_download_failure_removes_partial_and_preserves_destination(tmp_path):
     presigned = "https://storage.test/result.zip?signature=do-not-leak"
@@ -600,6 +724,23 @@ def test_midstream_download_failure_removes_partial_and_preserves_destination(tm
     assert "do-not-leak" not in str(result.exception.detail)
     assert destination.read_bytes() == b"old-result"
     assert [path.name for path in tmp_path.iterdir()] == ["job-1.zip"]
+
+
+@respx.mock
+def test_stream_protocol_failure_is_typed_and_removes_partial(tmp_path):
+    presigned = "https://storage.test/result.zip?signature=do-not-leak"
+    destination = tmp_path / "job-1.zip"
+    respx.get(presigned).mock(
+        return_value=httpx.Response(200, stream=_BrokenProtocolStream())
+    )
+
+    with pytest.raises(TamarindError) as raised:
+        jobs_commands._download(presigned, destination)
+
+    assert "do-not-leak" not in raised.value.message
+    assert raised.value.detail == {"type": "StreamError"}
+    assert not destination.exists()
+    assert list(tmp_path.iterdir()) == []
 
 
 @respx.mock

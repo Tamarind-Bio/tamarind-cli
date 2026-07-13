@@ -56,7 +56,7 @@ def _put_presigned_upload(url: str, path: Path, *, content_type: str, remote: st
         raise TamarindError(
             f"Upload of '{remote}' failed with HTTP {exc.response.status_code}."
         ) from exc
-    except (httpx.RequestError, httpx.InvalidURL) as exc:
+    except (httpx.RequestError, httpx.InvalidURL, httpx.StreamError) as exc:
         raise TamarindError(
             f"Upload transfer failed for '{remote}' ({type(exc).__name__})."
         ) from exc

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import uuid
 from pathlib import Path
 from typing import Optional
+from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 import typer
@@ -15,7 +17,7 @@ from ... import jobs as jobs_helpers
 from ... import rest
 from ...errors import ExitCode, NotFoundError, TamarindError, ValidationError
 from .. import output
-from ..guidance import rewrite_legacy_guidance
+from ..guidance import rewrite_validation_guidance
 from ..inputs import effective_job_type, resolve_job_input
 
 
@@ -86,7 +88,7 @@ def _download(url: str, dest: Path) -> int:
             f"Result download failed with HTTP {exc.response.status_code}.",
             detail={"type": type(exc).__name__, "statusCode": exc.response.status_code},
         ) from exc
-    except (httpx.HTTPError, httpx.InvalidURL) as exc:
+    except (httpx.HTTPError, httpx.InvalidURL, httpx.StreamError) as exc:
         raise TamarindError(
             "Result download failed due to a network error.",
             detail={"type": type(exc).__name__},
@@ -126,23 +128,75 @@ _SENSITIVE_JOB_URL_KEYS = {
     "headurl",
 }
 
+_SENSITIVE_QUERY_NAMES = {
+    "awsaccesskeyid",
+    "googleaccessid",
+    "policy",
+    "sig",
+    "signature",
+    "token",
+}
+
+
+def _normalized_key(key: object) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(key).lower())
+
+
+def _is_credential_url(value: object) -> bool:
+    """Return whether a string is an HTTP(S) URL carrying auth query data."""
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = urlsplit(value.strip())
+    except ValueError:
+        return False
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return False
+    names = {name.lower() for name, _ in parse_qsl(parsed.query, keep_blank_values=True)}
+    return any(
+        name in _SENSITIVE_QUERY_NAMES
+        or name.startswith(("x-amz-", "x-goog-", "x-ms-"))
+        or name.endswith(("signature", "credential", "security-token"))
+        for name in names
+    )
+
+
+def _with_redactions(cleaned: dict, removed: list[str]) -> dict:
+    if not removed:
+        return cleaned
+    existing = cleaned.get("redactedFields")
+    if existing is None or (
+        isinstance(existing, list) and all(isinstance(item, str) for item in existing)
+    ):
+        cleaned["redactedFields"] = sorted(set((existing or []) + removed))
+    else:
+        # Never overwrite an upstream field that happens to use our metadata
+        # name. Keep our redaction audit under a collision-safe key.
+        cleaned["tamarindRedactedFields"] = sorted(set(removed))
+    return cleaned
+
 
 def _sanitize_job_output(value: object) -> object:
     """Remove credential-bearing transfer URLs from ordinary job output."""
     if isinstance(value, list):
         return [_sanitize_job_output(item) for item in value]
+    if _is_credential_url(value):
+        return "<redacted credential URL>"
     if not isinstance(value, dict):
         return value
     sanitized = {}
     removed = []
     for key, item in value.items():
-        if str(key).lower() in _SENSITIVE_JOB_URL_KEYS:
+        normalized = _normalized_key(key)
+        if normalized in _SENSITIVE_JOB_URL_KEYS or (
+            _is_credential_url(item)
+            and (normalized.endswith(("url", "uri", "link", "location"))
+                 or "signed" in normalized)
+        ):
             removed.append(str(key))
             continue
         sanitized[key] = _sanitize_job_output(item)
-    if removed:
-        sanitized["redactedFields"] = sorted(removed)
-    return sanitized
+    return _with_redactions(sanitized, removed)
 
 
 def _rewrite_validation_guidance(value: object) -> object:
@@ -150,7 +204,7 @@ def _rewrite_validation_guidance(value: object) -> object:
     if not isinstance(value, dict) or not isinstance(value.get("error"), str):
         return value
     rewritten = dict(value)
-    rewritten["error"] = rewrite_legacy_guidance(rewritten["error"])
+    rewritten["error"] = rewrite_validation_guidance(rewritten["error"])
     return rewritten
 
 
@@ -309,7 +363,7 @@ def register(app: typer.Typer) -> None:
         )
         output.emit(_sanitize_job_output(result), state.output, human=human)
         if "final" in result and _failed_terminal(result["final"]):
-            raise typer.Exit(ExitCode.ERROR)
+            raise typer.Exit(ExitCode.JOB_FAILED)
 
     @app.command()
     def batch(
@@ -541,7 +595,7 @@ def register(app: typer.Typer) -> None:
             human=f"{job_name}: {jobs_helpers.job_status(final)}",
         )
         if _failed_terminal(final):
-            raise typer.Exit(ExitCode.ERROR)
+            raise typer.Exit(ExitCode.JOB_FAILED)
 
     @app.command()
     def results(
@@ -591,7 +645,7 @@ def register(app: typer.Typer) -> None:
                         state.output,
                         human=f"{job_name}: {jobs_helpers.job_status(final)}",
                     )
-                    raise typer.Exit(ExitCode.ERROR)
+                    raise typer.Exit(ExitCode.JOB_FAILED)
             url = _result_url(
                 rest.get_result(
                     client, job_name=job_name, file_name=file, pdbs_only=pdbs_only or None

@@ -155,6 +155,24 @@ def test_403_subtype_classification(message, exc):
         rest.get_jobs(client())
 
 
+@respx.mock
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Budget administration is forbidden by policy",
+        "Quota settings are not accessible",
+        "Credit report access is forbidden",
+        "The organization is accredited but this resource is forbidden",
+    ],
+)
+def test_403_resource_words_without_exhaustion_are_not_budget_errors(message):
+    respx.get(f"{BASE}jobs").mock(
+        return_value=httpx.Response(403, json={"error": message})
+    )
+    with pytest.raises(APIError):
+        rest.get_jobs(client())
+
+
 def test_missing_key_raises_auth():
     c = HTTPClient(BASE, None)
     with pytest.raises(AuthError):
