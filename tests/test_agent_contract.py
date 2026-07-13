@@ -304,9 +304,11 @@ def test_submit_wait_forwards_timeout_and_failed_job_exits_nonzero(monkeypatch):
         ["--poll-interval", "-1"],
         ["--poll-interval", "nan"],
         ["--poll-interval", "inf"],
+        ["--poll-interval", "-1e-999"],
         ["--timeout", "-1"],
         ["--timeout", "nan"],
         ["--timeout", "inf"],
+        ["--timeout", "-1e-999"],
     ],
 )
 def test_submit_wait_rejects_invalid_timing_before_any_remote_request(timing_args):

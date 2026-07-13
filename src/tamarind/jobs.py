@@ -180,7 +180,9 @@ def validate_wait_options(
     *, poll_interval: float = 10.0, timeout: float | None = None
 ) -> None:
     """Reject invalid local wait timing without making a remote request."""
-    if not math.isfinite(poll_interval) or poll_interval < 0:
+    if not math.isfinite(poll_interval) or math.copysign(1.0, poll_interval) < 0:
         raise ValidationError("Poll interval must be a finite, non-negative number.")
-    if timeout is not None and (not math.isfinite(timeout) or timeout < 0):
+    if timeout is not None and (
+        not math.isfinite(timeout) or math.copysign(1.0, timeout) < 0
+    ):
         raise ValidationError("Wait timeout must be a finite, non-negative number.")

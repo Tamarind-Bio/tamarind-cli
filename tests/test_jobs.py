@@ -150,9 +150,11 @@ def test_wait_timeout_caps_sleep_to_remaining_deadline():
         {"poll_interval": -1},
         {"poll_interval": float("nan")},
         {"poll_interval": float("inf")},
+        {"poll_interval": -0.0},
         {"timeout": -1},
         {"timeout": float("nan")},
         {"timeout": float("inf")},
+        {"timeout": -0.0},
     ],
 )
 @respx.mock
