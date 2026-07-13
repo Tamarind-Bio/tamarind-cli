@@ -24,7 +24,7 @@ jobs:
           names = tarfile.open(glob.glob('dist/*.tar.gz')[0]).getnames();
           assert not any('/.uv-cache/' in name or '/.venv/' in name for name in names)"
       - name: Smoke-check the built wheel
-        run: uv run --with dist/*.whl tamarind --version
+        run: uv run --isolated --no-project --with dist/*.whl tamarind --version
 
   test:
     name: Python ${{ matrix.python-version }}

@@ -22,7 +22,7 @@ jobs:
       - name: Build sdist + wheel
         run: uv build
       - name: Smoke-check the build
-        run: uv run --with dist/*.whl tamarind --version
+        run: uv run --isolated --no-project --with dist/*.whl tamarind --version
       - uses: actions/upload-artifact@v4
         with:
           name: dist
