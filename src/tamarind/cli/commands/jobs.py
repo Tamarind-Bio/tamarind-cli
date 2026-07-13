@@ -15,6 +15,7 @@ from ... import jobs as jobs_helpers
 from ... import rest
 from ...errors import ExitCode, NotFoundError, TamarindError, ValidationError
 from .. import output
+from ..guidance import rewrite_legacy_guidance
 from ..inputs import effective_job_type, resolve_job_input
 
 
@@ -144,6 +145,15 @@ def _sanitize_job_output(value: object) -> object:
     return sanitized
 
 
+def _rewrite_validation_guidance(value: object) -> object:
+    """Rewrite only server-authored validation errors, not user settings text."""
+    if not isinstance(value, dict) or not isinstance(value.get("error"), str):
+        return value
+    rewritten = dict(value)
+    rewritten["error"] = rewrite_legacy_guidance(rewritten["error"])
+    return rewritten
+
+
 # Safety bound on `jobs --all` so a runaway cursor can't loop forever.
 _MAX_AUTO_PAGES = 100
 
@@ -189,8 +199,13 @@ def register(app: typer.Typer) -> None:
         job_type = effective_job_type(tool, job.job_type)
         job_name = name or job.job_name or _gen_name(tool)
         with state.rest_client() as client:
-            result = rest.validate_job(
-                client, job_name=job_name, job_type=job_type, settings=job.settings
+            result = _rewrite_validation_guidance(
+                rest.validate_job(
+                    client,
+                    job_name=job_name,
+                    job_type=job_type,
+                    settings=job.settings,
+                )
             )
         valid = bool(result.get("valid"))
         human = "valid ✓" if valid else f"invalid ✗ {result.get('error', '')}"
@@ -219,7 +234,14 @@ def register(app: typer.Typer) -> None:
 
         with state.rest_client() as client:
             if not skip_validate:
-                v = rest.validate_job(client, job_name=job_name, job_type=job_type, settings=job.settings)
+                v = _rewrite_validation_guidance(
+                    rest.validate_job(
+                        client,
+                        job_name=job_name,
+                        job_type=job_type,
+                        settings=job.settings,
+                    )
+                )
                 if not v.get("valid"):
                     raise ValidationError(f"Settings invalid: {v.get('error', 'unknown error')}", detail=v)
                 # NB: submit the user's original settings, NOT validate-job's
@@ -358,11 +380,13 @@ def register(app: typer.Typer) -> None:
                         and job_names[index]
                         else f"{batch_name}-{index + 1}"
                     )
-                    validation = rest.validate_job(
-                        client,
-                        job_name=str(validation_name),
-                        job_type=job_type,
-                        settings=settings,
+                    validation = _rewrite_validation_guidance(
+                        rest.validate_job(
+                            client,
+                            job_name=str(validation_name),
+                            job_type=job_type,
+                            settings=settings,
+                        )
                     )
                     if not isinstance(validation, dict) or not validation.get("valid"):
                         validation_error = (
@@ -526,12 +550,24 @@ def register(app: typer.Typer) -> None:
         download: Optional[Path] = typer.Option(None, "--download", help="Download the results bundle to this directory."),
         file: Optional[str] = typer.Option(None, "--file", help="A specific file within the results."),
         pdbs_only: bool = typer.Option(False, "--pdbs-only", help="Only PDB outputs."),
+        show_url: bool = typer.Option(
+            False,
+            "--show-url",
+            help="Print the credential-bearing presigned URL instead of downloading it.",
+        ),
         wait: bool = typer.Option(False, "--wait", help="Wait for the job to finish first."),
         poll_interval: float = typer.Option(10.0, "--poll-interval", help="Seconds between polls when --wait."),
         timeout: Optional[float] = typer.Option(None, "--timeout", help="With --wait, give up after N seconds."),
     ) -> None:
-        """Get a presigned results URL, or download the results bundle."""
+        """Download results, or explicitly request a credential-bearing URL."""
         state = ctx.obj
+        if download is None and not show_url:
+            raise typer.BadParameter(
+                "Results require --download DIR. Use --show-url only when an "
+                "explicit presigned URL is needed outside agent logs."
+            )
+        if download is not None and show_url:
+            raise typer.BadParameter("--download and --show-url are mutually exclusive.")
         with state.rest_client() as client:
             final = None
             if wait:
@@ -569,7 +605,7 @@ def register(app: typer.Typer) -> None:
                 dest = download / Path(suffix).name
                 written = _download(url, dest)
                 result["download"] = {"path": str(dest), "bytes": written}
-            else:
+            elif show_url:
                 result["url"] = url
         human = result.get("download", {}).get("path") if download else url
         output.emit(result, state.output, human=str(human))

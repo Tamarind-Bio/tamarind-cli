@@ -7,7 +7,7 @@ from typing import Optional
 import typer
 
 from ... import rest
-from ...config import mask_key, save_profile
+from ...config import save_profile
 from ...errors import AuthError
 from ...http import HTTPClient
 from .. import output
@@ -56,23 +56,19 @@ def login(
 
 @app.command()
 def status(ctx: typer.Context) -> None:
-    """Show the active profile, endpoints, and whether the key works."""
+    """Show the active profile and whether its key works."""
     state = ctx.obj
     cfg = state.config()
     verified = cfg.has_key and _check_key(cfg.api_base, cfg.api_key)
     result = {
         "profile": cfg.profile,
-        "apiKey": mask_key(cfg.api_key),
         "hasKey": cfg.has_key,
         "verified": verified,
-        "apiBase": cfg.api_base,
-        "catalogBase": cfg.catalog_base,
     }
     human = (
         f"profile:      {cfg.profile}\n"
-        f"api key:      {mask_key(cfg.api_key)} ({'verified' if verified else 'not verified'})\n"
-        f"job api:      {cfg.api_base}\n"
-        f"catalog api:  {cfg.catalog_base}"
+        f"api key:      {'configured' if cfg.has_key else 'not configured'} "
+        f"({'verified' if verified else 'not verified'})"
     )
     output.emit(result, state.output, human=human)
 

@@ -2,29 +2,13 @@
 
 from __future__ import annotations
 
-import re
 from typing import Optional
 
 import typer
 
 from ... import catalog
 from .. import output
-
-
-def _rewrite_mcp_operations(text: object) -> object:
-    """Translate known MCP-operation boilerplate while preserving other guidance."""
-    if not isinstance(text, str):
-        return text
-    replacements = (
-        (r"\bgetJobSchema\s*\([^)]*\)", "`tamarind --json schema NAME`"),
-        (r"\blistJobFiles\s*\([^)]*\)", "the downloaded result bundle"),
-        (r"\bvalidateJob\b", "`tamarind --json validate`"),
-        (r"\bsubmitJob\b", "`tamarind --json submit`"),
-    )
-    rewritten = text
-    for pattern, replacement in replacements:
-        rewritten = re.sub(pattern, replacement, rewritten)
-    return rewritten
+from ..guidance import rewrite_legacy_guidance
 
 
 def _with_cli_tools_hint(response: object) -> object:
@@ -33,7 +17,7 @@ def _with_cli_tools_hint(response: object) -> object:
         return response
     result = dict(response)
     if "hint" in result:
-        result["hint"] = _rewrite_mcp_operations(result["hint"])
+        result["hint"] = rewrite_legacy_guidance(result["hint"])
     result["cliHint"] = (
         "Inspect a tool with `tamarind --json schema NAME`. Pass the exact lowercase "
         "tool name, and narrow discovery with `--modality` or `--function`."
@@ -47,14 +31,16 @@ def _with_cli_schema_hints(response: object, tool: str) -> object:
         return response
     result = dict(response)
     if "hint" in result:
-        result["hint"] = _rewrite_mcp_operations(result["hint"])
+        result["hint"] = rewrite_legacy_guidance(result["hint"])
     result["cliHint"] = (
         f"Validate settings with `tamarind --json validate {tool} --input FILE`. "
         "Upload local file inputs with `tamarind --json files upload PATH`; download "
         "completed outputs with `tamarind --json results JOB --download DIR`."
     )
     if "exampleJobNote" in result:
-        result["exampleJobNote"] = _rewrite_mcp_operations(result["exampleJobNote"])
+        result["exampleJobNote"] = rewrite_legacy_guidance(
+            result["exampleJobNote"]
+        )
     return result
 
 

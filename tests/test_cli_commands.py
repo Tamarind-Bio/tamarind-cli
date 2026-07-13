@@ -129,7 +129,7 @@ def test_schema_replaces_mcp_only_server_hints_with_cli_guidance():
                 "hint": "Use listJobFiles()",
                 "exampleJobNote": (
                     "Scientific caveat: replace placeholder files. "
-                    "Use validateJob then submitJob"
+                    "Use uploadFile('input.pdb'), validateJob, then submitJob"
                 ),
             },
         )
@@ -143,8 +143,40 @@ def test_schema_replaces_mcp_only_server_hints_with_cli_guidance():
     assert "tamarind --json validate boltz" in combined
     assert "tamarind --json results JOB" in combined
     assert "Scientific caveat: replace placeholder files." in combined
-    for legacy in ("listJobFiles", "validateJob", "submitJob"):
+    for legacy in ("listJobFiles", "uploadFile", "validateJob", "submitJob"):
         assert legacy not in combined
+
+
+@respx.mock
+def test_auth_status_never_emits_even_a_masked_key_fragment():
+    secret = "codex-super-secret-key"
+    endpoint_secret = "endpoint-secret"
+    respx.get(f"{API}jobs").mock(
+        return_value=httpx.Response(200, json={"jobs": []})
+    )
+    env = {
+        **ENV,
+        "TAMARIND_API_KEY": secret,
+        "TAMARIND_CATALOG_BASE": (
+            f"https://catalog.test/?X-Amz-Signature={endpoint_secret}"
+        ),
+    }
+
+    machine = runner.invoke(app, ["--json", "auth", "status"], env=env)
+    human = runner.invoke(app, ["--no-json", "auth", "status"], env=env)
+
+    assert machine.exit_code == 0, machine.stdout
+    payload = json.loads(machine.stdout)
+    assert "apiKey" not in payload
+    assert "apiBase" not in payload
+    assert "catalogBase" not in payload
+    assert payload["hasKey"] is True
+    assert secret not in machine.stdout + human.stdout
+    assert endpoint_secret not in machine.stdout + human.stdout
+    assert "X-Amz" not in machine.stdout + human.stdout
+    assert "code" not in machine.stdout + human.stdout
+    assert "-key" not in machine.stdout + human.stdout
+    assert "configured (verified)" in human.stdout
 
 
 @respx.mock

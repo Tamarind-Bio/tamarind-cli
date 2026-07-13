@@ -333,7 +333,15 @@ def test_results_wait_failure_never_requests_presigned_url(monkeypatch):
     monkeypatch.setattr(jobs_commands.jobs_helpers, "wait_for_job", fake_wait)
     result = runner.invoke(
         app,
-        ["--json", "results", "job-1", "--wait", "--timeout", "9"],
+        [
+            "--json",
+            "results",
+            "job-1",
+            "--show-url",
+            "--wait",
+            "--timeout",
+            "9",
+        ],
         env=ENV,
     )
 
@@ -360,6 +368,102 @@ def test_downloaded_results_json_omits_presigned_url(tmp_path):
     assert "url" not in payload
     assert payload["download"]["bytes"] == len(b"zip-bytes")
     assert (tmp_path / "job-1.zip").read_bytes() == b"zip-bytes"
+
+
+@respx.mock
+def test_results_requires_explicit_download_or_show_url():
+    route = respx.post(f"{API}result").mock(
+        return_value=httpx.Response(
+            200,
+            json="https://storage.test/result.zip?signature=do-not-leak",
+        )
+    )
+
+    result = runner.invoke(app, ["--json", "results", "job-1"], env=ENV)
+
+    assert result.exit_code == ExitCode.USAGE
+    assert "do-not-leak" not in result.stdout
+    assert not route.called
+
+
+@respx.mock
+def test_results_show_url_is_an_explicit_escape_hatch():
+    presigned = "https://storage.test/result.zip?signature=explicit"
+    respx.post(f"{API}result").mock(
+        return_value=httpx.Response(200, json=presigned)
+    )
+
+    result = runner.invoke(
+        app,
+        ["--json", "results", "job-1", "--show-url"],
+        env=ENV,
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert json.loads(result.stdout)["url"] == presigned
+
+
+@respx.mock
+def test_validation_rewrites_legacy_upload_endpoint_guidance():
+    respx.post(f"{API}validate-job").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "valid": False,
+                "error": (
+                    'File "missing.pdb" has not been uploaded. Please upload '
+                    "your file using the /upload endpoint."
+                ),
+                "missing_fields": [],
+            },
+        )
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "validate",
+            "aggrescan3d",
+            "--name",
+            "missing-file",
+            "--set",
+            "pdbFile=missing.pdb",
+        ],
+        env=ENV,
+    )
+
+    assert result.exit_code == ExitCode.VALIDATION
+    assert "/upload endpoint" not in result.stdout
+    assert "tamarind --json files upload PATH" in result.stdout
+
+
+@respx.mock
+def test_validation_guidance_rewrite_does_not_mutate_user_settings_text():
+    user_text = "A literal uploadFile() token in user-controlled text"
+    respx.post(f"{API}validate-job").mock(
+        return_value=httpx.Response(
+            200,
+            json={"valid": True, "normalized": {"note": user_text}},
+        )
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "validate",
+            "custom-tool",
+            "--name",
+            "literal-text",
+            "--set",
+            f"note={user_text}",
+        ],
+        env=ENV,
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert json.loads(result.stdout)["normalized"]["note"] == user_text
 
 
 @respx.mock

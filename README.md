@@ -96,6 +96,11 @@ For agent workflows, always put a deadline on blocking commands. `submit --wait`
 and `results --wait` accept `--timeout`; the standalone `wait` command remains
 the easiest way to reattach to a durable job name.
 
+Starting in 0.2, `results` requires `--download DIR` by default and never prints
+a presigned URL implicitly. This intentional safety boundary is why the release
+uses a new pre-1.0 minor version. The explicit `--show-url` escape hatch returns
+a credential-bearing, short-lived URL; do not use it in agent, CI, or shared logs.
+
 Not every tool ships a runnable example — `schema <tool> --example` exits non-zero
 (with a clear message) when one isn't available, so a `> job.yaml` redirect never
 silently produces an empty file. Destructive commands (`delete`, `files delete`)
