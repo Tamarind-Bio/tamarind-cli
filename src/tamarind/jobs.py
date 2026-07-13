@@ -136,10 +136,7 @@ def wait_for_job(
     if a timeout is set and the job is still running when it elapses — a clean,
     stably-coded error rather than a bare builtin ``TimeoutError`` traceback.
     """
-    if not math.isfinite(poll_interval) or poll_interval < 0:
-        raise ValidationError("Poll interval must be a finite, non-negative number.")
-    if timeout is not None and (not math.isfinite(timeout) or timeout < 0):
-        raise ValidationError("Wait timeout must be a finite, non-negative number.")
+    validate_wait_options(poll_interval=poll_interval, timeout=timeout)
     deadline = None if timeout is None else time.monotonic() + max(0.0, timeout)
     last_status: str | None = None
     while True:
@@ -177,3 +174,13 @@ def wait_for_job(
             )
         sleep_for = poll_interval if remaining is None else min(poll_interval, remaining)
         time.sleep(max(0.0, sleep_for))
+
+
+def validate_wait_options(
+    *, poll_interval: float = 10.0, timeout: float | None = None
+) -> None:
+    """Reject invalid local wait timing without making a remote request."""
+    if not math.isfinite(poll_interval) or poll_interval < 0:
+        raise ValidationError("Poll interval must be a finite, non-negative number.")
+    if timeout is not None and (not math.isfinite(timeout) or timeout < 0):
+        raise ValidationError("Wait timeout must be a finite, non-negative number.")

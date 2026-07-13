@@ -285,6 +285,12 @@ def register(app: typer.Typer) -> None:
         job = resolve_job_input(input, set_)
         job_type = effective_job_type(tool, job.job_type)
         job_name = name or job.job_name or _gen_name(tool)
+        if wait:
+            # A local wait-option error must never occur after creating a
+            # remote, potentially billable job.
+            jobs_helpers.validate_wait_options(
+                poll_interval=poll_interval, timeout=timeout
+            )
 
         with state.rest_client() as client:
             if not skip_validate:

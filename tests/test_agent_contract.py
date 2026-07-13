@@ -298,6 +298,47 @@ def test_submit_wait_forwards_timeout_and_failed_job_exits_nonzero(monkeypatch):
 
 
 @respx.mock
+@pytest.mark.parametrize(
+    "timing_args",
+    [
+        ["--poll-interval", "-1"],
+        ["--poll-interval", "nan"],
+        ["--poll-interval", "inf"],
+        ["--timeout", "-1"],
+        ["--timeout", "nan"],
+        ["--timeout", "inf"],
+    ],
+)
+def test_submit_wait_rejects_invalid_timing_before_any_remote_request(timing_args):
+    validation = respx.post(f"{API}validate-job").mock(
+        return_value=httpx.Response(200, json={"valid": True})
+    )
+    submit = respx.post(f"{API}submit-job").mock(
+        return_value=httpx.Response(200, json={"message": "must not submit"})
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "submit",
+            "boltz",
+            "--name",
+            "job-invalid-wait",
+            "--set",
+            "sequence=MKT",
+            "--wait",
+            *timing_args,
+        ],
+        env=ENV,
+    )
+
+    assert isinstance(result.exception, ValidationError)
+    assert not validation.called
+    assert not submit.called
+
+
+@respx.mock
 def test_submit_wait_redacts_result_url_from_final_job(monkeypatch):
     secret = "https://storage.test/result.zip?signature=do-not-leak"
     respx.post(f"{API}validate-job").mock(
