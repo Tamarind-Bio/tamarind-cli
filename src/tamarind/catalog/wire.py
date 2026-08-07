@@ -11,6 +11,7 @@ empty rather than raising, because those are optional in practice.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Iterable
 from typing import Any, Mapping
 
 # The response keys this boundary owns. Named so the architecture test can DERIVE
@@ -51,14 +52,30 @@ def parse_parameter(payload: Any) -> Parameter:
     )
 
 
+def _iter_parameters(params: Any) -> tuple[Any, ...]:
+    """The parameter collection, accepting any sequence the caller supplies.
+
+    Deliberately NOT `isinstance(params, list)`. The helper this replaced iterated
+    whatever it was given, so an SDK caller passing a tuple got their required names
+    back; narrowing to the concrete JSON list type silently returned nothing instead —
+    valid caller data lost with no error. Strings and mappings are excluded because
+    iterating them yields characters and keys, which the old code would have crashed
+    on rather than answered.
+    """
+    if params is None or isinstance(params, (str, bytes)) or isinstance(params, Mapping):
+        return ()
+    if isinstance(params, Iterable):
+        return tuple(params)
+    return ()
+
+
 def parse_schema(payload: Any) -> ToolSchema:
     """Normalize a tool schema. Never raises."""
     if not isinstance(payload, Mapping):
         return ToolSchema()
-    params = payload.get("parameters")
     example = payload.get("exampleJob") or {}
     return ToolSchema(
-        parameters=tuple(parse_parameter(p) for p in params) if isinstance(params, list) else (),
+        parameters=tuple(parse_parameter(p) for p in _iter_parameters(payload.get("parameters"))),
         example_settings=dict(example.get("settings") or {})
         if isinstance(example, Mapping)
         else {},

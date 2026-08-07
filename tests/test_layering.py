@@ -62,8 +62,10 @@ _FORBIDDEN_IN_PURE = frozenset(
         "api",  # the endpoint layer
         "flow",  # orchestration (which legitimately owns the clock)
         "http",  # this package's transport
-        "httpx",  # network clients
+        "httpx",  # network clients — third-party, stdlib and async
         "requests",
+        "urllib",
+        "aiohttp",
         "time",  # the clock
         "datetime",
         "pathlib",  # the filesystem
@@ -78,7 +80,9 @@ _FORBIDDEN_IN_PURE = frozenset(
 # Path methods are attribute calls, so an import denylist alone never sees them.
 _IO_CALL_NAMES = frozenset({"open"})
 _IO_METHOD_NAMES = frozenset(
-    {"read_text", "write_text", "read_bytes", "write_bytes", "unlink", "mkdir"}
+    # "open" is here so `builtins.open(...)` — an ast.Attribute, invisible to the
+    # bare-name check below — is caught alongside the Path methods.
+    {"open", "read_text", "write_text", "read_bytes", "write_bytes", "unlink", "mkdir"}
 )
 
 
@@ -125,7 +129,9 @@ def _stdout_writes(tree: ast.AST) -> list[str]:
             chain = _attribute_chain(node.func)
             if chain.endswith(".print"):
                 found.append(f"{chain}(...)")
-            elif chain in ("sys.stdout.write", "sys.stderr.write"):
+            elif chain.startswith(("sys.stdout", "sys.stderr")):
+                # Prefix, not equality: `sys.stdout.buffer.write(...)` is the standard
+                # binary output path and corrupts --json output just as thoroughly.
                 found.append(f"{chain}(...)")
     return found
 
@@ -192,30 +198,45 @@ def test_decision_and_boundary_modules_are_pure(path: Path) -> None:
 # or "status" is not evidence that response parsing has leaked. Excluded by name so
 # the exclusion is reviewable, rather than by quietly omitting them from a hand list.
 _AMBIGUOUS_KEYS = frozenset(
-    {"name", "status", "key", "filename", "settings", "parameters", "required"}
+    {
+        "name",
+        "status",
+        "key",
+        "filename",
+        "settings",
+        "parameters",
+        "required",
+        "size",
+        "type",
+        "batch",
+        "jobs",
+    }
 )
 
 
 def _shape_spellings() -> frozenset[str]:
-    """The response keys `wire` owns — read FROM the boundary modules.
+    """The response keys `wire` owns — read from the key literals in wire.py itself.
 
-    Hand-listing these was itself an instance of the bug this rule exists to prevent:
-    the list omitted JobStatus, Status, batchName and BatchName, so a plan module
-    could duplicate exactly the parsing the boundary centralises and the test would
-    pass. Deriving them means the rule cannot fall behind the code it guards.
+    Three versions of this rule have now been wrong the same way: a hand-written list,
+    then a list of the boundary's named key tuples. Each RESTATED what the boundary
+    knows, and each was already out of date — the named tuples missed `lastModified`
+    and `Type`, which the parsers use inline.
+
+    So it restates nothing now. Every short, whitespace-free string constant in the
+    wire modules is a boundary key, which means a key added inline tomorrow is covered
+    today. Docstrings and messages fall out via the length/whitespace filter — a key is
+    short and unspaced; prose is not.
     """
-    from tamarind.catalog import wire as catalog_wire
-    from tamarind.files import wire as files_wire
-    from tamarind.jobs import wire as jobs_wire
-
-    keys = (
-        set(jobs_wire._NAME_KEYS)
-        | set(jobs_wire._PARENT_STATUS_KEYS)
-        | set(jobs_wire._JOB_STATUS_KEYS)
-        | set(jobs_wire._JOB_MARKER_KEYS)
-        | set(files_wire._NAME_KEYS)
-        | set(catalog_wire._SCHEMA_KEYS)
-    )
+    keys: set[str] = set()
+    for path in SRC.rglob("wire.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and 0 < len(node.value) < 30
+                and not any(ch.isspace() for ch in node.value)
+            ):
+                keys.add(node.value)
     return frozenset(keys) - _AMBIGUOUS_KEYS
 
 
