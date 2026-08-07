@@ -20,29 +20,38 @@ from tamarind.errors import TamarindError
 
 
 class FakeServer:
-    """A custom-tools backend with controllable extraction timing.
+    """A custom-tools backend whose extraction lands on a chosen read.
 
-    ``lands_after`` is how many source-ref reads happen before extraction completes.
-    0 = instant, 1 = one poll late, 99 = never within the test's patience.
+    Timing is expressed in READS, not seconds. The first version of this fake used a
+    wall-clock notion of "late", but the tests patch `sleep` to a no-op, so the wait
+    polled a hundred times in milliseconds and every scenario landed promptly — the
+    race branch was never entered and three tests passed while proving nothing.
+
+    Read 1 is `build`'s pre-upload read. Reads 2..n are the extraction wait. The read
+    after the wait gives up is the late-landing recheck. So:
+
+        lands_on_read=2   extraction is prompt (the wait observes it)
+        lands_on_read=3   with a zero-length wait: the wait sees nothing, the RECHECK
+                          sees it — exactly the race
+        lands_on_read=99  never, within any test's sequence
     """
 
-    def __init__(self, *, lands_after: int = 0, deploy_paths: list[str] | None = None) -> None:
-        self.lands_after = lands_after
+    def __init__(self, *, lands_on_read: int = 2, deploy_paths: list[str] | None = None) -> None:
+        self.lands_on_read = lands_on_read
         self.ref_reads = 0
-        self.current_ref = "ref-old"
         self.deploy_paths = deploy_paths or ["building"]
         self.deploys: list[str] = []
-        self.uploaded = False
         self.finalized = False
+
+    @property
+    def current_ref(self) -> str:
+        return "ref-new" if self.finalized and self.ref_reads >= self.lands_on_read else "ref-old"
 
     # -- the api surface flow.build touches -------------------------------------
     def get_tool(self, client, *, name):
         from tamarind.customtools import wire
 
         self.ref_reads += 1
-        # The upload only starts moving the ref once it has been finalized.
-        if self.finalized and self.ref_reads > self.lands_after + 1:
-            self.current_ref = "ref-new"
         return wire.Tool(name=name, current_source_ref=self.current_ref)
 
     def init_upload(self, client, *, name):
@@ -60,6 +69,8 @@ class FakeServer:
         from tamarind.customtools import wire
 
         path = self.deploy_paths[min(len(self.deploys), len(self.deploy_paths) - 1)]
+        # Record the source this deploy would have built, which is the thing that
+        # actually matters when checking the retry.
         self.deploys.append(self.current_ref)
         return wire.DeployResult(
             version_name=f"v{len(self.deploys)}",
@@ -95,28 +106,31 @@ def patched(monkeypatch):
 
 
 class TestDeploySequence:
+    # A zero-length extraction wait makes the sequence deterministic: the wait observes
+    # nothing, so whether the RECHECK sees a moved ref is entirely up to lands_on_read.
+    RACE = dict(extract_timeout=0.0)
+
     def test_the_source_ref_is_read_before_the_upload(self, tool_folder, patched) -> None:
-        """The pre-upload read is what makes late-landing detection possible at all.
-        Reading it after the upload would compare the new ref against itself."""
-        server = patched(FakeServer(lands_after=0))
+        """The pre-upload read is what makes late-landing detection possible at all —
+        reading it afterwards would compare the new ref against itself."""
+        server = patched(FakeServer(lands_on_read=2))
         flow.build(None, name="t", folder=tool_folder, wait=False)
         assert server.ref_reads >= 1
-        # The first deploy must see a ref that was captured before finalize ran.
         assert server.deploys, "deploy never ran"
 
     def test_a_prompt_extraction_deploys_once(self, tool_folder, patched) -> None:
-        server = patched(FakeServer(lands_after=0))
+        server = patched(FakeServer(lands_on_read=2))
         outcome = flow.build(None, name="t", folder=tool_folder, wait=False)
         assert outcome.deployed is True
         assert outcome.reason == "built"
         assert len(server.deploys) == 1
 
     def test_a_slow_extraction_still_deploys_and_does_not_raise(self, tool_folder, patched) -> None:
-        """A wait that times out is NOT a failure — deploy runs anyway and the result
-        is interpreted. Treating a still ref as fatal is what would break every
-        unchanged CI re-deploy."""
-        server = patched(FakeServer(lands_after=99, deploy_paths=["building"]))
-        outcome = flow.build(None, name="t", folder=tool_folder, wait=False)
+        """A wait that gives up is NOT a failure — deploy runs anyway and the result is
+        interpreted. Treating a still ref as fatal is what would break every unchanged
+        CI re-deploy."""
+        server = patched(FakeServer(lands_on_read=99, deploy_paths=["building"]))
+        outcome = flow.build(None, name="t", folder=tool_folder, wait=False, **self.RACE)
         assert outcome.deployed is True
         assert len(server.deploys) == 1
 
@@ -124,33 +138,32 @@ class TestDeploySequence:
         self, tool_folder, patched
     ) -> None:
         """THE common CI case. The ref never moves because an identical upload produces
-        no commit, and the server says noop. That is success with nothing to do."""
-        server = patched(FakeServer(lands_after=99, deploy_paths=["noop"]))
-        outcome = flow.build(None, name="t", folder=tool_folder, wait=False)
+        no commit, and the server says noop. Success, with nothing to do."""
+        server = patched(FakeServer(lands_on_read=99, deploy_paths=["noop"]))
+        outcome = flow.build(None, name="t", folder=tool_folder, wait=False, **self.RACE)
         assert outcome.deployed is False
         assert outcome.reason == "unchanged"
-        # One deploy, one recheck read — it must not spin retrying.
-        assert len(server.deploys) == 1
+        assert len(server.deploys) == 1, "an unchanged deploy must not retry"
 
     def test_a_late_landing_triggers_a_second_deploy(self, tool_folder, patched) -> None:
-        """THE bug. Extraction finishes after the first deploy read the repository, so
-        that deploy built the OLD source and returned noop. Reporting success there is
-        exactly the silent-nothing-shipped failure; the fix is to deploy again."""
-        # Never lands during the wait, but has landed by the recheck.
-        server = FakeServer(lands_after=1, deploy_paths=["noop", "building"])
-        patched(server)
-        # Make the wait give up immediately so the first deploy races extraction.
-        outcome = flow.build(None, name="t", folder=tool_folder, wait=False)
+        """THE bug this sequence exists to prevent.
+
+        Read 1 is the pre-upload read and the zero-length wait makes read 2 the last
+        one it takes, so landing on read 3 means extraction finished AFTER the first
+        deploy read the repository. That deploy built the OLD source and returned noop.
+        Reporting success there is the silent-nothing-shipped failure.
+        """
+        server = patched(FakeServer(lands_on_read=3, deploy_paths=["noop", "building"]))
+        outcome = flow.build(None, name="t", folder=tool_folder, wait=False, **self.RACE)
         assert len(server.deploys) == 2, "the race was not detected — nothing was redeployed"
         assert outcome.deployed is True
         assert outcome.reason == "built"
 
     def test_the_retry_deploys_against_the_settled_source(self, tool_folder, patched) -> None:
-        """Not just 'deployed twice' — the second deploy must see the NEW ref, or it
-        would rebuild the same stale source."""
-        server = FakeServer(lands_after=1, deploy_paths=["noop", "building"])
-        patched(server)
-        flow.build(None, name="t", folder=tool_folder, wait=False)
+        """Not merely 'deployed twice' — the second deploy must see the NEW source, or
+        it would rebuild exactly the stale tree the first one did."""
+        server = patched(FakeServer(lands_on_read=3, deploy_paths=["noop", "building"]))
+        flow.build(None, name="t", folder=tool_folder, wait=False, **self.RACE)
         assert server.deploys[0] == "ref-old"
         assert server.deploys[-1] == "ref-new"
 

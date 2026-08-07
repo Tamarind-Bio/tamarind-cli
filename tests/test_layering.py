@@ -210,33 +210,67 @@ _AMBIGUOUS_KEYS = frozenset(
         "type",
         "batch",
         "jobs",
+        # Generic envelope and container words. `http` reads "message" out of an error
+        # body — that is transport parsing its own envelope, not a resource's shape —
+        # and "path" collides with a dataclass field name that reads no payload.
+        "message",
+        "error",
+        "detail",
+        "path",
+        "logs",
+        "latest",
+        "timestamp",
+        "published",
+        "ref",
     }
 )
 
 
+def _wire_lookup_keys(tree: ast.AST) -> set[str]:
+    """Strings a wire module uses to LOOK UP a field: `.get("k")`, `x["k"]`, `*_KEYS`."""
+    keys: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in ("get", "pop")
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            keys.add(node.args[0].value)
+        elif (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.slice, ast.Constant)
+            and isinstance(node.slice.value, str)
+        ):
+            keys.add(node.slice.value)
+        elif isinstance(node, ast.Assign):
+            # Named key collections, e.g. `_NAME_KEYS = ("JobName", "jobName", ...)`.
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id.endswith("_KEYS"):
+                    for inner in ast.walk(node.value):
+                        if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
+                            keys.add(inner.value)
+    return keys
+
+
 def _shape_spellings() -> frozenset[str]:
-    """The response keys `wire` owns — read from the key literals in wire.py itself.
+    """The response keys `wire` owns — the strings it uses to READ a payload.
 
-    Three versions of this rule have now been wrong the same way: a hand-written list,
-    then a list of the boundary's named key tuples. Each RESTATED what the boundary
-    knows, and each was already out of date — the named tuples missed `lastModified`
-    and `Type`, which the parsers use inline.
+    Four versions of this rule have now been wrong. A hand-written list and a list of
+    named tuples each RESTATED what the boundary knows and each fell behind it. Reading
+    every string constant fixed that but over-reached: it swept in domain VALUES
+    ("building", "saved") and field names that merely happen to match a key, so adding
+    a resource made the rule fire on code that reads nothing.
 
-    So it restates nothing now. Every short, whitespace-free string constant in the
-    wire modules is a boundary key, which means a key added inline tomorrow is covered
-    today. Docstrings and messages fall out via the length/whitespace filter — a key is
-    short and unspaced; prose is not.
+    Lookup keys are the precise thing: `.get("k")`, `x["k"]`, and the named `*_KEYS`
+    collections. A value a module branches on is not response-shape knowledge; a key it
+    reads a payload with, is.
     """
     keys: set[str] = set()
     for path in SRC.rglob("wire.py"):
-        for node in ast.walk(ast.parse(path.read_text())):
-            if (
-                isinstance(node, ast.Constant)
-                and isinstance(node.value, str)
-                and 0 < len(node.value) < 30
-                and not any(ch.isspace() for ch in node.value)
-            ):
-                keys.add(node.value)
+        keys |= _wire_lookup_keys(ast.parse(path.read_text()))
     return frozenset(keys) - _AMBIGUOUS_KEYS
 
 

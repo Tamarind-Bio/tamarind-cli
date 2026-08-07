@@ -137,7 +137,7 @@ def wait_for_build(
     if not plan.build_succeeded(page.build_status):
         raise TamarindError(
             page.error_message or f"Build {build_id} ended {page.build_status}.",
-            detail={"buildId": build_id, "buildStatus": page.build_status},
+            detail={"build_id": build_id, "build_status": page.build_status},
         )
     return page
 
@@ -150,6 +150,7 @@ def build(
     wait: bool = True,
     on_event: EventHandler | None = None,
     timeout: float = BUILD_TIMEOUT,
+    extract_timeout: float = EXTRACT_TIMEOUT,
 ) -> plan.DeployOutcome:
     """Package a folder, upload it, deploy it, and (by default) watch the build.
 
@@ -197,7 +198,7 @@ def build(
 
     # 4. Advisory wait. None here is not a failure.
     _emit(on_event, "extract", "status", "Waiting for the server to unpack the upload")
-    new_ref = wait_for_source(client, name=name, previous_ref=previous_ref)
+    new_ref = wait_for_source(client, name=name, previous_ref=previous_ref, timeout=extract_timeout)
     ref_moved = new_ref is not None
     if not ref_moved:
         _emit(
