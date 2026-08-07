@@ -45,9 +45,11 @@ def _imported_components(tree: ast.AST) -> set[str]:
         elif isinstance(node, ast.ImportFrom):
             if node.module:
                 parts.update(node.module.split("."))
-            if node.level and not node.module:
-                for alias in node.names:
-                    parts.update(alias.name.split("."))
+            # Aliases count for EVERY from-import, relative or absolute. In
+            # `from tamarind.jobs import api` the forbidden component is the alias,
+            # not the module — reading only `node.module` misses it entirely.
+            for alias in node.names:
+                parts.update(alias.name.split("."))
     return parts
 
 
@@ -68,11 +70,39 @@ _FORBIDDEN_IN_PURE = frozenset(
 )
 
 
-def _calls_named(tree: ast.AST, fname: str) -> bool:
-    return any(
-        isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == fname
-        for n in ast.walk(tree)
-    )
+def _attribute_chain(node: ast.AST) -> str:
+    """Dotted source spelling of an attribute chain, e.g. `sys.stdout.write`."""
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
+def _stdout_writes(tree: ast.AST) -> list[str]:
+    """Every way this module could write to a stream, not just bare `print(...)`.
+
+    Matching only `ast.Name` missed `builtins.print(...)` and `sys.stdout.write(...)`,
+    both of which corrupt `--json` output exactly as much as the bare call does.
+    """
+    found: list[str] = []
+    for node in ast.walk(tree):
+        # `from builtins import print` — aliasing it would defeat a call-site check.
+        if isinstance(node, ast.ImportFrom) and any(a.name == "print" for a in node.names):
+            found.append("imports the print builtin")
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name) and node.func.id == "print":
+            found.append("print(...)")
+        elif isinstance(node.func, ast.Attribute):
+            chain = _attribute_chain(node.func)
+            if chain.endswith(".print"):
+                found.append(f"{chain}(...)")
+            elif chain in ("sys.stdout.write", "sys.stderr.write"):
+                found.append(f"{chain}(...)")
+    return found
 
 
 @pytest.mark.parametrize("path", _library_modules(), ids=lambda p: str(p.name))
@@ -95,8 +125,11 @@ def test_library_does_not_write_to_stdout(path: Path) -> None:
     A library that prints is unusable from a notebook and corrupts `--json` output
     when its text lands on stdout alongside the result object.
     """
-    tree = ast.parse(path.read_text())
-    assert not _calls_named(tree, "print"), f"{path.name} calls print(); emit an event instead"
+    writes = _stdout_writes(ast.parse(path.read_text()))
+    assert not writes, (
+        f"{path.name} writes to a stream ({', '.join(sorted(set(writes)))}); "
+        f"emit an event instead — the CLI layer decides where output goes."
+    )
 
 
 @pytest.mark.parametrize(
@@ -123,6 +156,9 @@ def test_decision_and_boundary_modules_are_pure(path: Path) -> None:
     )
 
 
+_SHAPE_SPELLINGS = frozenset({"JobName", "jobName", "batchStatus", "BatchStatus", "exampleJob"})
+
+
 def test_shape_knowledge_lives_only_at_the_boundary() -> None:
     """The API's key-casing variance is `wire`'s business and nobody else's.
 
@@ -132,13 +168,20 @@ def test_shape_knowledge_lives_only_at_the_boundary() -> None:
     """
     offenders = []
     for path in _library_modules():
-        if path.name == "wire.py":
+        # `wire` owns response shapes by definition. `api` is exempt for a different
+        # reason: it BUILDS request bodies, so naming the endpoint's own keys
+        # ({"jobName": ...}) is its job, not a leak of parsing knowledge. The rule
+        # bites on decision and orchestration code, which is where a second copy of
+        # the casing rules would actually do damage.
+        if path.name in ("wire.py", "api.py"):
             continue
-        text = path.read_text()
-        for spelling in ('"JobName"', '"batchStatus"', '"exampleJob"'):
-            if spelling in text:
-                offenders.append(f"{path.parent.name}/{path.name} contains {spelling}")
-    assert not offenders, "shape knowledge outside wire.py: " + "; ".join(offenders)
+        # AST constants, not a source-text grep: `job.get('JobName')` is the same
+        # leak as the double-quoted spelling, and a formatter could rewrite either.
+        # Exact equality, so a docstring MENTIONING the key is not a false positive.
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Constant) and node.value in _SHAPE_SPELLINGS:
+                offenders.append(f"{path.parent.name}/{path.name} uses {node.value!r}")
+    assert not offenders, "shape knowledge outside wire.py: " + "; ".join(sorted(set(offenders)))
 
 
 # Errors that deliberately carry the generic code. APIError is the catch-all for a
