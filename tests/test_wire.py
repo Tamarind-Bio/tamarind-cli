@@ -131,32 +131,76 @@ class TestParseSchema:
 
 
 class TestDelegationIsRealNotParallel:
-    """The public helpers must be the SAME implementation as the parser, not a copy
-    kept in step by hand — that duplication is what the boundary exists to remove."""
+    """The public helpers must BE the parser, not a copy kept in step by hand.
 
-    def test_job_helpers_agree_with_the_parser(self) -> None:
+    Asserting the two agree on some inputs does not show that — a hand-maintained
+    copy agrees too, right up until someone edits one side. So these patch the
+    parser and check the helper's answer moves with it. A helper carrying its own
+    logic is unaffected by the patch and fails here, which is the whole point.
+    """
+
+    def test_job_status_and_name_come_from_the_parser(self, monkeypatch) -> None:
         from tamarind.jobs import plan
 
-        payload = {"Type": "batch", "batchStatus": "Complete", "JobStatus": "Running"}
-        assert plan.job_status(payload) == jobs_wire.parse_job(payload).status
-        assert plan.job_name({"jobName": "q"}) == jobs_wire.parse_job({"jobName": "q"}).name
+        sentinel = jobs_wire.Job(name="SENTINEL-NAME", status="SENTINEL-STATUS")
+        monkeypatch.setattr(jobs_wire, "parse_job", lambda payload: sentinel)
+        # Real payloads whose real answers are "Running"/"x" — a helper with its own
+        # copy of the casing rules would return those and fail.
+        assert plan.job_status({"JobStatus": "Running"}) == "SENTINEL-STATUS"
+        assert plan.job_name({"JobName": "x"}) == "SENTINEL-NAME"
 
-    def test_file_helper_agrees_with_the_parser(self) -> None:
+    def test_extract_single_comes_from_the_parser(self, monkeypatch) -> None:
+        from tamarind.jobs import plan
+
+        monkeypatch.setattr(jobs_wire, "find_job", lambda resp, name: {"SENTINEL": True})
+        assert plan.extract_single({"jobs": [{"JobName": "a"}]}, "a") == {"SENTINEL": True}
+
+    def test_file_name_comes_from_the_parser(self, monkeypatch) -> None:
         from tamarind.files import plan
 
-        assert plan.file_name({"key": "z.pdb"}) == files_wire.parse_file({"key": "z.pdb"}).name
+        monkeypatch.setattr(
+            files_wire, "parse_file", lambda e: files_wire.FileEntry(name="SENTINEL")
+        )
+        assert plan.file_name({"key": "z.pdb"}) == "SENTINEL"
 
-    def test_catalog_helpers_agree_with_the_parser(self) -> None:
+    def test_catalog_helpers_come_from_the_parser(self, monkeypatch) -> None:
+        from tamarind.catalog import plan
+
+        monkeypatch.setattr(
+            catalog_wire,
+            "parse_schema",
+            lambda s: catalog_wire.ToolSchema(
+                parameters=(catalog_wire.Parameter(name="SENTINEL", required=True),),
+                example_settings={"sentinel": 1},
+            ),
+        )
+        real = {
+            "parameters": [{"name": "sequence", "required": True}],
+            "exampleJob": {"settings": {"s": 1}},
+        }
+        assert plan.required_param_names(real) == ["SENTINEL"]
+        assert plan.example_settings(real) == {"sentinel": 1}
+
+
+class TestHelpersStillBehaveCorrectly:
+    """Unpatched behaviour, so the delegation tests above can't pass a broken parser."""
+
+    def test_job_status_reads_batch_parent_lifecycle(self) -> None:
+        from tamarind.jobs import plan
+
+        assert plan.job_status({"Type": "batch", "batchStatus": "Complete"}) == "Complete"
+
+    def test_file_name_reads_any_key(self) -> None:
+        from tamarind.files import plan
+
+        assert plan.file_name({"key": "z.pdb"}) == "z.pdb"
+
+    def test_catalog_helpers_read_a_real_schema(self) -> None:
         from tamarind.catalog import plan
 
         schema = {
             "parameters": [{"name": "s", "required": True}],
             "exampleJob": {"settings": {"s": 1}},
         }
-        assert (
-            tuple(plan.required_param_names(schema))
-            == catalog_wire.parse_schema(schema).required_names
-        )
-        assert plan.example_settings(schema) == dict(
-            catalog_wire.parse_schema(schema).example_settings
-        )
+        assert plan.required_param_names(schema) == ["s"]
+        assert plan.example_settings(schema) == {"s": 1}
