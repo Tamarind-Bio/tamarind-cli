@@ -4,17 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import wire
+
 
 def example_settings(schema: dict[str, Any]) -> dict[str, Any]:
     """Pull a runnable ``settings`` dict out of a schema's exampleJob, if present."""
-    example = schema.get("exampleJob") or {}
-    return dict(example.get("settings") or {})
+    return dict(wire.parse_schema(schema).example_settings)
 
 
 def required_param_names(schema: dict[str, Any]) -> list[str]:
     """Names of parameters marked required (top-level; ignores task-gated ones)."""
-    out = []
-    for p in schema.get("parameters", []):
-        if p.get("required") and p.get("name"):
-            out.append(p["name"])
-    return out
+    return list(wire.parse_schema(schema).required_names)

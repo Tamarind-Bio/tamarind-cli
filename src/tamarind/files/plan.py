@@ -9,14 +9,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import wire
+
 
 def file_name(f: object) -> str:
-    """A file entry is usually a bare name string, but be tolerant of dicts."""
-    if isinstance(f, str):
-        return f
-    if isinstance(f, dict):
-        return str(f.get("name") or f.get("filename") or f.get("key") or "")
-    return str(f)
+    """The entry's name, whatever shape it arrived in.
+
+    Delegates to the parser: entry-shape knowledge lives at the boundary (`wire`).
+    """
+    return wire.parse_file(f).name
 
 
 def apply_filters(

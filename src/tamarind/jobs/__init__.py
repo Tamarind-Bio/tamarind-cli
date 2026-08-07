@@ -32,6 +32,7 @@ from .api import (
 )
 from . import api, flow, plan
 from .flow import fetch_job, wait_for_job
+from .wire import Job, find_job, parse_job
 from .plan import (
     SUCCESS_STATUSES,
     TERMINAL_STATUSES,
@@ -48,6 +49,9 @@ from .plan import (
 _extract_single = extract_single
 
 __all__ = [
+    "parse_job",
+    "find_job",
+    "Job",
     "JOB_SOURCE",
     "api",
     "flow",

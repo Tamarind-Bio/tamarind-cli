@@ -87,23 +87,44 @@ def test_library_does_not_write_to_stdout(path: Path) -> None:
 
 @pytest.mark.parametrize(
     "path",
-    [p for p in _library_modules() if p.name == "plan.py"],
+    [p for p in _library_modules() if p.name in ("plan.py", "wire.py")],
     ids=lambda p: f"{p.parent.name}/{p.name}",
 )
-def test_plan_modules_are_pure(path: Path) -> None:
-    """`plan.py` holds decisions, not I/O — so it may not reach the network or the clock.
+def test_decision_and_boundary_modules_are_pure(path: Path) -> None:
+    """`plan` and `wire` hold decisions and parsing — never I/O.
 
-    This is what makes the interesting logic testable without a server: a decision
+    This is what makes the interesting logic testable without a server: a function
     that cannot perform I/O can be exercised as a table of inputs and outputs. The
-    moment a plan module imports the api layer, its tests start needing fixtures.
+    moment one of these imports the api layer, its tests start needing fixtures.
+
+    `wire` is included because a parser that can fetch is no longer a boundary — it
+    becomes a second, hidden client, and the shape knowledge stops being in one place.
     """
     tree = ast.parse(path.read_text())
     absolute = _imported_names(tree)
     relative = _relative_targets(tree)
     for forbidden in ("api", "flow", "http"):
-        assert forbidden not in relative, f"{path} imports {forbidden}; plan must stay pure"
+        assert forbidden not in relative, f"{path} imports {forbidden}; it must stay pure"
     for forbidden in ("httpx", "requests"):
-        assert forbidden not in absolute, f"{path} imports {forbidden}; plan must stay pure"
+        assert forbidden not in absolute, f"{path} imports {forbidden}; it must stay pure"
+
+
+def test_shape_knowledge_lives_only_at_the_boundary() -> None:
+    """The API's key-casing variance is `wire`'s business and nobody else's.
+
+    Before the boundary existed, the same "try JobName, then jobName, then name"
+    walk appeared in several places and each copy had to be kept in step. Finding
+    those spellings outside `wire` again means a second copy is forming.
+    """
+    offenders = []
+    for path in _library_modules():
+        if path.name == "wire.py":
+            continue
+        text = path.read_text()
+        for spelling in ('"JobName"', '"batchStatus"', '"exampleJob"'):
+            if spelling in text:
+                offenders.append(f"{path.parent.name}/{path.name} contains {spelling}")
+    assert not offenders, "shape knowledge outside wire.py: " + "; ".join(offenders)
 
 
 # Errors that deliberately carry the generic code. APIError is the catch-all for a
