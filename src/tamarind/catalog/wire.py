@@ -13,6 +13,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+# The response keys this boundary owns. Named so the architecture test can DERIVE
+# the "shape knowledge stays here" rule from it rather than restating it.
+_SCHEMA_KEYS = ("parameters", "exampleJob", "settings", "name", "required")
+
 
 @dataclass(frozen=True)
 class Parameter:

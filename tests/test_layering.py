@@ -66,8 +66,33 @@ _FORBIDDEN_IN_PURE = frozenset(
         "requests",
         "time",  # the clock
         "datetime",
+        "pathlib",  # the filesystem
+        "os",
+        "io",
+        "subprocess",
+        "socket",
     }
 )
+
+# Filesystem reads/writes reachable WITHOUT an import — `open` is a builtin and the
+# Path methods are attribute calls, so an import denylist alone never sees them.
+_IO_CALL_NAMES = frozenset({"open"})
+_IO_METHOD_NAMES = frozenset(
+    {"read_text", "write_text", "read_bytes", "write_bytes", "unlink", "mkdir"}
+)
+
+
+def _io_calls(tree: ast.AST) -> list[str]:
+    """Direct filesystem I/O a pure module performs without importing anything."""
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name) and node.func.id in _IO_CALL_NAMES:
+            found.append(f"{node.func.id}(...)")
+        elif isinstance(node.func, ast.Attribute) and node.func.attr in _IO_METHOD_NAMES:
+            found.append(f".{node.func.attr}(...)")
+    return found
 
 
 def _attribute_chain(node: ast.AST) -> str:
@@ -147,16 +172,51 @@ def test_decision_and_boundary_modules_are_pure(path: Path) -> None:
     `wire` is included because a parser that can fetch is no longer a boundary — it
     becomes a second, hidden client, and the shape knowledge stops being in one place.
     """
-    parts = _imported_components(ast.parse(path.read_text()))
-    hits = sorted(parts & _FORBIDDEN_IN_PURE)
+    tree = ast.parse(path.read_text())
+    hits = sorted(_imported_components(tree) & _FORBIDDEN_IN_PURE)
     assert not hits, (
         f"{path.parent.name}/{path.name} imports {hits}. Pure modules take no I/O layer, "
         f"no network client, and no clock — a decision that reads the clock is not a "
         f"function of its inputs, and its tests stop being a table."
     )
+    # Imports alone are not enough: `open(...)` is a builtin and `Path(...).read_text()`
+    # is an attribute call, so both reach the filesystem with nothing to deny.
+    io = sorted(set(_io_calls(tree)))
+    assert not io, (
+        f"{path.parent.name}/{path.name} performs filesystem I/O ({', '.join(io)}). "
+        f"A decision that depends on local files is not a function of its inputs."
+    )
 
 
-_SHAPE_SPELLINGS = frozenset({"JobName", "jobName", "batchStatus", "BatchStatus", "exampleJob"})
+# Spellings generic enough to appear legitimately anywhere — a dict key named "name"
+# or "status" is not evidence that response parsing has leaked. Excluded by name so
+# the exclusion is reviewable, rather than by quietly omitting them from a hand list.
+_AMBIGUOUS_KEYS = frozenset(
+    {"name", "status", "key", "filename", "settings", "parameters", "required"}
+)
+
+
+def _shape_spellings() -> frozenset[str]:
+    """The response keys `wire` owns — read FROM the boundary modules.
+
+    Hand-listing these was itself an instance of the bug this rule exists to prevent:
+    the list omitted JobStatus, Status, batchName and BatchName, so a plan module
+    could duplicate exactly the parsing the boundary centralises and the test would
+    pass. Deriving them means the rule cannot fall behind the code it guards.
+    """
+    from tamarind.catalog import wire as catalog_wire
+    from tamarind.files import wire as files_wire
+    from tamarind.jobs import wire as jobs_wire
+
+    keys = (
+        set(jobs_wire._NAME_KEYS)
+        | set(jobs_wire._PARENT_STATUS_KEYS)
+        | set(jobs_wire._JOB_STATUS_KEYS)
+        | set(jobs_wire._JOB_MARKER_KEYS)
+        | set(files_wire._NAME_KEYS)
+        | set(catalog_wire._SCHEMA_KEYS)
+    )
+    return frozenset(keys) - _AMBIGUOUS_KEYS
 
 
 def test_shape_knowledge_lives_only_at_the_boundary() -> None:
@@ -166,6 +226,7 @@ def test_shape_knowledge_lives_only_at_the_boundary() -> None:
     walk appeared in several places and each copy had to be kept in step. Finding
     those spellings outside `wire` again means a second copy is forming.
     """
+    spellings = _shape_spellings()
     offenders = []
     for path in _library_modules():
         # `wire` owns response shapes by definition. `api` is exempt for a different
@@ -179,7 +240,7 @@ def test_shape_knowledge_lives_only_at_the_boundary() -> None:
         # leak as the double-quoted spelling, and a formatter could rewrite either.
         # Exact equality, so a docstring MENTIONING the key is not a false positive.
         for node in ast.walk(ast.parse(path.read_text())):
-            if isinstance(node, ast.Constant) and node.value in _SHAPE_SPELLINGS:
+            if isinstance(node, ast.Constant) and node.value in spellings:
                 offenders.append(f"{path.parent.name}/{path.name} uses {node.value!r}")
     assert not offenders, "shape knowledge outside wire.py: " + "; ".join(sorted(set(offenders)))
 
