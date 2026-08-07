@@ -1,0 +1,153 @@
+"""Custom-tool decisions. Pure — no network, no clock, no filesystem.
+
+The interesting one is :func:`reconcile`. Deploying is not a single call: the archive
+is uploaded, the server extracts it in the background, and the deploy that follows
+builds at whatever the repository currently points to. Those can race, and the naive
+handling of that race silently ships nothing.
+
+Everything here is a function of values the caller already holds, so the whole matrix
+is a table test with no server and no clock.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Mapping
+
+from . import wire
+
+# ---------------------------------------------------------------- build status ----
+
+
+def is_terminal_build(status: str | None) -> bool:
+    """Whether a build has stopped changing.
+
+    Compared case-insensitively and against ALL six terminal states. Watching only the
+    obvious two leaves a poll loop running forever when a build FAULTs or is rejected
+    as a CLIENT_ERROR.
+    """
+    return bool(status) and status.upper() in wire.TERMINAL_BUILD_STATUSES
+
+
+def build_succeeded(status: str | None) -> bool:
+    return bool(status) and status.upper() == wire.SUCCESSFUL_BUILD_STATUS
+
+
+# ------------------------------------------------------------------ reconcile ----
+
+# Why each outcome exists, keyed by `reason`. Kept as data so the CLI and a script can
+# explain a result without either restating the matrix.
+REASONS: Mapping[str, str] = {
+    "built": "a new image is building",
+    "saved": "source changed; the existing image was reused",
+    "unchanged": "nothing to do — the source is identical to what is already deployed",
+    "already-deployed": "this exact source was already deployed by another run",
+}
+
+
+@dataclass(frozen=True)
+class DeployOutcome:
+    """The result of a deploy, with `deployed` decided in exactly one place.
+
+    Callers must not re-derive "did anything happen" from `path`: that inference is
+    what the reconcile step exists to make, and two callers making it separately is
+    how they come to disagree.
+    """
+
+    path: str | None = None
+    version_name: str | None = None
+    build_id: str | None = None
+    deployed: bool = False
+    reason: str = "unchanged"
+    raw: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def explanation(self) -> str:
+        return REASONS.get(self.reason, self.reason)
+
+
+def needs_late_landing_recheck(*, ref_moved: bool, path: str | None) -> bool:
+    """Whether the one genuinely ambiguous corner has been hit.
+
+    If the source ref never appeared to move AND the server reported no-op, two very
+    different things are indistinguishable so far:
+
+      - the upload was identical, so there was genuinely nothing to do; or
+      - the upload had not finished extracting when the deploy ran, so the deploy
+        built the PREVIOUS source and reported no-op against it.
+
+    Only this corner is ambiguous — every other combination is already decided — so
+    only this one costs an extra read.
+    """
+    return not ref_moved and path == "noop"
+
+
+def reconcile(*, ref_moved: bool, result: wire.DeployResult) -> DeployOutcome:
+    """Turn what the server said, plus what we observed, into one answer.
+
+    ``ref_moved`` is advisory: it is allowed to be False for a perfectly good deploy,
+    because an identical re-upload produces no new commit (the server skips a commit
+    whose tree matches HEAD).
+
+    The late-landing race is not an outcome here. `flow.build` detects it with
+    :func:`needs_late_landing_recheck` and DEPLOYS AGAIN, so by the time this runs the
+    ref is confirmed moved and the retry's result lands on the ordinary paths. Modelling
+    the race as a reportable outcome would add a state the shell can never produce.
+    """
+    path = result.path
+    common = {
+        "path": path,
+        "version_name": result.version_name,
+        "build_id": result.build_id,
+        "raw": result.raw,
+    }
+
+    if path == "building":
+        return DeployOutcome(**common, deployed=True, reason="built")
+    if path == "saved":
+        return DeployOutcome(**common, deployed=True, reason="saved")
+    if path == "noop":
+        if ref_moved:
+            # Our upload landed, yet the server found an existing version at that exact
+            # source. Someone deployed the same content first; the state is correct.
+            return DeployOutcome(**common, deployed=False, reason="already-deployed")
+        return DeployOutcome(**common, deployed=False, reason="unchanged")
+
+    # An unrecognized path. Report it rather than guessing — a server that invents a
+    # fourth outcome should surface, not be silently mapped onto one of the three.
+    return DeployOutcome(**common, deployed=False, reason=f"unknown-path:{path}")
+
+
+# -------------------------------------------------------------------- versions ----
+
+
+def select_publishable(versions: tuple[wire.Version, ...]) -> wire.Version | None:
+    """The newest version that actually built, or None.
+
+    The list arrives newest-first. A failed build leaves its version *Stopped*, not
+    FAILED, so selecting on "not failed" would happily publish a build that never
+    produced an image.
+    """
+    for version in versions:
+        if version.is_complete:
+            return version
+    return None
+
+
+def find_version(versions: tuple[wire.Version, ...], name: str) -> wire.Version | None:
+    for version in versions:
+        if version.name == name:
+            return version
+    return None
+
+
+def cancellable_build_id(versions: tuple[wire.Version, ...]) -> str | None:
+    """The build id of the newest version still in flight, or None.
+
+    Cancelling something already terminal should be an error rather than a silent
+    no-op, so this deliberately answers None instead of falling back to the latest.
+    """
+    for version in versions:
+        if version.is_in_flight and version.build_id:
+            return version.build_id
+    return None

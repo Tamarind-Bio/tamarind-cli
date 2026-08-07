@@ -75,9 +75,7 @@ class HTTPClient:
                 "or run `tamarind auth login`."
             )
         # Drop None-valued query params so we don't send `?x=None`.
-        clean_params = (
-            {k: v for k, v in params.items() if v is not None} if params else None
-        )
+        clean_params = {k: v for k, v in params.items() if v is not None} if params else None
         try:
             resp = self._client.request(
                 method,
@@ -102,8 +100,23 @@ class HTTPClient:
     ) -> Any:
         return _parse_json(self.request("GET", path, params=params, timeout=timeout))
 
-    def post_json(self, path: str, *, json: Any | None = None) -> Any:
-        return _parse_json(self.request("POST", path, json=json))
+    def post_json(
+        self,
+        path: str,
+        *,
+        json: Any | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> Any:
+        return _parse_json(self.request("POST", path, json=json, params=params))
+
+    def put_json(
+        self,
+        path: str,
+        *,
+        json: Any | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> Any:
+        return _parse_json(self.request("PUT", path, json=json, params=params))
 
     def delete_json(
         self, path: str, *, params: dict[str, Any] | None = None, json: Any | None = None

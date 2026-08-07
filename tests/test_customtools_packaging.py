@@ -1,0 +1,150 @@
+"""What reaches the upload — the security-relevant half of `deploy`.
+
+The archive becomes a Docker image layer readable by anyone with source access, and a
+credential in a layer survives being deleted from the folder. So these are not
+tidiness assertions: each excluded pattern is a thing that would otherwise be
+published.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from tamarind.customtools import packaging
+from tamarind.customtools.packaging import Disposition
+
+
+class TestSecretsNeverReachTheArchive:
+    @pytest.mark.parametrize(
+        "path",
+        [
+            ".env",
+            ".env.local",
+            ".env.production",
+            "server.pem",
+            "private.key",
+            "cert.p12",
+            "cert.pfx",
+            "id_rsa",
+            "id_rsa.pub",
+            "id_ed25519",
+            ".netrc",
+            ".npmrc",
+            ".pypirc",
+            ".git-credentials",
+            "credentials",
+            "credentials.json",
+            "service-account-prod.json",
+            "app/.env",
+            "nested/deep/.env",
+        ],
+    )
+    def test_credential_files_are_refused(self, path: str) -> None:
+        assert packaging.classify(path).disposition is Disposition.SECRET
+
+    @pytest.mark.parametrize(
+        "path",
+        [".ssh/id_rsa", ".aws/credentials", ".gcloud/token.json", "sub/.ssh/known_hosts"],
+    )
+    def test_credential_directories_are_refused_wholesale(self, path: str) -> None:
+        """Excluding by filename alone misses everything inside `.ssh/`, whose contents
+        are not individually recognizable."""
+        assert packaging.classify(path).disposition is Disposition.SECRET
+
+    def test_a_secret_is_reported_as_a_secret_not_as_noise(self) -> None:
+        """The message matters as much as the exclusion. Someone whose `.env` silently
+        vanished will work around the tool; someone told why will use env vars."""
+        decision = packaging.classify(".env")
+        assert decision.disposition is Disposition.SECRET
+        assert ".env" in decision.reason
+
+    def test_the_advice_names_the_mechanism_that_replaces_it(self) -> None:
+        advice = packaging.env_var_advice((".env",))
+        assert advice is not None
+        assert "ct config --env" in advice
+        assert "image layer" in advice
+
+    def test_no_advice_when_nothing_was_dropped(self) -> None:
+        assert packaging.env_var_advice(()) is None
+
+
+class TestNoiseIsDropped:
+    @pytest.mark.parametrize(
+        "path",
+        [
+            ".git/config",
+            ".git/objects/ab/cdef",
+            "__pycache__/mod.cpython-312.pyc",
+            "mod.pyc",
+            ".venv/lib/python3.12/site-packages/x.py",
+            "node_modules/pkg/index.js",
+            ".DS_Store",
+            "sub/.DS_Store",
+            ".pytest_cache/v/cache",
+            ".mypy_cache/3.12/x.json",
+            ".ruff_cache/x",
+            "pkg.egg-info",
+            ".tamarind",
+        ],
+    )
+    def test_build_detritus_and_vcs_internals(self, path: str) -> None:
+        assert packaging.classify(path).disposition is Disposition.NOISE
+
+
+class TestRealSourceSurvives:
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "Dockerfile",
+            "run.sh",
+            "main.py",
+            "config.json",
+            "requirements.txt",
+            "src/model.py",
+            "data/example.pdb",
+            "README.md",
+            # Near-misses for the exclusion patterns — a filter that eats these is
+            # worse than no filter, because the build fails confusingly.
+            "environment.yml",
+            "keys.py",
+            "credentials_helper.py",
+            "my.env.example",
+            "docs/git/notes.md",
+            "envs/prod.yaml",
+        ],
+    )
+    def test_ordinary_files_are_included(self, path: str) -> None:
+        assert packaging.classify(path).included is True
+
+
+class TestWeightsAreIncludedButFlagged:
+    @pytest.mark.parametrize(
+        "path", ["model.pt", "weights.pth", "ckpt.ckpt", "m.safetensors", "w.h5", "m.onnx"]
+    )
+    def test_weight_files_are_recognized(self, path: str) -> None:
+        assert packaging.is_weight_file(path) is True
+
+    @pytest.mark.parametrize("path", ["model.pt", "sub/weights.safetensors"])
+    def test_weights_are_still_uploaded(self, path: str) -> None:
+        """Recognized so the user can be warned, NOT excluded — silently dropping a
+        file someone deliberately added would be its own bug."""
+        assert packaging.classify(path).included is True
+
+    @pytest.mark.parametrize("path", ["main.py", "config.json", "notes.txt"])
+    def test_ordinary_files_are_not_mistaken_for_weights(self, path: str) -> None:
+        assert packaging.is_weight_file(path) is False
+
+
+class TestPathHandling:
+    @pytest.mark.parametrize("path", ["app\\.env", "app\\sub\\.env"])
+    def test_windows_separators(self, path: str) -> None:
+        """CI runs on windows-latest, so a POSIX-only split would classify nothing."""
+        assert packaging.classify(path).disposition is Disposition.SECRET
+
+    @pytest.mark.parametrize("path", ["./main.py", "././src/model.py"])
+    def test_leading_dot_segments_do_not_confuse_the_split(self, path: str) -> None:
+        assert packaging.classify(path).included is True
+
+    @pytest.mark.parametrize("path", ["", ".", "./"])
+    def test_empty_paths_are_dropped_rather_than_crashing(self, path: str) -> None:
+        assert packaging.classify(path).included is False
