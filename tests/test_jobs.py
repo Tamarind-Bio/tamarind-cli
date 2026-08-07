@@ -27,16 +27,22 @@ def test_status_normalization():
     assert jh.job_status({"status": "completed"}) == "completed"
     assert jh.job_status({"batchStatus": "AggregationFailed"}) == "AggregationFailed"
     # Batch lifecycle is authoritative if a parent also carries JobStatus.
-    assert jh.job_status({
-        "Type": "batch", "batchStatus": "Complete", "JobStatus": "Running"
-    }) == "Complete"
-    assert jh.job_status({
-        "Type": "boltz",
-        "JobName": "batch-1-subjob-1",
-        "batchName": "batch-1",
-        "batchStatus": "Complete",
-        "JobStatus": "Running",
-    }) == "Running"
+    assert (
+        jh.job_status({"Type": "batch", "batchStatus": "Complete", "JobStatus": "Running"})
+        == "Complete"
+    )
+    assert (
+        jh.job_status(
+            {
+                "Type": "boltz",
+                "JobName": "batch-1-subjob-1",
+                "batchName": "batch-1",
+                "batchStatus": "Complete",
+                "JobStatus": "Running",
+            }
+        )
+        == "Running"
+    )
     assert jh.job_status({}) is None
 
 
@@ -182,7 +188,10 @@ def test_wait_rejects_invalid_timing_values_before_polling(kwargs):
 def test_wait_preserves_typed_error_when_deadline_crosses(monkeypatch, exc):
     ticks = iter([0.0, 0.1, 2.0])
     monkeypatch.setattr(jh.time, "monotonic", lambda: next(ticks))
-    monkeypatch.setattr(jh, "fetch_job", lambda *args, **kwargs: (_ for _ in ()).throw(exc))
+    # Patch where `wait_for_job` resolves it — its own module — not the package
+    # re-export. Rebinding `jobs.fetch_job` would leave `flow.fetch_job` untouched
+    # and the patch would silently do nothing.
+    monkeypatch.setattr(jh.flow, "fetch_job", lambda *args, **kwargs: (_ for _ in ()).throw(exc))
 
     with pytest.raises(type(exc)) as raised:
         jh.wait_for_job(client(), "x", timeout=1.0)

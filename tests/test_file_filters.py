@@ -2,7 +2,9 @@
 applies (the /files endpoint ignores query filters, so the CLI mirrors the MCP
 getFiles tool locally)."""
 
-from tamarind.cli.commands.files import _apply_file_filters, _file_name, _file_type_counts
+from tamarind.cli.commands.files import _file_type_counts
+from tamarind.files.plan import apply_filters as _apply_file_filters
+from tamarind.files.plan import file_name as _file_name
 
 
 def test_file_name_variants():

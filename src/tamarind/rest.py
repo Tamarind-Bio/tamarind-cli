@@ -1,213 +1,55 @@
-"""Typed wrappers over the Tamarind REST API (the job/file surface).
+"""Deprecated: the job/file REST surface, now split by resource.
 
-Every function here maps onto an operation in ``openapi-mcp.yaml`` — the same
-server contract used by the Tamarind MCP surface. Keeping this mapping thin and
-free of business logic reduces drift; contract tests and coordinated releases
-remain necessary. Discovery/catalog calls live in :mod:`tamarind.catalog`.
+This module mixed two resources — jobs and workspace files — behind one flat
+namespace. They now live in :mod:`tamarind.jobs` and :mod:`tamarind.files`, each
+split into `api` / `plan` / `flow` like every other resource in the package.
+
+Every name below still works and still calls the same code. Prefer the new homes:
+
+    from tamarind import rest                  ->  from tamarind.jobs import api as jobs_api
+    rest.submit_job(client, ...)                   jobs_api.submit_job(client, ...)
+
+    rest.get_files(client, ...)                ->  from tamarind.files import api as files_api
+                                                   files_api.get_files(client, ...)
+
+Scheduled for removal one minor version after 0.1.x. Importing this module emits a
+DeprecationWarning, which is hidden by default — run with ``-W default`` to see it.
 """
 
 from __future__ import annotations
 
-from typing import Any
+import warnings
 
-from .errors import APIError
-from .http import HTTPClient
+from .files.api import delete_file, get_files, get_folders, upload_file_url
+from .jobs.api import (
+    cancel_batch,
+    cancel_job,
+    delete_job,
+    get_jobs,
+    get_result,
+    submit_batch,
+    submit_job,
+    validate_job,
+)
 
-# Query params that the API expects as the literal string "true" rather than a
-# JSON boolean.
-_TRUE = "true"
+warnings.warn(
+    "tamarind.rest is deprecated; use tamarind.jobs and tamarind.files "
+    "(see the module docstring for the mapping).",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
-# Stamped onto every job the CLI creates so the backend can attribute usage by
-# origin (the MCP server sends "MCP"). Validation calls are NOT tagged — they
-# don't create a job.
-_JOB_SOURCE = "CLI"
-
-
-def submit_job(
-    client: HTTPClient, *, job_name: str, job_type: str, settings: dict[str, Any]
-) -> Any:
-    """POST /submit-job — submit a single job. Body: {jobName, type, settings, jobSource}."""
-    return client.post_json(
-        "submit-job",
-        json={
-            "jobName": job_name,
-            "type": job_type,
-            "settings": settings,
-            "jobSource": _JOB_SOURCE,
-        },
-    )
-
-
-def validate_job(
-    client: HTTPClient, *, job_name: str, job_type: str, settings: dict[str, Any]
-) -> dict:
-    """POST /validate-job — returns {valid, normalized?, error?} (HTTP 200 either way)."""
-    return client.post_json(
-        "validate-job",
-        json={"jobName": job_name, "type": job_type, "settings": settings},
-    )
-
-
-def submit_batch(
-    client: HTTPClient,
-    *,
-    batch_name: str,
-    job_type: str,
-    settings: list[dict[str, Any]],
-    job_names: list[str] | None = None,
-    max_runtime_seconds: int | None = None,
-) -> Any:
-    """POST /submit-batch — submit many jobs as one batch."""
-    body: dict[str, Any] = {
-        "batchName": batch_name,
-        "type": job_type,
-        "settings": settings,
-        "jobSource": _JOB_SOURCE,
-    }
-    if job_names is not None:
-        body["jobNames"] = job_names
-    if max_runtime_seconds is not None:
-        body["maxRuntimeSeconds"] = max_runtime_seconds
-    return client.post_json("submit-batch", json=body)
-
-
-def get_jobs(
-    client: HTTPClient,
-    *,
-    job_name: str | None = None,
-    batch: str | None = None,
-    start_key: str | None = None,
-    limit: int | None = None,
-    organization: bool = False,
-    include_subjobs: bool = False,
-    job_email: str | None = None,
-    timeout: float | None = None,
-) -> Any:
-    """GET /jobs — list jobs, or fetch one when ``job_name`` is given."""
-    params = {
-        "jobName": job_name,
-        "batch": batch,
-        "startKey": start_key,
-        "limit": limit,
-        "organization": _TRUE if organization else None,
-        "includeSubjobs": _TRUE if include_subjobs else None,
-        "jobEmail": job_email,
-    }
-    return client.get_json("jobs", params=params, timeout=timeout)
-
-
-def get_result(
-    client: HTTPClient,
-    *,
-    job_name: str,
-    job_email: str | None = None,
-    file_name: str | None = None,
-    pdbs_only: bool | None = None,
-) -> Any:
-    """POST /result — returns an S3 presigned URL (string) for the result bundle."""
-    body: dict[str, Any] = {"jobName": job_name}
-    if job_email is not None:
-        body["jobEmail"] = job_email
-    if file_name is not None:
-        body["fileName"] = file_name
-    if pdbs_only is not None:
-        body["pdbsOnly"] = pdbs_only
-    return client.post_json("result", json=body)
-
-
-def upload_file_url(
-    client: HTTPClient, *, filename: str, content_type: str = "application/octet-stream"
-) -> dict:
-    """POST /getPresignedUploadUrl — returns {uploadUrl, headUrl, key, bucket}.
-
-    PUT the file bytes directly to ``uploadUrl`` with a matching ``Content-Type``
-    header (the presigned signature covers the content type). This uploads
-    straight to S3, bypassing the API's request-body size limit.
-    """
-    return client.post_json(
-        "getPresignedUploadUrl", json={"filename": filename, "contentType": content_type}
-    )
-
-
-def cancel_job(
-    client: HTTPClient, *, job_name: str | None = None, job_id: str | None = None
-) -> dict:
-    """POST /cancelJob — soft-stop a queued/running job (preserves the row)."""
-    body: dict[str, Any] = {}
-    if job_name is not None:
-        body["jobName"] = job_name
-    if job_id is not None:
-        body["jobId"] = job_id
-    return client.post_json("cancelJob", json=body)
-
-
-def cancel_batch(client: HTTPClient, *, batch_name: str) -> dict:
-    """POST /cancelBatch — soft-stop every job in a batch or pipeline."""
-    return client.post_json("cancelBatch", json={"batchName": batch_name})
-
-
-def delete_job(client: HTTPClient, *, job_name: str) -> Any:
-    """DELETE /delete-job — permanently remove a job (and subjobs, for batches).
-
-    The endpoint may return a bare string (not JSON), so parse defensively.
-    """
-    return client.delete_json("delete-job", json={"jobName": job_name})
-
-
-def delete_file(
-    client: HTTPClient, *, file_path: str | None = None, folder: str | None = None
-) -> Any:
-    """Delete a file, or every file under a folder.
-
-    The API expects DELETE (a GET returns 405 "Use DELETE or POST"); some older
-    deployments may still want GET, so fall back on a 405.
-    """
-    params = {"filePath": file_path, "folder": folder}
-    try:
-        return client.delete_json("delete-file", params=params)
-    except APIError as exc:
-        if getattr(exc, "status_code", None) == 405:
-            return client.get_json("delete-file", params=params)
-        raise
-
-
-def get_files(
-    client: HTTPClient,
-    *,
-    limit: int | None = None,
-    offset: int | None = None,
-    types: str | None = None,
-    search: str | None = None,
-    folder: str | None = None,
-    include_folders: bool = False,
-    include_all: bool = False,
-    include_metadata: bool = False,
-) -> Any:
-    """GET /files — list files in the workspace, with filtering/pagination."""
-    params = {
-        "limit": limit,
-        "offset": offset,
-        "types": types,
-        "search": search,
-        "folder": folder,
-        "includeFolders": _TRUE if include_folders else None,
-        "includeAll": _TRUE if include_all else None,
-        "includeMetadata": _TRUE if include_metadata else None,
-    }
-    return client.get_json("files", params=params)
-
-
-def get_folders(
-    client: HTTPClient,
-    *,
-    limit: int | None = None,
-    offset: int | None = None,
-    load_all: bool = False,
-) -> Any:
-    """GET /getFolders — list folders in the workspace."""
-    params = {
-        "limit": limit,
-        "offset": offset,
-        "loadAll": _TRUE if load_all else None,
-    }
-    return client.get_json("getFolders", params=params)
+__all__ = [
+    "cancel_batch",
+    "cancel_job",
+    "delete_file",
+    "delete_job",
+    "get_files",
+    "get_folders",
+    "get_jobs",
+    "get_result",
+    "submit_batch",
+    "submit_job",
+    "upload_file_url",
+    "validate_job",
+]

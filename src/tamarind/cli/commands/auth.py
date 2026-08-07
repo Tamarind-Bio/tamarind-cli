@@ -6,7 +6,7 @@ from typing import Optional
 
 import typer
 
-from ... import rest
+from ...jobs import api as jobs_api
 from ...config import save_profile
 from ...errors import AuthError
 from ...http import HTTPClient
@@ -19,7 +19,7 @@ def _check_key(api_base: str, api_key: str) -> bool:
     """Return True if the key authenticates against the job API."""
     with HTTPClient(api_base, api_key) as client:
         try:
-            rest.get_jobs(client, limit=1)
+            jobs_api.get_jobs(client, limit=1)
             return True
         except AuthError:
             return False

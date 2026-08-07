@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 import json
-import re
 import tempfile
 import uuid
 from pathlib import Path
 from typing import Optional
-from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 import typer
 
 from ... import jobs as jobs_helpers
-from ... import rest
+from ...jobs import api as jobs_api
+from ...redact import sanitize
 from ...errors import ExitCode, NotFoundError, TamarindError, ValidationError
 from .. import output
 from ..guidance import rewrite_validation_guidance
@@ -120,85 +119,6 @@ def _attach_error_context(exc: TamarindError, **context: object) -> TamarindErro
     return exc
 
 
-_SENSITIVE_JOB_URL_KEYS = {
-    "resulturl",
-    "downloadurl",
-    "presignedurl",
-    "uploadurl",
-    "headurl",
-}
-
-_SENSITIVE_QUERY_NAMES = {
-    "awsaccesskeyid",
-    "googleaccessid",
-    "policy",
-    "sig",
-    "signature",
-    "token",
-}
-
-
-def _normalized_key(key: object) -> str:
-    return re.sub(r"[^a-z0-9]", "", str(key).lower())
-
-
-def _is_credential_url(value: object) -> bool:
-    """Return whether a string is an HTTP(S) URL carrying auth query data."""
-    if not isinstance(value, str):
-        return False
-    try:
-        parsed = urlsplit(value.strip())
-    except ValueError:
-        return False
-    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
-        return False
-    names = {name.lower() for name, _ in parse_qsl(parsed.query, keep_blank_values=True)}
-    return any(
-        name in _SENSITIVE_QUERY_NAMES
-        or name.startswith(("x-amz-", "x-goog-", "x-ms-"))
-        or name.endswith(("signature", "credential", "security-token"))
-        for name in names
-    )
-
-
-def _with_redactions(cleaned: dict, removed: list[str]) -> dict:
-    if not removed:
-        return cleaned
-    existing = cleaned.get("redactedFields")
-    if existing is None or (
-        isinstance(existing, list) and all(isinstance(item, str) for item in existing)
-    ):
-        cleaned["redactedFields"] = sorted(set((existing or []) + removed))
-    else:
-        # Never overwrite an upstream field that happens to use our metadata
-        # name. Keep our redaction audit under a collision-safe key.
-        cleaned["tamarindRedactedFields"] = sorted(set(removed))
-    return cleaned
-
-
-def _sanitize_job_output(value: object) -> object:
-    """Remove credential-bearing transfer URLs from ordinary job output."""
-    if isinstance(value, list):
-        return [_sanitize_job_output(item) for item in value]
-    if _is_credential_url(value):
-        return "<redacted credential URL>"
-    if not isinstance(value, dict):
-        return value
-    sanitized = {}
-    removed = []
-    for key, item in value.items():
-        normalized = _normalized_key(key)
-        if normalized in _SENSITIVE_JOB_URL_KEYS or (
-            _is_credential_url(item)
-            and (normalized.endswith(("url", "uri", "link", "location"))
-                 or "signed" in normalized)
-        ):
-            removed.append(str(key))
-            continue
-        sanitized[key] = _sanitize_job_output(item)
-    return _with_redactions(sanitized, removed)
-
-
 def _rewrite_validation_guidance(value: object) -> object:
     """Rewrite only server-authored validation errors, not user settings text."""
     if not isinstance(value, dict) or not isinstance(value.get("error"), str):
@@ -224,7 +144,7 @@ def _fetch_all_jobs(client, **kwargs):
     key = kwargs.pop("start_key", None)
     pages = 0
     while True:
-        resp = rest.get_jobs(client, start_key=key, **kwargs)
+        resp = jobs_api.get_jobs(client, start_key=key, **kwargs)
         all_jobs.extend(resp.get("jobs", resp if isinstance(resp, list) else []))
         key = resp.get("startKey") if isinstance(resp, dict) else None
         pages += 1
@@ -243,8 +163,12 @@ def register(app: typer.Typer) -> None:
     def validate(
         ctx: typer.Context,
         tool: str = typer.Argument(..., help="Tool name (e.g. 'boltz')."),
-        input: Optional[str] = typer.Option(None, "--input", "-i", help="Settings file (YAML/JSON), '-' for stdin, or @yaml://path."),
-        set_: list[str] = typer.Option([], "--set", help="Override a setting: key=value (repeatable)."),
+        input: Optional[str] = typer.Option(
+            None, "--input", "-i", help="Settings file (YAML/JSON), '-' for stdin, or @yaml://path."
+        ),
+        set_: list[str] = typer.Option(
+            [], "--set", help="Override a setting: key=value (repeatable)."
+        ),
         name: Optional[str] = typer.Option(None, "--name", "-n", help="Job name (default: auto)."),
     ) -> None:
         """Validate a job's settings without submitting (catches errors early)."""
@@ -254,7 +178,7 @@ def register(app: typer.Typer) -> None:
         job_name = name or job.job_name or _gen_name(tool)
         with state.rest_client() as client:
             result = _rewrite_validation_guidance(
-                rest.validate_job(
+                jobs_api.validate_job(
                     client,
                     job_name=job_name,
                     job_type=job_type,
@@ -263,7 +187,7 @@ def register(app: typer.Typer) -> None:
             )
         valid = bool(result.get("valid"))
         human = "valid ✓" if valid else f"invalid ✗ {result.get('error', '')}"
-        output.emit(_sanitize_job_output(result), state.output, human=human)
+        output.emit(sanitize(result), state.output, human=human)
         if not valid:
             raise typer.Exit(ValidationError.exit_code)
 
@@ -271,14 +195,30 @@ def register(app: typer.Typer) -> None:
     def submit(
         ctx: typer.Context,
         tool: str = typer.Argument(..., help="Tool name (e.g. 'boltz'). See `tamarind tools`."),
-        input: Optional[str] = typer.Option(None, "--input", "-i", help="Settings file (YAML/JSON), '-' for stdin, or @yaml://path."),
-        set_: list[str] = typer.Option([], "--set", help="Override a setting: key=value (repeatable)."),
-        name: Optional[str] = typer.Option(None, "--name", "-n", help="Job name (default: auto-generated)."),
-        skip_validate: bool = typer.Option(False, "--skip-validate", help="Skip the pre-submit validate-job check."),
-        wait: bool = typer.Option(False, "--wait", help="Block until the job reaches a terminal state."),
-        poll_interval: float = typer.Option(10.0, "--poll-interval", help="Seconds between polls when --wait."),
-        timeout: Optional[float] = typer.Option(None, "--timeout", help="With --wait, give up after N seconds."),
-        download: Optional[Path] = typer.Option(None, "--download", help="With --wait, download results to this directory."),
+        input: Optional[str] = typer.Option(
+            None, "--input", "-i", help="Settings file (YAML/JSON), '-' for stdin, or @yaml://path."
+        ),
+        set_: list[str] = typer.Option(
+            [], "--set", help="Override a setting: key=value (repeatable)."
+        ),
+        name: Optional[str] = typer.Option(
+            None, "--name", "-n", help="Job name (default: auto-generated)."
+        ),
+        skip_validate: bool = typer.Option(
+            False, "--skip-validate", help="Skip the pre-submit validate-job check."
+        ),
+        wait: bool = typer.Option(
+            False, "--wait", help="Block until the job reaches a terminal state."
+        ),
+        poll_interval: float = typer.Option(
+            10.0, "--poll-interval", help="Seconds between polls when --wait."
+        ),
+        timeout: Optional[float] = typer.Option(
+            None, "--timeout", help="With --wait, give up after N seconds."
+        ),
+        download: Optional[Path] = typer.Option(
+            None, "--download", help="With --wait, download results to this directory."
+        ),
     ) -> None:
         """Submit a single job. Validates first unless --skip-validate."""
         state = ctx.obj
@@ -288,14 +228,12 @@ def register(app: typer.Typer) -> None:
         if wait:
             # A local wait-option error must never occur after creating a
             # remote, potentially billable job.
-            jobs_helpers.validate_wait_options(
-                poll_interval=poll_interval, timeout=timeout
-            )
+            jobs_helpers.validate_wait_options(poll_interval=poll_interval, timeout=timeout)
 
         with state.rest_client() as client:
             if not skip_validate:
                 v = _rewrite_validation_guidance(
-                    rest.validate_job(
+                    jobs_api.validate_job(
                         client,
                         job_name=job_name,
                         job_type=job_type,
@@ -303,14 +241,16 @@ def register(app: typer.Typer) -> None:
                     )
                 )
                 if not v.get("valid"):
-                    raise ValidationError(f"Settings invalid: {v.get('error', 'unknown error')}", detail=v)
+                    raise ValidationError(
+                        f"Settings invalid: {v.get('error', 'unknown error')}", detail=v
+                    )
                 # NB: submit the user's original settings, NOT validate-job's
                 # `normalized` output — the normalizer injects backend-internal
                 # fields (e.g. submit_method, msa) that submit-job rejects.
 
             output.info(f"Submitting {job_type} job '{job_name}'…", state.output)
             try:
-                submit_resp = rest.submit_job(
+                submit_resp = jobs_api.submit_job(
                     client, job_name=job_name, job_type=job_type, settings=job.settings
                 )
             except TamarindError as exc:
@@ -349,7 +289,7 @@ def register(app: typer.Typer) -> None:
                     result["final"] = final
                     status = jobs_helpers.job_status(final)
                     if download and jobs_helpers.is_success(status):
-                        url = _result_url(rest.get_result(client, job_name=job_name))
+                        url = _result_url(jobs_api.get_result(client, job_name=job_name))
                         dest = download / Path(f"{job_name}.zip").name
                         written = _download(url, dest)
                         result["download"] = {"path": str(dest), "bytes": written}
@@ -367,7 +307,7 @@ def register(app: typer.Typer) -> None:
         human = f"submitted: {job_name}" + (
             f"  ({jobs_helpers.job_status(result['final'])})" if "final" in result else ""
         )
-        output.emit(_sanitize_job_output(result), state.output, human=human)
+        output.emit(sanitize(result), state.output, human=human)
         if "final" in result and _failed_terminal(result["final"]):
             raise typer.Exit(ExitCode.JOB_FAILED)
 
@@ -375,9 +315,18 @@ def register(app: typer.Typer) -> None:
     def batch(
         ctx: typer.Context,
         tool: str = typer.Argument(..., help="Tool name applied to every job in the batch."),
-        input: str = typer.Option(..., "--input", "-i", help="YAML/JSON list of per-job settings, or a {batchName,type,settings[],jobNames} object."),
-        name: Optional[str] = typer.Option(None, "--name", "-n", help="Batch name (default: auto)."),
-        max_runtime: Optional[int] = typer.Option(None, "--max-runtime", help="Max runtime seconds per job."),
+        input: str = typer.Option(
+            ...,
+            "--input",
+            "-i",
+            help="YAML/JSON list of per-job settings, or a {batchName,type,settings[],jobNames} object.",
+        ),
+        name: Optional[str] = typer.Option(
+            None, "--name", "-n", help="Batch name (default: auto)."
+        ),
+        max_runtime: Optional[int] = typer.Option(
+            None, "--max-runtime", help="Max runtime seconds per job."
+        ),
         prevalidate: bool = typer.Option(
             False,
             "--prevalidate",
@@ -400,7 +349,9 @@ def register(app: typer.Typer) -> None:
             job_type = effective_job_type(tool, doc.get("type"))
             job_names = doc.get("jobNames")
         else:
-            raise TamarindError("Batch --input must be a list of settings or a {settings:[...]} object.")
+            raise TamarindError(
+                "Batch --input must be a list of settings or a {settings:[...]} object."
+            )
         if not isinstance(batch_name, str) or not batch_name.strip():
             raise ValidationError("Batch name must be a non-empty string.")
         if batch_name != batch_name.strip():
@@ -423,9 +374,7 @@ def register(app: typer.Typer) -> None:
             if any(not isinstance(job_name, str) or not job_name.strip() for job_name in job_names):
                 raise ValidationError("Every batch jobName must be a non-empty string.")
             if any(job_name != job_name.strip() for job_name in job_names):
-                raise ValidationError(
-                    "Batch jobNames may not have leading or trailing whitespace."
-                )
+                raise ValidationError("Batch jobNames may not have leading or trailing whitespace.")
             normalized_names = [job_name.strip() for job_name in job_names]
             if len(set(normalized_names)) != len(normalized_names):
                 raise ValidationError("Batch jobNames must be unique.")
@@ -441,7 +390,7 @@ def register(app: typer.Typer) -> None:
                         else f"{batch_name}-{index + 1}"
                     )
                     validation = _rewrite_validation_guidance(
-                        rest.validate_job(
+                        jobs_api.validate_job(
                             client,
                             job_name=str(validation_name),
                             job_type=job_type,
@@ -455,12 +404,15 @@ def register(app: typer.Typer) -> None:
                             else "unexpected validation response"
                         )
                         raise ValidationError(
-                            f"Batch item {index + 1} settings invalid: "
-                            f"{validation_error}",
-                            detail={"index": index, "jobName": validation_name, "validation": validation},
+                            f"Batch item {index + 1} settings invalid: {validation_error}",
+                            detail={
+                                "index": index,
+                                "jobName": validation_name,
+                                "validation": validation,
+                            },
                         )
             try:
-                resp = rest.submit_batch(
+                resp = jobs_api.submit_batch(
                     client,
                     batch_name=batch_name,
                     job_type=job_type,
@@ -486,9 +438,14 @@ def register(app: typer.Typer) -> None:
                     outcomeMayBeAmbiguous=ambiguous,
                     recoveryCommand=f"tamarind --json status {batch_name}",
                 )
-        result = {"batchName": batch_name, "type": job_type, "count": len(settings_list), "submit": resp}
+        result = {
+            "batchName": batch_name,
+            "type": job_type,
+            "count": len(settings_list),
+            "submit": resp,
+        }
         output.emit(
-            _sanitize_job_output(result),
+            sanitize(result),
             state.output,
             human=f"submitted batch '{batch_name}' ({len(settings_list)} jobs)",
         )
@@ -496,7 +453,9 @@ def register(app: typer.Typer) -> None:
     @app.command()
     def jobs(
         ctx: typer.Context,
-        status: Optional[str] = typer.Option(None, "--status", help="Filter by status (client-side)."),
+        status: Optional[str] = typer.Option(
+            None, "--status", help="Filter by status (client-side)."
+        ),
         batch: Optional[str] = typer.Option(None, "--batch", help="Only jobs in this batch."),
         limit: int = typer.Option(50, "--limit", help="Max jobs to return (page size when --all)."),
         start_key: Optional[str] = typer.Option(
@@ -505,8 +464,12 @@ def register(app: typer.Typer) -> None:
         all_jobs: bool = typer.Option(
             False, "--all", help="Auto-paginate: follow startKey until every job is fetched."
         ),
-        organization: bool = typer.Option(False, "--organization", help="All jobs across your org."),
-        include_subjobs: bool = typer.Option(False, "--include-subjobs", help="Include batch subjobs."),
+        organization: bool = typer.Option(
+            False, "--organization", help="All jobs across your org."
+        ),
+        include_subjobs: bool = typer.Option(
+            False, "--include-subjobs", help="Include batch subjobs."
+        ),
         email: Optional[str] = typer.Option(None, "--email", help="Jobs for another org member."),
     ) -> None:
         """List your jobs. When more remain, a 'startKey' is returned; pass it to --start-key (or use --all)."""
@@ -523,7 +486,7 @@ def register(app: typer.Typer) -> None:
                     job_email=email,
                 )
             else:
-                resp = rest.get_jobs(
+                resp = jobs_api.get_jobs(
                     client,
                     batch=batch,
                     start_key=start_key,
@@ -536,7 +499,9 @@ def register(app: typer.Typer) -> None:
                 statuses = resp.get("statuses") if isinstance(resp, dict) else None
                 next_key = resp.get("startKey") if isinstance(resp, dict) else None
         if status:
-            job_list = [j for j in job_list if (jobs_helpers.job_status(j) or "").lower() == status.lower()]
+            job_list = [
+                j for j in job_list if (jobs_helpers.job_status(j) or "").lower() == status.lower()
+            ]
         # The raw Score is a large per-tool JSON blob — keep it out of the human
         # table (it's noise there) but retain it in the --json payload / `status`.
         rows = [
@@ -548,7 +513,7 @@ def register(app: typer.Typer) -> None:
             }
             for j in job_list
         ]
-        out = {"jobs": _sanitize_job_output(job_list), "count": len(job_list)}
+        out = {"jobs": sanitize(job_list), "count": len(job_list)}
         if statuses:
             out["statuses"] = statuses
         human = output.render_table(rows, ["JobName", "Type", "JobStatus", "Created"])
@@ -573,7 +538,7 @@ def register(app: typer.Typer) -> None:
         with state.rest_client() as client:
             job = jobs_helpers.fetch_job(client, job_name)
         output.emit(
-            _sanitize_job_output(job),
+            sanitize(job),
             state.output,
             human=f"{job_name}: {jobs_helpers.job_status(job)}",
         )
@@ -593,10 +558,12 @@ def register(app: typer.Typer) -> None:
                 job_name,
                 poll_interval=poll_interval,
                 timeout=timeout,
-                on_poll=lambda j: output.info(f"  status: {jobs_helpers.job_status(j)}", state.output),
+                on_poll=lambda j: output.info(
+                    f"  status: {jobs_helpers.job_status(j)}", state.output
+                ),
             )
         output.emit(
-            _sanitize_job_output(final),
+            sanitize(final),
             state.output,
             human=f"{job_name}: {jobs_helpers.job_status(final)}",
         )
@@ -607,8 +574,12 @@ def register(app: typer.Typer) -> None:
     def results(
         ctx: typer.Context,
         job_name: str = typer.Argument(..., help="Job name."),
-        download: Optional[Path] = typer.Option(None, "--download", help="Download the results bundle to this directory."),
-        file: Optional[str] = typer.Option(None, "--file", help="A specific file within the results."),
+        download: Optional[Path] = typer.Option(
+            None, "--download", help="Download the results bundle to this directory."
+        ),
+        file: Optional[str] = typer.Option(
+            None, "--file", help="A specific file within the results."
+        ),
         pdbs_only: bool = typer.Option(False, "--pdbs-only", help="Only PDB outputs."),
         show_url: bool = typer.Option(
             False,
@@ -616,8 +587,12 @@ def register(app: typer.Typer) -> None:
             help="Print the credential-bearing presigned URL instead of downloading it.",
         ),
         wait: bool = typer.Option(False, "--wait", help="Wait for the job to finish first."),
-        poll_interval: float = typer.Option(10.0, "--poll-interval", help="Seconds between polls when --wait."),
-        timeout: Optional[float] = typer.Option(None, "--timeout", help="With --wait, give up after N seconds."),
+        poll_interval: float = typer.Option(
+            10.0, "--poll-interval", help="Seconds between polls when --wait."
+        ),
+        timeout: Optional[float] = typer.Option(
+            None, "--timeout", help="With --wait, give up after N seconds."
+        ),
     ) -> None:
         """Download results, or explicitly request a credential-bearing URL."""
         state = ctx.obj
@@ -644,7 +619,7 @@ def register(app: typer.Typer) -> None:
                 if _failed_terminal(final):
                     result = {
                         "jobName": job_name,
-                        "final": _sanitize_job_output(final),
+                        "final": sanitize(final),
                     }
                     output.emit(
                         result,
@@ -653,13 +628,13 @@ def register(app: typer.Typer) -> None:
                     )
                     raise typer.Exit(ExitCode.JOB_FAILED)
             url = _result_url(
-                rest.get_result(
+                jobs_api.get_result(
                     client, job_name=job_name, file_name=file, pdbs_only=pdbs_only or None
                 )
             )
             result = {"jobName": job_name}
             if final is not None:
-                result["final"] = _sanitize_job_output(final)
+                result["final"] = sanitize(final)
             if download:
                 suffix = file or f"{job_name}.zip"
                 dest = download / Path(suffix).name
@@ -697,7 +672,9 @@ def register(app: typer.Typer) -> None:
     def cancel(
         ctx: typer.Context,
         job_name: Optional[str] = typer.Argument(None, help="Job name to cancel."),
-        batch: Optional[str] = typer.Option(None, "--batch", help="Cancel an entire batch/pipeline instead."),
+        batch: Optional[str] = typer.Option(
+            None, "--batch", help="Cancel an entire batch/pipeline instead."
+        ),
     ) -> None:
         """Cancel a running/queued job, or an entire batch."""
         state = ctx.obj
@@ -705,10 +682,10 @@ def register(app: typer.Typer) -> None:
             raise TamarindError("Provide a job name or --batch <name>.")
         with state.rest_client() as client:
             if batch:
-                resp = rest.cancel_batch(client, batch_name=batch)
+                resp = jobs_api.cancel_batch(client, batch_name=batch)
             else:
-                resp = rest.cancel_job(client, job_name=job_name)
-        safe_resp = _sanitize_job_output(resp)
+                resp = jobs_api.cancel_job(client, job_name=job_name)
+        safe_resp = sanitize(resp)
         output.emit(safe_resp, state.output, human=_message(safe_resp))
 
     @app.command()
@@ -723,6 +700,6 @@ def register(app: typer.Typer) -> None:
             f"permanently delete job '{job_name}'", yes=yes, mode=state.output
         )
         with state.rest_client() as client:
-            resp = rest.delete_job(client, job_name=job_name)
-        safe_resp = _sanitize_job_output(resp)
+            resp = jobs_api.delete_job(client, job_name=job_name)
+        safe_resp = sanitize(resp)
         output.emit(safe_resp, state.output, human=_message(safe_resp))

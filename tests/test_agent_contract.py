@@ -39,9 +39,7 @@ def test_auth_status_preserves_non_auth_403_type(
 ):
     for key, value in ENV.items():
         monkeypatch.setenv(key, value)
-    respx.get(f"{API}jobs").mock(
-        return_value=httpx.Response(403, json={"error": message})
-    )
+    respx.get(f"{API}jobs").mock(return_value=httpx.Response(403, json={"error": message}))
     monkeypatch.setattr(sys, "argv", ["tamarind", "--json", "auth", "status"])
 
     with pytest.raises(SystemExit) as raised:
@@ -68,9 +66,7 @@ def test_auth_login_never_saves_when_verification_fails(
     config_dir = tmp_path / "config"
     monkeypatch.setenv("TAMARIND_CONFIG_DIR", str(config_dir))
     monkeypatch.setenv("TAMARIND_API_BASE", API)
-    respx.get(f"{API}jobs").mock(
-        return_value=httpx.Response(403, json={"error": message})
-    )
+    respx.get(f"{API}jobs").mock(return_value=httpx.Response(403, json={"error": message}))
     monkeypatch.setattr(
         sys,
         "argv",
@@ -208,9 +204,7 @@ def test_entrypoint_preserves_human_abort_behavior(monkeypatch, capsys):
 def test_ambiguous_auto_named_submit_surfaces_recovery_name(monkeypatch, capsys):
     for key, value in ENV.items():
         monkeypatch.setenv(key, value)
-    respx.post(f"{API}validate-job").mock(
-        return_value=httpx.Response(200, json={"valid": True})
-    )
+    respx.post(f"{API}validate-job").mock(return_value=httpx.Response(200, json={"valid": True}))
     request = httpx.Request("POST", f"{API}submit-job")
     respx.post(f"{API}submit-job").mock(
         side_effect=httpx.ReadTimeout("response lost", request=request)
@@ -267,7 +261,9 @@ def test_wait_failed_batch_parent_exits_nonzero(monkeypatch):
 @respx.mock
 def test_submit_wait_forwards_timeout_and_failed_job_exits_nonzero(monkeypatch):
     respx.post(f"{API}validate-job").mock(return_value=httpx.Response(200, json={"valid": True}))
-    respx.post(f"{API}submit-job").mock(return_value=httpx.Response(200, json={"message": "queued"}))
+    respx.post(f"{API}submit-job").mock(
+        return_value=httpx.Response(200, json={"message": "queued"})
+    )
     observed = {}
 
     def fake_wait(*args, **kwargs):
@@ -343,9 +339,7 @@ def test_submit_wait_rejects_invalid_timing_before_any_remote_request(timing_arg
 @respx.mock
 def test_submit_wait_redacts_result_url_from_final_job(monkeypatch):
     secret = "https://storage.test/result.zip?signature=do-not-leak"
-    respx.post(f"{API}validate-job").mock(
-        return_value=httpx.Response(200, json={"valid": True})
-    )
+    respx.post(f"{API}validate-job").mock(return_value=httpx.Response(200, json={"valid": True}))
     respx.post(f"{API}submit-job").mock(
         return_value=httpx.Response(200, json={"message": "queued"})
     )
@@ -380,12 +374,8 @@ def test_submit_wait_redacts_result_url_from_final_job(monkeypatch):
 
 
 @respx.mock
-def test_submit_wait_download_accepts_wrapped_url_and_sanitizes_job_name(
-    tmp_path, monkeypatch
-):
-    respx.post(f"{API}validate-job").mock(
-        return_value=httpx.Response(200, json={"valid": True})
-    )
+def test_submit_wait_download_accepts_wrapped_url_and_sanitizes_job_name(tmp_path, monkeypatch):
+    respx.post(f"{API}validate-job").mock(return_value=httpx.Response(200, json={"valid": True}))
     respx.post(f"{API}submit-job").mock(
         return_value=httpx.Response(200, json={"message": "queued"})
     )
@@ -493,9 +483,7 @@ def test_results_requires_explicit_download_or_show_url():
 @respx.mock
 def test_results_show_url_is_an_explicit_escape_hatch():
     presigned = "https://storage.test/result.zip?signature=explicit"
-    respx.post(f"{API}result").mock(
-        return_value=httpx.Response(200, json=presigned)
-    )
+    respx.post(f"{API}result").mock(return_value=httpx.Response(200, json=presigned))
 
     result = runner.invoke(
         app,
@@ -644,7 +632,7 @@ def test_sanitizer_redacts_signed_urls_by_value_and_preserves_ordinary_urls(secr
         "items": [secret, ordinary],
     }
 
-    sanitized = jobs_commands._sanitize_job_output(payload)
+    sanitized = jobs_commands.sanitize(payload)
     rendered = json.dumps(sanitized)
 
     assert "do-not-leak" not in rendered
@@ -652,7 +640,7 @@ def test_sanitizer_redacts_signed_urls_by_value_and_preserves_ordinary_urls(secr
     assert sanitized["nested"]["futureField"] == "<redacted credential URL>"
     assert sanitized["nested"]["docs"] == ordinary
     assert sanitized["items"] == ["<redacted credential URL>", ordinary]
-    assert jobs_commands._sanitize_job_output(secret) == "<redacted credential URL>"
+    assert jobs_commands.sanitize(secret) == "<redacted credential URL>"
 
 
 def test_sanitizer_does_not_overwrite_existing_redaction_metadata():
@@ -661,7 +649,7 @@ def test_sanitizer_does_not_overwrite_existing_redaction_metadata():
         "redactedFields": {"upstream": True},
     }
 
-    sanitized = jobs_commands._sanitize_job_output(payload)
+    sanitized = jobs_commands.sanitize(payload)
 
     assert sanitized["redactedFields"] == {"upstream": True}
     assert sanitized["tamarindRedactedFields"] == ["resultUrl"]
@@ -687,9 +675,7 @@ def test_results_accepts_wrapped_download_url(tmp_path):
 
 @respx.mock
 def test_results_rejects_missing_download_url_cleanly(tmp_path):
-    respx.post(f"{API}result").mock(
-        return_value=httpx.Response(200, json={"message": "not ready"})
-    )
+    respx.post(f"{API}result").mock(return_value=httpx.Response(200, json={"message": "not ready"}))
 
     result = runner.invoke(
         app,
@@ -729,9 +715,7 @@ class _FailingStream(httpx.SyncByteStream):
         yield b"partial-download"
         raise httpx.ReadError(
             "stream interrupted",
-            request=httpx.Request(
-                "GET", "https://storage.test/result.zip?signature=do-not-leak"
-            ),
+            request=httpx.Request("GET", "https://storage.test/result.zip?signature=do-not-leak"),
         )
 
 
@@ -773,9 +757,7 @@ def test_midstream_download_failure_removes_partial_and_preserves_destination(tm
 def test_stream_protocol_failure_is_typed_and_removes_partial(tmp_path):
     presigned = "https://storage.test/result.zip?signature=do-not-leak"
     destination = tmp_path / "job-1.zip"
-    respx.get(presigned).mock(
-        return_value=httpx.Response(200, stream=_BrokenProtocolStream())
-    )
+    respx.get(presigned).mock(return_value=httpx.Response(200, stream=_BrokenProtocolStream()))
 
     with pytest.raises(TamarindError) as raised:
         jobs_commands._download(presigned, destination)
@@ -790,9 +772,7 @@ def test_stream_protocol_failure_is_typed_and_removes_partial(tmp_path):
 def test_interrupted_download_removes_partial_file(tmp_path):
     presigned = "https://storage.test/result.zip?signature=do-not-leak"
     destination = tmp_path / "job-1.zip"
-    respx.get(presigned).mock(
-        return_value=httpx.Response(200, stream=_InterruptedStream())
-    )
+    respx.get(presigned).mock(return_value=httpx.Response(200, stream=_InterruptedStream()))
 
     with pytest.raises(KeyboardInterrupt):
         jobs_commands._download(presigned, destination)
