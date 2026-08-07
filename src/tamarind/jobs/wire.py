@@ -99,7 +99,12 @@ def find_job(response: Any, name: str) -> Mapping[str, Any] | None:
 
     # Shape A: {"jobs": [...]}
     if "jobs" in response:
-        jobs = response.get("jobs") or []
+        # Filter to mappings FIRST, as the index-keyed branch below already does. The
+        # fallback used to return `jobs[0]` whatever it was, so a scalar entry came back
+        # from a function whose contract is Mapping | None. `fetch_job` then treated it
+        # as a found job with a null status, and `wait_for_job` with no timeout polled
+        # it forever — a hang, not an error.
+        jobs = [j for j in (response.get("jobs") or []) if isinstance(j, Mapping)]
         for j in jobs:
             if parse_job(j).name == name:
                 return j

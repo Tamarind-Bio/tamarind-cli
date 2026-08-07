@@ -91,6 +91,21 @@ class TestFindJob:
     def test_unrecognized_envelope_is_none(self, resp: object) -> None:
         assert jobs_wire.find_job(resp, "x") is None
 
+    @pytest.mark.parametrize("junk", [["not-a-dict"], [7], [["nested"]], [None]])
+    def test_non_mapping_entries_never_come_back_as_a_job(self, junk: list) -> None:
+        """The contract is Mapping | None, and it has to hold on the FALLBACK path too.
+
+        Returning a scalar here made `fetch_job` report it as a found job with a null
+        status, and `wait_for_job` without a timeout then polled it forever — a hang
+        rather than an error, which is the worse failure.
+        """
+        assert jobs_wire.find_job({"jobs": junk}, "x") is None
+
+    def test_a_real_job_is_still_found_among_junk_entries(self) -> None:
+        """Filtering must not discard the answer along with the noise."""
+        resp = {"jobs": ["junk", {"JobName": "a"}]}
+        assert jobs_wire.find_job(resp, "a") == {"JobName": "a"}
+
 
 class TestParseFile:
     def test_bare_string_entry(self) -> None:
@@ -128,6 +143,25 @@ class TestParseSchema:
     def test_missing_or_malformed_sections_parse_empty(self, schema: object) -> None:
         parsed = catalog_wire.parse_schema(schema)
         assert parsed.required_names == () and parsed.example_settings == {}
+
+    @pytest.mark.parametrize("settings", [5, ["a"], "text", None, [("pair", 1, "extra")]])
+    def test_malformed_example_settings_parse_empty_rather_than_raising(
+        self, settings: object
+    ) -> None:
+        """`dict(5)` raises TypeError and `dict(['a'])` raises ValueError, so copying
+        without a guard turned a surprising catalog payload into a traceback out of
+        `schema --example` — the opposite of what this module promises."""
+        assert (
+            catalog_wire.parse_schema({"exampleJob": {"settings": settings}}).example_settings == {}
+        )
+
+    @pytest.mark.parametrize(
+        "params", [({"name": "s", "required": True},), [{"name": "s", "required": True}]]
+    )
+    def test_any_sequence_of_parameters_is_accepted(self, params: object) -> None:
+        """A caller passing a tuple used to get their required names back. Narrowing to
+        the concrete list type dropped valid data silently."""
+        assert catalog_wire.parse_schema({"parameters": params}).required_names == ("s",)
 
 
 class TestDelegationIsRealNotParallel:

@@ -69,6 +69,19 @@ def _iter_parameters(params: Any) -> tuple[Any, ...]:
     return ()
 
 
+def _example_settings(example: Any) -> dict[str, Any]:
+    """The example job's settings, or empty when the payload isn't shaped like that.
+
+    `dict(...)` raises TypeError on a scalar and ValueError on a malformed list, so
+    copying without checking turned a surprising catalog payload into a traceback out
+    of `schema --example` — the opposite of what this module promises. Tolerant in.
+    """
+    if not isinstance(example, Mapping):
+        return {}
+    settings = example.get("settings")
+    return dict(settings) if isinstance(settings, Mapping) else {}
+
+
 def parse_schema(payload: Any) -> ToolSchema:
     """Normalize a tool schema. Never raises."""
     if not isinstance(payload, Mapping):
@@ -76,8 +89,6 @@ def parse_schema(payload: Any) -> ToolSchema:
     example = payload.get("exampleJob") or {}
     return ToolSchema(
         parameters=tuple(parse_parameter(p) for p in _iter_parameters(payload.get("parameters"))),
-        example_settings=dict(example.get("settings") or {})
-        if isinstance(example, Mapping)
-        else {},
+        example_settings=_example_settings(example),
         raw=payload,
     )
