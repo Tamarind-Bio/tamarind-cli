@@ -189,7 +189,7 @@ class TestEventsNotPrints:
     def test_progress_is_emitted_as_structured_events(self, tool_folder, patched) -> None:
         """The library must not print. A consumer gets phases it can filter on, not
         prose it would have to parse."""
-        patched(FakeServer(lands_after=0))
+        patched(FakeServer(lands_on_read=2))
         seen: list[flow.BuildEvent] = []
         flow.build(None, name="t", folder=tool_folder, wait=False, on_event=seen.append)
         assert seen, "no events emitted"
@@ -198,7 +198,7 @@ class TestEventsNotPrints:
 
     def test_a_silent_caller_is_supported(self, tool_folder, patched) -> None:
         """on_event=None must be a no-op, not a crash — that is the scripted path."""
-        patched(FakeServer(lands_after=0))
+        patched(FakeServer(lands_on_read=2))
         assert flow.build(None, name="t", folder=tool_folder, wait=False, on_event=None).deployed
 
 
@@ -209,7 +209,7 @@ class TestSecretsNeverUpload:
         """End-to-end through the real packaging path: the file must not be in the
         archive, and the user must be told why."""
         (tool_folder / ".env").write_text("API_KEY=secret\n")
-        patched(FakeServer(lands_after=0))
+        patched(FakeServer(lands_on_read=2))
         seen: list[flow.BuildEvent] = []
         flow.build(None, name="t", folder=tool_folder, wait=False, on_event=seen.append)
         warnings = [e.message for e in seen if e.kind == "warning"]
