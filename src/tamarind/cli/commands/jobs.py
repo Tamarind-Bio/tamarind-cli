@@ -324,7 +324,19 @@ def register(app: typer.Typer) -> None:
             jobs_helpers.validate_wait_options(poll_interval=poll_interval, timeout=timeout)
 
         with state.rest_client() as client:
-            if not skip_validate:
+            # `validate-job` carries no toolRef, so it can only ever answer about the
+            # LIVE version. With --tool-version that is the wrong version: a freshly
+            # built one whose inputs changed gets rejected here against the schema it
+            # replaced, which breaks deploy -> smoke-test -> publish exactly when the
+            # schema changed. An answer about the wrong version is worse than no answer,
+            # so the pinned route's own server-side validation is relied on instead.
+            if tool_version and not skip_validate:
+                output.info(
+                    f"Skipping local validation: it checks the live version, not "
+                    f"{tool_version}. The submit itself still validates.",
+                    state.output,
+                )
+            if not skip_validate and not tool_version:
                 v = _rewrite_validation_guidance(
                     jobs_api.validate_job(
                         client,

@@ -114,7 +114,8 @@ class TestSummarize:
         assert summary.counts_disagreed is False
 
     def test_counts_only_is_believed_when_there_are_no_items(self) -> None:
-        """Honest rather than clever: something ran, and we cannot say what."""
+        """Honest rather than clever: something ran, and we cannot say what. Note the
+        zero `failed` — see TestCountsOnlyResponses for why that matters."""
         summary = plan.summarize_batch(wire.parse_batch_submission({"submitted": 3, "failed": 0}))
         assert summary.outcome is plan.BatchOutcome.SUBMITTED
         assert summary.submitted == ()
@@ -209,3 +210,30 @@ class TestRequestShape:
 
         jobs.submit_batch_pinned(FakeClient(), jobs=[{"jobName": "a"}], tool_ref="org/t:v1")
         assert "batch" not in sent["json"]["jobs"][0]
+
+
+class TestCountsOnlyResponses:
+    """When there is no itemized list, BOTH counts matter."""
+
+    def test_a_counts_only_partial_is_not_reported_as_success(self) -> None:
+        """THE regression. `{"submitted": 3, "failed": 2}` with no `results` was read as
+        an unqualified success: exit zero, two jobs silently never dispatched. That is
+        the same failure the itemized branch exists to prevent, reached through the
+        branch with LESS information rather than more.
+
+        Without honouring `failed`, the outcome is SUBMITTED and `ok` is True.
+        """
+        summary = plan.summarize_batch(wire.parse_batch_submission({"submitted": 3, "failed": 2}))
+        assert summary.outcome is plan.BatchOutcome.PARTIAL
+        assert summary.ok is False
+        assert len(summary.failures) == 2
+
+    def test_counts_only_with_no_failures_is_still_success(self) -> None:
+        summary = plan.summarize_batch(wire.parse_batch_submission({"submitted": 3, "failed": 0}))
+        assert summary.outcome is plan.BatchOutcome.SUBMITTED
+        assert summary.ok is True
+
+    def test_counts_only_all_failed_is_failed(self) -> None:
+        summary = plan.summarize_batch(wire.parse_batch_submission({"submitted": 0, "failed": 4}))
+        assert summary.outcome is plan.BatchOutcome.FAILED
+        assert len(summary.failures) == 4

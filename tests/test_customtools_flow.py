@@ -519,3 +519,174 @@ class TestExtractionSignal:
         assert outcome.reason == "unconfirmed"
         assert "unknown" in outcome.explanation
         assert len(server.deploys) == 1, "an unconfirmed deploy must not silently retry forever"
+
+
+class TestDestinationGuard:
+    """One guard for `init` and `clone`. There were two, and both had the same hole."""
+
+    def test_a_missing_path_is_fine(self, tmp_path) -> None:
+        target = tmp_path / "new"
+        assert flow.ensure_usable_destination(target) == target
+
+    def test_an_empty_folder_is_fine(self, tmp_path) -> None:
+        (tmp_path / "empty").mkdir()
+        assert flow.ensure_usable_destination(tmp_path / "empty")
+
+    def test_an_existing_file_is_a_typed_error_not_a_traceback(self, tmp_path) -> None:
+        """THE regression. `exists() and any(iterdir())` raises NotADirectoryError on a
+        file, and the CLI boundary does not catch arbitrary OSError — so ordinary user
+        input produced a stack trace.
+
+        Without the is_dir() branch this raises NotADirectoryError, which
+        `pytest.raises(ValidationError)` does not catch, and the test errors.
+        """
+        target = tmp_path / "notafolder"
+        target.write_text("i am a file\n")
+        with pytest.raises(ValidationError):
+            flow.ensure_usable_destination(target)
+
+    def test_a_non_empty_folder_is_refused_by_default(self, tmp_path) -> None:
+        busy = tmp_path / "busy"
+        busy.mkdir()
+        (busy / "work.py").write_text("mine\n")
+        with pytest.raises(ValidationError):
+            flow.ensure_usable_destination(busy)
+
+    def test_a_non_empty_folder_is_allowed_when_asked(self, tmp_path) -> None:
+        """`clone --force` is the caller that opts in."""
+        busy = tmp_path / "busy"
+        busy.mkdir()
+        (busy / "work.py").write_text("mine\n")
+        assert flow.ensure_usable_destination(busy, allow_nonempty=True) == busy
+
+
+class TestExtractionDoesNotFollowLinks:
+    def _zip(self, path: Path, members: dict) -> Path:
+        import zipfile
+
+        with zipfile.ZipFile(path, "w") as zf:
+            for name, body in members.items():
+                zf.writestr(name, body)
+        return path
+
+    def test_a_destination_symlink_is_replaced_not_written_through(self, tmp_path) -> None:
+        """`extractall` opens each output path for writing, and open() follows a symlink
+        already sitting there. With `clone --force` into a folder containing
+        `config.json -> outside/secret.json`, the archive's own config.json would be
+        written OUTSIDE the destination.
+
+        Without `_extract_without_following_links` the outside file's content changes
+        and this test fails on the final assertion.
+        """
+        outside = tmp_path / "outside.json"
+        outside.write_text("ORIGINAL\n")
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        (dest / "config.json").symlink_to(outside)
+
+        archive_path = self._zip(tmp_path / "a.zip", {"config.json": "FROM ARCHIVE\n"})
+        flow.unpack_source(archive_path, dest)
+
+        assert (dest / "config.json").read_text() == "FROM ARCHIVE\n"
+        assert outside.read_text() == "ORIGINAL\n", "wrote through the link, outside the folder"
+
+    def test_a_symlinked_parent_directory_is_also_replaced(self, tmp_path) -> None:
+        """Same escape one level up: `a/b.txt` writes through `a` when `a` is a link."""
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "b.txt").write_text("ORIGINAL\n")
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        (dest / "a").symlink_to(outside, target_is_directory=True)
+
+        archive_path = self._zip(tmp_path / "a.zip", {"a/b.txt": "FROM ARCHIVE\n"})
+        flow.unpack_source(archive_path, dest)
+
+        assert (outside / "b.txt").read_text() == "ORIGINAL\n"
+
+    def test_ordinary_extraction_is_unaffected(self, tmp_path) -> None:
+        dest = tmp_path / "dest"
+        archive_path = self._zip(tmp_path / "a.zip", {"main.py": "x\n", "sub/y.txt": "y\n"})
+        folder, _ = flow.unpack_source(archive_path, dest)
+        assert (folder / "main.py").read_text() == "x\n"
+        assert (folder / "sub" / "y.txt").read_text() == "y\n"
+
+
+class TestBuildTimeoutIsTyped:
+    def test_a_build_deadline_raises_the_timeout_type(self, monkeypatch) -> None:
+        """A bounded wait that elapses is not a failure — the build is still running and
+        `ct logs` reattaches. Exiting 1 makes that indistinguishable from a build that
+        actually failed; JobTimeoutError carries exit code 7.
+
+        Without the typed raise this is a plain TamarindError, which
+        `pytest.raises(JobTimeoutError)` does not match, and the test fails.
+        """
+        from tamarind.customtools import wire
+        from tamarind.errors import ExitCode, JobTimeoutError
+
+        monkeypatch.setattr(
+            flow.api,
+            "get_logs",
+            lambda client, *, name, build_id, next_token=None: wire.LogPage(
+                build_status="IN_PROGRESS"
+            ),
+        )
+        monkeypatch.setattr(flow.time, "sleep", lambda _s: None)
+        with pytest.raises(JobTimeoutError) as exc:
+            flow.wait_for_build(None, name="t", build_id="b-1", timeout=0.0)
+        assert exc.value.exit_code == ExitCode.TIMEOUT
+
+
+class TestLogDraining:
+    """One drain, used by both the follow and non-follow paths."""
+
+    def _paged(self, pages):
+        """A get_logs that walks a fixed list of pages by token."""
+        from tamarind.customtools import wire
+
+        def get_logs(client, *, name, build_id, next_token=None):
+            index = 0 if next_token is None else int(next_token)
+            body, token, status = pages[index]
+            return wire.LogPage(
+                build_status=status,
+                lines=tuple(wire.LogLine(message=m) for m in body),
+                next_token=token,
+            )
+
+        return get_logs
+
+    def test_a_terminal_first_page_does_not_stop_the_drain(self, monkeypatch) -> None:
+        """THE regression. The first page already carries the build's GLOBAL terminal
+        status, so breaking on it skipped every remaining page — and a failed build's
+        error is in the tail, which is exactly what was dropped.
+
+        Without draining, `lines` is ("start",) and the assertion on "the real error"
+        fails.
+        """
+        pages = [
+            (["start"], "1", "FAILED"),
+            (["middle"], "2", "FAILED"),
+            (["the real error"], None, "FAILED"),
+        ]
+        monkeypatch.setattr(flow.api, "get_logs", self._paged(pages))
+        page, token, lines = flow.drain_logs(None, name="t", build_id="b-1")
+        assert [line.message for line in lines] == ["start", "middle", "the real error"]
+        assert page.build_status == "FAILED"
+        assert token is None
+
+    def test_a_repeated_token_ends_the_drain(self, monkeypatch) -> None:
+        """A server that keeps handing back the same token would otherwise replay one
+        page forever."""
+        from tamarind.customtools import wire
+
+        monkeypatch.setattr(
+            flow.api,
+            "get_logs",
+            lambda client, *, name, build_id, next_token=None: wire.LogPage(
+                build_status="IN_PROGRESS",
+                lines=(wire.LogLine(message="same"),),
+                next_token="stuck",
+            ),
+        )
+        _, _, lines = flow.drain_logs(None, name="t", build_id="b-1")
+        assert len(lines) == 2, "the loop did not stop on a repeated token"

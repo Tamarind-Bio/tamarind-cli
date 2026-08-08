@@ -37,7 +37,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Literal
 
-from ..errors import TamarindError, ValidationError
+from ..errors import JobTimeoutError, TamarindError, ValidationError
 from ..http import HTTPClient
 from ..upload import put_presigned
 from . import api, archive, manifest, plan, project, wire
@@ -106,6 +106,36 @@ class ExtractionResult:
     ref_moved: bool = False
 
 
+def ensure_usable_destination(destination: Path | str, *, allow_nonempty: bool = False) -> Path:
+    """Check a folder a command is about to write into. Returns it.
+
+    ONE guard, because there were two and they drifted: `init` and `clone` each grew
+    their own `exists() and any(iterdir())`, and both crashed with a raw
+    NotADirectoryError when the path was an existing FILE — user input producing a
+    traceback rather than a typed error.
+
+    Three distinct cases, distinguished on purpose:
+
+      * missing            -> fine, the caller creates it
+      * an existing file   -> always an error; there is no sense in which this works
+      * a non-empty folder -> an error unless the caller explicitly allows it, since
+                              extraction overwrites whatever is already there
+    """
+    target = Path(destination)
+    if not target.exists():
+        return target
+    if not target.is_dir():
+        raise ValidationError(
+            f"'{target}' is a file, not a folder. Point this at a directory, or remove it."
+        )
+    if not allow_nonempty and any(target.iterdir()):
+        raise ValidationError(
+            f"'{target}' is not empty. Writing here overwrites whatever is already "
+            f"there, so local edits would be lost. Choose an empty folder."
+        )
+    return target
+
+
 def read_source_state(client: HTTPClient, *, name: str) -> SourceState:
     """The source fields a deploy needs to compare against afterwards."""
     tool = api.get_tool(client, name=name)
@@ -161,6 +191,41 @@ def wait_for_source(
         time.sleep(max(0.0, min(interval, deadline - time.monotonic())))
 
 
+def drain_logs(
+    client: HTTPClient,
+    *,
+    name: str,
+    build_id: str,
+    token: str | None = None,
+    on_event: EventHandler | None = None,
+) -> tuple[wire.LogPage, str | None, tuple[wire.LogLine, ...]]:
+    """Read every page currently available. Returns (last page, next token, lines).
+
+    ONE drain, because there were two and only one of them was right. The non-follow
+    path fetched a single page and reported the build summary as though that were the
+    whole log; `wait_for_build` stopped the moment a page reported a terminal status,
+    which is exactly when the remaining pages matter most — a failed build's error is
+    in its tail.
+
+    Never waits for output that does not exist yet: it follows tokens the server has
+    already issued and stops when it stops issuing new ones. A repeated token ends the
+    loop rather than replaying the page forever.
+    """
+    seen: set[str] = set()
+    lines: list[wire.LogLine] = []
+    while True:
+        page = api.get_logs(client, name=name, build_id=build_id, next_token=token)
+        for line in page.lines:
+            _emit(on_event, "build", "log", line.message, line.timestamp)
+        lines.extend(page.lines)
+        following = page.next_token
+        if not following or following in seen:
+            # Keep the last real token so a follow-up call resumes rather than replays.
+            return page, following or token, tuple(lines)
+        seen.add(following)
+        token = following
+
+
 def wait_for_build(
     client: HTTPClient,
     *,
@@ -172,25 +237,26 @@ def wait_for_build(
 ) -> wire.LogPage:
     """Stream build output until the build reaches a terminal state.
 
-    Raises :class:`TamarindError` on a non-successful terminal state, carrying the
-    server's own error message — which is already humanized, so it is surfaced verbatim
-    rather than re-derived from the log tail.
+    Raises :class:`JobTimeoutError` when the deadline elapses — a typed error with its
+    own exit code, so a caller can tell "still building when I stopped watching" (the
+    build is fine, and reattachable) from "the build failed". Raises
+    :class:`TamarindError` on a non-successful terminal state, carrying the server's own
+    message, which is already humanized.
     """
     deadline = time.monotonic() + max(0.0, timeout)
     token: str | None = None
     page = wire.LogPage()
     while True:
-        page = api.get_logs(client, name=name, build_id=build_id, next_token=token)
-        for line in page.lines:
-            _emit(on_event, "build", "log", line.message, line.timestamp)
-        # Only advance on a real token: reusing the previous one would replay the page.
-        token = page.next_token or token
+        page, token, _ = drain_logs(
+            client, name=name, build_id=build_id, token=token, on_event=on_event
+        )
         if plan.is_terminal_build(page.build_status):
             break
         if time.monotonic() >= deadline:
-            raise TamarindError(
+            raise JobTimeoutError(
                 f"Build {build_id} was still {page.build_status!r} after {timeout:.0f}s. "
-                f"It is still running — `tamarind ct logs {name}` reattaches."
+                f"It is still running — `tamarind ct logs {name}` reattaches.",
+                detail={"build_id": build_id, "build_status": page.build_status},
             )
         time.sleep(max(0.0, min(interval, deadline - time.monotonic())))
 
@@ -434,6 +500,50 @@ def fetch_source(
         return unpack_source(zip_path, destination)
 
 
+def _extract_without_following_links(zf, target: Path) -> None:
+    """Extract every member, refusing to write THROUGH an existing symlink.
+
+    `extractall` opens each output path for writing, and open() follows a symlink that
+    is already sitting there. So a destination containing `config.json -> /etc/thing`
+    lets an archive member named `config.json` write outside the destination entirely.
+    Only reachable with `clone --force` (an empty destination has no links to follow),
+    but --force means "overwrite this folder", not "overwrite anything it points at".
+
+    Links in the destination are removed rather than refused: the caller has already
+    said to overwrite, and the file being replaced is the link itself.
+    """
+    for member in zf.infolist():
+        parts = _sanitized_parts(member.filename)
+        if not parts:
+            continue
+        # Walk down from the destination. An INTERMEDIATE component can be a link too —
+        # `a/b.txt` writes through `a` if `a` points elsewhere — so every component is
+        # checked, not just the leaf.
+        current = target
+        for part in parts:
+            current = current / part
+            if current.is_symlink():
+                current.unlink()
+        zf.extract(member, target)
+
+
+def _sanitized_parts(filename: str) -> list[str]:
+    """The path components `ZipFile.extract` will actually use for a member.
+
+    Mirrors CPython's `_extract_member`: drive letters are dropped and empty, `.` and
+    `..` components are removed. Computing the same path is what makes the symlink
+    check land on the file that gets written rather than on a name that never exists.
+    """
+    import os
+
+    name = filename.replace("/", os.path.sep)
+    if os.path.altsep:
+        name = name.replace(os.path.altsep, os.path.sep)
+    name = os.path.splitdrive(name)[1]
+    invalid = ("", os.path.curdir, os.path.pardir)
+    return [part for part in name.split(os.path.sep) if part not in invalid]
+
+
 def unpack_source(archive_path: Path, destination: Path) -> tuple[Path, tuple[str, ...]]:
     """Extract a downloaded source archive. Returns the folder and any LFS pointers.
 
@@ -447,7 +557,7 @@ def unpack_source(archive_path: Path, destination: Path) -> tuple[Path, tuple[st
     target.mkdir(parents=True, exist_ok=True)
     try:
         with zipfile.ZipFile(archive_path) as zf:
-            zf.extractall(target)
+            _extract_without_following_links(zf, target)
     except (zipfile.BadZipFile, OSError) as exc:
         raise TamarindError(f"Could not unpack the tool's source: {exc}") from exc
     pointers = tuple(
@@ -488,12 +598,7 @@ def init(
     base, conda gets miniconda — so local templates would be a fourth copy of that
     logic and would drift the first time a base image moved.
     """
-    target = Path(destination)
-    if target.exists() and any(target.iterdir()):
-        raise ValidationError(
-            f"'{target}' already exists and is not empty. Point `init` at a new folder, "
-            f"or use `tamarind ct clone {name}` to fetch an existing tool."
-        )
+    target = ensure_usable_destination(destination)
 
     _emit(on_event, "check", "status", f"Creating {name}")
     api.create_tool(client, name=name, display_name=display_name, template="scratch")

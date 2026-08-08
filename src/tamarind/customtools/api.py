@@ -7,6 +7,7 @@ All of these live under the `v2/` prefix, which the website rewrites onto the ba
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -123,7 +124,15 @@ def download_archive(
     immediately redeployable.
     """
     params = {"ref": ref} if ref else None
-    target = Path(destination) if destination else Path(tempfile.mkstemp(suffix=".zip")[1])
+    if destination is not None:
+        target = Path(destination)
+    else:
+        # mkstemp hands back an OPEN descriptor. Dropping it leaks one per download,
+        # and a long-lived process cloning repeatedly runs out — so it is closed here
+        # rather than relying on the second `open` below to somehow account for it.
+        handle_fd, temp_name = tempfile.mkstemp(suffix=".zip")
+        os.close(handle_fd)
+        target = Path(temp_name)
     with client.stream("GET", f"{_PREFIX}/{name}/archive", params=params) as response:
         with target.open("wb") as handle:
             for chunk in response.iter_bytes():

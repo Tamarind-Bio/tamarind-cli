@@ -125,10 +125,18 @@ def summarize_batch(submission: wire.BatchSubmission) -> BatchSummary:
     something ran, and we cannot say what.
     """
     if not submission.items:
-        reported = submission.submitted or 0
-        if reported > 0:
+        # Counts are all there is. Both of them count: reading only `submitted` turns
+        # {"submitted": 3, "failed": 2} into an unqualified success and loses two jobs
+        # that never dispatched — the same silent-failure this function exists to stop,
+        # just via the branch with less information rather than more.
+        sent = submission.submitted or 0
+        lost = submission.failed or 0
+        unnamed = tuple(("<unnamed>", "no reason given") for _ in range(lost))
+        if sent and lost:
+            return BatchSummary(outcome=BatchOutcome.PARTIAL, submitted=(), failures=unnamed)
+        if sent:
             return BatchSummary(outcome=BatchOutcome.SUBMITTED, submitted=(), failures=())
-        return BatchSummary(outcome=BatchOutcome.FAILED, submitted=(), failures=())
+        return BatchSummary(outcome=BatchOutcome.FAILED, submitted=(), failures=unnamed)
 
     submitted = tuple(i.job_name or "" for i in submission.items if i.ok)
     failures = tuple(

@@ -107,10 +107,13 @@ def register(app_root: typer.Typer) -> None:
                 # already-created tool is not an error.
                 try:
                     ct.create_tool(client, name=tool)
-                    ct_project.write(folder, name=tool)
                 except TamarindError as exc:
                     if getattr(exc, "status_code", None) not in (400, 409):
                         raise
+                # Written on BOTH paths. Skipping it on the already-exists branch left a
+                # folder deploying to `--name other-tool` with no record of it, so the
+                # next bare `deploy` fell back to the folder name — a different tool.
+                ct_project.write(folder, name=tool)
             outcome = ct.build(
                 client,
                 name=tool,
@@ -382,29 +385,33 @@ def logs(
             target = tool.latest_build_id
             if not target:
                 raise ValidationError(f"'{name}' has no build to show logs for.")
+        collected: list = []
+
+        def collect(event: ct_flow.BuildEvent) -> None:
+            if event.kind == "log":
+                collected.append({"message": event.message, "timestamp": event.timestamp})
+            render(event)
+
+        render = _renderer(state)
         if follow:
-            page = ct.wait_for_build(client, name=name, build_id=target, on_event=_renderer(state))
+            page = ct.wait_for_build(client, name=name, build_id=target, on_event=collect)
         else:
-            # Drain every page that already exists. Stopping at the first one showed the
-            # OLDEST output and called it the log — the exact opposite of what someone
-            # inspecting a failed build needs, since the error is at the end. This still
-            # never blocks: it follows tokens that are already there and stops when the
-            # server stops handing out new ones.
-            page = ct.api.get_logs(client, name=name, build_id=target)
-            seen_tokens: set[str] = set()
-            while True:
-                for line in page.lines:
-                    output.info(line.message, state.output)
-                token = page.next_token
-                # A server that keeps returning the same token would otherwise spin here
-                # forever; an empty page with a fresh token is normal, so the guard is on
-                # the token rather than on the page being empty.
-                if not token or token in seen_tokens:
-                    break
-                seen_tokens.add(token)
-                page = ct.api.get_logs(client, name=name, build_id=target, next_token=token)
+            # One drain, shared with the follow path. Stopping at the first page showed
+            # the OLDEST output and called it the log — the opposite of what someone
+            # inspecting a failed build needs. Never blocks: it follows tokens already
+            # issued and stops when the server stops issuing them.
+            page, _, _ = ct_flow.drain_logs(client, name=name, build_id=target, on_event=collect)
+    # The lines go in the PAYLOAD, not only through the renderer. `output.info` is
+    # suppressed in JSON mode — which is the default whenever stdout is piped — so a
+    # status-only payload meant `tamarind --json ct logs` returned no logs at all,
+    # having just fetched every one of them.
     output.emit(
-        {"buildId": target, "buildStatus": page.build_status, "error": page.error_message},
+        {
+            "buildId": target,
+            "buildStatus": page.build_status,
+            "error": page.error_message,
+            "logs": collected,
+        },
         state.output,
         human=f"build {target}: {page.build_status}",
     )
@@ -507,22 +514,21 @@ def config(
             if changes
             else ct.get_tool(client, name=name)
         )
+    latest = tool.raw.get("latest", tool.raw)
     shown = {
-        k: tool.raw.get("latest", tool.raw).get(k)
-        for k in (
-            "gpuType",
-            "memory",
-            "cpu",
-            "homeDiskGi",
-            "displayName",
-            "description",
-            "envVars",
-        )
+        k: latest.get(k)
+        for k in ("gpuType", "memory", "cpu", "homeDiskGi", "displayName", "description")
     }
+    # NAMES only. These are the values someone just stored with `--env`, i.e. exactly
+    # the API keys this command exists to keep out of the source archive — and JSON is
+    # the default the moment stdout is piped, so printing them puts credentials into CI
+    # logs. The names are what a caller actually needs to confirm the write landed.
+    env_vars = latest.get("envVars")
+    shown["envVarNames"] = sorted(env_vars) if isinstance(env_vars, dict) else []
     output.emit(
         shown,
         state.output,
-        human="\n".join(f"{k}: {v}" for k, v in shown.items() if v is not None),
+        human="\n".join(f"{k}: {v}" for k, v in shown.items() if v not in (None, [])),
     )
 
 
@@ -543,13 +549,11 @@ def clone(
     destroy that work — and `clone name .` is an easy way to ask for exactly that.
     """
     state = ctx.obj
-    target = Path(dest) if dest else Path.cwd() / name
-    if target.exists() and any(target.iterdir()) and not force:
-        raise ValidationError(
-            f"'{target}' is not empty. Cloning extracts over whatever is there, so "
-            f"local edits would be lost. Choose an empty folder, or pass --force if "
-            f"overwriting is what you want."
-        )
+    # The same guard `init` uses. Two copies of it drifted once already: both crashed
+    # with a raw NotADirectoryError when the destination was an existing FILE.
+    target = ct_flow.ensure_usable_destination(
+        Path(dest) if dest else Path.cwd() / name, allow_nonempty=force
+    )
 
     with state.rest_client() as client:
         ref = None
@@ -557,6 +561,15 @@ def clone(
             found = ct.plan.find_version(ct.get_versions(client, name=name), version)
             if found is None:
                 raise ValidationError(f"'{name}' has no version {version}.")
+            if not found.ref:
+                # A null ref would fall through to "no ref parameter", which fetches the
+                # tool's CURRENT source — a different tree, reported as the version the
+                # user asked for. The pinned-submit path already refuses this.
+                raise ValidationError(
+                    f"Version {version} of '{name}' records no source ref, so its exact "
+                    f"tree cannot be fetched. `tamarind ct clone {name}` gets the current "
+                    f"source instead."
+                )
             ref = found.ref
         _, pointer_paths = ct.flow.fetch_source(client, name=name, destination=target, ref=ref)
 

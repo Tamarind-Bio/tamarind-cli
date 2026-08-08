@@ -501,3 +501,71 @@ def test_clone_refuses_a_non_empty_destination(tmp_path):
     combined = res.output + str(res.exception or "")
     assert "not empty" in combined or "--force" in combined
     assert (dest / "main.py").read_text() == "my unsaved edits\n", "the guard did not protect"
+
+
+@respx.mock
+def test_ct_config_never_prints_environment_values():
+    """THE credential leak. `--env` exists precisely so an API key stays OUT of the
+    source archive; echoing it back on the next `ct config` puts it in CI logs instead,
+    since JSON is the default whenever stdout is piped.
+
+    Without the redaction the payload contains `envVars` with the literal secret and
+    the `SUPER_SECRET_VALUE` assertion fails.
+    """
+    respx.get(f"{API}v2/custom-tools/mytool").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "latest": {
+                    "name": "mytool",
+                    "gpuType": "A100",
+                    "envVars": {"OPENAI_API_KEY": "SUPER_SECRET_VALUE"},
+                }
+            },
+        )
+    )
+    res = runner.invoke(app, ["--json", "ct", "config", "mytool"], env=ENV)
+    assert res.exit_code == 0, res.output
+    assert "SUPER_SECRET_VALUE" not in res.output, "an env value was printed"
+    payload = json.loads(res.output)
+    # The NAME is still reported — that is what confirms the write landed.
+    assert payload["envVarNames"] == ["OPENAI_API_KEY"]
+    assert "envVars" not in payload
+
+
+@respx.mock
+def test_ct_logs_puts_the_lines_in_the_json_payload():
+    """`output.info` is suppressed in JSON mode, so a status-only payload meant
+    `tamarind --json ct logs` returned no logs at all — having just fetched them.
+
+    Without accumulating into the payload, `payload["logs"]` is absent and this fails.
+    """
+    respx.get(f"{API}v2/custom-tools/mytool/logs").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "buildStatus": "FAILED",
+                "logs": [{"message": "step 1"}, {"message": "the real error"}],
+            },
+        )
+    )
+    res = runner.invoke(app, ["--json", "ct", "logs", "mytool", "--build-id", "b-1"], env=ENV)
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert [entry["message"] for entry in payload["logs"]] == ["step 1", "the real error"]
+    assert payload["buildStatus"] == "FAILED"
+
+
+@respx.mock
+def test_clone_refuses_a_version_with_no_source_ref():
+    """A null ref falls through to "no ref parameter", which fetches the tool's CURRENT
+    source — a different tree, reported as the version that was asked for."""
+    respx.get(f"{API}v2/custom-tools/mytool/versions").mock(
+        return_value=httpx.Response(200, json=[{"versionName": "v1", "status": "Complete"}])
+    )
+    res = runner.invoke(
+        app, ["ct", "clone", "mytool", "/tmp/ct-clone-noref", "--version", "v1"], env=ENV
+    )
+    assert res.exit_code != 0
+    combined = res.output + str(res.exception or "")
+    assert "source ref" in combined
