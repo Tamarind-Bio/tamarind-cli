@@ -330,7 +330,10 @@ def inspect_folder(folder: Path | str) -> manifest.Findings:
             else "No config.json — the tool has no declared inputs or outputs."
         )
 
-    found = inspect_manifest(root)
+    # Only read the manifest when there IS one that will ship. Parsing a config.json
+    # that is a symlink (and therefore excluded from the upload) reports a JSON error
+    # about a file the server will never see, burying the actual problem.
+    found = manifest.Findings() if _missing("config.json") else inspect_manifest(root)
     return manifest.Findings(
         errors=tuple(problems) + tuple(f"config.json: {e}" for e in found.errors),
         warnings=found.warnings,

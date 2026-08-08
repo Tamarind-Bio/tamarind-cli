@@ -224,7 +224,7 @@ class TestSecretMatchingIsCaseInsensitive:
 
     @pytest.mark.parametrize(
         "name",
-        ["server.PEM", "PRIVATE.KEY", "ID_RSA", ".AWS/credentials", "Secrets.YAML", ".ENV"],
+        ["server.PEM", "PRIVATE.KEY", "ID_RSA", ".AWS/credentials", "CREDENTIALS", ".ENV"],
     )
     def test_uppercase_credentials_are_still_excluded(self, name: str) -> None:
         assert packaging.classify(name).disposition is Disposition.SECRET
