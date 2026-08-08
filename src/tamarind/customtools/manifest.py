@@ -309,7 +309,7 @@ def _check_batching(inputs: list, errors: list[str], facts: dict) -> None:
         errors.append(f"Only one input may enable design batching; found: {names}.")
     for entry in batching:
         per_batch = entry.get("designsPerBatch")
-        if not _is_int(per_batch) or int(per_batch) < 1:
+        if not isinstance(per_batch, (int, float)) or not _is_int(per_batch) or int(per_batch) < 1:
             errors.append(
                 f"Input {entry.get('name')!r} enables design batching but has no "
                 f"valid designsPerBatch (>= 1)."

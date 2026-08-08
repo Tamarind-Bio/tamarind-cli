@@ -26,11 +26,15 @@ def is_terminal_build(status: str | None) -> bool:
     obvious two leaves a poll loop running forever when a build FAULTs or is rejected
     as a CLIENT_ERROR.
     """
-    return bool(status) and status.upper() in wire.TERMINAL_BUILD_STATUSES
+    if not status:
+        return False
+    return status.upper() in wire.TERMINAL_BUILD_STATUSES
 
 
 def build_succeeded(status: str | None) -> bool:
-    return bool(status) and status.upper() == wire.SUCCESSFUL_BUILD_STATUS
+    if not status:
+        return False
+    return status.upper() == wire.SUCCESSFUL_BUILD_STATUS
 
 
 # ------------------------------------------------------------------ reconcile ----
@@ -164,29 +168,37 @@ def reconcile(
     the race as a reportable outcome would add a state the shell can never produce.
     """
     path = result.path
-    common = {
-        "path": path,
-        "version_name": result.version_name,
-        "build_id": result.build_id,
-        "raw": result.raw,
-    }
+
+    def outcome(*, deployed: bool, reason: str, confirmed: bool = True) -> DeployOutcome:
+        """Every branch differs only in the three fields it decides; the rest are the
+        server's answer carried through unchanged. Spelling them once here keeps a
+        branch from quietly dropping `version_name`, which `publish` needs."""
+        return DeployOutcome(
+            path=path,
+            version_name=result.version_name,
+            build_id=result.build_id,
+            raw=result.raw,
+            deployed=deployed,
+            reason=reason,
+            confirmed=confirmed,
+        )
 
     if path == "building":
-        return DeployOutcome(**common, deployed=True, reason="built", confirmed=extraction_landed)
+        return outcome(deployed=True, reason="built", confirmed=extraction_landed)
     if path == "saved":
-        return DeployOutcome(**common, deployed=True, reason="saved", confirmed=extraction_landed)
+        return outcome(deployed=True, reason="saved", confirmed=extraction_landed)
     if path == "noop":
         if ref_moved:
             # Our upload landed, yet the server found an existing version at that exact
             # source. Someone deployed the same content first; the state is correct.
-            return DeployOutcome(**common, deployed=False, reason="already-deployed")
+            return outcome(deployed=False, reason="already-deployed")
         if not extraction_landed:
-            return DeployOutcome(**common, deployed=False, reason="unconfirmed")
-        return DeployOutcome(**common, deployed=False, reason="unchanged")
+            return outcome(deployed=False, reason="unconfirmed")
+        return outcome(deployed=False, reason="unchanged")
 
     # An unrecognized path. Report it rather than guessing — a server that invents a
     # fourth outcome should surface, not be silently mapped onto one of the three.
-    return DeployOutcome(**common, deployed=False, reason=f"unknown-path:{path}")
+    return outcome(deployed=False, reason=f"unknown-path:{path}")
 
 
 # -------------------------------------------------------------------- versions ----

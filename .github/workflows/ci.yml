@@ -46,6 +46,13 @@ jobs:
         run: uv run pytest
       - name: Lint
         run: uv run ruff check .
+      # Scoped to `customtools` on purpose. Type annotations had NO enforcement here
+      # at all, so they were documentation — and this package is where the invariants
+      # that kept breaking now live (`Destination`, `ConfirmedVersion`), which is
+      # exactly where a checker earns its keep. The rest of `src` has 21 pre-existing
+      # errors; widening the scope is a follow-up, not a prerequisite.
+      - name: Type-check custom tools
+        run: uv run mypy src/tamarind/customtools
 
   cross-platform:
     name: ${{ matrix.os }}

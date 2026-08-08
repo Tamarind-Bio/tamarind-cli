@@ -23,6 +23,7 @@ tamarind = "tamarind.cli.main:run"
 
 [project.optional-dependencies]
 dev = [
+    "mypy>=1.11",
     "pytest>=8.0",
     "respx>=0.21",
     "ruff>=0.5",

@@ -139,7 +139,8 @@ def parse_tool(payload: Any) -> Tool:
     """
     if not isinstance(payload, Mapping):
         return Tool()
-    inner = payload.get("latest") if isinstance(payload.get("latest"), Mapping) else payload
+    nested = payload.get("latest")
+    inner: Mapping[str, Any] = nested if isinstance(nested, Mapping) else payload
     return Tool(
         name=_str_or_none(inner.get("name")),
         status=_str_or_none(inner.get("status")),
