@@ -367,3 +367,51 @@ def test_exit_codes_are_distinct() -> None:
 
     codes = [v for k, v in vars(errors.ExitCode).items() if isinstance(v, int)]
     assert len(codes) == len(set(codes)), "duplicate ExitCode values"
+
+
+# Modules allowed to call a raw write, each for a stated reason rather than by being
+# quietly omitted. `project` DEFINES the safe primitive. `archive` writes the zip to a
+# temp path the library chose. `config` writes the user's OWN ~/.tamarind/config.json,
+# which is not a destination any command argument points at — the recurring defect was
+# writing into a folder the CALLER named, and that is what this rule guards.
+_MAY_WRITE_RAW = {"project.py", "archive.py", "config.py"}
+
+# Raw writes that follow a symlink sitting at the destination.
+_FOLLOWING_WRITES = frozenset({"write_text", "write_bytes"})
+
+
+def test_user_controlled_writes_do_not_follow_symlinks() -> None:
+    """Every write into a user-controlled path goes through one no-follow primitive.
+
+    This rule exists because the same defect shipped FOUR times in this package, each
+    time in a newly-added call site: the archive walk followed links into secrets,
+    `clone --force` extracted through them, preflight blessed a symlinked Dockerfile,
+    and the `.tamarind` marker write followed a link out of the destination. Each was
+    fixed on its own and the next one was written the same way, because nothing made
+    the safe form the default.
+
+    `project.write_without_following_links` is that default. Enforcing its use here is
+    the difference between an invariant and an intention — the previous three rounds of
+    "I swept for the other copies" were intentions, and each was wrong.
+
+    Not a claim that every write is safe: a `chmod` or an `open(..., "w")` would slip
+    past this. It closes the form that actually recurred.
+    """
+    offenders = []
+    for path in _library_modules():
+        if path.name in _MAY_WRITE_RAW:
+            continue
+        for node in ast.walk(ast.parse(path.read_text())):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in _FOLLOWING_WRITES
+            ):
+                offenders.append(
+                    f"{path.parent.name}/{path.name}:{node.lineno} .{node.func.attr}()"
+                )
+    assert not offenders, (
+        "raw write that follows a symlink at the destination: "
+        + "; ".join(sorted(offenders))
+        + " — use project.write_without_following_links()"
+    )

@@ -21,6 +21,11 @@ from enum import Enum
 SECRET_PATTERNS = (
     ".env",
     ".env.*",
+    # direnv. `.envrc` is NOT matched by `.env.*` (no dot after "env"), and it holds
+    # `export OPENAI_API_KEY=...` exactly as often as `.env` does.
+    ".envrc",
+    ".envrc.*",
+    ".direnvrc",
     "*.pem",
     "*.key",
     "*.p12",

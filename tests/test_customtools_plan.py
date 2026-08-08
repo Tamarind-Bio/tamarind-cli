@@ -249,3 +249,38 @@ class TestUnconfirmedExtraction:
         assert plan.reconcile(ref_moved=False, result=_result("noop", build=None)).reason == (
             "unchanged"
         )
+
+
+class TestPublishableRequiresConfirmation:
+    """The gate that replaced a third recheck point.
+
+    The recheck was widened twice and still missed a window (the source can land DURING
+    a long `wait_for_build`). Rather than add a fourth check, the doubt is carried on
+    the outcome and the one irreversible action is gated on it.
+    """
+
+    def test_an_unconfirmed_build_is_deployed_but_not_publishable(self) -> None:
+        """Without `confirmed`, this reports `deployed: true` and `--publish` promotes a
+        version that may have been built from the previous source."""
+        out = plan.reconcile(ref_moved=False, result=_result("building"), extraction_landed=False)
+        assert out.deployed is True, "the server did act; that much is true"
+        assert out.confirmed is False
+        assert out.publishable is False
+
+    def test_a_confirmed_build_is_publishable(self) -> None:
+        out = plan.reconcile(ref_moved=True, result=_result("building"), extraction_landed=True)
+        assert out.publishable is True
+
+    @pytest.mark.parametrize("path", ["building", "saved"])
+    def test_both_deploying_paths_carry_the_doubt(self, path: str) -> None:
+        """`saved` ships an image just as `building` does, so it needs the same gate."""
+        out = plan.reconcile(ref_moved=False, result=_result(path), extraction_landed=False)
+        assert out.confirmed is False and out.publishable is False
+
+    def test_a_no_op_is_never_publishable(self) -> None:
+        """Nothing was deployed, so there is nothing to promote regardless."""
+        out = plan.reconcile(ref_moved=False, result=_result("noop", build=None))
+        assert out.publishable is False
+
+    def test_confirmation_defaults_to_true_for_existing_callers(self) -> None:
+        assert plan.reconcile(ref_moved=True, result=_result("building")).confirmed is True

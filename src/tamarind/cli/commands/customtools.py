@@ -40,6 +40,31 @@ def _renderer(state) -> "callable":
     return handle
 
 
+def _looks_like_already_exists(exc: TamarindError) -> bool:
+    """Whether a 400 is the server saying the tool is already there.
+
+    Message matching is unlovely, but the alternative is worse: the endpoint reports
+    both "already exists" and "that name is invalid" as 400, and treating the whole
+    class as a conflict swallowed real errors. Kept deliberately narrow — an unmatched
+    message re-raises, so a new phrasing surfaces the error rather than hiding it.
+    """
+    text = str(getattr(exc, "message", exc)).lower()
+    return "exist" in text or "already" in text or "duplicate" in text or "taken" in text
+
+
+def _attach_logs(exc: TamarindError, build_id: str, collected: list) -> None:
+    """Carry the drained log lines out on the exception.
+
+    The CLI renders `detail` into the structured error, so this is what keeps the
+    output someone asked for from being discarded exactly when the build failed.
+    """
+    detail = dict(exc.detail) if isinstance(exc.detail, dict) else {}
+    if exc.detail is not None and not isinstance(exc.detail, dict):
+        detail["upstreamDetail"] = exc.detail
+    detail.update(buildId=build_id, logs=collected)
+    exc.detail = detail
+
+
 def _outcome_payload(outcome: ct.DeployOutcome, name: str) -> dict:
     return {
         "tool": name,
@@ -49,6 +74,9 @@ def _outcome_payload(outcome: ct.DeployOutcome, name: str) -> dict:
         # The field a script branches on. Deliberately NOT re-derived from `path` by
         # the caller — that inference is made once, in plan.reconcile.
         "deployed": outcome.deployed,
+        # Whether the deploy is known to have used YOUR source. A script that publishes
+        # on its own should branch on this, not on `deployed`.
+        "confirmed": outcome.confirmed,
         "reason": outcome.reason,
         "detail": outcome.explanation,
     }
@@ -115,7 +143,15 @@ def register(app_root: typer.Typer) -> None:
                 try:
                     ct.create_tool(client, name=tool)
                 except TamarindError as exc:
-                    if getattr(exc, "status_code", None) not in (400, 409):
+                    # A 409 is unambiguous. A 400 is the whole validation class — an
+                    # invalid tool name arrives as one too — so suppressing every 400
+                    # hid the real error, wrote a marker for a tool that was never
+                    # created, and failed confusingly at the upload instead.
+                    status = getattr(exc, "status_code", None)
+                    already_exists = status == 409 or (
+                        status == 400 and _looks_like_already_exists(exc)
+                    )
+                    if not already_exists:
                         raise
                 # Written on BOTH paths. Skipping it on the already-exists branch left a
                 # folder deploying to `--name other-tool` with no record of it, so the
@@ -131,7 +167,18 @@ def register(app_root: typer.Typer) -> None:
             )
             payload = _outcome_payload(outcome, tool)
 
-            if publish_after and outcome.deployed and outcome.version_name:
+            if publish_after and outcome.deployed and not outcome.publishable:
+                # The build may have run against the previous source. Publishing is the
+                # irreversible step, so it stops here rather than promoting a version
+                # nobody asked to ship. The deploy itself still reports what it did.
+                raise ValidationError(
+                    f"Deployed, but the server never confirmed it unpacked this upload, "
+                    f"so {outcome.version_name} may have been built from the previous "
+                    f"source. Not publishing. Check `tamarind ct status {tool}`, then "
+                    f"`tamarind publish {tool} <version>` when you are satisfied.",
+                    detail=_outcome_payload(outcome, tool),
+                )
+            if publish_after and outcome.publishable and outcome.version_name:
                 _, published = ct.publish(client, name=tool, version_name=outcome.version_name)
                 payload["published"] = published
 
@@ -401,7 +448,14 @@ def logs(
 
         render = _renderer(state)
         if follow:
-            page = ct.wait_for_build(client, name=name, build_id=target, on_event=collect)
+            try:
+                page = ct.wait_for_build(client, name=name, build_id=target, on_event=collect)
+            except TamarindError as exc:
+                # A FAILED build is the case someone runs this for, and the raise
+                # skipped the payload entirely — so `--json ct logs --follow` returned
+                # error metadata and none of the output it had just collected.
+                _attach_logs(exc, target, collected)
+                raise
         else:
             # One drain, shared with the follow path. Stopping at the first page showed
             # the OLDEST output and called it the log — the opposite of what someone
@@ -501,7 +555,10 @@ def config(
                 ("--display-name", display_name),
                 ("--description", description),
             )
-            if value
+            # `is not None`, not truthiness: `--cpu 0` is a supplied flag with a falsey
+            # value, so the truthy filter dropped it and applied config.json alone while
+            # reporting success — the exact silent discard this check was added to stop.
+            if value is not None
         ]
         if ignored:
             raise ValidationError(

@@ -68,3 +68,30 @@ class TestResolveName:
         from tamarind.customtools import packaging
 
         assert packaging.classify(project.PROJECT_FILENAME).included is False
+
+
+class TestTheMarkerWriteDoesNotFollowLinks:
+    def test_a_symlinked_marker_is_replaced_not_written_through(self, tmp_path) -> None:
+        """The fourth symlink escape in this package. `.tamarind` is not an archive
+        member, so `clone --force`'s extraction guard never removes it — and this write
+        then followed the link and overwrote its target outside the destination.
+
+        Without the no-follow write, `outside.read_text()` becomes the marker JSON and
+        the final assertion fails.
+        """
+        outside = tmp_path / "outside.txt"
+        outside.write_text("ORIGINAL\n")
+        folder = tmp_path / "dest"
+        folder.mkdir()
+        (folder / project.PROJECT_FILENAME).symlink_to(outside)
+
+        project.write(folder, name="my-tool")
+
+        assert project.read(folder).name == "my-tool"
+        assert outside.read_text() == "ORIGINAL\n", "wrote through the link"
+        assert not (folder / project.PROJECT_FILENAME).is_symlink()
+
+    def test_an_ordinary_marker_is_overwritten_normally(self, tmp_path) -> None:
+        project.write(tmp_path, name="first")
+        project.write(tmp_path, name="second")
+        assert project.read(tmp_path).name == "second"

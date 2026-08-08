@@ -125,6 +125,7 @@ def download_archive(
     immediately redeployable.
     """
     params = {"ref": ref} if ref else None
+    ours = destination is None
     if destination is not None:
         target = Path(destination)
     else:
@@ -145,11 +146,32 @@ def download_archive(
         # clone that runs out of space ends in a traceback rather than the structured
         # error every other failure produces — and the bigger the clone, the likelier it
         # is to be the one that hits it.
+        _discard_partial(target, ours)
         raise TamarindError(
             f"Could not write the downloaded archive to '{target}': {exc}",
             detail={"tool": name, "destination": str(target), "errno": exc.errno},
         ) from exc
+    except BaseException:
+        # Any other failure mid-stream — a transport error, or the caller interrupting.
+        # A path WE invented is invisible to the caller, so nobody else can ever clean
+        # it up, and a failed 5 GiB download would sit in the temp directory forever.
+        _discard_partial(target, ours)
+        raise
     return target
+
+
+def _discard_partial(target: Path, ours: bool) -> None:
+    """Remove a half-written archive, but only one this function created.
+
+    An explicit destination belongs to the caller: deleting it on failure would
+    destroy a file they chose, which is not this function's call to make.
+    """
+    if not ours:
+        return
+    try:
+        target.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------------- deploy ----

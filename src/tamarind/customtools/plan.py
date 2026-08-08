@@ -63,7 +63,27 @@ class DeployOutcome:
     build_id: str | None = None
     deployed: bool = False
     reason: str = "unchanged"
+    # Whether we ever OBSERVED our own upload in the repository. False means this
+    # deploy may have run against the previous source, whatever the server reported.
+    #
+    # Separate from `deployed` because the two answer different questions and only one
+    # of them can be trusted here: `deployed` says the server acted, `confirmed` says
+    # it acted on OUR source. Rechecking the ref at more and more points kept missing
+    # a window (before the build wait, then during it); carrying the doubt forward
+    # instead means the caller decides, once, whether that doubt matters.
+    confirmed: bool = True
     raw: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def publishable(self) -> bool:
+        """Whether promoting this version org-wide is a safe thing to do.
+
+        Publishing is the one irreversible step, and publishing a version built from
+        source nobody asked to ship is the worst outcome this whole sequence exists to
+        prevent. An unconfirmed deploy is therefore never publishable — the caller can
+        still check `ct status` and publish deliberately.
+        """
+        return self.deployed and self.confirmed
 
     @property
     def explanation(self) -> str:
@@ -122,9 +142,9 @@ def reconcile(
     }
 
     if path == "building":
-        return DeployOutcome(**common, deployed=True, reason="built")
+        return DeployOutcome(**common, deployed=True, reason="built", confirmed=extraction_landed)
     if path == "saved":
-        return DeployOutcome(**common, deployed=True, reason="saved")
+        return DeployOutcome(**common, deployed=True, reason="saved", confirmed=extraction_landed)
     if path == "noop":
         if ref_moved:
             # Our upload landed, yet the server found an existing version at that exact

@@ -57,13 +57,35 @@ def read(folder: Path | str) -> Project | None:
 
 
 def write(folder: Path | str, *, name: str) -> Path:
-    """Record ``name`` as the folder's tool. Returns the file written."""
+    """Record ``name`` as the folder's tool. Returns the file written.
+
+    Writes through :func:`write_without_following_links`, because this is the FOURTH
+    place a symlink could redirect a write outside the folder we were asked to touch.
+    The marker is not an archive member, so `clone --force`'s extraction guard never
+    sees it — a `.tamarind` symlink in the destination survives extraction and then
+    catches this write.
+    """
     path = Path(folder) / PROJECT_FILENAME
+    write_without_following_links(path, json.dumps({"name": name}, indent=2) + "\n")
+    return path
+
+
+def write_without_following_links(path: Path, text: str) -> None:
+    """Write ``text`` to ``path``, replacing a symlink rather than writing through it.
+
+    THE one write primitive for user-controlled destinations. Four separate symlink
+    escapes have now been fixed in this package one call site at a time (the archive
+    walk, extraction, the preflight checks, and this marker); the pattern is that each
+    new write is written with `write_text` and only later noticed. Routing every one
+    through here — and enforcing that in `tests/test_layering.py` — is what makes the
+    fifth instance fail a test instead of shipping.
+    """
+    if path.is_symlink():
+        path.unlink()
     try:
-        path.write_text(json.dumps({"name": name}, indent=2) + "\n")
+        path.write_text(text)
     except OSError as exc:
         raise TamarindError(f"Could not write {path}: {exc}") from exc
-    return path
 
 
 def resolve_name(folder: Path | str, explicit: str | None = None) -> str:
