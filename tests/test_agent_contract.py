@@ -152,7 +152,18 @@ def test_dangling_global_value_option_keeps_precise_json_usage_error(monkeypatch
     assert "Missing command" not in payload["error"]["message"]
 
 
-@pytest.mark.parametrize("argv", [["tamarind"], ["tamarind", "--json", "files"]])
+# Every registered group. `ct` was added to the CLI but not to _COMMAND_GROUPS, so it
+# was the one group that printed Rich help to STDOUT under --json instead of the
+# structured error — the single thing this contract promises never to happen.
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["tamarind"],
+        ["tamarind", "--json", "files"],
+        ["tamarind", "--json", "auth"],
+        ["tamarind", "--json", "ct"],
+    ],
+)
 def test_json_no_command_is_clean_and_machine_readable(argv, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", argv)
 

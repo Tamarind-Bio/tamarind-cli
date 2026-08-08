@@ -501,13 +501,3 @@ def test_clone_refuses_a_non_empty_destination(tmp_path):
     combined = res.output + str(res.exception or "")
     assert "not empty" in combined or "--force" in combined
     assert (dest / "main.py").read_text() == "my unsaved edits\n", "the guard did not protect"
-
-
-def test_json_mode_reports_a_missing_ct_subcommand(tmp_path):
-    """`tamarind --json ct` must emit the structured usage error, not Rich help on
-    stdout. `ct` was registered as a group but never added to _COMMAND_GROUPS, so it
-    was the one group that broke the machine-readable contract."""
-    res = runner.invoke(app, ["--json", "ct"], env=ENV)
-    assert res.exit_code != 0
-    combined = res.output + str(res.exception or "")
-    assert "Missing command" in combined
