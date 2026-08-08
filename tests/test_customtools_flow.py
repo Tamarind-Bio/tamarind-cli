@@ -11,6 +11,7 @@ original bug and cannot be reproduced against a real server on demand.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -783,6 +784,14 @@ class TestStaleDeployIsRedeployedWhateverThePath:
 
 
 class TestExecutableBitsSurviveAClone:
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason=(
+            "Windows has no executable bit — chmod there only toggles read-only, so the "
+            "behaviour under test does not exist. The restore is a no-op rather than a "
+            "failure (the OSError guard covers it), which the companion test checks."
+        ),
+    )
     def test_an_executable_member_stays_executable(self, tmp_path) -> None:
         """`ZipFile.extract` drops the Unix mode, so a cloned `install.sh` came back
         0644 and `RUN ./install.sh` failed on a tree that built fine before.
