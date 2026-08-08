@@ -259,3 +259,32 @@ class TestPinnedBatchSkipsLiveValidation:
         source = inspect.getsource(jobs_cmds)
         assert "if prevalidate and not tool_version:" in source
         assert "if not skip_validate and not tool_version:" in source
+
+
+class TestCountsAreReportedWithoutNames:
+    def test_a_counts_only_success_reports_how_many_started(self) -> None:
+        """The reconciliation fix made counts-only responses correct about the OUTCOME
+        and silent about the SCALE: `submitted: []` and "0/3 jobs" for three jobs that
+        are running and billing.
+
+        Without `reported_submitted`, `submitted_count` is 0 here.
+        """
+        summary = plan.summarize_batch(wire.parse_batch_submission({"submitted": 3, "failed": 0}))
+        assert summary.submitted == (), "no names are available on this path"
+        assert summary.submitted_count == 3
+
+    def test_a_counts_only_partial_also_reports_the_count(self) -> None:
+        summary = plan.summarize_batch(wire.parse_batch_submission({"submitted": 3, "failed": 2}))
+        assert summary.outcome is plan.BatchOutcome.PARTIAL
+        assert summary.submitted_count == 3
+
+    def test_itemized_responses_count_the_names(self) -> None:
+        summary = plan.summarize_batch(
+            wire.parse_batch_submission(
+                _response([{"JobName": "a", "ok": True}, {"JobName": "b", "ok": False}])
+            )
+        )
+        assert summary.submitted_count == 1
+
+    def test_nothing_dispatched_counts_zero(self) -> None:
+        assert plan.summarize_batch(wire.parse_batch_submission({})).submitted_count == 0

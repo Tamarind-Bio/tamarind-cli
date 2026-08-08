@@ -176,7 +176,11 @@ def _submit_pinned_batch(
         "toolRef": tool_ref,
         "count": len(items),
         "outcome": summary.outcome.value,
+        # Names when the server itemized them; the COUNT always. A counts-only response
+        # has no names, and reporting an empty list for jobs that are running and
+        # billing is worse than reporting a number without names.
         "submitted": list(summary.submitted),
+        "submittedCount": summary.submitted_count,
         "failures": [{"jobName": n, "error": e} for n, e in summary.failures],
         # No parent row exists on this path, so say so rather than let a caller infer
         # one from `batchName` and query for something that was never created.
@@ -185,7 +189,7 @@ def _submit_pinned_batch(
     if summary.counts_disagreed:
         result["countsDisagreed"] = True
 
-    human = f"{summary.outcome.value}: {len(summary.submitted)}/{len(items)} jobs at {tool_ref}"
+    human = f"{summary.outcome.value}: {summary.submitted_count}/{len(items)} jobs at {tool_ref}"
     if summary.failures:
         first = summary.failures[0]
         human += f"  (first failure: {first[0]} — {first[1]})"

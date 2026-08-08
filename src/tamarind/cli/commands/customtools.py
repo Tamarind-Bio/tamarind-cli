@@ -178,6 +178,14 @@ def register(app_root: typer.Typer) -> None:
                     f"`tamarind publish {tool} <version>` when you are satisfied.",
                     detail=_outcome_payload(outcome, tool),
                 )
+            if publish_after and outcome.publishable and not outcome.version_name:
+                # `--publish` was asked for and the deploy succeeded, so exiting zero
+                # without publishing would report a request that was never carried out.
+                raise TamarindError(
+                    f"Deployed, but the server named no version, so there is nothing to "
+                    f"publish. `tamarind ct versions {tool}` shows what exists.",
+                    detail=_outcome_payload(outcome, tool),
+                )
             if publish_after and outcome.publishable and outcome.version_name:
                 _, published = ct.publish(client, name=tool, version_name=outcome.version_name)
                 payload["published"] = published
@@ -426,6 +434,11 @@ def logs(
     follow: bool = typer.Option(
         False, "--follow", "-f", help="Keep streaming until the build ends."
     ),
+    timeout: float = typer.Option(
+        ct_flow.BUILD_TIMEOUT,
+        "--timeout",
+        help="Seconds to keep following. Custom-tool builds can exceed the 1h default.",
+    ),
 ) -> None:
     """Build output, for reattaching after `--no-wait` or a dropped connection.
 
@@ -449,7 +462,9 @@ def logs(
         render = _renderer(state)
         if follow:
             try:
-                page = ct.wait_for_build(client, name=name, build_id=target, on_event=collect)
+                page = ct.wait_for_build(
+                    client, name=name, build_id=target, on_event=collect, timeout=timeout
+                )
             except TamarindError as exc:
                 # A FAILED build is the case someone runs this for, and the raise
                 # skipped the payload entirely — so `--json ct logs --follow` returned
@@ -538,6 +553,13 @@ def config(
     are secrets from anyone who can read your tool's source.
     """
     state = ctx.obj
+    if version is not None and apply is None:
+        # The option exists only as an --apply target, so accepting it alone reports
+        # success for an operation that never touched the version that was named.
+        raise ValidationError(
+            "--version only means something with --apply, which is what amends a built "
+            "version's snapshotted inputs. Add --apply DIR, or drop --version."
+        )
     tool = ct_project.resolve_name(apply or Path.cwd(), name)
     if apply is not None:
         # --apply pushes config.json and nothing else. Accepting the other flags
@@ -657,7 +679,16 @@ def clone(
                     f"source instead."
                 )
             ref = found.ref
-        _, pointer_paths = ct.flow.fetch_source(client, name=name, destination=target, ref=ref)
+        _, pointer_paths = ct.flow.fetch_source(
+            client,
+            name=name,
+            destination=target,
+            ref=ref,
+            # --force means "make this folder be that version", so files the version
+            # deleted must go too. Without this the clone is a merge, and a later deploy
+            # repackages the leftovers under the cloned version's name.
+            replace_contents=force,
+        )
 
     # THIRD write site for the marker, and the one that was missing. A clone into a
     # differently-named folder left no record, so the next bare `deploy` fell back to

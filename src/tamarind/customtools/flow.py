@@ -122,6 +122,16 @@ def ensure_usable_destination(destination: Path | str, *, allow_nonempty: bool =
                               extraction overwrites whatever is already there
     """
     target = Path(destination)
+    if target.is_symlink():
+        # Checked BEFORE exists()/is_dir(), both of which follow the link. A symlinked
+        # root makes every per-member and marker protection irrelevant: extraction
+        # writes through it and modifies a directory the command never named. This is
+        # the fifth place a link could redirect a write in this package, and the only
+        # one upstream of all the others.
+        raise ValidationError(
+            f"'{target}' is a symlink. Point this at a real directory — writing through "
+            f"a link would modify somewhere other than the path you named."
+        )
     if not target.exists():
         return target
     if not target.is_dir():
@@ -191,14 +201,29 @@ def wait_for_source(
         time.sleep(max(0.0, min(interval, deadline - time.monotonic())))
 
 
+@dataclass(frozen=True)
+class LogCursor:
+    """Where to resume reading a build's log.
+
+    A token alone is not a position. At the tail the server returns no `nextToken`, so
+    resuming from the token that FETCHED that page re-reads it and re-emits every line
+    — once per poll, for the whole rest of a long build. `consumed` records how many
+    lines of that page were already emitted, which is what makes the token a cursor
+    rather than just a request parameter.
+    """
+
+    token: str | None = None
+    consumed: int = 0
+
+
 def drain_logs(
     client: HTTPClient,
     *,
     name: str,
     build_id: str,
-    token: str | None = None,
+    cursor: LogCursor | None = None,
     on_event: EventHandler | None = None,
-) -> tuple[wire.LogPage, str | None, tuple[wire.LogLine, ...]]:
+) -> tuple[wire.LogPage, LogCursor, tuple[wire.LogLine, ...]]:
     """Read every page currently available. Returns (last page, next token, lines).
 
     ONE drain, because there were two and only one of them was right. The non-follow
@@ -211,17 +236,25 @@ def drain_logs(
     already issued and stops when it stops issuing new ones. A repeated token ends the
     loop rather than replaying the page forever.
     """
+    start = cursor or LogCursor()
+    token = start.token
+    skip = start.consumed
     seen: set[str] = set()
     lines: list[wire.LogLine] = []
     while True:
         page = api.get_logs(client, name=name, build_id=build_id, next_token=token)
-        for line in page.lines:
+        # Lines already emitted from THIS page on a previous call are not emitted again.
+        fresh = page.lines[skip:]
+        skip = 0
+        for line in fresh:
             _emit(on_event, "build", "log", line.message, line.timestamp)
-        lines.extend(page.lines)
+        lines.extend(fresh)
         following = page.next_token
         if not following or following in seen:
-            # Keep the last real token so a follow-up call resumes rather than replays.
-            return page, following or token, tuple(lines)
+            # No further page yet. Resume from the token that fetched this one, having
+            # recorded how much of it we consumed, so the next poll picks up any lines
+            # the server appends rather than replaying the ones already shown.
+            return page, LogCursor(token=token, consumed=len(page.lines)), tuple(lines)
         seen.add(following)
         token = following
 
@@ -244,11 +277,11 @@ def wait_for_build(
     message, which is already humanized.
     """
     deadline = time.monotonic() + max(0.0, timeout)
-    token: str | None = None
+    cursor = LogCursor()
     page = wire.LogPage()
     while True:
-        page, token, _ = drain_logs(
-            client, name=name, build_id=build_id, token=token, on_event=on_event
+        page, cursor, _ = drain_logs(
+            client, name=name, build_id=build_id, cursor=cursor, on_event=on_event
         )
         if plan.is_terminal_build(page.build_status):
             break
@@ -520,7 +553,12 @@ def publish(
 
 
 def fetch_source(
-    client: HTTPClient, *, name: str, destination: Path, ref: str | None = None
+    client: HTTPClient,
+    *,
+    name: str,
+    destination: Path,
+    ref: str | None = None,
+    replace_contents: bool = False,
 ) -> tuple[Path, tuple[str, ...]]:
     """Download a tool's source into ``destination``. Returns it and any LFS pointers.
 
@@ -531,8 +569,36 @@ def fetch_source(
     """
     with tempfile.TemporaryDirectory() as tmp:
         zip_path = Path(tmp) / "source.zip"
+        # Downloaded BEFORE anything is cleared: a failed download must not leave the
+        # destination emptied of the work it held.
         api.download_archive(client, name=name, ref=ref, destination=zip_path)
+        if replace_contents:
+            _clear_directory(Path(destination))
         return unpack_source(zip_path, destination)
+
+
+def _clear_directory(target: Path) -> None:
+    """Empty a directory so its contents match what is about to be extracted.
+
+    Extraction only overwrites paths the archive contains, so a forced clone left files
+    that the requested version had DELETED — and a later deploy repackaged them,
+    silently reintroducing removed code into a build reported as that version.
+
+    Entries are removed without following links: unlinking a symlinked directory
+    removes the link, never what it points at.
+    """
+    import shutil
+
+    if not target.is_dir():
+        return
+    for entry in target.iterdir():
+        try:
+            if entry.is_symlink() or entry.is_file():
+                entry.unlink()
+            elif entry.is_dir():
+                shutil.rmtree(entry)
+        except OSError as exc:
+            raise TamarindError(f"Could not clear '{entry}' before cloning: {exc}") from exc
 
 
 def _extract_without_following_links(zf, target: Path) -> None:

@@ -45,7 +45,27 @@ SECRET_PATTERNS = (
 )
 
 # Directories whose contents are always credentials or local machine state.
-SECRET_DIRS = (".ssh", ".aws", ".gcloud", ".azure", ".config/gcloud")
+# Directories whose contents are always credentials or local machine state. This list
+# has now been extended three times; the failure mode is always the same — a store this
+# list has not heard of, sitting in a folder someone deployed from. Kept broad rather
+# than minimal for that reason: a false exclusion costs one confused author, a missing
+# one publishes a working credential into an image layer that outlives its deletion.
+SECRET_DIRS = (
+    ".ssh",
+    ".aws",
+    ".gcloud",
+    ".azure",
+    ".config/gcloud",
+    ".kube",  # kubeconfig: cluster certs and tokens
+    ".docker",  # config.json: registry auth
+    ".gnupg",
+    ".password-store",
+    ".terraform.d",  # credentials.tfrc.json
+    ".oci",
+    ".kaggle",  # kaggle.json
+    ".config/gh",  # GitHub CLI hosts.yml
+    ".chef",
+)
 
 # Dropped as noise: build detritus and VCS internals. Harmless but large, and shipping
 # them slows every build.

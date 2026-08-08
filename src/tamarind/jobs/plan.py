@@ -106,6 +106,15 @@ class BatchSummary:
     submitted: tuple[str, ...]
     failures: tuple[tuple[str, str], ...]  # (job name, reason)
     counts_disagreed: bool = False
+    # How many the server said it dispatched. Not always the same as len(submitted):
+    # a counts-only response gives a number and no names, and reporting "0/3 jobs"
+    # for three billable jobs that DID start is its own kind of lie.
+    reported_submitted: int | None = None
+
+    @property
+    def submitted_count(self) -> int:
+        """How many jobs started, by the best evidence available."""
+        return len(self.submitted) or (self.reported_submitted or 0)
 
     @property
     def ok(self) -> bool:
@@ -133,10 +142,22 @@ def summarize_batch(submission: wire.BatchSubmission) -> BatchSummary:
         lost = submission.failed or 0
         unnamed = tuple(("<unnamed>", "no reason given") for _ in range(lost))
         if sent and lost:
-            return BatchSummary(outcome=BatchOutcome.PARTIAL, submitted=(), failures=unnamed)
+            return BatchSummary(
+                outcome=BatchOutcome.PARTIAL,
+                submitted=(),
+                failures=unnamed,
+                reported_submitted=sent,
+            )
         if sent:
-            return BatchSummary(outcome=BatchOutcome.SUBMITTED, submitted=(), failures=())
-        return BatchSummary(outcome=BatchOutcome.FAILED, submitted=(), failures=unnamed)
+            return BatchSummary(
+                outcome=BatchOutcome.SUBMITTED,
+                submitted=(),
+                failures=(),
+                reported_submitted=sent,
+            )
+        return BatchSummary(
+            outcome=BatchOutcome.FAILED, submitted=(), failures=unnamed, reported_submitted=0
+        )
 
     submitted = tuple(i.job_name or "" for i in submission.items if i.ok)
     failures = tuple(
@@ -161,6 +182,7 @@ def summarize_batch(submission: wire.BatchSubmission) -> BatchSummary:
         submitted=submitted,
         failures=failures,
         counts_disagreed=disagreed,
+        reported_submitted=submission.submitted,
     )
 
 

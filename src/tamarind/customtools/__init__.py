@@ -51,7 +51,7 @@ from .flow import (
     wait_for_build,
     wait_for_source,
 )
-from .flow import ExtractionResult, SourceState
+from .flow import ExtractionResult, LogCursor, SourceState
 from .manifest import Findings, check as check_manifest, parse_env_assignments
 from .packaging import Disposition, classify
 from .plan import DeployOutcome, is_terminal_build, select_publishable
@@ -65,6 +65,7 @@ __all__ = [
     "read_source_state",
     "ExtractionResult",
     "SourceState",
+    "LogCursor",
     "parse_env_assignments",
     "unpack_source",
     "fetch_source",

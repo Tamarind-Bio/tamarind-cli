@@ -125,6 +125,10 @@ def download_archive(
     immediately redeployable.
     """
     params = {"ref": ref} if ref else None
+    # ALWAYS stream to a temporary file and move it into place only once the body is
+    # complete. Opening the caller's destination with "wb" truncates it at byte zero, so
+    # a stream that failed halfway destroyed a file they already had and left a partial
+    # replacement — not cleaning it up afterwards is no help once it is already gone.
     ours = destination is None
     if destination is not None:
         target = Path(destination)
@@ -135,12 +139,17 @@ def download_archive(
         handle_fd, temp_name = tempfile.mkstemp(suffix=".zip")
         os.close(handle_fd)
         target = Path(temp_name)
+    staging_fd, staging_name = tempfile.mkstemp(suffix=".zip.part", dir=str(target.parent))
+    os.close(staging_fd)
+    staging = Path(staging_name)
     try:
         with client.stream("GET", f"{_PREFIX}/{name}/archive", params=params) as response:
-            with target.open("wb") as handle:
+            with staging.open("wb") as handle:
                 for chunk in response.iter_bytes():
                     handle.write(chunk)
+        staging.replace(target)
     except OSError as exc:
+        _discard_partial(staging, True)
         # A full disk, a read-only path, or an unwritable explicit destination. The CLI
         # boundary catches TamarindError and not arbitrary OSError, so without this a
         # clone that runs out of space ends in a traceback rather than the structured
@@ -153,8 +162,9 @@ def download_archive(
         ) from exc
     except BaseException:
         # Any other failure mid-stream — a transport error, or the caller interrupting.
-        # A path WE invented is invisible to the caller, so nobody else can ever clean
-        # it up, and a failed 5 GiB download would sit in the temp directory forever.
+        # The staging file always goes; a path WE invented goes too, since it is
+        # invisible to the caller and nobody else could ever clean it up.
+        _discard_partial(staging, True)
         _discard_partial(target, ours)
         raise
     return target

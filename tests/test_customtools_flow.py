@@ -823,3 +823,134 @@ class TestExecutableBitsSurviveAClone:
             zf.writestr("main.py", "x\n")
         folder, _ = flow.unpack_source(archive_path, tmp_path / "out")
         assert (folder / "main.py").read_text() == "x\n"
+
+
+class TestLogCursorDoesNotReplay:
+    def _paged(self, pages):
+        from tamarind.customtools import wire
+
+        def get_logs(client, *, name, build_id, next_token=None):
+            index = 0 if next_token is None else int(next_token)
+            body, token, status = pages[index]
+            return wire.LogPage(
+                build_status=status,
+                lines=tuple(wire.LogLine(message=m) for m in body),
+                next_token=token,
+            )
+
+        return get_logs
+
+    def test_a_second_drain_does_not_re_emit_the_tail(self, monkeypatch) -> None:
+        """THE regression. At the tail the server returns no nextToken, so resuming from
+        the token that FETCHED that page re-reads it — re-emitting the same lines once
+        per poll for the rest of a long build.
+
+        Without `LogCursor.consumed` the second drain returns ("a", "b") again and this
+        fails on an empty-list assertion.
+        """
+        pages = [(["a", "b"], None, "IN_PROGRESS")]
+        monkeypatch.setattr(flow.api, "get_logs", self._paged(pages))
+
+        _, cursor, first = flow.drain_logs(None, name="t", build_id="b-1")
+        assert [line.message for line in first] == ["a", "b"]
+
+        _, cursor2, second = flow.drain_logs(None, name="t", build_id="b-1", cursor=cursor)
+        assert [line.message for line in second] == [], "the tail was replayed"
+        assert cursor2.consumed == 2
+
+    def test_new_lines_appended_to_the_tail_are_emitted(self, monkeypatch) -> None:
+        """Skipping consumed lines must not skip genuinely new ones."""
+        from tamarind.customtools import wire
+
+        state = {"lines": ["a", "b"]}
+
+        def get_logs(client, *, name, build_id, next_token=None):
+            return wire.LogPage(
+                build_status="IN_PROGRESS",
+                lines=tuple(wire.LogLine(message=m) for m in state["lines"]),
+                next_token=None,
+            )
+
+        monkeypatch.setattr(flow.api, "get_logs", get_logs)
+        _, cursor, _ = flow.drain_logs(None, name="t", build_id="b-1")
+        state["lines"] = ["a", "b", "c"]
+        _, _, second = flow.drain_logs(None, name="t", build_id="b-1", cursor=cursor)
+        assert [line.message for line in second] == ["c"]
+
+
+class TestForcedCloneMatchesTheSource:
+    def test_stale_files_are_removed(self, tmp_path, monkeypatch) -> None:
+        """Extraction only overwrites paths the archive contains, so a forced clone left
+        files the requested version had DELETED — and a later deploy repackaged them,
+        reintroducing removed code under that version's name.
+
+        Without `replace_contents`, `deleted.py` survives and this fails.
+        """
+        import zipfile
+
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        (dest / "deleted.py").write_text("removed upstream\n")
+        (dest / "main.py").write_text("old\n")
+
+        def fake_download(client, *, name, ref=None, destination=None):
+            with zipfile.ZipFile(destination, "w") as zf:
+                zf.writestr("main.py", "new\n")
+            return destination
+
+        monkeypatch.setattr(flow.api, "download_archive", fake_download)
+        flow.fetch_source(None, name="t", destination=dest, replace_contents=True)
+
+        assert (dest / "main.py").read_text() == "new\n"
+        assert not (dest / "deleted.py").exists(), "a file the version deleted survived"
+
+    def test_a_failed_download_does_not_empty_the_folder(self, tmp_path, monkeypatch) -> None:
+        """Clearing happens AFTER the download, so a network failure must leave the
+        destination exactly as it was rather than destroying it for nothing."""
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        (dest / "work.py").write_text("mine\n")
+
+        def boom(client, *, name, ref=None, destination=None):
+            raise TamarindError("network")
+
+        monkeypatch.setattr(flow.api, "download_archive", boom)
+        with pytest.raises(TamarindError):
+            flow.fetch_source(None, name="t", destination=dest, replace_contents=True)
+        assert (dest / "work.py").read_text() == "mine\n"
+
+    def test_an_unforced_clone_leaves_contents_alone(self, tmp_path, monkeypatch) -> None:
+        import zipfile
+
+        dest = tmp_path / "dest"
+
+        def fake_download(client, *, name, ref=None, destination=None):
+            with zipfile.ZipFile(destination, "w") as zf:
+                zf.writestr("main.py", "new\n")
+            return destination
+
+        monkeypatch.setattr(flow.api, "download_archive", fake_download)
+        flow.fetch_source(None, name="t", destination=dest)
+        assert (dest / "main.py").read_text() == "new\n"
+
+
+class TestSymlinkedDestinationRoot:
+    def test_a_symlinked_root_is_refused(self, tmp_path) -> None:
+        """The fifth and outermost symlink escape: `is_dir()` follows the link, so every
+        per-member and marker protection downstream becomes irrelevant — extraction
+        writes into a directory the command never named."""
+        real = tmp_path / "elsewhere"
+        real.mkdir()
+        link = tmp_path / "dest"
+        link.symlink_to(real, target_is_directory=True)
+        with pytest.raises(ValidationError):
+            flow.ensure_usable_destination(link)
+
+    def test_a_symlinked_root_is_refused_even_with_force(self, tmp_path) -> None:
+        """--force permits overwriting THIS folder, not redirecting to another one."""
+        real = tmp_path / "elsewhere"
+        real.mkdir()
+        link = tmp_path / "dest"
+        link.symlink_to(real, target_is_directory=True)
+        with pytest.raises(ValidationError):
+            flow.ensure_usable_destination(link, allow_nonempty=True)
