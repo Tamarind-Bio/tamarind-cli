@@ -24,6 +24,7 @@ script passes nothing.
 
 from __future__ import annotations
 
+import json
 import tempfile
 import time
 from dataclasses import dataclass
@@ -33,7 +34,7 @@ from typing import Callable, Literal
 from ..errors import TamarindError, ValidationError
 from ..http import HTTPClient
 from ..upload import put_presigned
-from . import api, archive, plan, wire
+from . import api, archive, plan, project, wire
 
 Phase = Literal["check", "package", "upload", "extract", "deploy", "build"]
 Kind = Literal["status", "log", "warning"]
@@ -269,3 +270,117 @@ def publish(
                 f"image to publish." + (f" ({named.error_message})" if named.error_message else "")
             )
     return api.publish_version(client, name=name, version_name=version_name), version_name
+
+
+def unpack_source(blob: bytes, destination: Path) -> tuple[Path, tuple[str, ...]]:
+    """Extract a downloaded source archive. Returns the folder and any LFS pointers.
+
+    Shared by `init` and `clone` rather than written twice — the LFS detection is the
+    kind of detail that gets fixed in one copy and not the other.
+    """
+    import io
+    import zipfile
+
+    target = Path(destination)
+    target.mkdir(parents=True, exist_ok=True)
+    try:
+        with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+            zf.extractall(target)
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise TamarindError(f"Could not unpack the tool's source: {exc}") from exc
+    pointers = tuple(
+        p.relative_to(target).as_posix()
+        for p in sorted(target.rglob("*"))
+        if p.is_file() and _is_lfs_pointer(p)
+    )
+    return target, pointers
+
+
+def _is_lfs_pointer(path: Path) -> bool:
+    """Whether a file is a Git-LFS pointer rather than its content.
+
+    Archives serve LFS-tracked files as pointers, matching GitHub and GitLab, so a
+    cloned tool with large assets is not immediately redeployable. Worth saying rather
+    than letting the next build fail confusingly.
+    """
+    try:
+        with path.open("rb") as fh:
+            return fh.read(45).startswith(b"version https://git-lfs.github.com/spec")
+    except OSError:
+        return False
+
+
+def init(
+    client: HTTPClient,
+    *,
+    name: str,
+    destination: Path | str,
+    display_name: str | None = None,
+    on_event: EventHandler | None = None,
+) -> tuple[Path, project.Project]:
+    """Create a tool and put its starting files on disk.
+
+    The scaffold is generated SERVER-SIDE (`template="scratch"`) and downloaded, rather
+    than the CLI carrying its own copies. That matters because the server picks the
+    Dockerfile's base image from the tool's declared packages — GPU work gets a CUDA
+    base, conda gets miniconda — so local templates would be a fourth copy of that
+    logic and would drift the first time a base image moved.
+    """
+    target = Path(destination)
+    if target.exists() and any(target.iterdir()):
+        raise ValidationError(
+            f"'{target}' already exists and is not empty. Point `init` at a new folder, "
+            f"or use `tamarind ct clone {name}` to fetch an existing tool."
+        )
+
+    _emit(on_event, "check", "status", f"Creating {name}")
+    api.create_tool(client, name=name, display_name=display_name, template="scratch")
+
+    _emit(on_event, "package", "status", "Fetching the starting files")
+    blob = api.download_archive(client, name=name)
+    folder, pointers = unpack_source(blob, target)
+    for pointer in pointers:
+        _emit(
+            on_event,
+            "package",
+            "warning",
+            f"{pointer} came down as a Git-LFS pointer, not content.",
+        )
+
+    marker = project.write(folder, name=name)
+    _emit(on_event, "check", "status", f"Recorded the tool id in {marker.name}")
+    return folder, project.Project(name=name, path=marker)
+
+
+def apply_config(
+    client: HTTPClient,
+    *,
+    name: str,
+    folder: Path | str,
+    target_version: str | None = None,
+) -> dict:
+    """Push a folder's config.json to the tool WITHOUT building or minting a version.
+
+    This is the input-schema iteration loop. Deploying would also work — an
+    inputs-only change does not rebuild, because the rebuild decision hashes the
+    environment files rather than config.json — but it mints a version every time and a
+    new version is not live until it is published. Fiddling with a label through
+    `deploy` produces v7 through v12 differing by a text field.
+
+    ``target_version`` is the capability nothing else reaches: a version's inputs are
+    snapshotted when it builds and pinned by its ref, so this is the only way to
+    correct a schema on a version that already exists.
+    """
+    config = Path(folder) / "config.json"
+    if not config.is_file():
+        raise ValidationError(f"No config.json in '{folder}' — nothing to apply.")
+    try:
+        text = config.read_text()
+        json.loads(text)
+    except OSError as exc:
+        raise TamarindError(f"Could not read {config}: {exc}") from exc
+    except ValueError as exc:
+        # Refuse locally rather than letting the server reject it: the message here can
+        # name the line, and a round trip proves nothing the parser cannot.
+        raise ValidationError(f"{config} is not valid JSON: {exc}") from exc
+    return api.save_config(client, name=name, config_json=text, target_version=target_version)

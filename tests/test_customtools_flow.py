@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from tamarind.customtools import flow
-from tamarind.errors import TamarindError
+from tamarind.errors import TamarindError, ValidationError
 
 
 class FakeServer:
@@ -215,3 +215,131 @@ class TestSecretsNeverUpload:
         warnings = [e.message for e in seen if e.kind == "warning"]
         assert any(".env" in w for w in warnings), "the dropped credential was not reported"
         assert any("ct config --env" in w for w in warnings), "no pointer to the right mechanism"
+
+
+class TestInit:
+    """The scaffold comes from the server, not from templates carried here."""
+
+    def _blob(self) -> bytes:
+        import io
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("Dockerfile", "FROM python:3.12-slim\n")
+            zf.writestr("run.sh", "#!/bin/bash\npython3 main.py\n")
+            zf.writestr("config.json", '{"displayName": ""}\n')
+        return buf.getvalue()
+
+    def test_asks_the_server_to_seed_the_scaffold(self, tmp_path, monkeypatch) -> None:
+        """`template="scratch"` matters: the server picks the Dockerfile's base image
+        from the tool's packages, so local templates would be a fourth copy of that
+        logic and would drift the first time a base image moved."""
+        seen: dict = {}
+
+        def create(client, *, name, display_name=None, description=None, template=None):
+            seen.update(name=name, template=template)
+            from tamarind.customtools import wire
+
+            return wire.Tool(name=name)
+
+        monkeypatch.setattr(flow.api, "create_tool", create)
+        monkeypatch.setattr(flow.api, "download_archive", lambda *a, **k: self._blob())
+        flow.init(None, name="my-tool", destination=tmp_path / "my-tool")
+        assert seen == {"name": "my-tool", "template": "scratch"}
+
+    def test_writes_the_files_and_records_the_tool(self, tmp_path, monkeypatch) -> None:
+        from tamarind.customtools import project, wire
+
+        monkeypatch.setattr(flow.api, "create_tool", lambda *a, **k: wire.Tool(name="t"))
+        monkeypatch.setattr(flow.api, "download_archive", lambda *a, **k: self._blob())
+        folder, _ = flow.init(None, name="t", destination=tmp_path / "t")
+        assert (folder / "Dockerfile").is_file()
+        assert (folder / "run.sh").is_file()
+        # Without this, a later bare `deploy` would guess the tool from the folder name.
+        assert project.read(folder).name == "t"
+
+    def test_refuses_a_non_empty_folder(self, tmp_path, monkeypatch) -> None:
+        """Scaffolding over someone's work would destroy it silently."""
+        from tamarind.customtools import wire
+
+        target = tmp_path / "busy"
+        target.mkdir()
+        (target / "main.py").write_text("mine\n")
+        monkeypatch.setattr(flow.api, "create_tool", lambda *a, **k: wire.Tool(name="t"))
+        with pytest.raises(ValidationError):
+            flow.init(None, name="t", destination=target)
+
+
+class TestApplyConfig:
+    """Pushing config.json in place — the input-schema iteration loop."""
+
+    def test_sends_the_folder_config(self, tool_folder, monkeypatch) -> None:
+        sent: dict = {}
+        monkeypatch.setattr(
+            flow.api,
+            "save_config",
+            lambda client, *, name, config_json, target_version=None: sent.update(
+                name=name, body=config_json, version=target_version
+            ),
+        )
+        flow.apply_config(None, name="t", folder=tool_folder)
+        assert sent["name"] == "t"
+        assert "displayName" in sent["body"]
+        assert sent["version"] is None
+
+    def test_amends_a_named_version(self, tool_folder, monkeypatch) -> None:
+        """The capability nothing else reaches: a version's inputs are snapshotted at
+        build time, so this is the only way to correct a schema on one that exists."""
+        sent: dict = {}
+        monkeypatch.setattr(
+            flow.api,
+            "save_config",
+            lambda client, *, name, config_json, target_version=None: sent.update(
+                version=target_version
+            ),
+        )
+        flow.apply_config(None, name="t", folder=tool_folder, target_version="v2")
+        assert sent["version"] == "v2"
+
+    def test_invalid_json_is_refused_before_the_request(self, tool_folder, monkeypatch) -> None:
+        """A round trip proves nothing the local parser cannot, and the local message
+        can name the position."""
+        (tool_folder / "config.json").write_text("{not json")
+        called = False
+
+        def save(*a, **k):
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr(flow.api, "save_config", save)
+        with pytest.raises(ValidationError):
+            flow.apply_config(None, name="t", folder=tool_folder)
+        assert called is False, "a malformed config must not reach the server"
+
+    def test_a_missing_config_is_a_clean_error(self, tmp_path, monkeypatch) -> None:
+        with pytest.raises(ValidationError):
+            flow.apply_config(None, name="t", folder=tmp_path)
+
+
+class TestUnpackSource:
+    def test_reports_lfs_pointers_rather_than_letting_the_build_fail(self, tmp_path) -> None:
+        """Archives serve LFS files as pointers, so a cloned tool with large assets is
+        not immediately redeployable — better said than discovered at build time."""
+        import io
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("main.py", "print('hi')\n")
+            zf.writestr(
+                "weights.pt",
+                "version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 1\n",
+            )
+        folder, pointers = flow.unpack_source(buf.getvalue(), tmp_path / "out")
+        assert (folder / "main.py").is_file()
+        assert pointers == ("weights.pt",)
+
+    def test_a_corrupt_archive_is_a_clean_error(self, tmp_path) -> None:
+        with pytest.raises(TamarindError):
+            flow.unpack_source(b"not a zip", tmp_path / "out")

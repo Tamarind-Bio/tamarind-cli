@@ -16,6 +16,7 @@ import typer
 from ... import customtools as ct
 from ...customtools import archive as ct_archive
 from ...customtools import flow as ct_flow
+from ...customtools import project as ct_project
 from ...errors import TamarindError, ValidationError
 from .. import output
 
@@ -65,7 +66,10 @@ def register(app_root: typer.Typer) -> None:
             Path("."), help="Tool folder. Defaults to the current directory."
         ),
         name: Optional[str] = typer.Option(
-            None, "--name", help="Tool id. Defaults to the folder name."
+            None, "--name", help="Tool id. Defaults to .tamarind, then the folder name."
+        ),
+        create: bool = typer.Option(
+            False, "--create", help="Create the tool first if it does not exist yet."
         ),
         wait: bool = typer.Option(
             True, "--wait/--no-wait", help="Watch the build until it finishes."
@@ -86,8 +90,17 @@ def register(app_root: typer.Typer) -> None:
         `deployed: false` in the JSON says so, and `--fail-on-noop` makes it an error.
         """
         state = ctx.obj
-        tool = name or Path(folder).resolve().name
+        tool = ct_project.resolve_name(folder, name)
         with state.rest_client() as client:
+            if create:
+                # Idempotent by intent: --create means "make sure it exists", so an
+                # already-created tool is not an error.
+                try:
+                    ct.create_tool(client, name=tool)
+                    ct_project.write(folder, name=tool)
+                except TamarindError as exc:
+                    if getattr(exc, "status_code", None) not in (400, 409):
+                        raise
             outcome = ct.build(
                 client,
                 name=tool,
@@ -112,6 +125,44 @@ def register(app_root: typer.Typer) -> None:
             raise typer.Exit(code=1)
 
     @app_root.command()
+    def init(
+        ctx: typer.Context,
+        directory: Optional[Path] = typer.Argument(
+            None, help="Folder to create. Defaults to ./<name>."
+        ),
+        name: Optional[str] = typer.Option(
+            None, "--name", help="Tool id. Defaults to the folder name."
+        ),
+        display_name: Optional[str] = typer.Option(
+            None, "--display-name", help="Human-readable name."
+        ),
+    ) -> None:
+        """Create a tool and write its starting files.
+
+        The scaffold comes from the server, not from templates carried here — it picks
+        the Dockerfile's base image from the tool's packages, so local copies would
+        drift the first time those images moved.
+        """
+        state = ctx.obj
+        tool = name or (Path(directory).name if directory else None)
+        if not tool:
+            raise ValidationError("Give a folder or --name, e.g. `tamarind init my-esmfold`.")
+        target = Path(directory) if directory else Path.cwd() / tool
+        with state.rest_client() as client:
+            folder, _ = ct.flow.init(
+                client,
+                name=tool,
+                destination=target,
+                display_name=display_name,
+                on_event=_renderer(state),
+            )
+        output.emit(
+            {"tool": tool, "path": str(folder)},
+            state.output,
+            human=f"created {tool} in {folder}\n\nnext: cd {folder} && tamarind deploy",
+        )
+
+    @app_root.command()
     def publish(
         ctx: typer.Context,
         name: Optional[str] = typer.Argument(None, help="Tool id. Defaults to the folder name."),
@@ -125,7 +176,7 @@ def register(app_root: typer.Typer) -> None:
         viewer role on the tool, so it should not happen as a side effect of building.
         """
         state = ctx.obj
-        tool = name or Path.cwd().name
+        tool = ct_project.resolve_name(Path.cwd(), name)
         with state.rest_client() as client:
             _, published = ct.publish(client, name=tool, version_name=version)
         output.emit(
@@ -348,7 +399,15 @@ def cancel(
 @app.command()
 def config(
     ctx: typer.Context,
-    name: str = typer.Argument(..., help="Tool id."),
+    name: Optional[str] = typer.Argument(None, help="Tool id. Defaults to .tamarind."),
+    apply: Optional[Path] = typer.Option(
+        None,
+        "--apply",
+        help="Push this folder's config.json in place — no build, no new version.",
+    ),
+    version: Optional[str] = typer.Option(
+        None, "--version", help="With --apply: amend this built version's inputs."
+    ),
     gpu_type: Optional[str] = typer.Option(None, "--gpu-type", help="None|T4|L4|L40S|A10|A100."),
     memory: Optional[str] = typer.Option(None, "--memory", help="e.g. 8Gi, 32Gi, 180Gi."),
     cpu: Optional[int] = typer.Option(None, "--cpu", help="1-8."),
@@ -363,6 +422,21 @@ def config(
     one means editing that file and deploying.
     """
     state = ctx.obj
+    tool = ct_project.resolve_name(apply or Path.cwd(), name)
+    if apply is not None:
+        with state.rest_client() as client:
+            ct.flow.apply_config(client, name=tool, folder=apply, target_version=version)
+        output.emit(
+            {"tool": tool, "applied": str(Path(apply) / "config.json"), "version": version},
+            state.output,
+            human=(
+                f"applied {tool}'s config.json"
+                + (f" to {version}" if version else "")
+                + " — no build, no new version"
+            ),
+        )
+        return
+    name = tool
     changes = {
         "gpuType": gpu_type,
         "memory": memory,

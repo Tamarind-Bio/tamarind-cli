@@ -28,6 +28,7 @@ from .api import (
     get_result,
     submit_batch,
     submit_job,
+    submit_job_pinned,
     validate_job,
 )
 from . import api, flow, plan
@@ -73,6 +74,7 @@ __all__ = [
     "job_status",
     "submit_batch",
     "submit_job",
+    "submit_job_pinned",
     "time",
     "validate_job",
     "validate_wait_options",

@@ -204,6 +204,11 @@ def register(app: typer.Typer) -> None:
         name: Optional[str] = typer.Option(
             None, "--name", "-n", help="Job name (default: auto-generated)."
         ),
+        tool_version: Optional[str] = typer.Option(
+            None,
+            "--tool-version",
+            help="Run a SPECIFIC custom-tool version (e.g. v3) instead of the live one.",
+        ),
         skip_validate: bool = typer.Option(
             False, "--skip-validate", help="Skip the pre-submit validate-job check."
         ),
@@ -248,10 +253,41 @@ def register(app: typer.Typer) -> None:
                 # `normalized` output — the normalizer injects backend-internal
                 # fields (e.g. submit_method, msa) that submit-job rejects.
 
+            tool_ref = None
+            if tool_version:
+                # A version's inputs are snapshotted when it builds, and the job API
+                # pins them by commit ref rather than by version name — so resolve it.
+                from ... import customtools as ct
+
+                found = ct.plan.find_version(ct.get_versions(client, name=job_type), tool_version)
+                if found is None or not found.ref:
+                    raise ValidationError(
+                        f"'{job_type}' has no version {tool_version}. "
+                        f"`tamarind ct versions {job_type}` shows what exists."
+                    )
+                if not found.is_complete:
+                    raise ValidationError(
+                        f"Version {tool_version} is {found.status}, not Complete — it "
+                        f"has no image to run."
+                    )
+                tool_ref = found.ref
+
             output.info(f"Submitting {job_type} job '{job_name}'…", state.output)
             try:
-                submit_resp = jobs_api.submit_job(
-                    client, job_name=job_name, job_type=job_type, settings=job.settings
+                submit_resp = (
+                    jobs_api.submit_job_pinned(
+                        client,
+                        job_name=job_name,
+                        job_type=job_type,
+                        settings=job.settings,
+                        tool_ref=tool_ref,
+                    )
+                    if tool_ref
+                    # Unpinned submits stay on the legacy route, so the common path is
+                    # untouched by this feature.
+                    else jobs_api.submit_job(
+                        client, job_name=job_name, job_type=job_type, settings=job.settings
+                    )
                 )
             except TamarindError as exc:
                 status_code = getattr(exc, "status_code", None)
@@ -273,6 +309,9 @@ def register(app: typer.Typer) -> None:
                 )
 
             result = {"jobName": job_name, "type": job_type, "submit": submit_resp}
+            if tool_ref:
+                result["toolVersion"] = tool_version
+                result["toolRef"] = tool_ref
 
             if wait:
                 try:

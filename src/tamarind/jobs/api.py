@@ -138,3 +138,34 @@ def delete_job(client: HTTPClient, *, job_name: str) -> Any:
     The endpoint may return a bare string (not JSON), so parse defensively.
     """
     return client.delete_json("delete-job", json={"jobName": job_name})
+
+
+def submit_job_pinned(
+    client: HTTPClient,
+    *,
+    job_name: str,
+    job_type: str,
+    settings: dict[str, Any],
+    tool_ref: str,
+) -> Any:
+    """POST v2/jobs — submit against a SPECIFIC custom-tool version.
+
+    A separate function because it is a different endpoint, and the split is not
+    cosmetic. The legacy `/submit-job` route stamps `jobSource` but carries no
+    `toolRef`, so it can only ever run whatever version is currently live; this route
+    carries both, which is what makes "deploy, then test exactly what I just built"
+    possible at all.
+
+    Used only when a caller names a version. An unpinned submit stays on the legacy
+    route, so the common path is unchanged.
+    """
+    return client.post_json(
+        "v2/jobs",
+        json={
+            "jobName": job_name,
+            "type": job_type,
+            "settings": settings,
+            "toolRef": tool_ref,
+            "jobSource": JOB_SOURCE,
+        },
+    )

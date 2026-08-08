@@ -22,7 +22,7 @@ comment there explains which step exists because of which race.
 
 from __future__ import annotations
 
-from . import api, archive, flow, packaging, plan, wire
+from . import api, archive, flow, packaging, plan, project, wire
 from .api import (
     cancel_build,
     create_tool,
@@ -37,12 +37,25 @@ from .api import (
     update_tool,
 )
 from .archive import MAX_SOURCE_BYTES, ArchivePlan, plan_archive
-from .flow import BuildEvent, build, publish, wait_for_build, wait_for_source
+from .flow import (
+    BuildEvent,
+    apply_config,
+    build,
+    init,
+    publish,
+    unpack_source,
+    wait_for_build,
+    wait_for_source,
+)
 from .packaging import Disposition, classify
 from .plan import DeployOutcome, is_terminal_build, select_publishable
 from .wire import DeployResult, LogPage, Tool, UploadTicket, Version
 
 __all__ = [
+    "unpack_source",
+    "init",
+    "apply_config",
+    "project",
     "MAX_SOURCE_BYTES",
     "ArchivePlan",
     "BuildEvent",
