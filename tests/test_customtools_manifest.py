@@ -204,8 +204,11 @@ class TestMisc:
         assert manifest.check({"paperUrl": "https://biorxiv.org/x"}).ok
 
     def test_env_vars_must_be_strings(self) -> None:
+        """Shape only. A populated VALUE is now rejected for a different reason — see
+        TestEnvVarsAreNotACredentialSink — so the legal case here is a declared name
+        with no value in the file."""
         assert _errors({"envVars": {"K": 1}})
-        assert manifest.check({"envVars": {"K": "1"}}).ok
+        assert manifest.check({"envVars": {"K": ""}}).ok
 
     @pytest.mark.parametrize("value", [30, 90000, "3600", True])
     def test_rejects_out_of_range_runtimes(self, value: object) -> None:
