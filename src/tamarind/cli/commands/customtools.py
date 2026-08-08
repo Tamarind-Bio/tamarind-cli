@@ -211,16 +211,21 @@ def register(app_root: typer.Typer) -> None:
                 'No run.sh — the generated Dockerfile ends in `CMD ["bash","run.sh"]`, '
                 "so the image builds and then fails to start."
             )
-        config = root / "config.json"
-        if not config.is_file():
+        facts: dict = {}
+        if not (root / "config.json").is_file():
             problems.append("No config.json — the tool has no declared inputs or outputs.")
         else:
-            import json
-
+            # One reader, shared with `deploy`, so the two cannot disagree about what
+            # the manifest says. `check` collects rather than raises, though: being
+            # told about every problem at once is the reason to run it.
             try:
-                json.loads(config.read_text())
-            except (OSError, ValueError) as exc:
-                problems.append(f"config.json is not valid JSON: {exc}")
+                findings = ct.inspect_manifest(root)
+            except ValidationError as exc:
+                problems.append(str(exc))
+            else:
+                problems += [f"config.json: {e}" for e in findings.errors]
+                warnings += list(findings.warnings)
+                facts = findings.facts
 
         advice = ct.packaging.env_var_advice(spec.secrets)
         if advice:
@@ -239,6 +244,9 @@ def register(app_root: typer.Typer) -> None:
             "excludedNoise": spec.noise_count,
             "problems": problems,
             "warnings": warnings,
+            # What the manifest declares, echoed so a caller can confirm the tool it
+            # is about to deploy is the one it meant (MSA on, batching on, N inputs).
+            "config": facts,
             "ok": not problems,
         }
         for warning in warnings:
@@ -414,12 +422,24 @@ def config(
     home_disk_gi: Optional[int] = typer.Option(None, "--home-disk-gi", help="1-50."),
     display_name: Optional[str] = typer.Option(None, "--display-name"),
     description: Optional[str] = typer.Option(None, "--description"),
+    env: Optional[list[str]] = typer.Option(
+        None,
+        "--env",
+        "-e",
+        metavar="KEY=VALUE",
+        help="Set a run-time environment variable. Repeatable. Merges with existing.",
+    ),
 ) -> None:
-    """Read or change a tool's resources and metadata.
+    """Read or change a tool's resources, metadata, and environment.
 
     Never builds and never creates a version — changes apply to the next run. Inputs
     are NOT settable here: config.json in the repo is canonical for those, so changing
     one means editing that file and deploying.
+
+    `--env` is the answer to "where do I put my API key", since a credential file in
+    the source archive would be baked into a readable image layer. Values are sent to
+    the server and stored on the tool, so they are not secrets FROM Tamarind — they
+    are secrets from anyone who can read your tool's source.
     """
     state = ctx.obj
     tool = ct_project.resolve_name(apply or Path.cwd(), name)
@@ -447,6 +467,13 @@ def config(
     }
     changes = {k: v for k, v in changes.items() if v is not None}
     with state.rest_client() as client:
+        if env:
+            # Read-modify-write, because the server replaces the whole map: sending
+            # only the new pair would silently delete every variable already set.
+            current = ct.get_tool(client, name=name)
+            merged = dict(current.raw.get("latest", current.raw).get("envVars") or {})
+            merged.update(ct.parse_env_assignments(env))
+            changes["envVars"] = merged
         tool = (
             ct.update_tool(client, name=name, **changes)
             if changes
@@ -454,7 +481,15 @@ def config(
         )
     shown = {
         k: tool.raw.get("latest", tool.raw).get(k)
-        for k in ("gpuType", "memory", "cpu", "homeDiskGi", "displayName", "description")
+        for k in (
+            "gpuType",
+            "memory",
+            "cpu",
+            "homeDiskGi",
+            "displayName",
+            "description",
+            "envVars",
+        )
     }
     output.emit(
         shown,

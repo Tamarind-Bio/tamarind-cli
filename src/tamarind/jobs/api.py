@@ -169,3 +169,36 @@ def submit_job_pinned(
             "jobSource": JOB_SOURCE,
         },
     )
+
+
+def submit_batch_pinned(
+    client: HTTPClient,
+    *,
+    jobs: list[dict[str, Any]],
+    tool_ref: str | None = None,
+) -> Any:
+    """POST v2/jobs/batch — submit up to 500 jobs, each against a named version.
+
+    Distinct from `submit_batch` in more than the endpoint. Legacy `/submit-batch`
+    creates a batch PARENT row with N children anchored to it; this route dispatches
+    N INDEPENDENT jobs and carries no parent. Callers must not treat the two as
+    interchangeable — `status <batchName>` finds nothing after this one, because
+    there is no such row to find.
+
+    ``batch`` is deliberately left unset on every item. The field anchors children to
+    a parent by name and the worker's aggregator reads its gate off that parent, so
+    labelling parentless jobs with it would point the aggregator at a row that does
+    not exist.
+
+    Per-item failures come back as ``ok: false`` inside a 200. Parse with
+    `wire.parse_batch_submission` and reconcile with `plan.summarize_batch`; do not
+    read success off the HTTP status.
+    """
+    payload = []
+    for job in jobs:
+        item = dict(job)
+        item["jobSource"] = JOB_SOURCE
+        if tool_ref is not None:
+            item.setdefault("toolRef", tool_ref)
+        payload.append(item)
+    return client.post_json("v2/jobs/batch", json={"jobs": payload})

@@ -165,11 +165,11 @@ def test_library_does_not_write_to_stdout(path: Path) -> None:
 
 @pytest.mark.parametrize(
     "path",
-    [p for p in _library_modules() if p.name in ("plan.py", "wire.py")],
+    [p for p in _library_modules() if p.name in ("plan.py", "wire.py", "manifest.py")],
     ids=lambda p: f"{p.parent.name}/{p.name}",
 )
 def test_decision_and_boundary_modules_are_pure(path: Path) -> None:
-    """`plan` and `wire` hold decisions and parsing — never I/O.
+    """`plan`, `wire` and `manifest` hold decisions and parsing — never I/O.
 
     This is what makes the interesting logic testable without a server: a function
     that cannot perform I/O can be exercised as a table of inputs and outputs. The
@@ -177,6 +177,9 @@ def test_decision_and_boundary_modules_are_pure(path: Path) -> None:
 
     `wire` is included because a parser that can fetch is no longer a boundary — it
     becomes a second, hidden client, and the shape knowledge stops being in one place.
+    `manifest` is included because it validates config.json: the obvious shortcut is
+    to let it open the file, and then the rules can only be tested through a tmpdir.
+    Reading the file is `flow.inspect_manifest`'s job.
     """
     tree = ast.parse(path.read_text())
     hits = sorted(_imported_components(tree) & _FORBIDDEN_IN_PURE)
@@ -291,12 +294,15 @@ def test_shape_knowledge_lives_only_at_the_boundary() -> None:
         # the casing rules would actually do damage.
         if path.name in ("wire.py", "api.py"):
             continue
-        # AST constants, not a source-text grep: `job.get('JobName')` is the same
-        # leak as the double-quoted spelling, and a formatter could rewrite either.
-        # Exact equality, so a docstring MENTIONING the key is not a false positive.
-        for node in ast.walk(ast.parse(path.read_text())):
-            if isinstance(node, ast.Constant) and node.value in spellings:
-                offenders.append(f"{path.parent.name}/{path.name} uses {node.value!r}")
+        # Symmetric with the wire side: a leak is a module LOOKING UP one of those
+        # keys, not merely containing the word. The asymmetric version (any string
+        # constant equal to a key) was the fifth wrong shape of this rule — the
+        # server answers with `submitted`/`failed`, and a batch outcome is honestly
+        # named "submitted"/"failed" too, so a value the code branches on collided
+        # with a key it never reads. Matching on the lookup makes that impossible
+        # while still catching a second copy of `x.get("JobName") or x.get("jobName")`.
+        leaked = _wire_lookup_keys(ast.parse(path.read_text())) & spellings
+        offenders += [f"{path.parent.name}/{path.name} reads {key!r}" for key in leaked]
     assert not offenders, "shape knowledge outside wire.py: " + "; ".join(sorted(set(offenders)))
 
 

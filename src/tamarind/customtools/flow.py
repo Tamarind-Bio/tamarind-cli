@@ -34,7 +34,7 @@ from typing import Callable, Literal
 from ..errors import TamarindError, ValidationError
 from ..http import HTTPClient
 from ..upload import put_presigned
-from . import api, archive, plan, project, wire
+from . import api, archive, manifest, plan, project, wire
 
 Phase = Literal["check", "package", "upload", "extract", "deploy", "build"]
 Kind = Literal["status", "log", "warning"]
@@ -143,6 +143,40 @@ def wait_for_build(
     return page
 
 
+def inspect_manifest(folder: Path | str) -> manifest.Findings:
+    """Read a folder's config.json and check it. The shell half of `manifest`.
+
+    `manifest.check` is pure and takes parsed data; this is the one place that turns
+    a folder into findings, so `deploy`, `check` and any caller script agree about
+    what "the manifest" means rather than each reading the file their own way.
+
+    A missing config.json yields no findings rather than an error. The server is the
+    authority on whether one is required, and refusing locally would put this client
+    between an author and a fix.
+    """
+    config = Path(folder) / "config.json"
+    if not config.is_file():
+        return manifest.Findings()
+    try:
+        data = json.loads(config.read_text())
+    except (OSError, ValueError) as exc:
+        raise ValidationError(f"config.json is not valid JSON: {exc}") from exc
+    return manifest.check(data)
+
+
+def _check_manifest(root: Path, on_event: EventHandler | None) -> None:
+    """Refuse a deploy the server would reject, before anything is uploaded."""
+    findings = inspect_manifest(root)
+    for warning in findings.warnings:
+        _emit(on_event, "package", "warning", warning)
+    if findings.errors:
+        raise ValidationError(
+            "config.json would be rejected by the server:\n"
+            + "\n".join(f"  - {e}" for e in findings.errors),
+            detail={"errors": list(findings.errors)},
+        )
+
+
 def build(
     client: HTTPClient,
     *,
@@ -152,13 +186,24 @@ def build(
     on_event: EventHandler | None = None,
     timeout: float = BUILD_TIMEOUT,
     extract_timeout: float = EXTRACT_TIMEOUT,
+    check_manifest: bool = True,
 ) -> plan.DeployOutcome:
     """Package a folder, upload it, deploy it, and (by default) watch the build.
 
     Returns a :class:`plan.DeployOutcome` whose ``deployed`` flag is decided in exactly
     one place. Callers must not re-derive it from ``path``.
+
+    The manifest is checked FIRST, and a fatal finding stops the deploy. The server
+    would reject the same config, but only after an upload, an extraction and a
+    build — the cost of being told about a typo should not be minutes. Pass
+    ``check_manifest=False`` to deploy anyway, for the case where this client's rules
+    have gone stale against a newer server.
     """
     root = Path(folder)
+
+    # 0. Refuse before spending anything, if the manifest is already wrong.
+    if check_manifest:
+        _check_manifest(root, on_event)
 
     # 1. Decide what goes up, and say what does not.
     _emit(on_event, "package", "status", f"Packaging {root}")

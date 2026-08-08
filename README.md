@@ -78,6 +78,69 @@ tamarind submit boltz \
   --name quick-fold
 ```
 
+## Custom tools
+
+Author, deploy and publish your own tool without opening a browser.
+
+```bash
+# 1. Scaffold a folder (Dockerfile, run.sh, config.json) from the server's template
+tamarind init my-esmfold
+cd my-esmfold
+
+# 2. Check locally — instant, and catches what would otherwise fail a build
+tamarind check
+
+# 3. Package the folder, upload it, build the image, stream the logs
+tamarind deploy --create        # --create only matters the first time
+
+# 4. Test the version you just built, not whatever is currently live
+tamarind submit my-esmfold --set sequence=MKTAYIAK --wait --tool-version v1
+
+# 5. Make it live for your org
+tamarind publish
+```
+
+Everything else hangs off `ct`:
+
+```bash
+tamarind ct list                     # your org's tools
+tamarind ct status my-esmfold        # latest build, live version
+tamarind ct versions my-esmfold
+tamarind ct logs my-esmfold          # reattach to a running build
+tamarind ct config my-esmfold        # read config.json; --apply pushes it back
+tamarind ct clone my-esmfold ./dir   # pull the source of an existing tool
+```
+
+A few things worth knowing:
+
+- **The folder remembers its tool.** `init` writes `.tamarind` with the tool id, so
+  `deploy` and `publish` need no arguments and a renamed directory still deploys to
+  the right place. Commit it.
+- **`deploy` is safe to re-run.** An unchanged folder reports `unchanged` and exits 0
+  without building. Use `--fail-on-noop` in CI if you want that to be an error.
+- **Credentials are never uploaded.** `.env`, key files and cloud credential
+  directories are refused, and named in the output — the archive becomes an image
+  layer, where a secret outlives deleting the file locally. Use
+  `tamarind ct config --env` for values the tool needs at runtime.
+- **The runtime container has no network.** Model weights belong in the image via the
+  Dockerfile, not in the source upload.
+- **`tamarind batch --tool-version`** submits up to 500 pinned runs at once. That path
+  submits jobs independently rather than under a batch parent, and reports each one,
+  so it exits non-zero if any item fails to dispatch even when the request succeeds.
+
+The same lifecycle from Python is in
+[`examples/custom_tool_e2e.py`](examples/custom_tool_e2e.py) — useful when you want
+to decide something in between, such as only publishing a version whose smoke test
+passed:
+
+```python
+from tamarind import customtools as ct
+
+outcome = ct.build(client, name="my-esmfold", folder="./my-esmfold")
+if outcome.deployed:                       # never infer this from outcome.path
+    ct.publish(client, name="my-esmfold", version_name=outcome.version_name)
+```
+
 ## Output for agents
 
 Every command emits JSON when stdout is not a TTY, or with `--json`. Result
@@ -122,6 +185,7 @@ place them before the command name.
 | Submit | `validate`, `submit`, `batch` |
 | Monitor | `jobs`, `status`, `wait`, `results`, `logs` |
 | Files | `files list`, `files stats`, `files upload`, `files delete`, `files folders` |
+| Custom tools | `init`, `check`, `deploy`, `publish`, `ct list`, `ct status`, `ct versions`, `ct logs`, `ct cancel`, `ct config`, `ct clone`, `ct delete` |
 | Lifecycle | `cancel`, `delete` |
 | Auth | `auth login`, `auth status`, `auth logout` |
 

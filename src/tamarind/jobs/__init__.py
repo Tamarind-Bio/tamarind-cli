@@ -27,21 +27,34 @@ from .api import (
     get_jobs,
     get_result,
     submit_batch,
+    submit_batch_pinned,
     submit_job,
     submit_job_pinned,
     validate_job,
 )
 from . import api, flow, plan
 from .flow import fetch_job, wait_for_job
-from .wire import Job, find_job, parse_job
+from .wire import (
+    BatchItem,
+    BatchSubmission,
+    Job,
+    find_job,
+    parse_batch_submission,
+    parse_job,
+)
 from .plan import (
+    MAX_BATCH_ITEMS,
     SUCCESS_STATUSES,
     TERMINAL_STATUSES,
+    BatchOutcome,
+    BatchSummary,
     extract_single,
     is_success,
     is_terminal,
     job_name,
     job_status,
+    summarize_batch,
+    validate_batch_size,
     validate_wait_options,
 )
 
@@ -50,6 +63,14 @@ from .plan import (
 _extract_single = extract_single
 
 __all__ = [
+    "BatchItem",
+    "BatchOutcome",
+    "BatchSubmission",
+    "BatchSummary",
+    "MAX_BATCH_ITEMS",
+    "parse_batch_submission",
+    "summarize_batch",
+    "validate_batch_size",
     "parse_job",
     "find_job",
     "Job",
@@ -73,6 +94,7 @@ __all__ = [
     "job_name",
     "job_status",
     "submit_batch",
+    "submit_batch_pinned",
     "submit_job",
     "submit_job_pinned",
     "time",

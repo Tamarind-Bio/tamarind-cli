@@ -343,3 +343,64 @@ class TestUnpackSource:
     def test_a_corrupt_archive_is_a_clean_error(self, tmp_path) -> None:
         with pytest.raises(TamarindError):
             flow.unpack_source(b"not a zip", tmp_path / "out")
+
+
+class TestManifestPreflight:
+    """`deploy` refuses a config the server would reject, before uploading anything."""
+
+    def _folder(self, tmp_path, config: str):
+        (tmp_path / "Dockerfile").write_text("FROM scratch\n")
+        (tmp_path / "run.sh").write_text("echo hi\n")
+        (tmp_path / "config.json").write_text(config)
+        return tmp_path
+
+    def test_a_fatal_config_stops_the_deploy_before_any_request(self, tmp_path) -> None:
+        """The whole point of the pre-flight: no upload, no build, no waiting to be
+        told about a typo. Without it this deploys and fails minutes later."""
+        folder = self._folder(tmp_path, '{"cpu": 99}')
+
+        class ExplodingClient:
+            def __getattr__(self, item):
+                raise AssertionError(f"deploy touched the network ({item}) despite a fatal config")
+
+        with pytest.raises(ValidationError) as exc:
+            flow.build(ExplodingClient(), name="t", folder=folder)
+        assert "cpu" in str(exc.value)
+
+    def test_a_warning_does_not_stop_the_deploy(self, tmp_path) -> None:
+        """A misplaced flag is valid to the server, so refusing would block a deploy
+        that works. It has to be reported and then allowed through."""
+        folder = self._folder(tmp_path, '{"usesMsa": true}')
+        assert flow.inspect_manifest(folder).warnings
+
+        class ExplodingClient:
+            def __getattr__(self, item):
+                raise RuntimeError("reached the network")
+
+        # Getting as far as the network is the assertion: a warning must not raise
+        # ValidationError the way a fatal finding does.
+        with pytest.raises(RuntimeError):
+            flow.build(ExplodingClient(), name="t", folder=folder)
+
+    def test_invalid_json_is_fatal(self, tmp_path) -> None:
+        folder = self._folder(tmp_path, "{not json")
+        with pytest.raises(ValidationError):
+            flow.inspect_manifest(folder)
+
+    def test_a_missing_config_is_not_an_error_here(self, tmp_path) -> None:
+        """`deploy` is also how someone FIXES a broken tool. The server decides
+        whether a config is required; refusing locally would stand in the way."""
+        assert flow.inspect_manifest(tmp_path).ok
+
+    def test_the_preflight_can_be_turned_off(self, tmp_path) -> None:
+        """An escape hatch for the day these rules go stale against a newer server."""
+        folder = self._folder(tmp_path, '{"cpu": 99}')
+
+        class ExplodingClient:
+            def __getattr__(self, item):
+                raise RuntimeError("reached the network")
+
+        # Reaching the network means the manifest check was skipped, which is the
+        # behaviour under test — the RuntimeError proves it got past the gate.
+        with pytest.raises(RuntimeError):
+            flow.build(ExplodingClient(), name="t", folder=folder, check_manifest=False)

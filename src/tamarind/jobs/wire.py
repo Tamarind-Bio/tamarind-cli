@@ -123,3 +123,84 @@ def find_job(response: Any, name: str) -> Mapping[str, Any] | None:
     if any(k in response for k in _JOB_MARKER_KEYS):
         return response
     return None
+
+
+# ── Batch submission ──────────────────────────────────────────────────────────
+# The pinned batch route answers 200 with per-item outcomes rather than failing the
+# request, so "the HTTP call worked" and "the jobs were submitted" are different
+# facts. Keeping them different types is the point: a caller that conflates them
+# reports 500 submissions when 300 silently failed.
+
+
+@dataclass(frozen=True)
+class BatchItem:
+    """One job's outcome inside a batch submit."""
+
+    job_name: str | None = None
+    job_type: str | None = None
+    ok: bool = False
+    job_id: str | None = None
+    status: str | None = None
+    error: str | None = None
+    raw: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class BatchSubmission:
+    """What a batch submit reported.
+
+    ``submitted``/``failed`` are the server's OWN counts, kept separate from
+    ``items`` rather than reconciled here — deciding which to believe is a
+    judgement, and judgements live in `plan`.
+    """
+
+    items: tuple[BatchItem, ...] = ()
+    submitted: int | None = None
+    failed: int | None = None
+    raw: Mapping[str, Any] = field(default_factory=dict)
+
+
+def parse_batch_item(payload: Any) -> BatchItem:
+    """Normalize one per-item batch outcome. Never raises.
+
+    ``ok`` defaults to False for an unrecognized payload: an item we cannot read is
+    an item we cannot claim was submitted.
+    """
+    if not isinstance(payload, Mapping):
+        return BatchItem()
+    return BatchItem(
+        job_name=_first_str(payload, ("JobName", "jobName")),
+        job_type=_first_str(payload, ("Type", "type")),
+        ok=payload.get("ok") is True,
+        job_id=_first_str(payload, ("Id", "id", "jobId")),
+        status=_first_str(payload, ("JobStatus", "status")),
+        error=_first_str(payload, ("error", "Error", "message")),
+        raw=payload,
+    )
+
+
+def parse_batch_submission(payload: Any) -> BatchSubmission:
+    """Normalize the batch-submit response. Never raises."""
+    if not isinstance(payload, Mapping):
+        return BatchSubmission()
+    results = payload.get("results")
+    items: tuple[BatchItem, ...] = ()
+    if isinstance(results, (list, tuple)):
+        items = tuple(parse_batch_item(r) for r in results)
+    submitted = payload.get("submitted")
+    failed = payload.get("failed")
+    return BatchSubmission(
+        items=items,
+        submitted=submitted if isinstance(submitted, int) else None,
+        failed=failed if isinstance(failed, int) else None,
+        raw=payload,
+    )
+
+
+def _first_str(payload: Mapping[str, Any], keys: tuple[str, ...]) -> str | None:
+    """The first key present with a non-empty value, as a string."""
+    for key in keys:
+        value = payload.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return None

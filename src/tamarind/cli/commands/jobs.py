@@ -109,6 +109,94 @@ def _failed_terminal(job: dict) -> bool:
     return jobs_helpers.is_terminal(status) and not jobs_helpers.is_success(status)
 
 
+def _submit_pinned_batch(
+    client,
+    *,
+    state,
+    batch_name: str,
+    job_type: str,
+    settings_list: list,
+    job_names: object,
+    max_runtime: Optional[int],
+    tool_version: str,
+) -> None:
+    """Submit a batch against a pinned custom-tool version, and report per item.
+
+    Split out of `batch` because it is a genuinely different transaction, not a flag:
+    N independent submits with no batch parent, answering 200 with per-item outcomes.
+    The reporting is what makes that usable — a caller needs the names of the jobs
+    that DID start (they are running and cost money) and the reasons the rest did not.
+    """
+    jobs_helpers.validate_batch_size(len(settings_list))
+    tool_ref = f"{job_type}:{tool_version}"
+
+    items = []
+    for index, settings in enumerate(settings_list):
+        name = (
+            job_names[index]
+            if isinstance(job_names, list) and index < len(job_names) and job_names[index]
+            else f"{batch_name}-{index + 1}"
+        )
+        item: dict = {
+            "jobName": str(name).strip(),
+            "type": job_type,
+            "settings": settings,
+            "toolRef": tool_ref,
+        }
+        if max_runtime is not None:
+            item["maxRuntimeSeconds"] = max_runtime
+        items.append(item)
+
+    try:
+        resp = jobs_api.submit_batch_pinned(client, jobs=items)
+    except TamarindError as exc:
+        status_code = getattr(exc, "status_code", None)
+        ambiguous = type(exc) is TamarindError or (
+            isinstance(status_code, int) and status_code >= 500
+        )
+        if ambiguous:
+            exc.message = (
+                f"{exc.message} Some jobs may have dispatched before the failure; "
+                f"list them with `tamarind jobs` before retrying."
+            )
+        raise _attach_error_context(
+            exc,
+            batchName=batch_name,
+            toolRef=tool_ref,
+            phase="submit-batch-pinned",
+            submitted=None if ambiguous else False,
+            outcomeMayBeAmbiguous=ambiguous,
+            recoveryCommand="tamarind --json jobs",
+        )
+
+    summary = jobs_helpers.summarize_batch(jobs_helpers.parse_batch_submission(resp))
+    result = {
+        "batchName": batch_name,
+        "type": job_type,
+        "toolRef": tool_ref,
+        "count": len(items),
+        "outcome": summary.outcome.value,
+        "submitted": list(summary.submitted),
+        "failures": [{"jobName": n, "error": e} for n, e in summary.failures],
+        # No parent row exists on this path, so say so rather than let a caller infer
+        # one from `batchName` and query for something that was never created.
+        "hasBatchParent": False,
+    }
+    if summary.counts_disagreed:
+        result["countsDisagreed"] = True
+
+    human = f"{summary.outcome.value}: {len(summary.submitted)}/{len(items)} jobs at {tool_ref}"
+    if summary.failures:
+        first = summary.failures[0]
+        human += f"  (first failure: {first[0]} — {first[1]})"
+    output.emit(sanitize(result), state.output, human=human)
+
+    # A 200 that dispatched nothing, or only some, is not a success. The detail is
+    # already in the payload above, so this only decides the exit code.
+    if not summary.ok:
+        raise typer.Exit(ExitCode.JOB_FAILED)
+
+
 def _attach_error_context(exc: TamarindError, **context: object) -> TamarindError:
     """Add recovery metadata without changing the exception's stable exit code."""
     detail = dict(exc.detail) if isinstance(exc.detail, dict) else {}
@@ -371,8 +459,23 @@ def register(app: typer.Typer) -> None:
             "--prevalidate",
             help="Validate every item before submitting (one API request per item).",
         ),
+        tool_version: Optional[str] = typer.Option(
+            None,
+            "--tool-version",
+            help=(
+                "Pin every job to this custom-tool version. Submits N independent "
+                "jobs instead of one batch parent — see `tamarind batch --help`."
+            ),
+        ),
     ) -> None:
-        """Submit many jobs as one batch (preferred over looping submit)."""
+        """Submit many jobs as one batch (preferred over looping submit).
+
+        With --tool-version every job runs against a named version of a custom tool.
+        That path submits jobs INDEPENDENTLY rather than under a batch parent, so
+        there is no batch row to query afterwards: use the returned job names, or
+        `tamarind jobs`. It also reports per-item outcomes, and exits non-zero when
+        any item fails to dispatch even though the request itself succeeded.
+        """
         state = ctx.obj
         from ..inputs import _load_text, _parse_document  # internal reuse
 
@@ -450,6 +553,18 @@ def register(app: typer.Typer) -> None:
                                 "validation": validation,
                             },
                         )
+            if tool_version:
+                _submit_pinned_batch(
+                    client,
+                    state=state,
+                    batch_name=batch_name,
+                    job_type=job_type,
+                    settings_list=settings_list,
+                    job_names=job_names,
+                    max_runtime=max_runtime,
+                    tool_version=tool_version,
+                )
+                return
             try:
                 resp = jobs_api.submit_batch(
                     client,
