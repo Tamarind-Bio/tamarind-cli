@@ -90,6 +90,16 @@ def register(app_root: typer.Typer) -> None:
         `deployed: false` in the JSON says so, and `--fail-on-noop` makes it an error.
         """
         state = ctx.obj
+        # Rejected here, before the upload, rather than failing after it. Publishing
+        # requires a COMPLETE version and `--no-wait` returns while the build is still
+        # running, so the combination cannot succeed for any build that actually builds
+        # — accepting it would spend the upload and then refuse.
+        if publish_after and not wait:
+            raise ValidationError(
+                "--publish needs the build to finish, so it cannot be combined with "
+                "--no-wait. Drop --no-wait, or deploy now and run `tamarind publish` "
+                "once the build completes."
+            )
         tool = ct_project.resolve_name(folder, name)
         with state.rest_client() as client:
             if create:
@@ -203,29 +213,20 @@ def register(app_root: typer.Typer) -> None:
         root = spec.root
         problems: list[str] = []
         warnings: list[str] = []
-
-        if not (root / "Dockerfile").is_file():
-            problems.append("No Dockerfile — the build has nothing to build.")
-        if not (root / "run.sh").is_file():
-            problems.append(
-                'No run.sh — the generated Dockerfile ends in `CMD ["bash","run.sh"]`, '
-                "so the image builds and then fails to start."
-            )
         facts: dict = {}
-        if not (root / "config.json").is_file():
-            problems.append("No config.json — the tool has no declared inputs or outputs.")
+
+        # THE function `deploy` runs, not a second copy of it — that divergence is
+        # what let a folder this command rejected still reach a remote build. `check`
+        # collects rather than raises, though: being told about every problem at once
+        # is the whole reason to run it separately.
+        try:
+            findings = ct.inspect_folder(root)
+        except ValidationError as exc:
+            problems.append(str(exc))
         else:
-            # One reader, shared with `deploy`, so the two cannot disagree about what
-            # the manifest says. `check` collects rather than raises, though: being
-            # told about every problem at once is the reason to run it.
-            try:
-                findings = ct.inspect_manifest(root)
-            except ValidationError as exc:
-                problems.append(str(exc))
-            else:
-                problems += [f"config.json: {e}" for e in findings.errors]
-                warnings += list(findings.warnings)
-                facts = findings.facts
+            problems += list(findings.errors)
+            warnings += list(findings.warnings)
+            facts = findings.facts
 
         advice = ct.packaging.env_var_advice(spec.secrets)
         if advice:
@@ -235,12 +236,20 @@ def register(app_root: typer.Typer) -> None:
                 f"{weight} looks like model weights. The runtime container has no "
                 f"network, so weights belong in the image via the Dockerfile."
             )
+        if spec.links:
+            warnings.append(
+                f"Skipped {len(spec.links)} symlink(s) ({', '.join(sorted(spec.links)[:3])}"
+                f"{' …' if len(spec.links) > 3 else ''}). Links are never followed — a "
+                f"link's name says nothing about what it points at — so copy the real "
+                f"file in if the build needs it."
+            )
 
         payload = {
             "folder": str(root),
             "files": len(spec.included),
             "bytes": spec.total_bytes,
             "excludedSecrets": list(spec.secrets),
+            "excludedLinks": list(spec.links),
             "excludedNoise": spec.noise_count,
             "problems": problems,
             "warnings": warnings,
@@ -300,8 +309,12 @@ def status(ctx: typer.Context, name: str = typer.Argument(..., help="Tool id."))
 
     latest = versions[0] if versions else None
     # The genuinely useful line, and the only derived one: if the source has moved past
-    # the newest version's ref, there is work sitting undeployed.
-    undeployed = bool(tool.current_source_ref and latest and latest.ref != tool.current_source_ref)
+    # the newest version's ref, there is work sitting undeployed. NO version at all is
+    # the strongest form of that — a source tree nobody has ever built — so it must not
+    # fall through to False just because there is nothing to compare against.
+    undeployed = bool(
+        tool.current_source_ref and (latest is None or latest.ref != tool.current_source_ref)
+    )
     payload = {
         "name": tool.name,
         "status": tool.status,
@@ -372,9 +385,24 @@ def logs(
         if follow:
             page = ct.wait_for_build(client, name=name, build_id=target, on_event=_renderer(state))
         else:
+            # Drain every page that already exists. Stopping at the first one showed the
+            # OLDEST output and called it the log — the exact opposite of what someone
+            # inspecting a failed build needs, since the error is at the end. This still
+            # never blocks: it follows tokens that are already there and stops when the
+            # server stops handing out new ones.
             page = ct.api.get_logs(client, name=name, build_id=target)
-            for line in page.lines:
-                output.info(line.message, state.output)
+            seen_tokens: set[str] = set()
+            while True:
+                for line in page.lines:
+                    output.info(line.message, state.output)
+                token = page.next_token
+                # A server that keeps returning the same token would otherwise spin here
+                # forever; an empty page with a fresh token is normal, so the guard is on
+                # the token rather than on the page being empty.
+                if not token or token in seen_tokens:
+                    break
+                seen_tokens.add(token)
+                page = ct.api.get_logs(client, name=name, build_id=target, next_token=token)
     output.emit(
         {"buildId": target, "buildStatus": page.build_status, "error": page.error_message},
         state.output,
@@ -504,13 +532,25 @@ def clone(
     name: str = typer.Argument(..., help="Tool id."),
     dest: Optional[Path] = typer.Argument(None, help="Destination. Defaults to ./<name>."),
     version: Optional[str] = typer.Option(None, "--version", help="Version to fetch."),
+    force: bool = typer.Option(
+        False, "--force", help="Extract into a non-empty destination, overwriting files."
+    ),
 ) -> None:
-    """Download a tool's source, so you can edit it and deploy it back."""
-    import io
-    import zipfile
+    """Download a tool's source, so you can edit it and deploy it back.
 
+    Refuses a destination that already has files in it. Extraction overwrites without
+    asking, so re-running `clone` in a folder you have been editing would silently
+    destroy that work — and `clone name .` is an easy way to ask for exactly that.
+    """
     state = ctx.obj
     target = Path(dest) if dest else Path.cwd() / name
+    if target.exists() and any(target.iterdir()) and not force:
+        raise ValidationError(
+            f"'{target}' is not empty. Cloning extracts over whatever is there, so "
+            f"local edits would be lost. Choose an empty folder, or pass --force if "
+            f"overwriting is what you want."
+        )
+
     with state.rest_client() as client:
         ref = None
         if version:
@@ -518,16 +558,9 @@ def clone(
             if found is None:
                 raise ValidationError(f"'{name}' has no version {version}.")
             ref = found.ref
-        blob = ct.download_archive(client, name=name, ref=ref)
+        _, pointer_paths = ct.flow.fetch_source(client, name=name, destination=target, ref=ref)
 
-    target.mkdir(parents=True, exist_ok=True)
-    try:
-        with zipfile.ZipFile(io.BytesIO(blob)) as zf:
-            zf.extractall(target)
-    except (zipfile.BadZipFile, OSError) as exc:
-        raise TamarindError(f"Could not unpack {name}'s source: {exc}") from exc
-
-    pointers = [p.name for p in target.rglob("*") if p.is_file() and _is_lfs_pointer(p)]
+    pointers = [Path(p).name for p in pointer_paths]
     if pointers:
         output.info(
             f"warning: {len(pointers)} file(s) came down as Git-LFS pointers, not "

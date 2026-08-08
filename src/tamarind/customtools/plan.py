@@ -42,6 +42,10 @@ REASONS: Mapping[str, str] = {
     "saved": "source changed; the existing image was reused",
     "unchanged": "nothing to do — the source is identical to what is already deployed",
     "already-deployed": "this exact source was already deployed by another run",
+    "unconfirmed": (
+        "the server did not confirm it finished unpacking the upload, so whether your "
+        "source is deployed is unknown — check `ct status` before assuming it shipped"
+    ),
 }
 
 
@@ -82,12 +86,21 @@ def needs_late_landing_recheck(*, ref_moved: bool, path: str | None) -> bool:
     return not ref_moved and path == "noop"
 
 
-def reconcile(*, ref_moved: bool, result: wire.DeployResult) -> DeployOutcome:
+def reconcile(
+    *, ref_moved: bool, result: wire.DeployResult, extraction_landed: bool = True
+) -> DeployOutcome:
     """Turn what the server said, plus what we observed, into one answer.
 
     ``ref_moved`` is advisory: it is allowed to be False for a perfectly good deploy,
     because an identical re-upload produces no new commit (the server skips a commit
     whose tree matches HEAD).
+
+    ``extraction_landed`` is what makes the no-op branch trustworthy. "The source is
+    identical to what is deployed" and "we never saw the server finish unpacking" both
+    produce a no-op with a still ref, and only the first is good news. Reporting the
+    second as `unchanged` claims the deploy was a success when the uploaded source may
+    never have been built at all — so an unconfirmed extraction gets its own reason and
+    tells the caller to go and look.
 
     The late-landing race is not an outcome here. `flow.build` detects it with
     :func:`needs_late_landing_recheck` and DEPLOYS AGAIN, so by the time this runs the
@@ -111,6 +124,8 @@ def reconcile(*, ref_moved: bool, result: wire.DeployResult) -> DeployOutcome:
             # Our upload landed, yet the server found an existing version at that exact
             # source. Someone deployed the same content first; the state is correct.
             return DeployOutcome(**common, deployed=False, reason="already-deployed")
+        if not extraction_landed:
+            return DeployOutcome(**common, deployed=False, reason="unconfirmed")
         return DeployOutcome(**common, deployed=False, reason="unchanged")
 
     # An unrecognized path. Report it rather than guessing — a server that invents a

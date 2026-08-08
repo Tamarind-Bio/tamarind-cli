@@ -39,7 +39,10 @@ from .commands import jobs as jobs_cmds
 _active_output_mode = OutputMode(json=not output.is_tty(), quiet=False)
 _GLOBAL_VALUE_OPTIONS = {"--api-key", "--api-base", "--catalog-base", "--profile"}
 _GLOBAL_FLAG_OPTIONS = {"--json", "--no-json", "--quiet", "-q"}
-_COMMAND_GROUPS = {"auth", "files"}
+# Every sub-app registered on the root. A group missing from here prints Rich help
+# to stdout under --json instead of the structured UsageError, which is the one
+# thing the JSON contract promises never to do.
+_COMMAND_GROUPS = {"auth", "files", "ct"}
 
 
 def _missing_command_message(argv: list[str]) -> str | None:

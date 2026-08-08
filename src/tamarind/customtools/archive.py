@@ -29,6 +29,9 @@ class ArchivePlan:
 
     included: tuple[Path, ...] = ()
     secrets: tuple[str, ...] = ()
+    # Symlinks, which are never uploaded. Reported because dropping one silently is
+    # how a tool builds without a file its author believed was there.
+    links: tuple[str, ...] = ()
     noise_count: int = 0
     weights: tuple[str, ...] = ()
     total_bytes: int = 0
@@ -47,12 +50,23 @@ def plan_archive(folder: Path) -> ArchivePlan:
 
     included: list[Path] = []
     secrets: list[str] = []
+    links: list[str] = []
     weights: list[str] = []
     noise = 0
     total = 0
 
     for path in sorted(root.rglob("*")):
-        if not path.is_file() and not path.is_symlink():
+        if path.is_symlink():
+            # NEVER followed. Every filter in `packaging` works on the pathname, and a
+            # symlink's name says nothing about what it points at: `config.txt ->
+            # ~/.ssh/id_rsa` classifies as an ordinary file, and `ZipFile.write` would
+            # then archive the KEY's bytes under that harmless name. That single case
+            # defeats the entire exclusion list, so links are reported and dropped
+            # rather than resolved-then-classified — resolving first would still let a
+            # link to an unnamed-but-sensitive file through.
+            links.append(path.relative_to(root).as_posix())
+            continue
+        if not path.is_file():
             continue
         relative = path.relative_to(root).as_posix()
         decision = packaging.classify(relative)
@@ -62,10 +76,6 @@ def plan_archive(folder: Path) -> ArchivePlan:
         if decision.disposition is packaging.Disposition.NOISE:
             noise += 1
             continue
-        # A symlink is followed by is_file(); a broken one is neither, and stat() on it
-        # would raise, so it is skipped as unreadable rather than crashing the walk.
-        if not path.is_file():
-            continue
         included.append(path)
         total += path.stat().st_size
         if packaging.is_weight_file(relative):
@@ -74,6 +84,7 @@ def plan_archive(folder: Path) -> ArchivePlan:
     return ArchivePlan(
         included=tuple(included),
         secrets=tuple(secrets),
+        links=tuple(links),
         noise_count=noise,
         weights=tuple(weights),
         total_bytes=total,

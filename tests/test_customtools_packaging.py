@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from tamarind.customtools import packaging
+from tamarind.customtools import archive, packaging
 from tamarind.customtools.packaging import Disposition
 
 
@@ -148,3 +148,67 @@ class TestPathHandling:
     @pytest.mark.parametrize("path", ["", ".", "./"])
     def test_empty_paths_are_dropped_rather_than_crashing(self, path: str) -> None:
         assert packaging.classify(path).included is False
+
+
+class TestSymlinks:
+    """Links are never followed, and the reason is security rather than tidiness."""
+
+    def test_a_symlink_to_a_secret_is_not_uploaded(self, tmp_path) -> None:
+        """THE escape. Every exclusion in `packaging` works on the PATHNAME, and a
+        link's name says nothing about its target: `config.txt -> id_rsa` classifies as
+        an ordinary file, `is_file()` follows the link, and `ZipFile.write` then stores
+        the KEY's bytes under that innocuous name.
+
+        Without the symlink check this asserts False — `config.txt` appears in
+        `included`, and the archive would carry the private key past every filter the
+        module exists to enforce.
+        """
+        secret = tmp_path / "id_rsa"
+        secret.write_text("-----BEGIN OPENSSH PRIVATE KEY-----\n")
+        folder = tmp_path / "tool"
+        folder.mkdir()
+        (folder / "Dockerfile").write_text("FROM scratch\n")
+        (folder / "config.txt").symlink_to(secret)
+
+        spec = archive.plan_archive(folder)
+        names = {p.name for p in spec.included}
+        assert "config.txt" not in names, "a symlink was followed into the archive"
+        assert "config.txt" in spec.links, "the skipped link was not reported"
+
+    def test_a_symlink_to_an_ordinary_file_is_also_skipped(self, tmp_path) -> None:
+        """Not just secrets. Resolving links to decide would still let a link to an
+        unnamed-but-sensitive file through, so the rule is the simple one: never
+        follow. Reporting it is what keeps that from being a silent omission."""
+        target = tmp_path / "shared.py"
+        target.write_text("x = 1\n")
+        folder = tmp_path / "tool"
+        folder.mkdir()
+        (folder / "Dockerfile").write_text("FROM scratch\n")
+        (folder / "lib.py").symlink_to(target)
+
+        spec = archive.plan_archive(folder)
+        assert "lib.py" not in {p.name for p in spec.included}
+        assert spec.links == ("lib.py",)
+
+    def test_a_symlinked_directory_is_not_descended_into(self, tmp_path) -> None:
+        """The same escape one level up: linking a directory would sweep in everything
+        under it, none of which the walk ever names."""
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "creds.json").write_text("{}\n")
+        folder = tmp_path / "tool"
+        folder.mkdir()
+        (folder / "Dockerfile").write_text("FROM scratch\n")
+        (folder / "data").symlink_to(outside, target_is_directory=True)
+
+        spec = archive.plan_archive(folder)
+        assert not any("creds" in p.name for p in spec.included)
+
+    def test_ordinary_files_are_unaffected(self, tmp_path) -> None:
+        folder = tmp_path / "tool"
+        folder.mkdir()
+        (folder / "Dockerfile").write_text("FROM scratch\n")
+        (folder / "main.py").write_text("print('hi')\n")
+        spec = archive.plan_archive(folder)
+        assert {p.name for p in spec.included} == {"Dockerfile", "main.py"}
+        assert spec.links == ()

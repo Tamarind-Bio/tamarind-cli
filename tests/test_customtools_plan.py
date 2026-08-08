@@ -191,3 +191,52 @@ class TestCancellableBuild:
             wire.Version(name="v1", status="Stopped", build_id="b-1"),
         )
         assert plan.cancellable_build_id(versions) is None
+
+
+class TestUnconfirmedExtraction:
+    """A no-op means two different things, and only one of them is good news."""
+
+    def test_a_confirmed_no_op_is_unchanged(self) -> None:
+        out = plan.reconcile(
+            ref_moved=False, result=_result("noop", build=None), extraction_landed=True
+        )
+        assert out.reason == "unchanged"
+        assert out.deployed is False
+
+    def test_an_unconfirmed_no_op_is_not_called_unchanged(self) -> None:
+        """The silent-failure case. If the server never confirmed it unpacked the
+        upload, a no-op may mean the deploy built the PREVIOUS source and the new code
+        was never built at all. `unchanged` asserts a success nobody observed.
+
+        Without the `extraction_landed` branch this returns "unchanged", and a CI job
+        branching on it reports a clean deploy for source that never shipped.
+        """
+        out = plan.reconcile(
+            ref_moved=False, result=_result("noop", build=None), extraction_landed=False
+        )
+        assert out.reason == "unconfirmed"
+        assert out.deployed is False
+        assert "unknown" in out.explanation, "the reason must say what the caller should do"
+
+    def test_confirmation_is_irrelevant_once_the_ref_moved(self) -> None:
+        """A moved ref already proves the upload landed, so the extra flag must not
+        override the more specific answer."""
+        for landed in (True, False):
+            out = plan.reconcile(
+                ref_moved=True, result=_result("noop", build=None), extraction_landed=landed
+            )
+            assert out.reason == "already-deployed"
+
+    def test_a_real_deploy_is_never_downgraded(self) -> None:
+        """`building` and `saved` are positive statements from the server; an
+        unconfirmed extraction does not make them less true."""
+        for path in ("building", "saved"):
+            out = plan.reconcile(ref_moved=False, result=_result(path), extraction_landed=False)
+            assert out.deployed is True
+
+    def test_the_default_keeps_existing_callers_honest(self) -> None:
+        """Defaulting to True means an old caller reads exactly as before rather than
+        every no-op suddenly becoming `unconfirmed`."""
+        assert plan.reconcile(ref_moved=False, result=_result("noop", build=None)).reason == (
+            "unchanged"
+        )

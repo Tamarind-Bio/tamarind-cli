@@ -4,7 +4,7 @@
 where getting the sequence wrong ships nothing while reporting success. The sequence
 and the reason for it:
 
-    read the source ref  ->  upload  ->  finalize  ->  wait  ->  deploy  ->  reconcile
+    read source state  ->  upload  ->  finalize  ->  wait  ->  deploy  ->  reconcile
 
 `finalize` hands extraction to a background task and returns immediately, while
 `deploy` builds at whatever the repository currently points to. Those race. The naive
@@ -12,11 +12,17 @@ handling — deploy straight after finalize — can build the PREVIOUS source, f
 existing version there, and report "nothing to do" on a run that was supposed to ship
 new code.
 
-The wait is deliberately advisory rather than a gate. An identical re-upload produces
-no new commit at all (the server skips a commit whose tree matches HEAD), so demanding
-that the ref move would turn every unchanged CI re-deploy into a hard timeout. Instead:
-wait if we can, deploy regardless, then interpret what came back — which is what
-`plan.reconcile` is for.
+**What the wait watches matters more than how long it waits.** The obvious signal is
+the source ref, and it is the wrong one: an identical re-upload produces no commit at
+all (the server skips a commit whose tree matches HEAD), so on the single most common
+CI deploy the ref never moves and a ref-watcher waits out its entire timeout before
+concluding nothing happened. `lastUpdatedAt` is the right one — the extractor stamps it
+on every successful extraction, including the no-commit case — so "the server finished"
+and "the content changed" stop being the same question.
+
+The wait still does not GATE the deploy: it is bounded, and on timeout the deploy runs
+anyway. What changes is the reporting. A no-op with an unconfirmed extraction is no
+longer called `unchanged`, because that claims a success we did not observe.
 
 Progress is reported through `on_event`, never printed. The CLI passes a renderer; a
 script passes nothing.
@@ -27,7 +33,7 @@ from __future__ import annotations
 import json
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Literal
 
@@ -74,31 +80,84 @@ def _emit(
         on_event(BuildEvent(phase=phase, kind=kind, message=message, timestamp=ts))
 
 
+@dataclass(frozen=True)
+class SourceState:
+    """What the server said about the tool's source at one moment.
+
+    Captured BEFORE an upload so the wait afterwards has something to compare against.
+    """
+
+    ref: str | None = None
+    updated_at: str | None = None
+
+
+@dataclass(frozen=True)
+class ExtractionResult:
+    """How the wait for extraction ended.
+
+    ``landed`` is the load-bearing one, and it is deliberately separate from
+    ``ref_moved``: extraction completing and the content having changed are different
+    facts, and conflating them is what made an unchanged re-upload indistinguishable
+    from an upload that had not finished.
+    """
+
+    landed: bool = False
+    ref: str | None = None
+    ref_moved: bool = False
+
+
+def read_source_state(client: HTTPClient, *, name: str) -> SourceState:
+    """The source fields a deploy needs to compare against afterwards."""
+    tool = api.get_tool(client, name=name)
+    return SourceState(ref=tool.current_source_ref, updated_at=tool.last_updated_at)
+
+
 def wait_for_source(
     client: HTTPClient,
     *,
     name: str,
-    previous_ref: str | None,
+    before: SourceState,
     timeout: float = EXTRACT_TIMEOUT,
     interval: float = EXTRACT_INTERVAL,
-) -> str | None:
-    """Poll until the source ref differs from ``previous_ref``. Never raises on timeout.
+) -> ExtractionResult:
+    """Poll until the server finishes extracting the upload.
 
-    Returns the new ref, or None if it never moved within ``timeout``. None is NOT an
-    error: an identical upload legitimately produces no commit, so the caller deploys
-    anyway and lets `reconcile` decide.
+    Watches ``lastUpdatedAt``, not the source ref. The extractor stamps that field on
+    every successful extraction *including one whose tree matched and produced no
+    commit*, so it answers "is the server done with my upload" — which the ref cannot,
+    because on an identical re-upload the ref never moves at all. Watching the ref made
+    the single most common CI deploy wait out the full timeout every time, and made a
+    genuinely-unchanged upload look identical to one still being unpacked.
 
-    `hasSource` is unusable for this — it is already true on every redeploy — and a null
-    ref reads as "not yet" rather than "never", since the field is documented as null
-    when the repository is unreachable.
+    Raises if the server recorded an extraction failure: a bad zip or an LFS-pointer
+    archive is a real error, and burning the timeout before reporting "unchanged" told
+    the user the opposite of what happened.
+
+    ``landed=False`` on timeout is honest rather than fatal — the caller still deploys,
+    but must not then claim the source was unchanged.
+
+    NOT correlated with THIS upload: a concurrent upload by someone else stamps the same
+    field. Closing that needs a per-upload signal (the source hash), which the API does
+    not expose yet; the late-landing recheck in `build` is the partial mitigation.
     """
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
-        current = api.get_tool(client, name=name).current_source_ref
-        if current and current != previous_ref:
-            return current
+        tool = api.get_tool(client, name=name)
+        if tool.connection_error:
+            raise TamarindError(
+                f"The server could not unpack the upload: {tool.connection_error}",
+                detail={"tool": name, "phase": "extract"},
+            )
+        moved = bool(tool.current_source_ref and tool.current_source_ref != before.ref)
+        if tool.last_updated_at and tool.last_updated_at != before.updated_at:
+            return ExtractionResult(landed=True, ref=tool.current_source_ref, ref_moved=moved)
+        # A server that reports no timestamp at all leaves only the old signal. Treat a
+        # moved ref as landed rather than waiting out the clock for a field this
+        # deployment may not serve.
+        if moved:
+            return ExtractionResult(landed=True, ref=tool.current_source_ref, ref_moved=True)
         if time.monotonic() >= deadline:
-            return None
+            return ExtractionResult(landed=False, ref=tool.current_source_ref, ref_moved=False)
         time.sleep(max(0.0, min(interval, deadline - time.monotonic())))
 
 
@@ -164,15 +223,44 @@ def inspect_manifest(folder: Path | str) -> manifest.Findings:
     return manifest.check(data)
 
 
-def _check_manifest(root: Path, on_event: EventHandler | None) -> None:
-    """Refuse a deploy the server would reject, before anything is uploaded."""
-    findings = inspect_manifest(root)
+def inspect_folder(folder: Path | str) -> manifest.Findings:
+    """Everything decidable about a tool folder without contacting the server.
+
+    The structural files plus the manifest, in ONE function, because `check` and
+    `deploy` must not disagree about what a deployable folder is. They did: `check`
+    verified the Dockerfile and run.sh while `deploy` verified neither, so a folder
+    `check` rejected still got packaged, uploaded, and sent to a remote build that
+    could only fail — with `check`'s own docstring promising otherwise.
+    """
+    root = Path(folder)
+    problems: list[str] = []
+
+    if not (root / "Dockerfile").is_file():
+        problems.append("No Dockerfile — the build has nothing to build.")
+    if not (root / "run.sh").is_file():
+        problems.append(
+            'No run.sh — the generated Dockerfile ends in `CMD ["bash","run.sh"]`, '
+            "so the image builds and then fails to start."
+        )
+    if not (root / "config.json").is_file():
+        problems.append("No config.json — the tool has no declared inputs or outputs.")
+
+    found = inspect_manifest(root)
+    return manifest.Findings(
+        errors=tuple(problems) + tuple(f"config.json: {e}" for e in found.errors),
+        warnings=found.warnings,
+        facts=found.facts,
+    )
+
+
+def _preflight(root: Path, on_event: EventHandler | None) -> None:
+    """Refuse a deploy that cannot work, before anything is uploaded."""
+    findings = inspect_folder(root)
     for warning in findings.warnings:
         _emit(on_event, "package", "warning", warning)
     if findings.errors:
         raise ValidationError(
-            "config.json would be rejected by the server:\n"
-            + "\n".join(f"  - {e}" for e in findings.errors),
+            "This folder will not deploy:\n" + "\n".join(f"  - {e}" for e in findings.errors),
             detail={"errors": list(findings.errors)},
         )
 
@@ -186,24 +274,25 @@ def build(
     on_event: EventHandler | None = None,
     timeout: float = BUILD_TIMEOUT,
     extract_timeout: float = EXTRACT_TIMEOUT,
-    check_manifest: bool = True,
+    preflight: bool = True,
 ) -> plan.DeployOutcome:
     """Package a folder, upload it, deploy it, and (by default) watch the build.
 
     Returns a :class:`plan.DeployOutcome` whose ``deployed`` flag is decided in exactly
     one place. Callers must not re-derive it from ``path``.
 
-    The manifest is checked FIRST, and a fatal finding stops the deploy. The server
-    would reject the same config, but only after an upload, an extraction and a
-    build — the cost of being told about a typo should not be minutes. Pass
-    ``check_manifest=False`` to deploy anyway, for the case where this client's rules
-    have gone stale against a newer server.
+    The folder is checked FIRST — structural files and the manifest, via the same
+    `inspect_folder` that `check` runs — and a fatal finding stops the deploy before
+    anything is uploaded. The server would reject most of this too, but only after an
+    upload, an extraction and a build; the cost of being told about a missing run.sh
+    should not be minutes. Pass ``preflight=False`` to deploy anyway, for the case
+    where this client's rules have gone stale against a newer server.
     """
     root = Path(folder)
 
     # 0. Refuse before spending anything, if the manifest is already wrong.
-    if check_manifest:
-        _check_manifest(root, on_event)
+    if preflight:
+        _preflight(root, on_event)
 
     # 1. Decide what goes up, and say what does not.
     _emit(on_event, "package", "status", f"Packaging {root}")
@@ -222,7 +311,7 @@ def build(
         )
 
     # 2. The ref BEFORE the upload — this is what makes step 4 possible at all.
-    previous_ref = api.get_tool(client, name=name).current_source_ref
+    before = read_source_state(client, name=name)
 
     # 3. Package and upload.
     with tempfile.TemporaryDirectory() as tmp:
@@ -242,17 +331,26 @@ def build(
         )
         api.finalize_upload(client, name=name, upload_id=ticket.upload_id)
 
-    # 4. Advisory wait. None here is not a failure.
+    # 4. Wait for the server to finish unpacking. Bounded, and not fatal on timeout.
     _emit(on_event, "extract", "status", "Waiting for the server to unpack the upload")
-    new_ref = wait_for_source(client, name=name, previous_ref=previous_ref, timeout=extract_timeout)
-    ref_moved = new_ref is not None
-    if not ref_moved:
+    extraction = wait_for_source(client, name=name, before=before, timeout=extract_timeout)
+    ref_moved = extraction.ref_moved
+    if extraction.landed and not ref_moved:
         _emit(
             on_event,
             "extract",
             "status",
-            "Source is unchanged from what is already stored (an identical upload "
-            "produces no new commit)",
+            "Unpacked; the source is identical to what is already stored, so there is "
+            "no new commit",
+        )
+    elif not extraction.landed:
+        _emit(
+            on_event,
+            "extract",
+            "warning",
+            f"The server did not confirm it unpacked the upload within "
+            f"{extract_timeout:.0f}s. Deploying anyway, and reporting the result as "
+            f"unconfirmed rather than guessing.",
         )
 
     # 5. Deploy regardless, then interpret.
@@ -265,7 +363,7 @@ def build(
         # shipped nothing. Deploying again is the fix; reporting success is the bug this
         # whole sequence exists to avoid.
         settled = api.get_tool(client, name=name).current_source_ref
-        if settled and settled != previous_ref:
+        if settled and settled != before.ref:
             _emit(
                 on_event,
                 "deploy",
@@ -276,8 +374,11 @@ def build(
             # The ref is now confirmed moved, so the retry's result is reconciled on the
             # normal paths — a second no-op here genuinely means someone else got there.
             ref_moved = True
+            extraction = replace(extraction, landed=True, ref_moved=True)
 
-    outcome = plan.reconcile(ref_moved=ref_moved, result=result)
+    outcome = plan.reconcile(
+        ref_moved=ref_moved, result=result, extraction_landed=extraction.landed
+    )
     _emit(on_event, "deploy", "status", outcome.explanation)
 
     if outcome.deployed and outcome.build_id and wait:
@@ -317,19 +418,35 @@ def publish(
     return api.publish_version(client, name=name, version_name=version_name), version_name
 
 
-def unpack_source(blob: bytes, destination: Path) -> tuple[Path, tuple[str, ...]]:
+def fetch_source(
+    client: HTTPClient, *, name: str, destination: Path, ref: str | None = None
+) -> tuple[Path, tuple[str, ...]]:
+    """Download a tool's source into ``destination``. Returns it and any LFS pointers.
+
+    Shared by `init` and `clone` rather than written twice — the LFS detection and the
+    streaming download are both the kind of detail that gets fixed in one copy and not
+    the other. The archive goes to a temporary file and is deleted afterwards, so a
+    5 GiB source never has to fit in memory.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        zip_path = Path(tmp) / "source.zip"
+        api.download_archive(client, name=name, ref=ref, destination=zip_path)
+        return unpack_source(zip_path, destination)
+
+
+def unpack_source(archive_path: Path, destination: Path) -> tuple[Path, tuple[str, ...]]:
     """Extract a downloaded source archive. Returns the folder and any LFS pointers.
 
-    Shared by `init` and `clone` rather than written twice — the LFS detection is the
-    kind of detail that gets fixed in one copy and not the other.
+    Takes a PATH, not bytes: the caller has already streamed it to disk, and taking
+    bytes here would have forced every caller to hold the whole archive in memory to
+    satisfy this signature.
     """
-    import io
     import zipfile
 
     target = Path(destination)
     target.mkdir(parents=True, exist_ok=True)
     try:
-        with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+        with zipfile.ZipFile(archive_path) as zf:
             zf.extractall(target)
     except (zipfile.BadZipFile, OSError) as exc:
         raise TamarindError(f"Could not unpack the tool's source: {exc}") from exc
@@ -382,8 +499,7 @@ def init(
     api.create_tool(client, name=name, display_name=display_name, template="scratch")
 
     _emit(on_event, "package", "status", "Fetching the starting files")
-    blob = api.download_archive(client, name=name)
-    folder, pointers = unpack_source(blob, target)
+    folder, pointers = fetch_source(client, name=name, destination=target)
     for pointer in pointers:
         _emit(
             on_event,

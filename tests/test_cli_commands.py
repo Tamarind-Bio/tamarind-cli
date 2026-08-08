@@ -462,3 +462,52 @@ def test_files_stats_counts_by_type():
     out = json.loads(runner.invoke(app, ["--json", "files", "stats"], env=ENV).stdout)
     assert out["totalFiles"] == 5
     assert out["fileTypes"] == {"pdb": 2, "cif": 1, "no_extension": 1, "txt": 1}
+
+
+# ── Custom tools: guards that cost nothing to check and a lot to get wrong ────────
+
+
+def test_deploy_rejects_publish_without_waiting(tmp_path):
+    """`--publish` requires a COMPLETE version and `--no-wait` returns while the build
+    is still Running, so the pair can never succeed for a build that actually builds.
+
+    The check is before the upload deliberately: without it, deploy packages the folder,
+    uploads it, starts a build, and only then raises from `publish`.
+
+    Asserting on stderr rather than the exit code because CliRunner bypasses the exit
+    mapping; the point is that it refused, and named both flags.
+    """
+    (tmp_path / "Dockerfile").write_text("FROM scratch\n")
+    (tmp_path / "run.sh").write_text("true\n")
+    (tmp_path / "config.json").write_text("{}\n")
+    res = runner.invoke(app, ["deploy", str(tmp_path), "--no-wait", "--publish"], env=ENV)
+    assert res.exit_code != 0
+    combined = res.output + str(res.exception or "")
+    assert "--publish" in combined and "--no-wait" in combined
+
+
+def test_clone_refuses_a_non_empty_destination(tmp_path):
+    """Extraction overwrites without asking, so re-cloning into a folder you have been
+    editing destroys that work — and `clone name .` asks for exactly that.
+
+    No HTTP is mocked here on purpose: the guard has to fire BEFORE the download, so a
+    request reaching the network would fail this test by erroring differently.
+    """
+    dest = tmp_path / "work"
+    dest.mkdir()
+    (dest / "main.py").write_text("my unsaved edits\n")
+    res = runner.invoke(app, ["ct", "clone", "some-tool", str(dest)], env=ENV)
+    assert res.exit_code != 0
+    combined = res.output + str(res.exception or "")
+    assert "not empty" in combined or "--force" in combined
+    assert (dest / "main.py").read_text() == "my unsaved edits\n", "the guard did not protect"
+
+
+def test_json_mode_reports_a_missing_ct_subcommand(tmp_path):
+    """`tamarind --json ct` must emit the structured usage error, not Rich help on
+    stdout. `ct` was registered as a group but never added to _COMMAND_GROUPS, so it
+    was the one group that broke the machine-readable contract."""
+    res = runner.invoke(app, ["--json", "ct"], env=ENV)
+    assert res.exit_code != 0
+    combined = res.output + str(res.exception or "")
+    assert "Missing command" in combined

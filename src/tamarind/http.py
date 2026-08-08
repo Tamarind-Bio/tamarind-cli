@@ -8,7 +8,8 @@ callers (and the CLI's exit codes) get consistent behaviour.
 from __future__ import annotations
 
 import re
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 import httpx
 
@@ -90,6 +91,44 @@ class HTTPClient:
         if resp.is_success:
             return resp
         raise _map_error(resp)
+
+    @contextmanager
+    def stream(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        timeout: float | None = None,
+    ) -> Iterator[httpx.Response]:
+        """A response whose body is read in chunks, for downloads too big to buffer.
+
+        The read timeout is disabled while the connect timeout is kept: a multi-gigabyte
+        body legitimately takes longer than any per-request deadline, but an unreachable
+        host should still fail fast rather than hang.
+
+        Errors are mapped exactly as in `request`, which means reading the body first —
+        an error response is small, and mapping it needs its text.
+        """
+        if not self.api_key:
+            raise AuthError(
+                "No API key configured. Set TAMARIND_API_KEY, pass --api-key, "
+                "or run `tamarind auth login`."
+            )
+        clean_params = {k: v for k, v in params.items() if v is not None} if params else None
+        stream_timeout = (
+            httpx.Timeout(timeout) if timeout is not None else httpx.Timeout(30.0, read=None)
+        )
+        try:
+            with self._client.stream(
+                method, path.lstrip("/"), params=clean_params, timeout=stream_timeout
+            ) as resp:
+                if not resp.is_success:
+                    resp.read()
+                    raise _map_error(resp)
+                yield resp
+        except httpx.HTTPError as exc:
+            raise TamarindError(f"Network error talking to {self.base_url}: {exc}") from exc
 
     def get_json(
         self,

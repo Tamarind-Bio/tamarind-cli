@@ -42,12 +42,16 @@ from .flow import (
     apply_config,
     build,
     init,
+    inspect_folder,
     inspect_manifest,
+    read_source_state,
     publish,
+    fetch_source,
     unpack_source,
     wait_for_build,
     wait_for_source,
 )
+from .flow import ExtractionResult, SourceState
 from .manifest import Findings, check as check_manifest, parse_env_assignments
 from .packaging import Disposition, classify
 from .plan import DeployOutcome, is_terminal_build, select_publishable
@@ -57,8 +61,13 @@ __all__ = [
     "manifest",
     "check_manifest",
     "inspect_manifest",
+    "inspect_folder",
+    "read_source_state",
+    "ExtractionResult",
+    "SourceState",
     "parse_env_assignments",
     "unpack_source",
+    "fetch_source",
     "init",
     "apply_config",
     "project",

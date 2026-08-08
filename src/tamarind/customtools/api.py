@@ -7,6 +7,8 @@ All of these live under the `v2/` prefix, which the website rewrites onto the ba
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from ..http import HTTPClient
@@ -101,20 +103,32 @@ def finalize_upload(client: HTTPClient, *, name: str, upload_id: str) -> Any:
 
     Returns immediately with ``sourceHash="pending"``: extraction runs in a background
     task AFTER the response is sent. Nothing in this response indicates the source has
-    landed, which is the whole reason `flow.build` watches the source ref instead.
+    landed, which is why `flow.wait_for_source` exists at all.
     """
     return client.post_json(f"{_PREFIX}/{name}/uploads/{upload_id}/finalize")
 
 
-def download_archive(client: HTTPClient, *, name: str, ref: str | None = None) -> bytes:
-    """GET .../archive — the tool's source as a zip.
+def download_archive(
+    client: HTTPClient, *, name: str, ref: str | None = None, destination: Path | None = None
+) -> Path:
+    """GET .../archive — the tool's source as a zip, written to ``destination``.
+
+    Streamed to disk rather than returned as bytes. Sources are allowed up to 5 GiB, and
+    buffering the whole body to hand back a `bytes` made a large-but-valid tool an
+    out-of-memory crash on the client; it also ran the download under the ordinary
+    request timeout, which a multi-gigabyte body will not finish inside.
 
     LFS-tracked files arrive as pointer files rather than content, matching how GitHub
     and GitLab serve archives, so a clone of a tool with large assets is not
     immediately redeployable.
     """
     params = {"ref": ref} if ref else None
-    return client.request("GET", f"{_PREFIX}/{name}/archive", params=params).content
+    target = Path(destination) if destination else Path(tempfile.mkstemp(suffix=".zip")[1])
+    with client.stream("GET", f"{_PREFIX}/{name}/archive", params=params) as response:
+        with target.open("wb") as handle:
+            for chunk in response.iter_bytes():
+                handle.write(chunk)
+    return target
 
 
 # ---------------------------------------------------------------------- deploy ----

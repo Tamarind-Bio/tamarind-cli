@@ -138,9 +138,16 @@ class TestDeploySequence:
         self, tool_folder, patched
     ) -> None:
         """THE common CI case. The ref never moves because an identical upload produces
-        no commit, and the server says noop. Success, with nothing to do."""
-        server = patched(FakeServer(lands_on_read=99, deploy_paths=["noop"]))
-        outcome = flow.build(None, name="t", folder=tool_folder, wait=False, **self.RACE)
+        no commit, and the server says noop. Success, with nothing to do.
+
+        Uses the StampingServer because the real one stamps a completion timestamp even
+        when it makes no commit — that is precisely what distinguishes this from an
+        extraction that never finished, and the plain FakeServer (which reports no
+        timestamp at all) cannot express the difference.
+        """
+        server = patched(StampingServer(lands_on_read=2, content_changed=False))
+        server.deploy_paths = ["noop"]
+        outcome = flow.build(None, name="t", folder=tool_folder, wait=False)
         assert outcome.deployed is False
         assert outcome.reason == "unchanged"
         assert len(server.deploys) == 1, "an unchanged deploy must not retry"
@@ -231,6 +238,12 @@ class TestInit:
             zf.writestr("config.json", '{"displayName": ""}\n')
         return buf.getvalue()
 
+    def _fake_download(self, client, *, name, ref=None, destination=None):
+        """Matches the streaming signature: writes the zip, returns its path."""
+        target = Path(destination)
+        target.write_bytes(self._blob())
+        return target
+
     def test_asks_the_server_to_seed_the_scaffold(self, tmp_path, monkeypatch) -> None:
         """`template="scratch"` matters: the server picks the Dockerfile's base image
         from the tool's packages, so local templates would be a fourth copy of that
@@ -244,7 +257,7 @@ class TestInit:
             return wire.Tool(name=name)
 
         monkeypatch.setattr(flow.api, "create_tool", create)
-        monkeypatch.setattr(flow.api, "download_archive", lambda *a, **k: self._blob())
+        monkeypatch.setattr(flow.api, "download_archive", self._fake_download)
         flow.init(None, name="my-tool", destination=tmp_path / "my-tool")
         assert seen == {"name": "my-tool", "template": "scratch"}
 
@@ -252,7 +265,7 @@ class TestInit:
         from tamarind.customtools import project, wire
 
         monkeypatch.setattr(flow.api, "create_tool", lambda *a, **k: wire.Tool(name="t"))
-        monkeypatch.setattr(flow.api, "download_archive", lambda *a, **k: self._blob())
+        monkeypatch.setattr(flow.api, "download_archive", self._fake_download)
         folder, _ = flow.init(None, name="t", destination=tmp_path / "t")
         assert (folder / "Dockerfile").is_file()
         assert (folder / "run.sh").is_file()
@@ -336,13 +349,17 @@ class TestUnpackSource:
                 "weights.pt",
                 "version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 1\n",
             )
-        folder, pointers = flow.unpack_source(buf.getvalue(), tmp_path / "out")
+        zip_path = tmp_path / "src.zip"
+        zip_path.write_bytes(buf.getvalue())
+        folder, pointers = flow.unpack_source(zip_path, tmp_path / "out")
         assert (folder / "main.py").is_file()
         assert pointers == ("weights.pt",)
 
     def test_a_corrupt_archive_is_a_clean_error(self, tmp_path) -> None:
+        bad = tmp_path / "bad.zip"
+        bad.write_bytes(b"not a zip")
         with pytest.raises(TamarindError):
-            flow.unpack_source(b"not a zip", tmp_path / "out")
+            flow.unpack_source(bad, tmp_path / "out")
 
 
 class TestManifestPreflight:
@@ -403,4 +420,102 @@ class TestManifestPreflight:
         # Reaching the network means the manifest check was skipped, which is the
         # behaviour under test — the RuntimeError proves it got past the gate.
         with pytest.raises(RuntimeError):
-            flow.build(ExplodingClient(), name="t", folder=folder, check_manifest=False)
+            flow.build(ExplodingClient(), name="t", folder=folder, preflight=False)
+
+
+class StampingServer(FakeServer):
+    """A server that behaves like the real one: it stamps `lastUpdatedAt` on EVERY
+    successful extraction, including one whose tree matched and produced no commit.
+
+    That is the distinction the ref cannot express, so it is the distinction the fake
+    has to be able to produce.
+    """
+
+    def __init__(self, *, lands_on_read: int = 2, content_changed: bool = True, **kw) -> None:
+        super().__init__(lands_on_read=lands_on_read, **kw)
+        self.content_changed = content_changed
+        self.error: str | None = None
+
+    @property
+    def current_ref(self) -> str:
+        # No commit when the content is identical — exactly what the server does.
+        landed = self.finalized and self.ref_reads >= self.lands_on_read
+        return "ref-new" if landed and self.content_changed else "ref-old"
+
+    def get_tool(self, client, *, name):
+        from tamarind.customtools import wire
+
+        self.ref_reads += 1
+        landed = self.finalized and self.ref_reads >= self.lands_on_read
+        return wire.Tool(
+            name=name,
+            current_source_ref=self.current_ref,
+            last_updated_at="2026-01-02T00:00:00Z" if landed else "2026-01-01T00:00:00Z",
+            connection_error=self.error,
+        )
+
+
+class TestExtractionSignal:
+    """What the wait watches. The ref answers "did the content change"; the timestamp
+    answers "is the server done" — and only the second one is what a deploy needs."""
+
+    def test_an_unchanged_upload_finishes_the_wait_without_the_ref_moving(
+        self, tool_folder, patched
+    ) -> None:
+        """THE regression. On an identical re-upload the server makes no commit, so a
+        ref-watcher sees nothing change and polls until its deadline — turning the most
+        common CI deploy into a five-minute wait every time.
+
+        Without the timestamp check, `wait_for_source` would take all 30 reads its
+        deadline allows and return landed=False; the assertion on `ref_reads` is what
+        fails. The generous timeout here is deliberate: it is what a ref-watcher would
+        burn, and the point is that this returns long before it.
+        """
+        server = patched(StampingServer(lands_on_read=3, content_changed=False))
+        state = flow.SourceState(ref="ref-old", updated_at="2026-01-01T00:00:00Z")
+        server.finalized = True
+        result = flow.wait_for_source(None, name="t", before=state, timeout=300.0)
+        assert result.landed is True, "extraction completion was not observed"
+        assert result.ref_moved is False, "an identical upload must not look like a change"
+        assert server.ref_reads <= 3, "polled past the completion signal"
+
+    def test_a_changed_upload_reports_both_landed_and_moved(self, tool_folder, patched) -> None:
+        server = patched(StampingServer(lands_on_read=2, content_changed=True))
+        server.finalized = True
+        state = flow.SourceState(ref="ref-old", updated_at="2026-01-01T00:00:00Z")
+        result = flow.wait_for_source(None, name="t", before=state, timeout=300.0)
+        assert result.landed is True and result.ref_moved is True
+
+    def test_a_failed_extraction_raises_instead_of_waiting(self, tool_folder, patched) -> None:
+        """A bad zip is recorded server-side. Polling past it burns the whole timeout
+        and then reports `unchanged` — telling the user the opposite of what happened."""
+        server = patched(StampingServer(lands_on_read=99, content_changed=True))
+        server.error = "Zip contains LFS pointers"
+        state = flow.SourceState(ref="ref-old", updated_at="2026-01-01T00:00:00Z")
+        with pytest.raises(TamarindError) as exc:
+            flow.wait_for_source(None, name="t", before=state, timeout=300.0)
+        assert "LFS pointers" in str(exc.value), "the server's own reason was dropped"
+
+    def test_a_server_without_the_timestamp_still_works(self, tool_folder, patched) -> None:
+        """The plain FakeServer reports no lastUpdatedAt at all. Ref movement is the
+        fallback, so an older deployment does not simply hang."""
+        server = patched(FakeServer(lands_on_read=2))
+        server.finalized = True
+        state = flow.SourceState(ref="ref-old", updated_at=None)
+        result = flow.wait_for_source(None, name="t", before=state, timeout=300.0)
+        assert result.landed is True and result.ref_moved is True
+
+    def test_a_timeout_is_reported_as_unconfirmed_not_unchanged(self, tool_folder, patched) -> None:
+        """The silent-failure case. Extraction never completes, the deploy no-ops
+        against the old source, and calling that `unchanged` claims a success nobody
+        observed — the uploaded code may never be built at all.
+
+        Without the `extraction_landed` argument to `reconcile`, this reason is
+        "unchanged" and a CI job checking it would pass.
+        """
+        server = patched(StampingServer(lands_on_read=99, deploy_paths=["noop"]))
+        outcome = flow.build(None, name="t", folder=tool_folder, wait=False, extract_timeout=0.0)
+        assert outcome.deployed is False
+        assert outcome.reason == "unconfirmed"
+        assert "unknown" in outcome.explanation
+        assert len(server.deploys) == 1, "an unconfirmed deploy must not silently retry forever"

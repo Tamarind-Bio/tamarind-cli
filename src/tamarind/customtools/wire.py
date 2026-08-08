@@ -45,10 +45,20 @@ class Tool:
     name: str | None = None
     status: str | None = None
     published: bool = False
-    # Gitea main HEAD. The signal `deploy` watches to know an upload landed — null when
-    # the repo is empty, the tool has no source, or Gitea is unreachable, so a null
-    # reads as "not yet" rather than "never".
+    # Gitea main HEAD. Null when the repo is empty, the tool has no source, or Gitea is
+    # unreachable, so a null reads as "not yet" rather than "never".
+    #
+    # NOT the signal that an upload landed, though it looks like one: an identical
+    # re-upload produces no commit, so this never moves for the single most common
+    # deploy in CI. It answers "did the content change", which is a different question.
     current_source_ref: str | None = None
+    # Stamped by the extractor on EVERY successful extraction, including one whose tree
+    # matched and produced no commit. That is what makes it the completion signal the
+    # ref cannot be: it distinguishes "identical, and done" from "not finished yet".
+    last_updated_at: str | None = None
+    # Set when extraction FAILED (bad zip, LFS pointers, Gitea unreachable). Non-null
+    # turns a wait into an immediate, specific error instead of a silent timeout.
+    connection_error: str | None = None
     latest_build_id: str | None = None
     latest_build_status: str | None = None
     # Non-null while a publish has been accepted but the default-version pointer has
@@ -135,6 +145,8 @@ def parse_tool(payload: Any) -> Tool:
         status=_str_or_none(inner.get("status")),
         published=bool(inner.get("published")),
         current_source_ref=_str_or_none(payload.get("currentSourceRef")),
+        last_updated_at=_str_or_none(inner.get("lastUpdatedAt")),
+        connection_error=_str_or_none(inner.get("connectionError")),
         latest_build_id=_str_or_none(payload.get("latestBuildId")),
         latest_build_status=_str_or_none(payload.get("latestBuildStatus")),
         publish_pending_version=_str_or_none(payload.get("publishPendingVersion")),
