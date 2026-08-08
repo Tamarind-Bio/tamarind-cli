@@ -20,7 +20,14 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from typing import TYPE_CHECKING
+
 from ..errors import TamarindError
+
+from .destination import read_text_here
+
+if TYPE_CHECKING:
+    from .destination import Destination
 
 PROJECT_FILENAME = ".tamarind"
 
@@ -41,11 +48,12 @@ def read(folder: Path | str) -> Project | None:
     the one failure this file exists to prevent.
     """
     path = Path(folder) / PROJECT_FILENAME
-    if not path.is_file():
+    text = read_text_here(folder, PROJECT_FILENAME)
+    if text is None:
         return None
     try:
-        data = json.loads(path.read_text())
-    except (OSError, ValueError) as exc:
+        data = json.loads(text)
+    except ValueError as exc:
         raise TamarindError(
             f"{path} is not readable as JSON ({exc}). Delete it, or fix the tool name, "
             f"rather than letting the folder name decide which tool gets deployed."
@@ -56,36 +64,16 @@ def read(folder: Path | str) -> Project | None:
     return Project(name=name, path=path)
 
 
-def write(folder: Path | str, *, name: str) -> Path:
+def write(destination: "Destination", *, name: str) -> Path:
     """Record ``name`` as the folder's tool. Returns the file written.
 
-    Writes through :func:`write_without_following_links`, because this is the FOURTH
-    place a symlink could redirect a write outside the folder we were asked to touch.
-    The marker is not an archive member, so `clone --force`'s extraction guard never
-    sees it — a `.tamarind` symlink in the destination survives extraction and then
-    catches this write.
+    Takes a :class:`~tamarind.customtools.destination.Destination` rather than a path,
+    so the marker cannot be written somewhere unchecked. That is not hypothetical: the
+    marker write was the FOURTH symlink escape in this package — `.tamarind` is not an
+    archive member, so extraction's per-member guard never sees it, and a link left in
+    the destination caught this write and redirected it out of the folder.
     """
-    path = Path(folder) / PROJECT_FILENAME
-    write_without_following_links(path, json.dumps({"name": name}, indent=2) + "\n")
-    return path
-
-
-def write_without_following_links(path: Path, text: str) -> None:
-    """Write ``text`` to ``path``, replacing a symlink rather than writing through it.
-
-    THE one write primitive for user-controlled destinations. Four separate symlink
-    escapes have now been fixed in this package one call site at a time (the archive
-    walk, extraction, the preflight checks, and this marker); the pattern is that each
-    new write is written with `write_text` and only later noticed. Routing every one
-    through here — and enforcing that in `tests/test_layering.py` — is what makes the
-    fifth instance fail a test instead of shipping.
-    """
-    if path.is_symlink():
-        path.unlink()
-    try:
-        path.write_text(text)
-    except OSError as exc:
-        raise TamarindError(f"Could not write {path}: {exc}") from exc
+    return destination.write_file(PROJECT_FILENAME, json.dumps({"name": name}, indent=2) + "\n")
 
 
 def resolve_name(folder: Path | str, explicit: str | None = None) -> str:

@@ -50,6 +50,24 @@ REASONS: Mapping[str, str] = {
 
 
 @dataclass(frozen=True)
+class ConfirmedVersion:
+    """A version we KNOW was built from the caller's own source.
+
+    Evidence, not a name. `publish` promoting the wrong version is the worst outcome
+    the deploy sequence can produce, and it happened twice: once because an unconfirmed
+    extraction still reported `deployed: true`, and once because a deployed response
+    with no version name silently skipped the publish and exited zero.
+
+    Both were gates I had to remember to write. Making the automatic publish path
+    require this instead means the bad state cannot be constructed: there is exactly
+    one producer, :meth:`DeployOutcome.confirmed_version`, and it returns None in
+    every case where publishing would be wrong.
+    """
+
+    name: str
+
+
+@dataclass(frozen=True)
 class DeployOutcome:
     """The result of a deploy, with `deployed` decided in exactly one place.
 
@@ -84,6 +102,18 @@ class DeployOutcome:
         still check `ct status` and publish deliberately.
         """
         return self.deployed and self.confirmed
+
+    def confirmed_version(self) -> ConfirmedVersion | None:
+        """The version this deploy may safely publish, or None.
+
+        THE only producer of :class:`ConfirmedVersion`. None covers every case where
+        an automatic publish would be wrong — nothing deployed, the extraction was
+        never confirmed so the build may have used the previous source, or the server
+        named no version to promote.
+        """
+        if not self.publishable or not self.version_name:
+            return None
+        return ConfirmedVersion(name=self.version_name)
 
     @property
     def explanation(self) -> str:

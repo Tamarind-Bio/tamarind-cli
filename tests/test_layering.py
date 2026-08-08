@@ -369,49 +369,57 @@ def test_exit_codes_are_distinct() -> None:
     assert len(codes) == len(set(codes)), "duplicate ExitCode values"
 
 
-# Modules allowed to call a raw write, each for a stated reason rather than by being
-# quietly omitted. `project` DEFINES the safe primitive. `archive` writes the zip to a
-# temp path the library chose. `config` writes the user's OWN ~/.tamarind/config.json,
-# which is not a destination any command argument points at — the recurring defect was
-# writing into a folder the CALLER named, and that is what this rule guards.
-_MAY_WRITE_RAW = {"project.py", "archive.py", "config.py"}
+# ── The filesystem boundary ──────────────────────────────────────────────────────
+#
+# Five symlink escapes shipped in this package, each in a newly-added call site that
+# took a bare Path and re-derived "is this safe" at the point of use. The structural
+# answer is `destination.Destination`: the check returns a CAPABILITY and the writes
+# are methods on it, so an unchecked directory is not reachable. This rule is the other
+# half — it keeps the primitives that capability is built from from leaking back out.
+#
+# Each exemption is listed with its reason rather than quietly omitted:
+#   destination.py  DEFINES the capability, so these primitives belong there.
+#   archive.py      owns the SCAN: it must inspect paths to classify them, and it is
+#                   the module every other reader is supposed to ask instead.
+#   config.py       writes the user's own ~/.tamarind, not a path a command names.
+_FS_OWNERS = {"destination.py", "archive.py", "config.py"}
 
-# Raw writes that follow a symlink sitting at the destination.
-_FOLLOWING_WRITES = frozenset({"write_text", "write_bytes"})
+# Writes that follow a symlink at the destination, and the predicates that disagreed
+# with the packager. `mkdir`/`unlink`/`rmtree` are deliberately absent: destructive but
+# not REDIRECTABLE, and redirection is the defect that recurred.
+_FS_PRIMITIVES = frozenset(
+    {"write_text", "write_bytes", "extractall", "chmod", "is_file", "is_symlink"}
+)
 
 
-def test_user_controlled_writes_do_not_follow_symlinks() -> None:
-    """Every write into a user-controlled path goes through one no-follow primitive.
+def test_filesystem_primitives_stay_behind_the_capability() -> None:
+    """Only the modules that own the filesystem may touch it directly.
 
-    This rule exists because the same defect shipped FOUR times in this package, each
-    time in a newly-added call site: the archive walk followed links into secrets,
-    `clone --force` extracted through them, preflight blessed a symlinked Dockerfile,
-    and the `.tamarind` marker write followed a link out of the destination. Each was
-    fixed on its own and the next one was written the same way, because nothing made
-    the safe form the default.
+    The rule is not "be careful with paths" — it is that there should be exactly ONE
+    answer to "will this file ship" and ONE way to write into a folder a caller named.
+    Preflight asking `is_file()` got a different answer than the packager for the same
+    file; four separate writes each followed a link the others had learned to refuse.
 
-    `project.write_without_following_links` is that default. Enforcing its use here is
-    the difference between an invariant and an intention — the previous three rounds of
-    "I swept for the other copies" were intentions, and each was wrong.
-
-    Not a claim that every write is safe: a `chmod` or an `open(..., "w")` would slip
-    past this. It closes the form that actually recurred.
+    Deliberately narrow. It cannot catch `open(p, "w")` or an aliased method, and it
+    says nothing about whether the owning modules are themselves correct. It closes the
+    form that actually recurred, five times.
     """
     offenders = []
     for path in _library_modules():
-        if path.name in _MAY_WRITE_RAW:
+        if path.name in _FS_OWNERS:
             continue
         for node in ast.walk(ast.parse(path.read_text())):
             if (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
-                and node.func.attr in _FOLLOWING_WRITES
+                and node.func.attr in _FS_PRIMITIVES
             ):
                 offenders.append(
                     f"{path.parent.name}/{path.name}:{node.lineno} .{node.func.attr}()"
                 )
     assert not offenders, (
-        "raw write that follows a symlink at the destination: "
+        "filesystem primitive outside the modules that own it: "
         + "; ".join(sorted(offenders))
-        + " — use project.write_without_following_links()"
+        + " — ask archive.plan_archive() what ships, or take a Destination and use "
+        "its methods"
     )

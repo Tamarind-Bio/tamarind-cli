@@ -37,17 +37,28 @@ class ArchivePlan:
     total_bytes: int = 0
     root: Path = field(default_factory=Path)
 
+    def will_upload(self, relative: str) -> bool:
+        """Whether this exact path is in the archive.
 
-def will_upload(path: Path) -> bool:
-    """Whether the packager would put this exact path in the archive.
+        A MEMBERSHIP query, not a filesystem call, and that is the whole point. When
+        preflight asked `is_file()` instead, it got a different answer than the
+        packager for the same file — `is_file()` follows symlinks and the packager
+        drops them — so a folder whose Dockerfile was a link passed inspection, shipped
+        without it, and started a build that could only fail.
+        """
+        return relative in self._included_names
 
-    The one place that answers "is this file really going to ship". `plan_archive`
-    excludes symlinks for security, so anything else asking `is_file()` — which
-    FOLLOWS a link — reaches the opposite conclusion about the same file. That gap
-    let preflight bless a folder whose Dockerfile was a link, upload none of it, and
-    start a build that could only fail.
-    """
-    return path.is_file() and not path.is_symlink()
+    def is_link(self, relative: str) -> bool:
+        """Whether this path was skipped because it is a symlink.
+
+        Only for the message. "No Dockerfile" is confusing when the file is plainly
+        sitting there; "Dockerfile is a symlink, which is never uploaded" is not.
+        """
+        return relative in self.links
+
+    @property
+    def _included_names(self) -> frozenset[str]:
+        return frozenset(p.relative_to(self.root).as_posix() for p in self.included)
 
 
 def plan_archive(folder: Path) -> ArchivePlan:

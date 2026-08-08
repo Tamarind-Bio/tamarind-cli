@@ -41,6 +41,8 @@ from ..errors import JobTimeoutError, TamarindError, ValidationError
 from ..http import HTTPClient
 from ..upload import put_presigned
 from . import api, archive, manifest, plan, project, wire
+from . import destination
+from .destination import Destination
 
 Phase = Literal["check", "package", "upload", "extract", "deploy", "build"]
 Kind = Literal["status", "log", "warning"]
@@ -104,46 +106,6 @@ class ExtractionResult:
     landed: bool = False
     ref: str | None = None
     ref_moved: bool = False
-
-
-def ensure_usable_destination(destination: Path | str, *, allow_nonempty: bool = False) -> Path:
-    """Check a folder a command is about to write into. Returns it.
-
-    ONE guard, because there were two and they drifted: `init` and `clone` each grew
-    their own `exists() and any(iterdir())`, and both crashed with a raw
-    NotADirectoryError when the path was an existing FILE — user input producing a
-    traceback rather than a typed error.
-
-    Three distinct cases, distinguished on purpose:
-
-      * missing            -> fine, the caller creates it
-      * an existing file   -> always an error; there is no sense in which this works
-      * a non-empty folder -> an error unless the caller explicitly allows it, since
-                              extraction overwrites whatever is already there
-    """
-    target = Path(destination)
-    if target.is_symlink():
-        # Checked BEFORE exists()/is_dir(), both of which follow the link. A symlinked
-        # root makes every per-member and marker protection irrelevant: extraction
-        # writes through it and modifies a directory the command never named. This is
-        # the fifth place a link could redirect a write in this package, and the only
-        # one upstream of all the others.
-        raise ValidationError(
-            f"'{target}' is a symlink. Point this at a real directory — writing through "
-            f"a link would modify somewhere other than the path you named."
-        )
-    if not target.exists():
-        return target
-    if not target.is_dir():
-        raise ValidationError(
-            f"'{target}' is a file, not a folder. Point this at a directory, or remove it."
-        )
-    if not allow_nonempty and any(target.iterdir()):
-        raise ValidationError(
-            f"'{target}' is not empty. Writing here overwrites whatever is already "
-            f"there, so local edits would be lost. Choose an empty folder."
-        )
-    return target
 
 
 def read_source_state(client: HTTPClient, *, name: str) -> SourceState:
@@ -312,12 +274,12 @@ def inspect_manifest(folder: Path | str) -> manifest.Findings:
     authority on whether one is required, and refusing locally would put this client
     between an author and a fix.
     """
-    config = Path(folder) / "config.json"
-    if not config.is_file():
+    text = destination.read_text_here(folder, "config.json")
+    if text is None:
         return manifest.Findings()
     try:
-        data = json.loads(config.read_text())
-    except (OSError, ValueError) as exc:
+        data = json.loads(text)
+    except ValueError as exc:
         raise ValidationError(f"config.json is not valid JSON: {exc}") from exc
     return manifest.check(data)
 
@@ -334,14 +296,16 @@ def inspect_folder(folder: Path | str) -> manifest.Findings:
     root = Path(folder)
     problems: list[str] = []
 
-    # `will_upload`, not `is_file` — the packager drops symlinks, so a linked
-    # Dockerfile is a file that exists locally and will NOT be in the archive. Asking
-    # the same question the packager asks is what keeps the two from disagreeing.
+    # The packager's own answer, asked as a question rather than re-derived. There is
+    # deliberately no filesystem call in this function: that is what made preflight and
+    # the packager disagree about the same file.
+    tree = archive.plan_archive(root)
+
     def _missing(name: str) -> bool:
-        return not archive.will_upload(root / name)
+        return not tree.will_upload(name)
 
     def _is_link(name: str) -> bool:
-        return (root / name).is_symlink()
+        return tree.is_link(name)
 
     if _missing("Dockerfile"):
         problems.append(
@@ -522,6 +486,21 @@ def build(
     return outcome
 
 
+def publish_confirmed(
+    client: HTTPClient, *, name: str, version: plan.ConfirmedVersion
+) -> tuple[wire.Tool, str]:
+    """Publish a version a deploy confirmed. For the AUTOMATIC path only.
+
+    Takes evidence rather than a name, so `deploy --publish` cannot promote a build
+    that may have used the previous source, and cannot silently skip when the server
+    named no version — neither state can produce a `ConfirmedVersion`.
+
+    A person naming a version themselves uses :func:`publish`; they have looked, and
+    that is a different decision from a script inferring it.
+    """
+    return publish(client, name=name, version_name=version.name)
+
+
 def publish(
     client: HTTPClient, *, name: str, version_name: str | None = None
 ) -> tuple[wire.Tool, str]:
@@ -556,7 +535,7 @@ def fetch_source(
     client: HTTPClient,
     *,
     name: str,
-    destination: Path,
+    destination: Destination,
     ref: str | None = None,
     replace_contents: bool = False,
 ) -> tuple[Path, tuple[str, ...]]:
@@ -573,152 +552,15 @@ def fetch_source(
         # destination emptied of the work it held.
         api.download_archive(client, name=name, ref=ref, destination=zip_path)
         if replace_contents:
-            _clear_directory(Path(destination))
-        return unpack_source(zip_path, destination)
-
-
-def _clear_directory(target: Path) -> None:
-    """Empty a directory so its contents match what is about to be extracted.
-
-    Extraction only overwrites paths the archive contains, so a forced clone left files
-    that the requested version had DELETED — and a later deploy repackaged them,
-    silently reintroducing removed code into a build reported as that version.
-
-    Entries are removed without following links: unlinking a symlinked directory
-    removes the link, never what it points at.
-    """
-    import shutil
-
-    if not target.is_dir():
-        return
-    for entry in target.iterdir():
-        try:
-            if entry.is_symlink() or entry.is_file():
-                entry.unlink()
-            elif entry.is_dir():
-                shutil.rmtree(entry)
-        except OSError as exc:
-            raise TamarindError(f"Could not clear '{entry}' before cloning: {exc}") from exc
-
-
-def _extract_without_following_links(zf, target: Path) -> None:
-    """Extract every member, refusing to write THROUGH an existing symlink.
-
-    `extractall` opens each output path for writing, and open() follows a symlink that
-    is already sitting there. So a destination containing `config.json -> /etc/thing`
-    lets an archive member named `config.json` write outside the destination entirely.
-    Only reachable with `clone --force` (an empty destination has no links to follow),
-    but --force means "overwrite this folder", not "overwrite anything it points at".
-
-    Links in the destination are removed rather than refused: the caller has already
-    said to overwrite, and the file being replaced is the link itself.
-    """
-    for member in zf.infolist():
-        parts = _sanitized_parts(member.filename)
-        if not parts:
-            continue
-        # Walk down from the destination. An INTERMEDIATE component can be a link too —
-        # `a/b.txt` writes through `a` if `a` points elsewhere — so every component is
-        # checked, not just the leaf.
-        current = target
-        for part in parts:
-            current = current / part
-            if current.is_symlink():
-                current.unlink()
-        extracted = Path(zf.extract(member, target))
-        _restore_mode(member, extracted)
-
-
-def _restore_mode(member, path: Path) -> None:
-    """Put back the executable bit the archive recorded.
-
-    `ZipFile.extract` creates files with the process default (usually 0644) and drops
-    the Unix mode in `external_attr`, so a cloned `run.sh` or `install.sh` comes back
-    non-executable and `RUN ./install.sh` fails on a tree that built fine before.
-
-    Only the executable bits are restored, and only where the archive already grants
-    read: setuid/setgid/sticky and world-writable bits from an untrusted archive are
-    not something a clone should be able to set.
-    """
-    import stat
-
-    mode = member.external_attr >> 16
-    if not mode or stat.S_ISDIR(mode) or stat.S_ISLNK(mode):
-        return
-    if not mode & 0o111:
-        return
-    try:
-        current = path.stat().st_mode
-        # Grant execute exactly where read is already granted — the umask-respecting
-        # idiom. 0644 becomes 0755; a file the extractor made group-unreadable does not
-        # silently become group-executable.
-        path.chmod(current | ((current & 0o444) >> 2))
-    except OSError:
-        # A filesystem without executable bits (or a read-only one) is not a reason to
-        # fail a clone that has already written every file.
-        pass
-
-
-def _sanitized_parts(filename: str) -> list[str]:
-    """The path components `ZipFile.extract` will actually use for a member.
-
-    Mirrors CPython's `_extract_member`: drive letters are dropped and empty, `.` and
-    `..` components are removed. Computing the same path is what makes the symlink
-    check land on the file that gets written rather than on a name that never exists.
-    """
-    import os
-
-    name = filename.replace("/", os.path.sep)
-    if os.path.altsep:
-        name = name.replace(os.path.altsep, os.path.sep)
-    name = os.path.splitdrive(name)[1]
-    invalid = ("", os.path.curdir, os.path.pardir)
-    return [part for part in name.split(os.path.sep) if part not in invalid]
-
-
-def unpack_source(archive_path: Path, destination: Path) -> tuple[Path, tuple[str, ...]]:
-    """Extract a downloaded source archive. Returns the folder and any LFS pointers.
-
-    Takes a PATH, not bytes: the caller has already streamed it to disk, and taking
-    bytes here would have forced every caller to hold the whole archive in memory to
-    satisfy this signature.
-    """
-    import zipfile
-
-    target = Path(destination)
-    target.mkdir(parents=True, exist_ok=True)
-    try:
-        with zipfile.ZipFile(archive_path) as zf:
-            _extract_without_following_links(zf, target)
-    except (zipfile.BadZipFile, OSError) as exc:
-        raise TamarindError(f"Could not unpack the tool's source: {exc}") from exc
-    pointers = tuple(
-        p.relative_to(target).as_posix()
-        for p in sorted(target.rglob("*"))
-        if p.is_file() and _is_lfs_pointer(p)
-    )
-    return target, pointers
-
-
-def _is_lfs_pointer(path: Path) -> bool:
-    """Whether a file is a Git-LFS pointer rather than its content.
-
-    Archives serve LFS-tracked files as pointers, matching GitHub and GitLab, so a
-    cloned tool with large assets is not immediately redeployable. Worth saying rather
-    than letting the next build fail confusingly.
-    """
-    try:
-        with path.open("rb") as fh:
-            return fh.read(45).startswith(b"version https://git-lfs.github.com/spec")
-    except OSError:
-        return False
+            destination.clear()
+        return destination.path, destination.extract(zip_path)
 
 
 def init(
     client: HTTPClient,
     *,
     name: str,
-    destination: Path | str,
+    destination: Destination,
     display_name: str | None = None,
     on_event: EventHandler | None = None,
 ) -> tuple[Path, project.Project]:
@@ -730,13 +572,11 @@ def init(
     base, conda gets miniconda — so local templates would be a fourth copy of that
     logic and would drift the first time a base image moved.
     """
-    target = ensure_usable_destination(destination)
-
     _emit(on_event, "check", "status", f"Creating {name}")
     api.create_tool(client, name=name, display_name=display_name, template="scratch")
 
     _emit(on_event, "package", "status", "Fetching the starting files")
-    folder, pointers = fetch_source(client, name=name, destination=target)
+    folder, pointers = fetch_source(client, name=name, destination=destination)
     for pointer in pointers:
         _emit(
             on_event,
@@ -745,7 +585,7 @@ def init(
             f"{pointer} came down as a Git-LFS pointer, not content.",
         )
 
-    marker = project.write(folder, name=name)
+    marker = project.write(destination, name=name)
     _emit(on_event, "check", "status", f"Recorded the tool id in {marker.name}")
     return folder, project.Project(name=name, path=marker)
 
@@ -769,16 +609,13 @@ def apply_config(
     snapshotted when it builds and pinned by its ref, so this is the only way to
     correct a schema on a version that already exists.
     """
-    config = Path(folder) / "config.json"
-    if not config.is_file():
+    text = destination.read_text_here(folder, "config.json")
+    if text is None:
         raise ValidationError(f"No config.json in '{folder}' — nothing to apply.")
     try:
-        text = config.read_text()
         json.loads(text)
-    except OSError as exc:
-        raise TamarindError(f"Could not read {config}: {exc}") from exc
     except ValueError as exc:
         # Refuse locally rather than letting the server reject it: the message here can
         # name the line, and a round trip proves nothing the parser cannot.
-        raise ValidationError(f"{config} is not valid JSON: {exc}") from exc
+        raise ValidationError(f"{Path(folder) / 'config.json'} is not valid JSON: {exc}") from exc
     return api.save_config(client, name=name, config_json=text, target_version=target_version)

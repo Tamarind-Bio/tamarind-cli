@@ -156,7 +156,9 @@ def register(app_root: typer.Typer) -> None:
                 # Written on BOTH paths. Skipping it on the already-exists branch left a
                 # folder deploying to `--name other-tool` with no record of it, so the
                 # next bare `deploy` fell back to the folder name — a different tool.
-                ct_project.write(folder, name=tool)
+                ct_project.write(
+                    ct.Destination.prepare(folder, allow_nonempty=True), name=tool
+                )
             outcome = ct.build(
                 client,
                 name=tool,
@@ -167,27 +169,23 @@ def register(app_root: typer.Typer) -> None:
             )
             payload = _outcome_payload(outcome, tool)
 
-            if publish_after and outcome.deployed and not outcome.publishable:
-                # The build may have run against the previous source. Publishing is the
-                # irreversible step, so it stops here rather than promoting a version
-                # nobody asked to ship. The deploy itself still reports what it did.
-                raise ValidationError(
-                    f"Deployed, but the server never confirmed it unpacked this upload, "
-                    f"so {outcome.version_name} may have been built from the previous "
-                    f"source. Not publishing. Check `tamarind ct status {tool}`, then "
-                    f"`tamarind publish {tool} <version>` when you are satisfied.",
-                    detail=_outcome_payload(outcome, tool),
-                )
-            if publish_after and outcome.publishable and not outcome.version_name:
-                # `--publish` was asked for and the deploy succeeded, so exiting zero
-                # without publishing would report a request that was never carried out.
-                raise TamarindError(
-                    f"Deployed, but the server named no version, so there is nothing to "
-                    f"publish. `tamarind ct versions {tool}` shows what exists.",
-                    detail=_outcome_payload(outcome, tool),
-                )
-            if publish_after and outcome.publishable and outcome.version_name:
-                _, published = ct.publish(client, name=tool, version_name=outcome.version_name)
+            if publish_after and outcome.deployed:
+                # ONE check, because there is one question: is there a version we know
+                # was built from this upload? `confirmed_version()` is the only producer
+                # of the evidence `publish_confirmed` requires, and it returns None both
+                # when the extraction was never confirmed (the build may have used the
+                # previous source) and when the server named no version at all. Two
+                # separate gates used to guard those, and each was written a round after
+                # the bug it was guarding shipped.
+                confirmed = outcome.confirmed_version()
+                if confirmed is None:
+                    raise ValidationError(
+                        f"Deployed, but not safely publishable: {outcome.explanation}. "
+                        f"Check `tamarind ct status {tool}`, then `tamarind publish "
+                        f"{tool} <version>` when you are satisfied.",
+                        detail=_outcome_payload(outcome, tool),
+                    )
+                _, published = ct.publish_confirmed(client, name=tool, version=confirmed)
                 payload["published"] = published
 
         human = (
@@ -222,7 +220,7 @@ def register(app_root: typer.Typer) -> None:
         tool = name or (Path(directory).name if directory else None)
         if not tool:
             raise ValidationError("Give a folder or --name, e.g. `tamarind init my-esmfold`.")
-        target = Path(directory) if directory else Path.cwd() / tool
+        target = ct.Destination.prepare(Path(directory) if directory else Path.cwd() / tool)
         with state.rest_client() as client:
             folder, _ = ct.flow.init(
                 client,
@@ -659,7 +657,9 @@ def clone(
     state = ctx.obj
     # The same guard `init` uses. Two copies of it drifted once already: both crashed
     # with a raw NotADirectoryError when the destination was an existing FILE.
-    target = ct_flow.ensure_usable_destination(
+    # The capability, not a validated path: `extract` and the marker write are methods
+    # on it, so there is no way to reach an unchecked directory from here.
+    target = ct.Destination.prepare(
         Path(dest) if dest else Path.cwd() / name, allow_nonempty=force
     )
 
@@ -706,7 +706,7 @@ def clone(
             state.output,
         )
     output.emit(
-        {"tool": name, "path": str(target), "lfsPointers": pointers},
+        {"tool": name, "path": str(target.path), "lfsPointers": pointers},
         state.output,
         human=f"cloned {name} to {target}",
     )

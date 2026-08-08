@@ -13,12 +13,13 @@ from pathlib import Path
 import pytest
 
 from tamarind.customtools import project
+from tamarind.customtools.destination import Destination
 from tamarind.errors import TamarindError
 
 
 class TestReadWrite:
     def test_round_trips(self, tmp_path: Path) -> None:
-        project.write(tmp_path, name="my-esmfold")
+        project.write(Destination.prepare(tmp_path, allow_nonempty=True), name="my-esmfold")
         found = project.read(tmp_path)
         assert found is not None and found.name == "my-esmfold"
 
@@ -28,7 +29,7 @@ class TestReadWrite:
 
     def test_the_file_holds_no_credentials(self, tmp_path: Path) -> None:
         """It is safe to commit, so it must never accumulate anything secret."""
-        project.write(tmp_path, name="t")
+        project.write(Destination.prepare(tmp_path, allow_nonempty=True), name="t")
         data = json.loads((tmp_path / project.PROJECT_FILENAME).read_text())
         assert set(data) == {"name"}
 
@@ -48,13 +49,13 @@ class TestReadWrite:
 
 class TestResolveName:
     def test_explicit_name_wins(self, tmp_path: Path) -> None:
-        project.write(tmp_path, name="recorded")
+        project.write(Destination.prepare(tmp_path, allow_nonempty=True), name="recorded")
         assert project.resolve_name(tmp_path, "explicit") == "explicit"
 
     def test_project_file_beats_the_folder_name(self, tmp_path: Path) -> None:
         """The whole point: a renamed or differently-checked-out folder still deploys
         to the tool it belongs to."""
-        project.write(tmp_path, name="my-esmfold")
+        project.write(Destination.prepare(tmp_path, allow_nonempty=True), name="my-esmfold")
         assert project.resolve_name(tmp_path, None) == "my-esmfold"
         assert tmp_path.name != "my-esmfold"
 
@@ -85,13 +86,13 @@ class TestTheMarkerWriteDoesNotFollowLinks:
         folder.mkdir()
         (folder / project.PROJECT_FILENAME).symlink_to(outside)
 
-        project.write(folder, name="my-tool")
+        project.write(Destination.prepare(folder, allow_nonempty=True), name="my-tool")
 
         assert project.read(folder).name == "my-tool"
         assert outside.read_text() == "ORIGINAL\n", "wrote through the link"
         assert not (folder / project.PROJECT_FILENAME).is_symlink()
 
     def test_an_ordinary_marker_is_overwritten_normally(self, tmp_path) -> None:
-        project.write(tmp_path, name="first")
-        project.write(tmp_path, name="second")
+        project.write(Destination.prepare(tmp_path, allow_nonempty=True), name="first")
+        project.write(Destination.prepare(tmp_path, allow_nonempty=True), name="second")
         assert project.read(tmp_path).name == "second"

@@ -17,7 +17,20 @@ from pathlib import Path
 import pytest
 
 from tamarind.customtools import flow
+from tamarind.customtools.destination import Destination
 from tamarind.errors import TamarindError, ValidationError
+
+
+def _extract(dest, archive_path):
+    """The old `unpack_source(archive, dest)` shape, over the capability.
+
+    Kept so these tests still read as "extract this archive there" rather than as a
+    ceremony about who is allowed to write.
+    """
+    prepared = (
+        dest if isinstance(dest, Destination) else Destination.prepare(dest, allow_nonempty=True)
+    )
+    return prepared.path, prepared.extract(archive_path)
 
 
 class FakeServer:
@@ -259,7 +272,7 @@ class TestInit:
 
         monkeypatch.setattr(flow.api, "create_tool", create)
         monkeypatch.setattr(flow.api, "download_archive", self._fake_download)
-        flow.init(None, name="my-tool", destination=tmp_path / "my-tool")
+        flow.init(None, name="my-tool", destination=Destination.prepare(tmp_path / "my-tool"))
         assert seen == {"name": "my-tool", "template": "scratch"}
 
     def test_writes_the_files_and_records_the_tool(self, tmp_path, monkeypatch) -> None:
@@ -267,7 +280,7 @@ class TestInit:
 
         monkeypatch.setattr(flow.api, "create_tool", lambda *a, **k: wire.Tool(name="t"))
         monkeypatch.setattr(flow.api, "download_archive", self._fake_download)
-        folder, _ = flow.init(None, name="t", destination=tmp_path / "t")
+        folder, _ = flow.init(None, name="t", destination=Destination.prepare(tmp_path / "t"))
         assert (folder / "Dockerfile").is_file()
         assert (folder / "run.sh").is_file()
         # Without this, a later bare `deploy` would guess the tool from the folder name.
@@ -282,7 +295,7 @@ class TestInit:
         (target / "main.py").write_text("mine\n")
         monkeypatch.setattr(flow.api, "create_tool", lambda *a, **k: wire.Tool(name="t"))
         with pytest.raises(ValidationError):
-            flow.init(None, name="t", destination=target)
+            flow.init(None, name="t", destination=Destination.prepare(target))
 
 
 class TestApplyConfig:
@@ -352,7 +365,7 @@ class TestUnpackSource:
             )
         zip_path = tmp_path / "src.zip"
         zip_path.write_bytes(buf.getvalue())
-        folder, pointers = flow.unpack_source(zip_path, tmp_path / "out")
+        folder, pointers = _extract(tmp_path / "out", zip_path)
         assert (folder / "main.py").is_file()
         assert pointers == ("weights.pt",)
 
@@ -360,7 +373,7 @@ class TestUnpackSource:
         bad = tmp_path / "bad.zip"
         bad.write_bytes(b"not a zip")
         with pytest.raises(TamarindError):
-            flow.unpack_source(bad, tmp_path / "out")
+            _extract(tmp_path / "out", bad)
 
 
 class TestManifestPreflight:
@@ -522,16 +535,16 @@ class TestExtractionSignal:
         assert len(server.deploys) == 1, "an unconfirmed deploy must not silently retry forever"
 
 
-class TestDestinationGuard:
+class TestDestinationPreparation:
     """One guard for `init` and `clone`. There were two, and both had the same hole."""
 
     def test_a_missing_path_is_fine(self, tmp_path) -> None:
         target = tmp_path / "new"
-        assert flow.ensure_usable_destination(target) == target
+        assert Destination.prepare(target).path == target
 
     def test_an_empty_folder_is_fine(self, tmp_path) -> None:
         (tmp_path / "empty").mkdir()
-        assert flow.ensure_usable_destination(tmp_path / "empty")
+        assert Destination.prepare(tmp_path / "empty")
 
     def test_an_existing_file_is_a_typed_error_not_a_traceback(self, tmp_path) -> None:
         """THE regression. `exists() and any(iterdir())` raises NotADirectoryError on a
@@ -544,21 +557,21 @@ class TestDestinationGuard:
         target = tmp_path / "notafolder"
         target.write_text("i am a file\n")
         with pytest.raises(ValidationError):
-            flow.ensure_usable_destination(target)
+            Destination.prepare(target)
 
     def test_a_non_empty_folder_is_refused_by_default(self, tmp_path) -> None:
         busy = tmp_path / "busy"
         busy.mkdir()
         (busy / "work.py").write_text("mine\n")
         with pytest.raises(ValidationError):
-            flow.ensure_usable_destination(busy)
+            Destination.prepare(busy)
 
     def test_a_non_empty_folder_is_allowed_when_asked(self, tmp_path) -> None:
         """`clone --force` is the caller that opts in."""
         busy = tmp_path / "busy"
         busy.mkdir()
         (busy / "work.py").write_text("mine\n")
-        assert flow.ensure_usable_destination(busy, allow_nonempty=True) == busy
+        assert Destination.prepare(busy, allow_nonempty=True).path == busy
 
 
 class TestExtractionDoesNotFollowLinks:
@@ -586,7 +599,7 @@ class TestExtractionDoesNotFollowLinks:
         (dest / "config.json").symlink_to(outside)
 
         archive_path = self._zip(tmp_path / "a.zip", {"config.json": "FROM ARCHIVE\n"})
-        flow.unpack_source(archive_path, dest)
+        _extract(dest, archive_path)
 
         assert (dest / "config.json").read_text() == "FROM ARCHIVE\n"
         assert outside.read_text() == "ORIGINAL\n", "wrote through the link, outside the folder"
@@ -601,14 +614,14 @@ class TestExtractionDoesNotFollowLinks:
         (dest / "a").symlink_to(outside, target_is_directory=True)
 
         archive_path = self._zip(tmp_path / "a.zip", {"a/b.txt": "FROM ARCHIVE\n"})
-        flow.unpack_source(archive_path, dest)
+        _extract(dest, archive_path)
 
         assert (outside / "b.txt").read_text() == "ORIGINAL\n"
 
     def test_ordinary_extraction_is_unaffected(self, tmp_path) -> None:
         dest = tmp_path / "dest"
         archive_path = self._zip(tmp_path / "a.zip", {"main.py": "x\n", "sub/y.txt": "y\n"})
-        folder, _ = flow.unpack_source(archive_path, dest)
+        folder, _ = _extract(dest, archive_path)
         assert (folder / "main.py").read_text() == "x\n"
         assert (folder / "sub" / "y.txt").read_text() == "y\n"
 
@@ -809,7 +822,7 @@ class TestExecutableBitsSurviveAClone:
             zf.writestr(info, "#!/bin/sh\necho hi\n")
             zf.writestr("notes.md", "plain\n")
 
-        folder, _ = flow.unpack_source(archive_path, tmp_path / "out")
+        folder, _ = _extract(tmp_path / "out", archive_path)
         assert (folder / "install.sh").stat().st_mode & stat.S_IXUSR, "lost the exec bit"
         assert not (folder / "notes.md").stat().st_mode & stat.S_IXUSR, (
             "granted exec to a plain file"
@@ -822,7 +835,7 @@ class TestExecutableBitsSurviveAClone:
         archive_path = tmp_path / "a.zip"
         with zipfile.ZipFile(archive_path, "w") as zf:
             zf.writestr("main.py", "x\n")
-        folder, _ = flow.unpack_source(archive_path, tmp_path / "out")
+        folder, _ = _extract(tmp_path / "out", archive_path)
         assert (folder / "main.py").read_text() == "x\n"
 
 
@@ -900,7 +913,12 @@ class TestForcedCloneMatchesTheSource:
             return destination
 
         monkeypatch.setattr(flow.api, "download_archive", fake_download)
-        flow.fetch_source(None, name="t", destination=dest, replace_contents=True)
+        flow.fetch_source(
+            None,
+            name="t",
+            destination=Destination.prepare(dest, allow_nonempty=True),
+            replace_contents=True,
+        )
 
         assert (dest / "main.py").read_text() == "new\n"
         assert not (dest / "deleted.py").exists(), "a file the version deleted survived"
@@ -917,7 +935,12 @@ class TestForcedCloneMatchesTheSource:
 
         monkeypatch.setattr(flow.api, "download_archive", boom)
         with pytest.raises(TamarindError):
-            flow.fetch_source(None, name="t", destination=dest, replace_contents=True)
+            flow.fetch_source(
+                None,
+                name="t",
+                destination=Destination.prepare(dest, allow_nonempty=True),
+                replace_contents=True,
+            )
         assert (dest / "work.py").read_text() == "mine\n"
 
     def test_an_unforced_clone_leaves_contents_alone(self, tmp_path, monkeypatch) -> None:
@@ -931,7 +954,9 @@ class TestForcedCloneMatchesTheSource:
             return destination
 
         monkeypatch.setattr(flow.api, "download_archive", fake_download)
-        flow.fetch_source(None, name="t", destination=dest)
+        flow.fetch_source(
+            None, name="t", destination=Destination.prepare(dest, allow_nonempty=True)
+        )
         assert (dest / "main.py").read_text() == "new\n"
 
 
@@ -945,7 +970,7 @@ class TestSymlinkedDestinationRoot:
         link = tmp_path / "dest"
         link.symlink_to(real, target_is_directory=True)
         with pytest.raises(ValidationError):
-            flow.ensure_usable_destination(link)
+            Destination.prepare(link)
 
     def test_a_symlinked_root_is_refused_even_with_force(self, tmp_path) -> None:
         """--force permits overwriting THIS folder, not redirecting to another one."""
@@ -954,4 +979,4 @@ class TestSymlinkedDestinationRoot:
         link = tmp_path / "dest"
         link.symlink_to(real, target_is_directory=True)
         with pytest.raises(ValidationError):
-            flow.ensure_usable_destination(link, allow_nonempty=True)
+            Destination.prepare(link, allow_nonempty=True)

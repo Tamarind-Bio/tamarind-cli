@@ -22,7 +22,7 @@ comment there explains which step exists because of which race.
 
 from __future__ import annotations
 
-from . import api, archive, flow, manifest, packaging, plan, project, wire
+from . import api, archive, destination, flow, manifest, packaging, plan, project, wire
 from .api import (
     cancel_build,
     create_tool,
@@ -43,18 +43,19 @@ from .flow import (
     build,
     init,
     inspect_folder,
+    publish_confirmed,
     inspect_manifest,
     read_source_state,
     publish,
     fetch_source,
-    unpack_source,
     wait_for_build,
     wait_for_source,
 )
+from .destination import Destination
 from .flow import ExtractionResult, LogCursor, SourceState
 from .manifest import Findings, check as check_manifest, parse_env_assignments
 from .packaging import Disposition, classify
-from .plan import DeployOutcome, is_terminal_build, select_publishable
+from .plan import ConfirmedVersion, DeployOutcome, is_terminal_build, select_publishable
 from .wire import DeployResult, LogPage, Tool, UploadTicket, Version
 
 __all__ = [
@@ -62,12 +63,15 @@ __all__ = [
     "check_manifest",
     "inspect_manifest",
     "inspect_folder",
+    "Destination",
+    "destination",
+    "publish_confirmed",
+    "ConfirmedVersion",
     "read_source_state",
     "ExtractionResult",
     "SourceState",
     "LogCursor",
     "parse_env_assignments",
-    "unpack_source",
     "fetch_source",
     "init",
     "apply_config",
