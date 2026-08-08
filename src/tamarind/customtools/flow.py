@@ -445,18 +445,22 @@ def build(
     _emit(on_event, "deploy", "status", "Deploying")
     result = api.deploy(client, name=name)
 
-    if plan.needs_late_landing_recheck(ref_moved=ref_moved, path=result.path):
-        # The one ambiguous corner. If the ref has moved by NOW, extraction finished
-        # after the deploy read the repository — so that deploy built the OLD source and
-        # shipped nothing. Deploying again is the fix; reporting success is the bug this
-        # whole sequence exists to avoid.
+    if plan.needs_late_landing_recheck(ref_moved=ref_moved):
+        # We never watched our own content land, so this deploy read whatever the
+        # repository happened to hold. If the ref has moved by NOW, extraction finished
+        # after the deploy started and that deploy was against the OLD source —
+        # whatever it reported. Checked for EVERY path, not just `noop`: when the
+        # previous head itself needed building, a stale deploy comes back `building`,
+        # reports success, and `--publish` then publishes a version built from source
+        # the caller never asked to ship.
         settled = api.get_tool(client, name=name).current_source_ref
         if settled and settled != before.ref:
             _emit(
                 on_event,
                 "deploy",
                 "warning",
-                "Upload landed after the deploy started; deploying again",
+                "Upload landed after the deploy started, so that deploy used the "
+                "previous source. Deploying again.",
             )
             result = api.deploy(client, name=name)
             # The ref is now confirmed moved, so the retry's result is reconciled on the
@@ -555,7 +559,38 @@ def _extract_without_following_links(zf, target: Path) -> None:
             current = current / part
             if current.is_symlink():
                 current.unlink()
-        zf.extract(member, target)
+        extracted = Path(zf.extract(member, target))
+        _restore_mode(member, extracted)
+
+
+def _restore_mode(member, path: Path) -> None:
+    """Put back the executable bit the archive recorded.
+
+    `ZipFile.extract` creates files with the process default (usually 0644) and drops
+    the Unix mode in `external_attr`, so a cloned `run.sh` or `install.sh` comes back
+    non-executable and `RUN ./install.sh` fails on a tree that built fine before.
+
+    Only the executable bits are restored, and only where the archive already grants
+    read: setuid/setgid/sticky and world-writable bits from an untrusted archive are
+    not something a clone should be able to set.
+    """
+    import stat
+
+    mode = member.external_attr >> 16
+    if not mode or stat.S_ISDIR(mode) or stat.S_ISLNK(mode):
+        return
+    if not mode & 0o111:
+        return
+    try:
+        current = path.stat().st_mode
+        # Grant execute exactly where read is already granted — the umask-respecting
+        # idiom. 0644 becomes 0755; a file the extractor made group-unreadable does not
+        # silently become group-executable.
+        path.chmod(current | ((current & 0o444) >> 2))
+    except OSError:
+        # A filesystem without executable bits (or a read-only one) is not a reason to
+        # fail a clone that has already written every file.
+        pass
 
 
 def _sanitized_parts(filename: str) -> list[str]:

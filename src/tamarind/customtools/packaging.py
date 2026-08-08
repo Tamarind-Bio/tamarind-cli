@@ -92,6 +92,14 @@ class Decision:
         return self.disposition is Disposition.INCLUDE
 
 
+# Folded once at import. Every case-comparison in this module reads from these rather
+# than from the source tuples, so a new check cannot be added case-sensitively by
+# accident — which is exactly how the directory checks were missed when the FILENAME
+# matching was made insensitive.
+_SECRET_DIRS_LOWER = frozenset(d.lower() for d in SECRET_DIRS)
+_NOISE_DIRS_LOWER = frozenset(d.lower() for d in NOISE_DIRS)
+
+
 def _matches(name: str, patterns: tuple[str, ...]) -> bool:
     """Case-INSENSITIVELY, because these patterns are a security control.
 
@@ -119,22 +127,32 @@ def classify(relative_path: str) -> Decision:
     name = parts[-1]
     directories = parts[:-1]
 
-    for directory in directories:
-        if directory in SECRET_DIRS:
-            return Decision(Disposition.SECRET, f"{directory}/ holds credentials")
+    # Case is folded ONCE, here, and every comparison below uses the folded values.
+    # The previous fix lowercased only `_matches`, which left both directory checks
+    # case-sensitive — so `.SSH/config` and `.GCLOUD/token.json` still sailed into the
+    # archive. Normalizing at the single point where the path is split is what stops
+    # the next comparison added below from having to remember to do it.
+    lower_name = name.lower()
+    lower_directories = [d.lower() for d in directories]
+    lower_joined = "/".join(lower_directories)
+
+    for directory, original in zip(lower_directories, directories):
+        if directory in _SECRET_DIRS_LOWER:
+            return Decision(Disposition.SECRET, f"{original}/ holds credentials")
     # Nested spellings like `.config/gcloud` are matched on the joined path.
-    joined = "/".join(directories)
-    for secret_dir in SECRET_DIRS:
-        if "/" in secret_dir and (joined == secret_dir or joined.endswith("/" + secret_dir)):
+    for secret_dir in _SECRET_DIRS_LOWER:
+        if "/" in secret_dir and (
+            lower_joined == secret_dir or lower_joined.endswith("/" + secret_dir)
+        ):
             return Decision(Disposition.SECRET, f"{secret_dir}/ holds credentials")
 
-    if _matches(name, SECRET_PATTERNS):
+    if _matches(lower_name, SECRET_PATTERNS):
         return Decision(Disposition.SECRET, f"{name} looks like a credential")
 
-    for directory in directories:
-        if directory in NOISE_DIRS:
-            return Decision(Disposition.NOISE, f"{directory}/ is not source")
-    if _matches(name, NOISE_PATTERNS):
+    for directory, original in zip(lower_directories, directories):
+        if directory in _NOISE_DIRS_LOWER:
+            return Decision(Disposition.NOISE, f"{original}/ is not source")
+    if _matches(lower_name, NOISE_PATTERNS):
         return Decision(Disposition.NOISE, f"{name} is build output")
 
     return Decision(Disposition.INCLUDE)

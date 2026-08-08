@@ -276,3 +276,31 @@ class TestEnvAssignments:
 
     def test_later_wins_on_a_repeated_key(self) -> None:
         assert manifest.parse_env_assignments(["A=1", "A=2"]) == {"A": "2"}
+
+
+class TestEnvVarsAreNotACredentialSink:
+    """config.json is uploaded verbatim and becomes an image layer, so a value written
+    here is exposed permanently — and the filename filters cannot help, because this is
+    a file the tool genuinely needs holding a field the server genuinely reads."""
+
+    def test_populated_env_values_are_rejected(self) -> None:
+        """Without this check the manifest validates happily and the archive carries the
+        literal key into every built image."""
+        errors = _errors({"envVars": {"OPENAI_API_KEY": "sk-live-abc"}})
+        assert errors
+        assert "OPENAI_API_KEY" in errors[0]
+
+    def test_the_message_names_the_safe_alternative(self) -> None:
+        """Refusing without saying where to put it is how someone works around the
+        check instead of using the mechanism that exists."""
+        assert "ct config --env" in _errors({"envVars": {"K": "v"}})[0]
+
+    def test_the_key_names_alone_are_fine(self) -> None:
+        """Declaring which variables a tool expects is useful and exposes nothing."""
+        assert manifest.check({"envVars": {"OPENAI_API_KEY": "", "MODEL": ""}}).ok
+
+    def test_absent_env_vars_are_fine(self) -> None:
+        assert manifest.check({}).ok
+
+    def test_the_shape_check_still_runs_first(self) -> None:
+        assert _errors({"envVars": {"K": 1}})

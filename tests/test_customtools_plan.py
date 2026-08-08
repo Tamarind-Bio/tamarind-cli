@@ -53,23 +53,32 @@ class TestBuildTerminality:
 
 
 class TestNeedsLateLandingRecheck:
-    """Exactly one corner is ambiguous, and only it should cost an extra read."""
+    """The question is only "did we watch our own content land before deploying"."""
 
-    def test_the_ambiguous_corner(self) -> None:
-        assert plan.needs_late_landing_recheck(ref_moved=False, path="noop") is True
+    @pytest.mark.parametrize("path", ["noop", "building", "saved", None, "something-new"])
+    def test_an_unwatched_landing_is_rechecked_whatever_the_server_said(self, path) -> None:
+        """THE regression, and the sharpest one in this PR.
 
-    @pytest.mark.parametrize(
-        ("ref_moved", "path"),
-        [
-            (True, "noop"),  # our upload landed; noop means someone beat us to it
-            (False, "building"),  # something is building, so the upload plainly landed
-            (True, "building"),
-            (False, "saved"),
-            (True, "saved"),
-        ],
-    )
-    def test_every_other_combination_is_already_decided(self, ref_moved: bool, path: str) -> None:
-        assert plan.needs_late_landing_recheck(ref_moved=ref_moved, path=path) is False
+        The first version keyed on `noop`, which looked right because the ambiguity is
+        most visible there. But when the PREVIOUS head itself needed building, a deploy
+        that raced extraction comes back `building` for the OLD tree — and that path
+        reports `deployed: true`, so `deploy --publish` publishes a version built from
+        source the caller never asked to ship, while their upload sits undeployed.
+
+        Keying on `noop` skipped exactly the paths capable of publishing the wrong
+        thing. Restore `and path == "noop"` and every case here except the first fails.
+        """
+        assert plan.needs_late_landing_recheck(ref_moved=False, path=path) is True
+
+    @pytest.mark.parametrize("path", ["noop", "building", "saved"])
+    def test_a_watched_landing_needs_no_recheck(self, path: str) -> None:
+        """A moved ref already proves our content was in the repository when the deploy
+        ran, so there is nothing later to discover."""
+        assert plan.needs_late_landing_recheck(ref_moved=True, path=path) is False
+
+    def test_the_path_argument_is_not_load_bearing(self) -> None:
+        """Kept only so existing callers keep working; the decision must not read it."""
+        assert plan.needs_late_landing_recheck(ref_moved=False) is True
 
 
 class TestReconcileMatrix:

@@ -70,20 +70,26 @@ class DeployOutcome:
         return REASONS.get(self.reason, self.reason)
 
 
-def needs_late_landing_recheck(*, ref_moved: bool, path: str | None) -> bool:
-    """Whether the one genuinely ambiguous corner has been hit.
+def needs_late_landing_recheck(*, ref_moved: bool, path: str | None = None) -> bool:
+    """Whether this deploy might have run against the PREVIOUS source.
 
-    If the source ref never appeared to move AND the server reported no-op, two very
-    different things are indistinguishable so far:
+    The question is only ever "did we watch our own content land before deploying".
+    If we did not, the deploy read whatever the repository held at that moment, and
+    what the server then reported says nothing about which source it read.
 
-      - the upload was identical, so there was genuinely nothing to do; or
-      - the upload had not finished extracting when the deploy ran, so the deploy
-        built the PREVIOUS source and reported no-op against it.
+    ``path`` is accepted and deliberately unused. Keying on `noop` — the first version
+    of this — looked right because the ambiguity is most obvious there, but it silently
+    excluded the worse case: when the PREVIOUS head itself needed building, an
+    unconfirmed deploy returns `building` or `saved` for the OLD tree. That reports
+    `deployed: true`, and `deploy --publish` will then publish a version built from
+    source the caller never asked to ship, while their actual upload sits undeployed.
+    A recheck that skips exactly the paths capable of publishing the wrong thing is
+    worse than no recheck at all.
 
-    Only this corner is ambiguous — every other combination is already decided — so
-    only this one costs an extra read.
+    The cost of widening it is one extra read on a deploy whose content was genuinely
+    identical, which is cheap and produces no redeploy.
     """
-    return not ref_moved and path == "noop"
+    return not ref_moved
 
 
 def reconcile(

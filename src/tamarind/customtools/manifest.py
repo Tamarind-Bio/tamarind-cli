@@ -187,6 +187,17 @@ def _check_paper_url(data: dict, errors: list[str]) -> None:
 
 
 def _check_env_vars(data: dict, errors: list[str]) -> None:
+    """Shape, and then the harder rule: the VALUES must not live in this file.
+
+    config.json is uploaded verbatim and becomes part of the image layer, so anything
+    written here is permanently readable by everyone who can read the tool's source —
+    and `envVars` is where API keys go. The filename-based exclusions cannot help: this
+    is a file the tool genuinely needs, holding a field the server genuinely reads.
+
+    So the check is on content rather than on a name, and it is an ERROR. `ct config
+    --env` stores the same variables server-side without committing them, so refusing
+    here removes no capability; it redirects one.
+    """
     env = data.get("envVars")
     if env is None:
         return
@@ -194,6 +205,16 @@ def _check_env_vars(data: dict, errors: list[str]) -> None:
         isinstance(k, str) and isinstance(v, str) for k, v in env.items()
     ):
         errors.append("envVars must be an object mapping string to string.")
+        return
+    populated = sorted(k for k, v in env.items() if v)
+    if populated:
+        errors.append(
+            f"envVars in config.json has values for {', '.join(populated)}. This file "
+            f"is uploaded and becomes part of the image layer, so those values would be "
+            f"readable by anyone with source access — permanently, even after you "
+            f"remove them. Set them with `tamarind ct config --env KEY=VALUE` instead, "
+            f"and leave the values out of the file."
+        )
 
 
 def _check_max_runtime(data: dict, errors: list[str]) -> None:

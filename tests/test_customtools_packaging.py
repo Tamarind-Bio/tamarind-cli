@@ -233,3 +233,30 @@ class TestSecretMatchingIsCaseInsensitive:
     def test_ordinary_uppercase_files_are_untouched(self, name: str) -> None:
         """The insensitivity must not start swallowing legitimate files."""
         assert packaging.classify(name).disposition is Disposition.INCLUDE
+
+
+class TestSecretDirsAreAlsoCaseInsensitive:
+    """The follow-on the first case fix missed: only `_matches` had been folded, so the
+    two DIRECTORY comparisons stayed case-sensitive and `.SSH/config` — a name matching
+    no credential pattern — went straight into the archive."""
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            ".SSH/config",
+            ".GCLOUD/token.json",
+            ".AZURE/accessTokens.json",
+            "sub/.AWS/config",
+            ".Config/GCloud/creds.json",
+        ],
+    )
+    def test_uppercase_credential_directories_are_excluded(self, path: str) -> None:
+        assert packaging.classify(path).disposition is Disposition.SECRET
+
+    def test_uppercase_noise_directories_are_excluded(self) -> None:
+        assert packaging.classify("__PYCACHE__/x.pyc").disposition is Disposition.NOISE
+
+    def test_the_reason_names_the_directory_as_written(self) -> None:
+        """Folding is for matching, not for what the user is told — echoing a lowercase
+        name back would send them looking for a directory that is not there."""
+        assert ".SSH/" in packaging.classify(".SSH/config").reason

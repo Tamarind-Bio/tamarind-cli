@@ -749,3 +749,68 @@ class TestBuildingWithoutABuildId:
         with pytest.raises(TamarindError) as exc:
             flow.build(None, name="t", folder=tool_folder, wait=True)
         assert "build id" in str(exc.value)
+
+
+class TestStaleDeployIsRedeployedWhateverThePath:
+    def test_a_building_deploy_against_stale_source_is_redeployed(
+        self, tool_folder, patched
+    ) -> None:
+        """THE regression, and the one that could publish the wrong code.
+
+        Extraction lands after the first deploy (read 3, with a zero-length wait), and
+        the PREVIOUS head itself needed building — so the stale deploy comes back
+        `building`, not `noop`. The old predicate only rechecked `noop`, so this
+        reported `deployed: true` for the old tree and `--publish` would have published
+        it while the uploaded source sat undeployed.
+
+        With the recheck keyed on `noop`, `server.deploys` is length 1 and the assertion
+        below fails.
+        """
+        server = patched(FakeServer(lands_on_read=3, deploy_paths=["building", "building"]))
+        outcome = flow.build(None, name="t", folder=tool_folder, wait=False, extract_timeout=0.0)
+        assert len(server.deploys) == 2, "a stale `building` deploy was not redeployed"
+        assert server.deploys[0] == "ref-old", (
+            "the first deploy did not race, so this proves nothing"
+        )
+        assert server.deploys[1] == "ref-new", "the retry did not use the settled source"
+        assert outcome.deployed is True
+
+    def test_a_confirmed_deploy_is_not_redeployed(self, tool_folder, patched) -> None:
+        """Widening the recheck must not make every ordinary deploy deploy twice."""
+        server = patched(FakeServer(lands_on_read=2, deploy_paths=["building"]))
+        flow.build(None, name="t", folder=tool_folder, wait=False)
+        assert len(server.deploys) == 1
+
+
+class TestExecutableBitsSurviveAClone:
+    def test_an_executable_member_stays_executable(self, tmp_path) -> None:
+        """`ZipFile.extract` drops the Unix mode, so a cloned `install.sh` came back
+        0644 and `RUN ./install.sh` failed on a tree that built fine before.
+
+        Without `_restore_mode` the extracted file has no executable bit and this fails.
+        """
+        import stat
+        import zipfile
+
+        archive_path = tmp_path / "a.zip"
+        with zipfile.ZipFile(archive_path, "w") as zf:
+            info = zipfile.ZipInfo("install.sh")
+            info.external_attr = (0o755 & 0xFFFF) << 16
+            zf.writestr(info, "#!/bin/sh\necho hi\n")
+            zf.writestr("notes.md", "plain\n")
+
+        folder, _ = flow.unpack_source(archive_path, tmp_path / "out")
+        assert (folder / "install.sh").stat().st_mode & stat.S_IXUSR, "lost the exec bit"
+        assert not (folder / "notes.md").stat().st_mode & stat.S_IXUSR, (
+            "granted exec to a plain file"
+        )
+
+    def test_an_archive_without_modes_still_extracts(self, tmp_path) -> None:
+        """A zip written without external_attr must not crash the clone."""
+        import zipfile
+
+        archive_path = tmp_path / "a.zip"
+        with zipfile.ZipFile(archive_path, "w") as zf:
+            zf.writestr("main.py", "x\n")
+        folder, _ = flow.unpack_source(archive_path, tmp_path / "out")
+        assert (folder / "main.py").read_text() == "x\n"
