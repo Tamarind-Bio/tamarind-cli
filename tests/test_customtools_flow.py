@@ -670,13 +670,14 @@ class TestLogDraining:
             (["the real error"], None, "FAILED"),
         ]
         monkeypatch.setattr(flow.api, "get_logs", self._paged(pages))
-        page, token, lines = flow.drain_logs(None, name="t", build_id="b-1")
+        page, cursor, lines = flow.drain_logs(None, name="t", build_id="b-1")
         assert [line.message for line in lines] == ["start", "middle", "the real error"]
         assert page.build_status == "FAILED"
-        # The LAST REAL token is kept, not None. `wait_for_build` passes it back on the
-        # next poll, and a forward token means "anything after this point" — resuming
-        # there is right, while starting from None would replay the log from the top.
-        assert token == "2"
+        # The LAST REAL token is kept, not None — starting from None would replay the
+        # log from the top. It is a CURSOR rather than a bare token, carrying how much
+        # of that page was already emitted so the next poll does not re-show it.
+        assert cursor.token == "2"
+        assert cursor.consumed == 1
 
     def test_a_repeated_token_ends_the_drain(self, monkeypatch) -> None:
         """A server that keeps handing back the same token would otherwise replay one
