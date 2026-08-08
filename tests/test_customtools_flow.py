@@ -672,7 +672,10 @@ class TestLogDraining:
         page, token, lines = flow.drain_logs(None, name="t", build_id="b-1")
         assert [line.message for line in lines] == ["start", "middle", "the real error"]
         assert page.build_status == "FAILED"
-        assert token is None
+        # The LAST REAL token is kept, not None. `wait_for_build` passes it back on the
+        # next poll, and a forward token means "anything after this point" — resuming
+        # there is right, while starting from None would replay the log from the top.
+        assert token == "2"
 
     def test_a_repeated_token_ends_the_drain(self, monkeypatch) -> None:
         """A server that keeps handing back the same token would otherwise replay one
