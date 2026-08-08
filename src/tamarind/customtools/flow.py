@@ -301,15 +301,34 @@ def inspect_folder(folder: Path | str) -> manifest.Findings:
     root = Path(folder)
     problems: list[str] = []
 
-    if not (root / "Dockerfile").is_file():
-        problems.append("No Dockerfile — the build has nothing to build.")
-    if not (root / "run.sh").is_file():
+    # `will_upload`, not `is_file` — the packager drops symlinks, so a linked
+    # Dockerfile is a file that exists locally and will NOT be in the archive. Asking
+    # the same question the packager asks is what keeps the two from disagreeing.
+    def _missing(name: str) -> bool:
+        return not archive.will_upload(root / name)
+
+    def _is_link(name: str) -> bool:
+        return (root / name).is_symlink()
+
+    if _missing("Dockerfile"):
         problems.append(
-            'No run.sh — the generated Dockerfile ends in `CMD ["bash","run.sh"]`, '
+            "Dockerfile is a symlink, which is never uploaded — copy the real file in."
+            if _is_link("Dockerfile")
+            else "No Dockerfile — the build has nothing to build."
+        )
+    if _missing("run.sh"):
+        problems.append(
+            "run.sh is a symlink, which is never uploaded — copy the real file in."
+            if _is_link("run.sh")
+            else 'No run.sh — the generated Dockerfile ends in `CMD ["bash","run.sh"]`, '
             "so the image builds and then fails to start."
         )
-    if not (root / "config.json").is_file():
-        problems.append("No config.json — the tool has no declared inputs or outputs.")
+    if _missing("config.json"):
+        problems.append(
+            "config.json is a symlink, which is never uploaded — copy the real file in."
+            if _is_link("config.json")
+            else "No config.json — the tool has no declared inputs or outputs."
+        )
 
     found = inspect_manifest(root)
     return manifest.Findings(
@@ -447,6 +466,15 @@ def build(
     )
     _emit(on_event, "deploy", "status", outcome.explanation)
 
+    if outcome.deployed and outcome.path == "building" and not outcome.build_id:
+        # `building` promises a build is running. Without an id there is nothing to
+        # watch, so honouring `wait=True` is impossible and returning success would
+        # exit clean while an untracked build is still going.
+        raise TamarindError(
+            "The server reported a build started but named no build id, so it cannot "
+            "be watched. `tamarind ct status` shows whether it is running.",
+            detail={"tool": name, "path": outcome.path, "version": outcome.version_name},
+        )
     if outcome.deployed and outcome.build_id and wait:
         wait_for_build(
             client, name=name, build_id=outcome.build_id, timeout=timeout, on_event=on_event

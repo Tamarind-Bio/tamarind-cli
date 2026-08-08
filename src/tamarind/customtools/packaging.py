@@ -93,7 +93,18 @@ class Decision:
 
 
 def _matches(name: str, patterns: tuple[str, ...]) -> bool:
-    return any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
+    """Case-INSENSITIVELY, because these patterns are a security control.
+
+    `fnmatch.fnmatch` normalizes case only on case-insensitive filesystems, so on
+    Linux — where CI runs — `server.PEM`, `PRIVATE.KEY` and `.AWS/credentials` all
+    sail past a lowercase pattern list and into the image layer. A filter that a
+    capital letter defeats is not a filter.
+
+    `fnmatchcase` on a lowered name rather than `fnmatch`, so the behaviour does not
+    depend on the host filesystem.
+    """
+    lowered = name.lower()
+    return any(fnmatch.fnmatchcase(lowered, pattern.lower()) for pattern in patterns)
 
 
 def classify(relative_path: str) -> Decision:

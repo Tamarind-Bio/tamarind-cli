@@ -6,6 +6,7 @@ import json
 from io import BytesIO
 
 import httpx
+import pytest
 import respx
 from typer.testing import CliRunner
 
@@ -569,3 +570,58 @@ def test_clone_refuses_a_version_with_no_source_ref():
     assert res.exit_code != 0
     combined = res.output + str(res.exception or "")
     assert "source ref" in combined
+
+
+@respx.mock
+def test_clone_records_the_project_marker():
+    """A clone into a differently-named folder left no `.tamarind`, so the next bare
+    `deploy` fell back to the folder name and targeted a different tool. Third write
+    site for the marker and the one that was missing.
+    """
+    import io
+    import zipfile
+    from pathlib import Path
+    from tempfile import mkdtemp
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("Dockerfile", "FROM scratch\n")
+    respx.get(f"{API}v2/custom-tools/mytool/archive").mock(
+        return_value=httpx.Response(200, content=buf.getvalue())
+    )
+    dest = Path(mkdtemp()) / "differently-named"
+    res = runner.invoke(app, ["ct", "clone", "mytool", str(dest)], env=ENV)
+    assert res.exit_code == 0, res.output + str(res.exception or "")
+    assert (dest / ".tamarind").is_file(), "no marker written; a bare deploy would guess"
+    assert json.loads((dest / ".tamarind").read_text())["name"] == "mytool"
+
+
+def test_config_apply_refuses_flags_it_would_discard(tmp_path):
+    """`--apply` pushes config.json only. Accepting `--env` alongside it and reporting
+    success claimed a credential had been stored when it was never sent."""
+    (tmp_path / "config.json").write_text("{}\n")
+    res = runner.invoke(
+        app,
+        ["ct", "config", "mytool", "--apply", str(tmp_path), "--env", "KEY=value"],
+        env=ENV,
+    )
+    assert res.exit_code != 0
+    combined = res.output + str(res.exception or "")
+    assert "--env" in combined and "ignored" in combined
+
+
+@pytest.mark.parametrize("bad", ["-1", "nan"])
+def test_deploy_validates_the_timeout_before_uploading(tmp_path, bad):
+    """`--timeout -1` expired only after a remote build had started; `--timeout nan`
+    produced a deadline no comparison ever satisfies, so the bound did nothing.
+
+    No HTTP is mocked: the check must fire before any request, so a call reaching the
+    network fails this differently.
+    """
+    (tmp_path / "Dockerfile").write_text("FROM scratch\n")
+    (tmp_path / "run.sh").write_text("true\n")
+    (tmp_path / "config.json").write_text("{}\n")
+    res = runner.invoke(app, ["deploy", str(tmp_path), "--timeout", bad], env=ENV)
+    assert res.exit_code != 0
+    combined = res.output + str(res.exception or "")
+    assert "finite" in combined or "non-negative" in combined

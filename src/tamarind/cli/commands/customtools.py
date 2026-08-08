@@ -14,6 +14,7 @@ from typing import Optional
 import typer
 
 from ... import customtools as ct
+from ... import jobs as jobs_helpers
 from ...customtools import archive as ct_archive
 from ...customtools import flow as ct_flow
 from ...customtools import project as ct_project
@@ -100,6 +101,12 @@ def register(app_root: typer.Typer) -> None:
                 "--no-wait. Drop --no-wait, or deploy now and run `tamarind publish` "
                 "once the build completes."
             )
+        # Same rule, same place: a bad --timeout must not be discovered AFTER the
+        # upload and the build. `--timeout -1` expired only once a remote build was
+        # already running, and `--timeout nan` produced a deadline no comparison ever
+        # satisfies, so the bound silently did nothing. Reuses the jobs validator
+        # rather than growing a second notion of a valid timeout.
+        jobs_helpers.validate_wait_options(timeout=timeout)
         tool = ct_project.resolve_name(folder, name)
         with state.rest_client() as client:
             if create:
@@ -479,6 +486,28 @@ def config(
     state = ctx.obj
     tool = ct_project.resolve_name(apply or Path.cwd(), name)
     if apply is not None:
+        # --apply pushes config.json and nothing else. Accepting the other flags
+        # alongside it and reporting success discarded them silently — worst with
+        # --env, where the command would claim to have stored a credential it never
+        # sent. Refused rather than half-applied.
+        ignored = [
+            flag
+            for flag, value in (
+                ("--env", env),
+                ("--gpu-type", gpu_type),
+                ("--memory", memory),
+                ("--cpu", cpu),
+                ("--home-disk-gi", home_disk_gi),
+                ("--display-name", display_name),
+                ("--description", description),
+            )
+            if value
+        ]
+        if ignored:
+            raise ValidationError(
+                f"--apply only pushes config.json, so {', '.join(ignored)} would be "
+                f"ignored. Run them as a separate `tamarind ct config` call."
+            )
         with state.rest_client() as client:
             ct.flow.apply_config(client, name=tool, folder=apply, target_version=version)
         output.emit(
@@ -572,6 +601,13 @@ def clone(
                 )
             ref = found.ref
         _, pointer_paths = ct.flow.fetch_source(client, name=name, destination=target, ref=ref)
+
+    # THIRD write site for the marker, and the one that was missing. A clone into a
+    # differently-named folder left no record, so the next bare `deploy` fell back to
+    # the folder name and targeted another tool — and with --force a stale marker from
+    # the directory's previous occupant would have survived and pointed somewhere else
+    # entirely. Written after extraction succeeds, so a failed clone leaves no claim.
+    ct_project.write(target, name=name)
 
     pointers = [Path(p).name for p in pointer_paths]
     if pointers:

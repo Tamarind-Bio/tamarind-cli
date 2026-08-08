@@ -189,6 +189,19 @@ def _extract_message(resp: httpx.Response) -> str:
 
 
 def _map_error(resp: httpx.Response) -> TamarindError:
+    """Map a non-2xx onto a typed error, stamping the status on whatever it becomes.
+
+    The status is set at the END rather than threaded through each construction: every
+    branch below returns a different type, and one of them (a 400 -> ValidationError)
+    silently dropped it, which broke `deploy --create`'s already-exists handling.
+    Setting it in one place is what stops the next branch from forgetting.
+    """
+    error = _map_error_type(resp)
+    error.status_code = resp.status_code
+    return error
+
+
+def _map_error_type(resp: httpx.Response) -> TamarindError:
     msg = _extract_message(resp)
     code = resp.status_code
     ml = msg.lower()

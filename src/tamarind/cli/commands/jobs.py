@@ -534,7 +534,17 @@ def register(app: typer.Typer) -> None:
                 raise ValidationError("Batch jobNames must be unique.")
 
         with state.rest_client() as client:
-            if prevalidate:
+            if prevalidate and tool_version:
+                # Same reason as the single pinned submit: `validate-job` carries no
+                # toolRef, so it answers about the LIVE version and would reject
+                # settings that are valid for the pinned one. This is the second call
+                # site of that rule; the first was fixed a round earlier.
+                output.info(
+                    f"Skipping --prevalidate: it checks the live version, not "
+                    f"{tool_version}. The submit itself still validates.",
+                    state.output,
+                )
+            if prevalidate and not tool_version:
                 for index, settings in enumerate(settings_list):
                     validation_name = (
                         job_names[index]

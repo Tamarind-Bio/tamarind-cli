@@ -693,3 +693,59 @@ class TestLogDraining:
         )
         _, _, lines = flow.drain_logs(None, name="t", build_id="b-1")
         assert len(lines) == 2, "the loop did not stop on a repeated token"
+
+
+class TestPreflightAgreesWithThePackager:
+    """`is_file()` follows symlinks and the packager drops them. That disagreement let
+    preflight bless a folder whose required file would never be uploaded."""
+
+    def _folder(self, tmp_path: Path) -> Path:
+        folder = tmp_path / "tool"
+        folder.mkdir()
+        (folder / "Dockerfile").write_text("FROM scratch\n")
+        (folder / "run.sh").write_text("true\n")
+        (folder / "config.json").write_text("{}\n")
+        return folder
+
+    @pytest.mark.parametrize("required", ["Dockerfile", "run.sh", "config.json"])
+    def test_a_symlinked_required_file_fails_preflight(self, tmp_path, required: str) -> None:
+        """THE regression. Before the fix `inspect_folder` reports ok, the upload
+        contains no Dockerfile at all, and a remote build starts that can only fail.
+        """
+        folder = self._folder(tmp_path)
+        real = tmp_path / f"real-{required}"
+        real.write_text("content\n")
+        (folder / required).unlink()
+        (folder / required).symlink_to(real)
+
+        findings = flow.inspect_folder(folder)
+        assert not findings.ok
+        assert any("symlink" in e for e in findings.errors), findings.errors
+
+    def test_a_normal_folder_still_passes(self, tmp_path) -> None:
+        assert flow.inspect_folder(self._folder(tmp_path)).ok
+
+
+class TestBuildingWithoutABuildId:
+    def test_a_building_response_with_no_id_is_an_error(
+        self, tool_folder, patched, monkeypatch
+    ) -> None:
+        """`building` promises a build is running. With no id there is nothing to watch,
+        so `wait=True` cannot be honoured — and returning success exits clean while an
+        untracked build is still going.
+
+        Without the guard this returns a deployed outcome and the test's
+        `pytest.raises` never fires.
+        """
+        server = patched(StampingServer(lands_on_read=2, deploy_paths=["building"]))
+
+        def no_id(client, *, name, carry_forward_from_version=None):
+            from tamarind.customtools import wire
+
+            server.deploys.append(server.current_ref)
+            return wire.DeployResult(version_name="v1", path="building", build_id=None)
+
+        monkeypatch.setattr(flow.api, "deploy", no_id)
+        with pytest.raises(TamarindError) as exc:
+            flow.build(None, name="t", folder=tool_folder, wait=True)
+        assert "build id" in str(exc.value)

@@ -241,7 +241,11 @@ def _check_msa(inputs: list, errors: list[str], facts: dict) -> None:
     """
     flagged = [i for i in inputs if isinstance(i, dict) and i.get("usesMsa") is not None]
     for entry in flagged:
-        if entry.get("usesMsa") not in (True, False):
+        # `isinstance`, not membership: `1 in (True, False)` is True in Python, so the
+        # membership form accepted a JSON `1` — and the `is True` check below then read
+        # that same value as DISABLED. A manifest this validator calls a boolean would
+        # reach the server and silently not use MSA.
+        if not isinstance(entry.get("usesMsa"), bool):
             errors.append(
                 f"Input {entry.get('name')!r}: usesMsa must be a boolean "
                 f'(got {entry.get("usesMsa")!r}; the string "false" is truthy).'

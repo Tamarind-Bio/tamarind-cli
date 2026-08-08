@@ -212,3 +212,24 @@ class TestSymlinks:
         spec = archive.plan_archive(folder)
         assert {p.name for p in spec.included} == {"Dockerfile", "main.py"}
         assert spec.links == ()
+
+
+class TestSecretMatchingIsCaseInsensitive:
+    """These patterns are a security control, so a capital letter must not defeat them.
+
+    `fnmatch.fnmatch` normalizes case only on case-insensitive filesystems — on Linux,
+    where CI runs, it does not. Without the fix every name below classifies as INCLUDE
+    and lands in the image layer.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        ["server.PEM", "PRIVATE.KEY", "ID_RSA", ".AWS/credentials", "Secrets.YAML", ".ENV"],
+    )
+    def test_uppercase_credentials_are_still_excluded(self, name: str) -> None:
+        assert packaging.classify(name).disposition is Disposition.SECRET
+
+    @pytest.mark.parametrize("name", ["Main.py", "README.md", "Environment.yml"])
+    def test_ordinary_uppercase_files_are_untouched(self, name: str) -> None:
+        """The insensitivity must not start swallowing legitimate files."""
+        assert packaging.classify(name).disposition is Disposition.INCLUDE

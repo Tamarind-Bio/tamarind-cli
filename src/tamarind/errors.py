@@ -31,14 +31,24 @@ class ExitCode:
 
 
 class TamarindError(Exception):
-    """Base class for all client errors. Carries a stable exit code."""
+    """Base class for all client errors. Carries a stable exit code.
+
+    ``status_code`` is the HTTP status this error was mapped FROM, or None when it did
+    not come from a response. It lives on the base class because callers legitimately
+    branch on it — `deploy --create` treats 400/409 as "already exists" — and it used
+    to exist only on `APIError`, so a 400 mapped to `ValidationError` lost it and the
+    idempotency check silently stopped working.
+    """
 
     exit_code: int = ExitCode.ERROR
 
-    def __init__(self, message: str, *, detail: object | None = None):
+    def __init__(
+        self, message: str, *, detail: object | None = None, status_code: int | None = None
+    ):
         super().__init__(message)
         self.message = message
         self.detail = detail
+        self.status_code = status_code
 
 
 class AuthError(TamarindError):
@@ -76,6 +86,6 @@ class JobTimeoutError(TamarindError):
 class APIError(TamarindError):
     """A non-2xx response that doesn't map to a more specific error."""
 
-    def __init__(self, message: str, *, status_code: int, detail: object | None = None):
+    def __init__(self, message: str, *, status_code: int, detail: object | None = None):  # noqa: D107
         super().__init__(message, detail=detail)
         self.status_code = status_code

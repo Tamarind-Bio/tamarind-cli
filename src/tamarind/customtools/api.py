@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from ..errors import TamarindError
 from ..http import HTTPClient
 from . import wire
 
@@ -133,10 +134,21 @@ def download_archive(
         handle_fd, temp_name = tempfile.mkstemp(suffix=".zip")
         os.close(handle_fd)
         target = Path(temp_name)
-    with client.stream("GET", f"{_PREFIX}/{name}/archive", params=params) as response:
-        with target.open("wb") as handle:
-            for chunk in response.iter_bytes():
-                handle.write(chunk)
+    try:
+        with client.stream("GET", f"{_PREFIX}/{name}/archive", params=params) as response:
+            with target.open("wb") as handle:
+                for chunk in response.iter_bytes():
+                    handle.write(chunk)
+    except OSError as exc:
+        # A full disk, a read-only path, or an unwritable explicit destination. The CLI
+        # boundary catches TamarindError and not arbitrary OSError, so without this a
+        # clone that runs out of space ends in a traceback rather than the structured
+        # error every other failure produces — and the bigger the clone, the likelier it
+        # is to be the one that hits it.
+        raise TamarindError(
+            f"Could not write the downloaded archive to '{target}': {exc}",
+            detail={"tool": name, "destination": str(target), "errno": exc.errno},
+        ) from exc
     return target
 
 

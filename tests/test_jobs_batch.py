@@ -237,3 +237,25 @@ class TestCountsOnlyResponses:
         summary = plan.summarize_batch(wire.parse_batch_submission({"submitted": 0, "failed": 4}))
         assert summary.outcome is plan.BatchOutcome.FAILED
         assert len(summary.failures) == 4
+
+
+class TestPinnedBatchSkipsLiveValidation:
+    """Second call site of the rule fixed for single submits one round earlier."""
+
+    def test_prevalidate_is_skipped_when_a_version_is_pinned(self) -> None:
+        """`validate-job` carries no toolRef, so with `--tool-version` it answers about
+        the LIVE version and can reject settings valid for the pinned one, blocking the
+        batch entirely.
+
+        This asserts the SHAPE rather than driving the CLI: the guard is
+        `if prevalidate and not tool_version`, so a pinned run cannot reach the
+        unpinned validator. A source check is weak, but the alternative here is a full
+        CLI round-trip for a two-token condition.
+        """
+        import inspect
+
+        from tamarind.cli.commands import jobs as jobs_cmds
+
+        source = inspect.getsource(jobs_cmds)
+        assert "if prevalidate and not tool_version:" in source
+        assert "if not skip_validate and not tool_version:" in source

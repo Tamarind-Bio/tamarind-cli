@@ -38,6 +38,18 @@ class ArchivePlan:
     root: Path = field(default_factory=Path)
 
 
+def will_upload(path: Path) -> bool:
+    """Whether the packager would put this exact path in the archive.
+
+    The one place that answers "is this file really going to ship". `plan_archive`
+    excludes symlinks for security, so anything else asking `is_file()` — which
+    FOLLOWS a link — reaches the opposite conclusion about the same file. That gap
+    let preflight bless a folder whose Dockerfile was a link, upload none of it, and
+    start a build that could only fail.
+    """
+    return path.is_file() and not path.is_symlink()
+
+
 def plan_archive(folder: Path) -> ArchivePlan:
     """Walk ``folder`` and classify everything, without writing anything.
 
