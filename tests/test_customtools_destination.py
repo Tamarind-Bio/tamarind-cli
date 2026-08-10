@@ -262,14 +262,24 @@ class TestCreate:
 class TestWindowsNameSanitization:
     def test_the_guard_uses_the_name_extract_will_write(self) -> None:
         """On Windows `extract` replaces :<>|"?* with underscores and strips trailing
-        dots and spaces. Checking the UNSANITIZED name inspects `a:b` while extraction
+        dots and spaces. Checking the UNSANITIZED name inspects `a<b` while extraction
         writes `a_b`, so a symlink at the real path is never seen.
+
+        `<` rather than `:` on purpose. CPython strips a drive with `splitdrive` BEFORE
+        sanitizing, so `a:b/file` becomes `b/file` on Windows and never reaches the
+        mangling at all — a colon is the one illegal character this test cannot use to
+        show the difference. (The implementation orders the two the same way.)
 
         Asserted through the helper rather than by extracting, because the mangling
         only happens on Windows and this must stay meaningful on every runner.
         """
-        parts = destination_module._sanitized_parts("a:b/file")
+        parts = destination_module._sanitized_parts("a<b/file")
         if os.path.sep == "\\":
             assert parts == ["a_b", "file"]
         else:
-            assert parts == ["a:b", "file"], "POSIX keeps the name as written"
+            assert parts == ["a<b", "file"], "POSIX keeps the name as written"
+
+    def test_a_drive_prefix_is_stripped_before_anything_else(self) -> None:
+        """Mirrors CPython's order: splitdrive, then drop `.`/`..`, then sanitize."""
+        parts = destination_module._sanitized_parts("a:b/file")
+        assert parts == (["b", "file"] if os.path.sep == "\\" else ["a:b", "file"])
