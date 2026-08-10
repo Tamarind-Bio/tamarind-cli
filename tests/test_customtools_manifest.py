@@ -307,3 +307,38 @@ class TestEnvVarsAreNotACredentialSink:
 
     def test_the_shape_check_still_runs_first(self) -> None:
         assert _errors({"envVars": {"K": 1}})
+
+
+class TestDesignBatchingIsARealBoolean:
+    """Same bug as `usesMsa`, one field over — and it survived that fix."""
+
+    def test_a_string_false_is_rejected_rather_than_believed(self) -> None:
+        """Truthiness read `"false"` as ENABLED. A number input with
+        `designBatching: "false"` and a positive count was reported as batching."""
+        errors = _errors(
+            {
+                "inputs": [
+                    {
+                        "name": "n",
+                        "type": "number",
+                        "designBatching": "false",
+                        "designsPerBatch": 5,
+                    }
+                ]
+            }
+        )
+        assert any("boolean" in e for e in errors)
+
+    @pytest.mark.parametrize("value", [1, 0, "true", []])
+    def test_no_non_boolean_is_accepted(self, value: object) -> None:
+        assert _errors({"inputs": [{"name": "n", "type": "number", "designBatching": value}]})
+
+    def test_an_explicit_false_is_fine(self) -> None:
+        """And must NOT be read as "enabled but missing a count", which is how the
+        truthiness version rejected it."""
+        assert manifest.check(
+            {"inputs": [{"name": "n", "type": "number", "designBatching": False}]}
+        ).ok
+
+    def test_true_still_requires_a_count(self) -> None:
+        assert _errors({"inputs": [{"name": "n", "type": "number", "designBatching": True}]})

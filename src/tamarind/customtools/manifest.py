@@ -296,8 +296,21 @@ def _check_msa(inputs: list, errors: list[str], facts: dict) -> None:
 
 
 def _check_batching(inputs: list, errors: list[str], facts: dict) -> None:
-    """designBatching: number inputs only, at most one, with designsPerBatch >= 1."""
-    batching = [i for i in inputs if isinstance(i, dict) and i.get("designBatching")]
+    """designBatching: a real boolean, number inputs only, at most one, count >= 1.
+
+    The bool check is the same one `usesMsa` needed, for the same reason and one field
+    over: truthiness reads `"false"` and `1` as ENABLED and `0` as absent. A number
+    input with `designBatching: "false"` was reported as batching, while the same
+    string without a count was rejected as if it had asked for it.
+    """
+    flagged = [i for i in inputs if isinstance(i, dict) and i.get("designBatching") is not None]
+    for entry in flagged:
+        if not isinstance(entry.get("designBatching"), bool):
+            errors.append(
+                f"Input {entry.get('name')!r}: designBatching must be a boolean "
+                f"(got {entry.get('designBatching')!r})."
+            )
+    batching = [i for i in flagged if i.get("designBatching") is True]
     for entry in batching:
         if entry.get("type") != "number":
             errors.append(

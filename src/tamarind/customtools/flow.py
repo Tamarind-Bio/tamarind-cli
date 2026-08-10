@@ -552,7 +552,9 @@ def fetch_source(
         # destination emptied of the work it held.
         api.download_archive(client, name=name, ref=ref, destination=zip_path)
         if replace_contents:
-            destination.clear()
+            # Staged: the existing tree is only removed once a complete replacement
+            # exists, so a corrupt archive cannot leave the caller with neither.
+            return destination.path, destination.extract_replacing(zip_path)
         return destination.path, destination.extract(zip_path)
 
 

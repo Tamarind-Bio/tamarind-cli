@@ -17,6 +17,7 @@ from ... import customtools as ct
 from ... import jobs as jobs_helpers
 from ...customtools import archive as ct_archive
 from ...customtools import flow as ct_flow
+from ...customtools import plan
 from ...customtools import project as ct_project
 from ...errors import TamarindError, ValidationError
 from .. import output
@@ -156,9 +157,7 @@ def register(app_root: typer.Typer) -> None:
                 # Written on BOTH paths. Skipping it on the already-exists branch left a
                 # folder deploying to `--name other-tool` with no record of it, so the
                 # next bare `deploy` fell back to the folder name — a different tool.
-                ct_project.write(
-                    ct.Destination.prepare(folder, allow_nonempty=True), name=tool
-                )
+                ct_project.write(ct.Destination.prepare(folder, allow_nonempty=True), name=tool)
             outcome = ct.build(
                 client,
                 name=tool,
@@ -371,12 +370,19 @@ def status(ctx: typer.Context, name: str = typer.Argument(..., help="Tool id."))
         versions = ct.get_versions(client, name=name)
 
     latest = versions[0] if versions else None
-    # The genuinely useful line, and the only derived one: if the source has moved past
-    # the newest version's ref, there is work sitting undeployed. NO version at all is
-    # the strongest form of that — a source tree nobody has ever built — so it must not
-    # fall through to False just because there is nothing to compare against.
+    # The genuinely useful line, and the only derived one. Two ways to be undeployed,
+    # and matching refs only rules out the first:
+    #
+    #   * the source moved past every built version, or
+    #   * a version exists at this ref but never COMPLETED — a failed build, or one
+    #     still running after `deploy --no-wait`. The refs match and no image exists,
+    #     so reporting "nothing undeployed" is exactly backwards.
+    #
+    # NO version at all is the strongest form of both, so it must not fall through to
+    # False just because there is nothing to compare against.
+    built = plan.select_publishable(versions) if versions else None
     undeployed = bool(
-        tool.current_source_ref and (latest is None or latest.ref != tool.current_source_ref)
+        tool.current_source_ref and (built is None or built.ref != tool.current_source_ref)
     )
     payload = {
         "name": tool.name,
@@ -659,9 +665,7 @@ def clone(
     # with a raw NotADirectoryError when the destination was an existing FILE.
     # The capability, not a validated path: `extract` and the marker write are methods
     # on it, so there is no way to reach an unchecked directory from here.
-    target = ct.Destination.prepare(
-        Path(dest) if dest else Path.cwd() / name, allow_nonempty=force
-    )
+    target = ct.Destination.prepare(Path(dest) if dest else Path.cwd() / name, allow_nonempty=force)
 
     with state.rest_client() as client:
         ref = None

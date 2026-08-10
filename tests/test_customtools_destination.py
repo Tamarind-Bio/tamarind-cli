@@ -198,3 +198,78 @@ class TestReadTextHere:
         real.write_text('{"displayName": "sneaky"}\n')
         (tmp_path / "config.json").symlink_to(real)
         assert destination_module.read_text_here(tmp_path, "config.json") is None
+
+
+class TestExtractReplacing:
+    """`clone --force`: the existing tree is only removed once a replacement exists."""
+
+    def test_a_corrupt_archive_leaves_the_tree_intact(self, tmp_path: Path) -> None:
+        """THE regression. Clearing before extracting meant a bad zip, a full disk, or
+        a member collision destroyed the user's work and left a partial clone.
+
+        Without staging, `work.py` is gone by the time `extract` raises and this fails
+        on the read below.
+        """
+        folder = tmp_path / "dest"
+        folder.mkdir()
+        (folder / "work.py").write_text("mine\n")
+        bad = tmp_path / "bad.zip"
+        bad.write_bytes(b"not a zip")
+
+        dest = Destination.prepare(folder, allow_nonempty=True)
+        with pytest.raises(TamarindError):
+            dest.extract_replacing(bad)
+        assert (folder / "work.py").read_text() == "mine\n"
+
+    def test_a_good_archive_replaces_everything(self, tmp_path: Path) -> None:
+        """The point of replacing rather than merging: files the version DELETED go."""
+        folder = tmp_path / "dest"
+        folder.mkdir()
+        (folder / "deleted.py").write_text("removed upstream\n")
+        (folder / "main.py").write_text("old\n")
+
+        dest = Destination.prepare(folder, allow_nonempty=True)
+        dest.extract_replacing(_zip(tmp_path / "a.zip", {"main.py": "new\n"}))
+
+        assert (folder / "main.py").read_text() == "new\n"
+        assert not (folder / "deleted.py").exists()
+
+    def test_nested_members_survive_the_move(self, tmp_path: Path) -> None:
+        folder = tmp_path / "dest"
+        folder.mkdir()
+        dest = Destination.prepare(folder, allow_nonempty=True)
+        dest.extract_replacing(_zip(tmp_path / "a.zip", {"sub/deep/x.py": "y\n"}))
+        assert (folder / "sub" / "deep" / "x.py").read_text() == "y\n"
+
+
+class TestCreate:
+    def test_an_unwritable_parent_is_a_typed_error(self, tmp_path: Path) -> None:
+        """`init` prepares a destination, creates the tool REMOTELY, and only then
+        writes — so a raw OSError here surfaced as a traceback AND left a tool created
+        on the server that the retry rejects as already existing."""
+        if os.name == "nt":
+            pytest.skip("chmod does not restrict directory writes on Windows")
+        parent = tmp_path / "locked"
+        parent.mkdir()
+        parent.chmod(0o500)
+        try:
+            with pytest.raises(TamarindError):
+                Destination.prepare(parent / "child").create()
+        finally:
+            parent.chmod(0o700)
+
+
+class TestWindowsNameSanitization:
+    def test_the_guard_uses_the_name_extract_will_write(self) -> None:
+        """On Windows `extract` replaces :<>|"?* with underscores and strips trailing
+        dots and spaces. Checking the UNSANITIZED name inspects `a:b` while extraction
+        writes `a_b`, so a symlink at the real path is never seen.
+
+        Asserted through the helper rather than by extracting, because the mangling
+        only happens on Windows and this must stay meaningful on every runner.
+        """
+        parts = destination_module._sanitized_parts("a:b/file")
+        if os.path.sep == "\\":
+            assert parts == ["a_b", "file"]
+        else:
+            assert parts == ["a:b", "file"], "POSIX keeps the name as written"

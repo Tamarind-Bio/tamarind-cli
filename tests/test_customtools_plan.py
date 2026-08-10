@@ -284,3 +284,32 @@ class TestPublishableRequiresConfirmation:
 
     def test_confirmation_defaults_to_true_for_existing_callers(self) -> None:
         assert plan.reconcile(ref_moved=True, result=_result("building")).confirmed is True
+
+
+class TestSelectPublishableDrivesTheStatusCheck:
+    def test_an_incomplete_version_is_not_a_deployed_one(self) -> None:
+        """`ct status` compared the NEWEST version's ref against the source. After a
+        failed build — or right after `deploy --no-wait` — a version exists at that ref
+        and never completed, so matching refs reported "nothing undeployed" when no
+        image exists for the current tree.
+
+        `select_publishable` is what the check now asks, and it skips the incomplete
+        ones. Without that, `latest` here is the Stopped v2 and the refs match.
+        """
+        versions = (
+            wire.Version(name="v2", status="Stopped", ref="ref-current"),
+            wire.Version(name="v1", status="Complete", ref="ref-older"),
+        )
+        built = plan.select_publishable(versions)
+        assert built is not None and built.name == "v1"
+        assert built.ref != "ref-current", "a failed build must not count as deployed"
+
+    def test_a_running_version_is_also_skipped(self) -> None:
+        versions = (
+            wire.Version(name="v2", status="Running", ref="ref-current"),
+            wire.Version(name="v1", status="Complete", ref="ref-older"),
+        )
+        assert plan.select_publishable(versions).name == "v1"
+
+    def test_no_complete_version_at_all_is_none(self) -> None:
+        assert plan.select_publishable((wire.Version(name="v1", status="Stopped"),)) is None

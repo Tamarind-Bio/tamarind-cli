@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import tempfile
 import stat
 import zipfile
 from dataclasses import dataclass
@@ -99,7 +100,7 @@ class Destination:
         folder, so the file being replaced is the link itself and nothing beyond it.
         """
         target = self.path / name
-        self.path.mkdir(parents=True, exist_ok=True)
+        self.create()
         if target.is_symlink():
             target.unlink()
         try:
@@ -130,6 +131,36 @@ class Destination:
             except OSError as exc:
                 raise TamarindError(f"Could not clear '{entry}': {exc}") from exc
 
+    def create(self) -> None:
+        """Make this directory, translating the failure.
+
+        Separate from the writes because of WHEN it fails: `init` prepares a
+        destination, creates the tool REMOTELY, and only then writes. A parent that is
+        read-only surfaced there as a raw OSError past the typed boundary — a traceback,
+        and a tool left created on the server that the retry then rejects as existing.
+        """
+        try:
+            self.path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise TamarindError(f"Could not create {self.path}: {exc}") from exc
+
+    def extract_replacing(self, archive_path: Path) -> tuple[str, ...]:
+        """Extract, replacing this directory's contents — archive first, delete second.
+
+        `clone --force` used to clear the destination and THEN extract, so a corrupt
+        archive, a full disk, or a member collision destroyed the user's tree and left
+        a partial clone in its place. Staging inverts that: everything that can fail
+        happens against a temporary directory, and the existing files are only removed
+        once there is a complete replacement to put there.
+        """
+        with tempfile.TemporaryDirectory(dir=str(self.path.parent)) as tmp:
+            staging = Destination.prepare(Path(tmp) / "staged")
+            pointers = staging.extract(archive_path)
+            self.clear()
+            for entry in staging.path.iterdir():
+                shutil.move(str(entry), str(self.path / entry.name))
+        return pointers
+
     def extract(self, archive_path: Path) -> tuple[str, ...]:
         """Unpack a zip into this directory. Returns any Git-LFS pointer paths.
 
@@ -139,7 +170,7 @@ class Destination:
         folder entirely. Every path component is checked, not just the leaf: `a/b.txt`
         writes through `a` when `a` is a link.
         """
-        self.path.mkdir(parents=True, exist_ok=True)
+        self.create()
         try:
             with zipfile.ZipFile(archive_path) as zf:
                 for member in zf.infolist():
@@ -215,7 +246,23 @@ def _sanitized_parts(filename: str) -> list[str]:
         name = name.replace(os.path.altsep, os.path.sep)
     name = os.path.splitdrive(name)[1]
     invalid = ("", os.path.curdir, os.path.pardir)
-    return [part for part in name.split(os.path.sep) if part not in invalid]
+    parts = [part for part in name.split(os.path.sep) if part not in invalid]
+    if os.path.sep == "\\":
+        # Windows only, and it matters: `extract` ALSO replaces :<>|"?* with underscores
+        # and strips trailing dots and spaces. Without mirroring it, the guard inspects
+        # `a:b` while extraction writes `a_b` — so a symlink at the sanitized name is
+        # never seen and the archive writes through it after all.
+        parts = [_sanitize_windows_component(part) for part in parts]
+    return parts
+
+
+_WINDOWS_ILLEGAL = ':<>|"?*'
+_WINDOWS_TABLE = str.maketrans(_WINDOWS_ILLEGAL, "_" * len(_WINDOWS_ILLEGAL))
+
+
+def _sanitize_windows_component(part: str) -> str:
+    """One path component as Windows `ZipFile.extract` will write it."""
+    return part.translate(_WINDOWS_TABLE).rstrip(" .") or part.translate(_WINDOWS_TABLE)
 
 
 def _restore_mode(member: zipfile.ZipInfo, path: Path) -> None:

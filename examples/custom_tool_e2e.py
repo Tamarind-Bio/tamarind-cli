@@ -14,15 +14,17 @@ Run it with:
 
 Three things in here are load-bearing and easy to get wrong by hand:
 
-* **`outcome.deployed`, never `outcome.path`.** The library decides "did anything
-  ship" in one place, because `path` alone cannot answer it — a `noop` can mean
-  "identical upload, nothing to do" OR "the deploy raced source extraction and
-  built the previous code". `build()` resolves that; re-deriving it here would
-  reintroduce the bug.
+* **`outcome.confirmed_version()`, never `outcome.version_name`.** `deployed` says
+  the server acted; it does NOT say the server acted on YOUR source. When extraction
+  outruns the deploy, `build()` deliberately returns `deployed=True` with
+  `confirmed=False` — publishing that promotes a version built from the previous
+  tree. `confirmed_version()` returns None in exactly the cases where publishing
+  would be wrong, and `publish_confirmed()` is the only thing that accepts its
+  result. Checking `deployed` alone is the bug this script used to contain.
 
-* **Pin the smoke test to the version you just built.** An unpinned submit runs
-  whatever is currently live, which is the OLD version until you publish — so an
-  unpinned test passes without ever executing the new code.
+* **Pin the smoke test to the version's REF, not its name.** `v1` is a display
+  name; the pinned submit endpoint pins by commit ref, so `toolRef` must carry
+  `version.ref`. Sending the name either fails or silently exercises the wrong tree.
 
 * **Publish last.** Publishing is what makes a version live for the whole org.
 """
@@ -81,19 +83,29 @@ def deploy(folder: Path) -> int:
             # Not a failure. The common case is an unchanged re-deploy in CI, where
             # the live version is already correct and there is nothing to test.
             return 0
-        if not outcome.version_name:
-            print("Deployed, but the server named no version to test.", file=sys.stderr)
+
+        # 3. The evidence, not the name. None here means publishing would be unsafe —
+        #    nothing deployed, the server named no version, or the extraction was never
+        #    confirmed so this build may have used the PREVIOUS source.
+        confirmed = outcome.confirmed_version()
+        if confirmed is None:
+            print(f"not publishable: {outcome.explanation}", file=sys.stderr)
             return 1
 
-        # 3. Smoke-test THAT version, not whatever happens to be live.
-        job_name = f"{name}-smoke-{outcome.version_name}"
-        print(f"submitting {job_name} against {name}:{outcome.version_name}")
+        # 4. Smoke-test THAT version. The endpoint pins by commit ref, so resolve the
+        #    named version to its ref — sending the display name pins nothing.
+        version = ct.plan.find_version(ct.get_versions(client, name=name), confirmed.name)
+        if version is None or not version.ref:
+            print(f"{confirmed.name} records no source ref to pin to.", file=sys.stderr)
+            return 1
+        job_name = f"{name}-smoke-{confirmed.name}"
+        print(f"submitting {job_name} against {name}@{version.ref[:10]}")
         jobs.submit_job_pinned(
             client,
             job_name=job_name,
             job_type=name,
             settings=SMOKE_TEST_SETTINGS,
-            tool_ref=f"{name}:{outcome.version_name}",
+            tool_ref=version.ref,
         )
         final = jobs.wait_for_job(client, job_name, timeout=SMOKE_TEST_TIMEOUT)
         status = jobs.job_status(final)
@@ -101,8 +113,9 @@ def deploy(folder: Path) -> int:
             print(f"smoke test finished {status} — not publishing.", file=sys.stderr)
             return 1
 
-        # 4. Only now make it live for everyone.
-        _, published = ct.publish(client, name=name, version_name=outcome.version_name)
+        # 5. Only now make it live for everyone. `publish_confirmed` takes the
+        #    evidence rather than a name, so this line cannot promote a stale build.
+        _, published = ct.publish_confirmed(client, name=name, version=confirmed)
         print(f"published {name} version {published}")
         return 0
 
