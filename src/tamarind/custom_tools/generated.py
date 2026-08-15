@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from tamarind.http import HTTPClient
 
-OPENAPI_SHA256 = "d7b26705f76c1bec56b95cc6e3fb9927757065cf15375d4883cfb007123550a1"
+OPENAPI_SHA256 = "3a1f89370e0af6f4d7d086478216895ed64806d7be7aae3cac5973750484fdab"
 
 
 def _segment(value: str) -> str:
@@ -16,7 +16,7 @@ def _segment(value: str) -> str:
 
 
 PublicCustomToolStatus: TypeAlias = Literal["Draft", "Building", "Deployed"]
-PublicVersionStatus: TypeAlias = Literal["Running", "Complete", "Stopped"]
+PublicVersionStatus: TypeAlias = Literal["Queued", "Claimed", "Running", "Complete", "Stopped"]
 
 
 class PublicBuildError(TypedDict):

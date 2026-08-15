@@ -793,6 +793,8 @@
       },
       "PublicVersionStatus": {
         "enum": [
+          "Queued",
+          "Claimed",
           "Running",
           "Complete",
           "Stopped"
@@ -1293,9 +1295,8 @@
             "name": "version_name",
             "required": true,
             "schema": {
-              "maxLength": 20,
-              "minLength": 2,
-              "pattern": "^v[1-9][0-9]*$",
+              "maxLength": 200,
+              "minLength": 1,
               "title": "Version Name",
               "type": "string"
             }
@@ -1353,9 +1354,8 @@
             "name": "version_name",
             "required": true,
             "schema": {
-              "maxLength": 20,
-              "minLength": 2,
-              "pattern": "^v[1-9][0-9]*$",
+              "maxLength": 200,
+              "minLength": 1,
               "title": "Version Name",
               "type": "string"
             }
@@ -1413,9 +1413,8 @@
             "name": "version_name",
             "required": true,
             "schema": {
-              "maxLength": 20,
-              "minLength": 2,
-              "pattern": "^v[1-9][0-9]*$",
+              "maxLength": 200,
+              "minLength": 1,
               "title": "Version Name",
               "type": "string"
             }
