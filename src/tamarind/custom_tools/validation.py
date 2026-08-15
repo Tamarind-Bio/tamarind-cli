@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 from typing import Any
 
-from tamarind.custom_tools.packaging import inspect_source_tree
+from tamarind.custom_tools.packaging import SourceTree, inspect_source_tree
 from tamarind.errors import CustomToolUploadError
 
 
@@ -45,6 +45,27 @@ class ValidationReport:
 
 def validate_folder(folder: str | Path) -> ValidationReport:
     root = Path(folder).expanduser()
+    if not root.is_dir():
+        return ValidationReport(
+            errors=(
+                ValidationProblem(
+                    code="folder_not_found",
+                    path=".",
+                    message=f"Source folder does not exist: {root}",
+                ),
+            )
+        )
+    try:
+        tree = inspect_source_tree(root)
+    except CustomToolUploadError as exc:
+        return ValidationReport(
+            errors=(ValidationProblem(code="invalid_source_tree", path=".", message=str(exc)),)
+        )
+    return validate_source_tree(tree)
+
+
+def validate_source_tree(tree: SourceTree) -> ValidationReport:
+    """Validate the exact inspected snapshot that will be archived."""
     errors: list[ValidationProblem] = []
     warnings: list[ValidationProblem] = []
 
@@ -54,20 +75,7 @@ def validate_folder(folder: str | Path) -> ValidationReport:
     def warning(code: str, path: str, message: str) -> None:
         warnings.append(ValidationProblem(code=code, path=path, message=message))
 
-    if not root.is_dir():
-        error("folder_not_found", ".", f"Source folder does not exist: {root}")
-        return ValidationReport(tuple(errors), tuple(warnings))
-    try:
-        tree = inspect_source_tree(root)
-    except CustomToolUploadError as exc:
-        error(
-            "invalid_source_tree",
-            ".",
-            str(exc),
-        )
-        return ValidationReport(tuple(errors), tuple(warnings))
-
-    files = dict(tree.files)
+    files = {source_file.relative: source_file for source_file in tree.files}
     for required in ("config.json", "Dockerfile"):
         if required not in files:
             error("required_file_missing", required, f"{required} is required")
@@ -79,10 +87,13 @@ def validate_folder(folder: str | Path) -> ValidationReport:
             "run.sh is recommended because the Custom Tool runtime invokes it directly",
         )
 
-    config_path = files.get("config.json")
-    if config_path is not None:
+    config_file = files.get("config.json")
+    if config_file is not None:
         try:
-            value = json.loads(config_path.read_text(encoding="utf-8"))
+            value = json.loads(config_file.read_text())
+        except CustomToolUploadError as exc:
+            error("invalid_source_tree", ".", str(exc))
+            return ValidationReport(tuple(errors), tuple(warnings))
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             error("invalid_json", "config.json", f"config.json is not valid JSON: {exc}")
         else:
@@ -92,19 +103,23 @@ def validate_folder(folder: str | Path) -> ValidationReport:
                 _validate_config(value, error)
 
     runtime_files = [
-        path
-        for relative, path in tree.files
-        if relative == "run.sh" or ("/" not in relative and path.suffix == ".py")
+        source_file
+        for source_file in tree.files
+        if source_file.relative == "run.sh"
+        or ("/" not in source_file.relative and source_file.path.suffix == ".py")
     ]
     for candidate in runtime_files:
         try:
-            text = candidate.read_text(encoding="utf-8")
+            text = candidate.read_text()
+        except CustomToolUploadError as exc:
+            error("invalid_source_tree", ".", str(exc))
+            return ValidationReport(tuple(errors), tuple(warnings))
         except (OSError, UnicodeError):
             continue
         if _NETWORK_PATTERN.search(text):
             warning(
                 "runtime_network_access",
-                candidate.relative_to(root).as_posix(),
+                candidate.relative,
                 "Runtime network access is blocked; bake dependencies into the image or use platform inputs",
             )
 

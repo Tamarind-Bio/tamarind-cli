@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
 from io import BytesIO
 import os
 from pathlib import Path
-import shutil
 import stat
+from typing import BinaryIO
 import zipfile
 
 from tamarind.errors import CustomToolUploadError
@@ -44,23 +46,105 @@ class SourceArchive:
 
 
 @dataclass(frozen=True)
+class SourceFile:
+    relative: str
+    path: Path
+    root: Path
+    device: int
+    inode: int
+    size: int
+    modified_ns: int
+    mode: int
+
+    @classmethod
+    def inspect(cls, relative: str, path: Path, root: Path) -> SourceFile:
+        metadata = _file_metadata(path)
+        _assert_contained(root, path)
+        confirmed = _file_metadata(path)
+        if _identity(metadata) != _identity(confirmed):
+            raise CustomToolUploadError(f"Source file changed during inspection: {path}")
+        if not stat.S_ISREG(metadata.st_mode):
+            raise CustomToolUploadError(f"Source archives can contain only regular files: {path}")
+        return cls(
+            relative=relative,
+            path=path,
+            root=root,
+            device=metadata.st_dev,
+            inode=metadata.st_ino,
+            size=metadata.st_size,
+            modified_ns=metadata.st_mtime_ns,
+            mode=metadata.st_mode,
+        )
+
+    @contextmanager
+    def open_verified(self) -> Iterator[BinaryIO]:
+        """Open the inspected file without following a replacement symlink."""
+        self._verify_path()
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(self.path, flags)
+        except OSError as exc:
+            raise CustomToolUploadError(
+                f"Source file changed after inspection: {self.path}"
+            ) from exc
+
+        with os.fdopen(descriptor, "rb") as source:
+            self._verify(os.fstat(source.fileno()))
+            try:
+                yield source
+            finally:
+                self._verify(os.fstat(source.fileno()))
+                self._verify_path()
+
+    def read_text(self, encoding: str = "utf-8") -> str:
+        with self.open_verified() as source:
+            return source.read().decode(encoding)
+
+    def _verify(self, metadata: os.stat_result) -> None:
+        identity = _identity(metadata)
+        expected = (self.device, self.inode, self.size, self.modified_ns, self.mode)
+        if identity != expected or not stat.S_ISREG(metadata.st_mode):
+            raise CustomToolUploadError(f"Source file changed after inspection: {self.path}")
+
+    def _verify_path(self) -> None:
+        _assert_contained(self.root, self.path)
+        self._verify(_file_metadata(self.path))
+
+
+@dataclass(frozen=True)
 class SourceTree:
-    files: tuple[tuple[str, Path], ...]
+    files: tuple[SourceFile, ...]
     empty_directories: tuple[str, ...]
 
 
 def inspect_source_tree(folder: str | Path) -> SourceTree:
     """Collect the exact retained tree while enforcing archive link policy."""
     root = Path(folder).expanduser()
-    if not root.is_dir():
+    try:
+        root_metadata = root.lstat()
+    except OSError as exc:
+        raise CustomToolUploadError(f"Custom Tool source folder does not exist: {root}") from exc
+    if not stat.S_ISDIR(root_metadata.st_mode):
         raise CustomToolUploadError(f"Custom Tool source folder does not exist: {root}")
-    if is_link_like(root):
+    if _metadata_is_link_like(root_metadata):
         raise CustomToolUploadError(f"Source archives cannot contain symlinks or junctions: {root}")
+    try:
+        resolved_root = root.resolve(strict=True)
+    except OSError as exc:
+        raise CustomToolUploadError(f"Cannot resolve Custom Tool source folder: {root}") from exc
 
-    files: list[tuple[str, Path]] = []
+    def traversal_error(exc: OSError) -> None:
+        raise CustomToolUploadError(f"Cannot traverse Custom Tool source folder: {exc}") from exc
+
+    files: list[SourceFile] = []
     empty_directories: list[str] = []
-    for current, directories, filenames in os.walk(root, followlinks=False):
+    for current, directories, filenames in os.walk(
+        root,
+        followlinks=False,
+        onerror=traversal_error,
+    ):
         current_path = Path(current)
+        _verify_directory(resolved_root, current_path)
         kept_directories: list[str] = []
         for name in sorted(directories):
             path = current_path / name
@@ -76,7 +160,11 @@ def inspect_source_tree(folder: str | Path) -> SourceTree:
         kept_files: list[tuple[str, Path]] = []
         for name in sorted(filenames):
             path = current_path / name
-            if name in EXCLUDED_FILES or path.suffix in EXCLUDED_SUFFIXES:
+            if (
+                name in EXCLUDED_DIRECTORIES
+                or name in EXCLUDED_FILES
+                or path.suffix in EXCLUDED_SUFFIXES
+            ):
                 continue
             if is_link_like(path):
                 raise CustomToolUploadError(
@@ -84,7 +172,9 @@ def inspect_source_tree(folder: str | Path) -> SourceTree:
                 )
             relative = path.relative_to(root).as_posix()
             kept_files.append((relative, path))
-        files.extend(kept_files)
+        files.extend(
+            SourceFile.inspect(relative, path, resolved_root) for relative, path in kept_files
+        )
         if current_path != root and not kept_directories and not kept_files:
             empty_directories.append(current_path.relative_to(root).as_posix())
 
@@ -96,7 +186,11 @@ def inspect_source_tree(folder: str | Path) -> SourceTree:
 
 def build_archive(folder: str | Path) -> SourceArchive:
     """Package a folder into byte-for-byte reproducible ZIP content."""
-    tree = inspect_source_tree(folder)
+    return build_source_tree_archive(inspect_source_tree(folder))
+
+
+def build_source_tree_archive(tree: SourceTree) -> SourceArchive:
+    """Package one previously inspected source snapshot."""
     output = BytesIO()
     with zipfile.ZipFile(
         output,
@@ -105,16 +199,16 @@ def build_archive(folder: str | Path) -> SourceArchive:
         compresslevel=9,
         strict_timestamps=True,
     ) as archive:
-        entries: list[tuple[str, Path | None, int]] = []
+        entries: list[tuple[str, SourceFile | None, int]] = []
         for relative in tree.empty_directories:
             entries.append((f"{relative}/", None, _DIRECTORY_MODE))
             # Git cannot persist an empty tree. The marker keeps the directory
             # present when the backend commits the uploaded archive to Gitea.
             entries.append((f"{relative}/.gitkeep", None, _REGULAR_FILE_MODE))
-        for relative, path in tree.files:
-            executable = relative == "run.sh" or bool(path.stat().st_mode & 0o111)
+        for source_file in tree.files:
+            executable = source_file.relative == "run.sh" or bool(source_file.mode & 0o111)
             mode = _EXECUTABLE_FILE_MODE if executable else _REGULAR_FILE_MODE
-            entries.append((relative, path, mode))
+            entries.append((source_file.relative, source_file, mode))
 
         for relative, entry_path, mode in sorted(entries, key=lambda item: item[0]):
             info = zipfile.ZipInfo(relative, date_time=_ZIP_TIMESTAMP)
@@ -124,11 +218,10 @@ def build_archive(folder: str | Path) -> SourceArchive:
             if entry_path is None:
                 archive.writestr(info, b"", compresslevel=9)
                 continue
-            with (
-                entry_path.open("rb") as source,
-                archive.open(info, "w", force_zip64=True) as destination,
-            ):
-                shutil.copyfileobj(source, destination, length=1024 * 1024)
+            with entry_path.open_verified() as source:
+                with archive.open(info, "w", force_zip64=True) as destination:
+                    while chunk := source.read(1024 * 1024):
+                        destination.write(chunk)
 
     data = output.getvalue()
     return SourceArchive(data=data, digest=f"sha256:{sha256(data).hexdigest()}")
@@ -136,8 +229,47 @@ def build_archive(folder: str | Path) -> SourceArchive:
 
 def is_link_like(path: Path) -> bool:
     """Reject POSIX links and Windows reparse points such as junctions."""
-    if path.is_symlink():
+    return _metadata_is_link_like(_file_metadata(path))
+
+
+def _metadata_is_link_like(metadata: os.stat_result) -> bool:
+    if stat.S_ISLNK(metadata.st_mode):
         return True
     reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-    file_attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    file_attributes = getattr(metadata, "st_file_attributes", 0)
     return bool(reparse_flag and file_attributes & reparse_flag)
+
+
+def _verify_directory(root: Path, path: Path) -> None:
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise CustomToolUploadError(f"Source directory changed during inspection: {path}") from exc
+    if not stat.S_ISDIR(metadata.st_mode) or _metadata_is_link_like(metadata):
+        raise CustomToolUploadError(f"Source archives cannot contain symlinks or junctions: {path}")
+    _assert_contained(root, path)
+
+
+def _assert_contained(root: Path, path: Path) -> None:
+    try:
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(root)
+    except (OSError, ValueError) as exc:
+        raise CustomToolUploadError(f"Source path escapes the source folder: {path}") from exc
+
+
+def _file_metadata(path: Path) -> os.stat_result:
+    try:
+        return path.lstat()
+    except OSError as exc:
+        raise CustomToolUploadError(f"Source file changed during inspection: {path}") from exc
+
+
+def _identity(metadata: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_mode,
+    )

@@ -20,8 +20,17 @@ from tamarind.custom_tools.generated import (
     PublicVersion,
     PublicVersionStatus,
 )
-from tamarind.custom_tools.packaging import SourceArchive, build_archive
-from tamarind.custom_tools.validation import ValidationReport, validate_folder
+from tamarind.custom_tools.packaging import (
+    SourceArchive,
+    build_source_tree_archive,
+    inspect_source_tree,
+)
+from tamarind.custom_tools.validation import (
+    ValidationProblem,
+    ValidationReport,
+    validate_folder,
+    validate_source_tree,
+)
 from tamarind.errors import (
     CustomToolBuildFailedError,
     CustomToolBuildTimeoutError,
@@ -144,10 +153,17 @@ class CustomTool:
         return validate_folder(folder)
 
     def build(self, folder: str | Path) -> BuildResult:
-        report = self.validate(folder)
+        try:
+            tree = inspect_source_tree(folder)
+        except CustomToolUploadError as exc:
+            report = ValidationReport(
+                errors=(ValidationProblem(code="invalid_source_tree", path=".", message=str(exc)),)
+            )
+            raise ValidationError("Custom Tool source validation failed", detail=report) from None
+        report = validate_source_tree(tree)
         if not report.valid:
             raise ValidationError("Custom Tool source validation failed", detail=report)
-        return self._collection._build(self, build_archive(folder))
+        return self._collection._build(self, build_source_tree_archive(tree))
 
     def get_version(self, name: str) -> "Version":
         return self._collection._get_version(self.name, name)

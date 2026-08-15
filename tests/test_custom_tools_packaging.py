@@ -9,6 +9,7 @@ import zipfile
 
 import pytest
 
+from tamarind.custom_tools import packaging
 from tamarind.custom_tools.packaging import build_archive
 from tamarind.custom_tools.validation import validate_folder
 from tamarind.errors import CustomToolUploadError
@@ -47,6 +48,15 @@ def test_archive_is_deterministic_and_excludes_local_artifacts(tmp_path: Path) -
         assert all(info.date_time == (1980, 1, 1, 0, 0, 0) for info in archive.infolist())
 
 
+@pytest.mark.parametrize("metadata_name", [".git", ".hg", ".svn"])
+def test_archive_excludes_file_form_vcs_metadata(tmp_path: Path, metadata_name: str) -> None:
+    _valid_source(tmp_path)
+    (tmp_path / metadata_name).write_text("gitdir: ../metadata\n")
+
+    with zipfile.ZipFile(BytesIO(build_archive(tmp_path).data)) as archive:
+        assert metadata_name not in archive.namelist()
+
+
 def test_archive_preserves_explicit_build_inputs_and_empty_directories(tmp_path: Path) -> None:
     _valid_source(tmp_path)
     (tmp_path / "dist").mkdir()
@@ -80,6 +90,61 @@ def test_archive_rejects_symlinks(tmp_path: Path) -> None:
 
     with pytest.raises(CustomToolUploadError, match="symlinks"):
         build_archive(tmp_path)
+
+
+def test_archive_rejects_file_replaced_by_symlink_after_inspection(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _valid_source(tmp_path)
+    inspected = packaging.inspect_source_tree(tmp_path)
+    main = tmp_path / "main.py"
+    main.unlink()
+    main.symlink_to(tmp_path / "run.sh")
+    monkeypatch.setattr(packaging, "inspect_source_tree", lambda _folder: inspected)
+
+    with pytest.raises(CustomToolUploadError, match="changed after inspection"):
+        build_archive(tmp_path)
+
+
+def test_inspection_rejects_directory_traversal_errors(tmp_path: Path, monkeypatch) -> None:
+    _valid_source(tmp_path)
+
+    def failing_walk(_root, *, followlinks, onerror):
+        assert followlinks is False
+        onerror(PermissionError("directory is unreadable"))
+        return ()
+
+    monkeypatch.setattr(packaging.os, "walk", failing_walk)
+
+    with pytest.raises(CustomToolUploadError, match="Cannot traverse"):
+        packaging.inspect_source_tree(tmp_path)
+
+
+def test_inspection_rejects_directory_replaced_by_link_during_descent(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _valid_source(tmp_path)
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    outside = tmp_path.parent / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("secret")
+
+    def replaced_walk(root, *, followlinks, onerror):
+        assert followlinks is False
+        assert onerror is not None
+        filenames = [path.name for path in Path(root).iterdir() if path.is_file()]
+        yield str(root), ["nested"], filenames
+        nested.rmdir()
+        nested.symlink_to(outside, target_is_directory=True)
+        yield str(nested), [], ["secret.txt"]
+
+    monkeypatch.setattr(packaging.os, "walk", replaced_walk)
+
+    with pytest.raises(CustomToolUploadError, match="symlinks or junctions"):
+        packaging.inspect_source_tree(tmp_path)
 
 
 def test_validation_rejects_symlinked_source_root(tmp_path: Path) -> None:

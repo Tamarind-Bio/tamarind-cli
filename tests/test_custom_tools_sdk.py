@@ -9,6 +9,7 @@ import respx
 
 from tamarind import Tamarind
 from tamarind.custom_tools import BuildEvent
+from tamarind.custom_tools import resources
 from tamarind.errors import (
     CustomToolBuildFailedError,
     CustomToolBuildTimeoutError,
@@ -137,6 +138,27 @@ def test_build_uploads_exact_archive_then_creates_version(tmp_path: Path) -> Non
     assert uploaded.startswith(b"PK")
     assert result.action == "build"
     assert result.version.name == "v1"
+
+
+@respx.mock
+def test_build_archives_the_same_source_snapshot_that_passed_validation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _source(tmp_path)
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    validate_source_tree = resources.validate_source_tree
+
+    def mutate_after_validation(tree):
+        report = validate_source_tree(tree)
+        (tmp_path / "run.sh").write_text("#!/bin/sh\nchanged\n")
+        return report
+
+    monkeypatch.setattr(resources, "validate_source_tree", mutate_after_validation)
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(CustomToolUploadError, match="changed after inspection"):
+            client.custom_tools.get("example").build(tmp_path)
 
 
 @respx.mock
