@@ -244,6 +244,50 @@ def test_monitor_does_not_replay_cumulative_events_without_a_cursor(monkeypatch)
 
 
 @respx.mock
+def test_monitor_does_not_replay_events_when_a_cursor_appears(monkeypatch) -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+        side_effect=[
+            httpx.Response(200, json=_version()),
+            httpx.Response(200, json=_version(status="Complete", terminal=True)),
+        ]
+    )
+    respx.get(f"{BASE}custom-tools/example/versions/v1/logs").mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "status": "Running",
+                    "items": [{"message": "building", "timestamp": 1}],
+                    "nextCursor": None,
+                    "error": None,
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "status": "Complete",
+                    "items": [
+                        {"message": "building", "timestamp": 1},
+                        {"message": "done", "timestamp": 2},
+                    ],
+                    "nextCursor": "cursor-1",
+                    "error": None,
+                },
+            ),
+        ]
+    )
+    monkeypatch.setattr("tamarind.custom_tools.resources.time.sleep", lambda _: None)
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        version = client.custom_tools.get("example").get_version("v1")
+        events: list[BuildEvent] = []
+        version.monitor(timeout=10, interval=0.01, on_event=events.append)
+
+    assert [event.message for event in events] == ["building", "done"]
+
+
+@respx.mock
 def test_callback_exception_stops_monitoring_without_cancelling() -> None:
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
     respx.get(f"{BASE}custom-tools/example/versions/v1").mock(

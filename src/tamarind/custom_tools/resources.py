@@ -238,7 +238,7 @@ class Version:
                 events = page.items[delivered_for_cursor:]
                 delivered_for_cursor = max(delivered_for_cursor, len(page.items))
             else:
-                events = page.items
+                events = page.items[delivered_for_cursor:]
                 cursor = page.next_cursor
                 delivered_for_cursor = 0
             if on_event is not None:
