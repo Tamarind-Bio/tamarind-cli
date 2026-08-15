@@ -1,0 +1,241 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import httpx
+import pytest
+import respx
+
+from tamarind import Tamarind
+from tamarind.custom_tools import BuildEvent
+from tamarind.errors import CustomToolBuildFailedError, CustomToolBuildTimeoutError
+
+
+BASE = "https://api.test/"
+UPLOAD = "https://uploads.test/source.zip"
+
+
+def _tool(*, generation: str = "generation-1") -> dict:
+    return {
+        "name": "example",
+        "generation": generation,
+        "displayName": "Example",
+        "description": "",
+        "functions": [],
+        "status": "Draft",
+        "gpuType": "None",
+        "memory": "8Gi",
+        "cpu": 1,
+        "homeDiskGi": 20,
+        "maxRuntimeSeconds": None,
+        "hasSource": False,
+        "sourceDigest": None,
+        "published": False,
+        "autoPublish": False,
+        "defaultVersion": None,
+        "createdAt": "2026-08-15T00:00:00Z",
+        "updatedAt": "2026-08-15T00:00:00Z",
+        "canEdit": True,
+        "canBuild": True,
+    }
+
+
+def _version(*, status: str = "Running", terminal: bool = False, error: dict | None = None) -> dict:
+    return {
+        "name": "v1",
+        "sourceRevision": "a" * 40,
+        "sourceDigest": "sha256:" + "b" * 64,
+        "status": status,
+        "origin": "Build",
+        "createdAt": "2026-08-15T00:00:00Z",
+        "startedAt": "2026-08-15T00:00:00Z",
+        "completedAt": "2026-08-15T00:01:00Z" if terminal else None,
+        "terminal": terminal,
+        "error": error,
+    }
+
+
+def _source(root: Path) -> None:
+    (root / "config.json").write_text(json.dumps({"displayName": "Example", "inputs": []}))
+    (root / "Dockerfile").write_text("FROM python:3.12-slim\n")
+    (root / "run.sh").write_text("#!/bin/sh\ntrue\n")
+
+
+@respx.mock
+def test_collection_get_list_and_update_use_resource_generation() -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    list_route = respx.get(f"{BASE}custom-tools").mock(
+        return_value=httpx.Response(200, json={"items": [_tool()], "nextCursor": "next"})
+    )
+    update_route = respx.patch(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json={**_tool(), "description": "updated"})
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        tool = client.custom_tools.get("example")
+        page = client.custom_tools.list(status="Draft", published=False, limit=10)
+        updated = tool.update(description="updated")
+
+    assert page.items == (tool,)
+    assert page.next_cursor == "next"
+    assert list_route.calls.last.request.url.params["status"] == "Draft"
+    assert list_route.calls.last.request.url.params["published"] == "false"
+    assert update_route.calls.last.request.headers["If-Match"] == "generation-1"
+    assert json.loads(update_route.calls.last.request.content) == {"description": "updated"}
+    assert updated.description == "updated"
+
+
+@respx.mock
+def test_build_uploads_exact_archive_then_creates_version(tmp_path: Path) -> None:
+    _source(tmp_path)
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.post(f"{BASE}custom-tools/example/uploads").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "uploadId": "upload-1",
+                "uploadUrl": UPLOAD,
+                "expiresAt": "2026-08-15T01:00:00Z",
+                "maxBytes": 1_000_000,
+            },
+        )
+    )
+    upload_route = respx.put(UPLOAD).mock(return_value=httpx.Response(200))
+    build_route = respx.post(f"{BASE}custom-tools/example/versions").mock(
+        return_value=httpx.Response(202, json={"action": "build", "version": _version()})
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        result = client.custom_tools.get("example").build(tmp_path)
+
+    uploaded = upload_route.calls.last.request.content
+    body = json.loads(build_route.calls.last.request.content)
+    assert upload_route.calls.last.request.headers["Content-Type"] == "application/zip"
+    assert body["uploadId"] == "upload-1"
+    assert body["expectedSourceDigest"].startswith("sha256:")
+    assert build_route.calls.last.request.headers["If-Match"] == "generation-1"
+    assert uploaded.startswith(b"PK")
+    assert result.action == "build"
+    assert result.version.name == "v1"
+
+
+@respx.mock
+def test_monitor_advances_cursor_and_returns_terminal_version(monkeypatch) -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    version_route = respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+        side_effect=[
+            httpx.Response(200, json=_version()),
+            httpx.Response(200, json=_version(status="Complete", terminal=True)),
+        ]
+    )
+    logs_route = respx.get(f"{BASE}custom-tools/example/versions/v1/logs").mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "status": "Running",
+                    "items": [{"message": "building", "timestamp": 1}],
+                    "nextCursor": "cursor-1",
+                    "error": None,
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "status": "Complete",
+                    "items": [{"message": "done", "timestamp": 2}],
+                    "nextCursor": None,
+                    "error": None,
+                },
+            ),
+        ]
+    )
+    monkeypatch.setattr("tamarind.custom_tools.resources.time.sleep", lambda _: None)
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        initial = client.custom_tools.get("example")
+        version = initial.get_version("v1")
+        events: list[BuildEvent] = []
+        final = version.monitor(timeout=10, interval=0.01, on_event=events.append)
+
+    assert final.status == "Complete"
+    assert [event.message for event in events] == ["building", "done"]
+    assert logs_route.calls[1].request.url.params["cursor"] == "cursor-1"
+    assert version_route.call_count == 2
+
+
+@respx.mock
+def test_callback_exception_stops_monitoring_without_cancelling() -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+        return_value=httpx.Response(200, json=_version())
+    )
+    respx.get(f"{BASE}custom-tools/example/versions/v1/logs").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "status": "Running",
+                "items": [{"message": "building", "timestamp": 1}],
+                "nextCursor": "cursor-1",
+                "error": None,
+            },
+        )
+    )
+    cancel_route = respx.post(f"{BASE}custom-tools/example/versions/v1/cancel").mock(
+        return_value=httpx.Response(200, json=_version(status="Stopped", terminal=True))
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        version = client.custom_tools.get("example").get_version("v1")
+        with pytest.raises(RuntimeError, match="renderer failed"):
+            version.monitor(
+                timeout=10,
+                on_event=lambda _event: (_ for _ in ()).throw(RuntimeError("renderer failed")),
+            )
+
+    assert not cancel_route.called
+
+
+@respx.mock
+def test_timeout_does_not_cancel_remote_build(monkeypatch) -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+        return_value=httpx.Response(200, json=_version())
+    )
+    respx.get(f"{BASE}custom-tools/example/versions/v1/logs").mock(
+        return_value=httpx.Response(
+            200,
+            json={"status": "Running", "items": [], "nextCursor": "cursor", "error": None},
+        )
+    )
+    cancel_route = respx.post(f"{BASE}custom-tools/example/versions/v1/cancel").mock(
+        return_value=httpx.Response(200, json=_version(status="Stopped", terminal=True))
+    )
+    ticks = iter([0.0, 0.0, 2.0])
+    monkeypatch.setattr("tamarind.custom_tools.resources.time.monotonic", lambda: next(ticks))
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        version = client.custom_tools.get("example").get_version("v1")
+        with pytest.raises(CustomToolBuildTimeoutError):
+            version.monitor(timeout=1)
+
+    assert not cancel_route.called
+
+
+@respx.mock
+def test_terminal_failure_raises_typed_error() -> None:
+    failed = _version(
+        status="Stopped",
+        terminal=True,
+        error={"code": "build_failed", "message": "Docker build failed"},
+    )
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+        return_value=httpx.Response(200, json=failed)
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        version = client.custom_tools.get("example").get_version("v1")
+        with pytest.raises(CustomToolBuildFailedError, match="Docker build failed"):
+            version.monitor(timeout=10)

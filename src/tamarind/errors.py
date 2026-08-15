@@ -79,3 +79,35 @@ class APIError(TamarindError):
     def __init__(self, message: str, *, status_code: int, detail: object | None = None):
         super().__init__(message, detail=detail)
         self.status_code = status_code
+
+
+class CustomToolError(TamarindError):
+    """Base class for Custom Tools SDK failures."""
+
+
+class CustomToolNotFoundError(NotFoundError, CustomToolError):
+    """The Custom Tool does not exist or is not visible to the caller."""
+
+
+class CustomToolExistsError(CustomToolError):
+    """A Custom Tool already owns the requested organization-scoped name."""
+
+
+class StaleCustomToolError(CustomToolError):
+    """A resource handle refers to a deleted-and-recreated Tool generation."""
+
+
+class CustomToolUploadError(CustomToolError):
+    """Packaging or direct source upload failed."""
+
+
+class CustomToolBuildFailedError(CustomToolError):
+    """A Custom Tool Version reached an unsuccessful terminal state."""
+
+
+class CustomToolBuildNotInProgressError(CustomToolError):
+    """Cancellation was requested for a Version without an active build."""
+
+
+class CustomToolBuildTimeoutError(CustomToolError):
+    """Local monitoring timed out without cancelling the remote build."""

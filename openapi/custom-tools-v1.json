@@ -1,0 +1,1403 @@
+{
+  "components": {
+    "responses": {
+      "Error": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/PublicProblem"
+            }
+          }
+        },
+        "description": "An error occurred (RFC 9457 problem+json). Switch on the stable `code`, not on prose."
+      },
+      "NotFound": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/PublicProblem"
+            }
+          }
+        },
+        "description": "The addressed resource does not exist, or is not visible to your tenant."
+      },
+      "Unauthorized": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/PublicProblem"
+            }
+          }
+        },
+        "description": "API key missing or invalid."
+      },
+      "ValidationProblem": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/PublicProblem"
+            }
+          }
+        },
+        "description": "The request was malformed or failed validation; see `errors` for the offending fields."
+      }
+    },
+    "schemas": {
+      "PublicBuildError": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "PublicBuildError",
+        "type": "object"
+      },
+      "PublicBuildEvent": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "message",
+          "timestamp"
+        ],
+        "title": "PublicBuildEvent",
+        "type": "object"
+      },
+      "PublicBuildLogPage": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicBuildError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PublicBuildEvent"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PublicVersionStatus"
+          }
+        },
+        "required": [
+          "status",
+          "items",
+          "nextCursor",
+          "error"
+        ],
+        "title": "PublicBuildLogPage",
+        "type": "object"
+      },
+      "PublicBuildResult": {
+        "properties": {
+          "action": {
+            "enum": [
+              "build",
+              "reuse_image",
+              "unchanged"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "version": {
+            "$ref": "#/components/schemas/PublicVersion"
+          }
+        },
+        "required": [
+          "action",
+          "version"
+        ],
+        "title": "PublicBuildResult",
+        "type": "object"
+      },
+      "PublicCreateCustomToolRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "cpu": {
+            "default": 1,
+            "maximum": 8.0,
+            "minimum": 1.0,
+            "title": "Cpu",
+            "type": "integer"
+          },
+          "description": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Description",
+            "type": "string"
+          },
+          "displayName": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Displayname",
+            "type": "string"
+          },
+          "gpuType": {
+            "default": "None",
+            "enum": [
+              "None",
+              "T4",
+              "L4",
+              "L40S",
+              "A10",
+              "A100"
+            ],
+            "title": "Gputype",
+            "type": "string"
+          },
+          "memory": {
+            "default": "8Gi",
+            "enum": [
+              "8Gi",
+              "12Gi",
+              "24Gi",
+              "32Gi",
+              "48Gi",
+              "64Gi",
+              "90Gi",
+              "96Gi",
+              "180Gi"
+            ],
+            "title": "Memory",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 50,
+            "minLength": 3,
+            "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "PublicCreateCustomToolRequest",
+        "type": "object"
+      },
+      "PublicCreateVersionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedSourceDigest": {
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "title": "Expectedsourcedigest",
+            "type": "string"
+          },
+          "uploadId": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Uploadid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "uploadId",
+          "expectedSourceDigest"
+        ],
+        "title": "PublicCreateVersionRequest",
+        "type": "object"
+      },
+      "PublicCustomTool": {
+        "properties": {
+          "autoPublish": {
+            "title": "Autopublish",
+            "type": "boolean"
+          },
+          "canBuild": {
+            "title": "Canbuild",
+            "type": "boolean"
+          },
+          "canEdit": {
+            "title": "Canedit",
+            "type": "boolean"
+          },
+          "cpu": {
+            "title": "Cpu",
+            "type": "integer"
+          },
+          "createdAt": {
+            "title": "Createdat",
+            "type": "string"
+          },
+          "defaultVersion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Defaultversion"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "displayName": {
+            "title": "Displayname",
+            "type": "string"
+          },
+          "functions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Functions",
+            "type": "array"
+          },
+          "generation": {
+            "title": "Generation",
+            "type": "string"
+          },
+          "gpuType": {
+            "enum": [
+              "None",
+              "T4",
+              "L4",
+              "L40S",
+              "A10",
+              "A100"
+            ],
+            "title": "Gputype",
+            "type": "string"
+          },
+          "hasSource": {
+            "title": "Hassource",
+            "type": "boolean"
+          },
+          "homeDiskGi": {
+            "title": "Homediskgi",
+            "type": "integer"
+          },
+          "maxRuntimeSeconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maxruntimeseconds"
+          },
+          "memory": {
+            "enum": [
+              "8Gi",
+              "12Gi",
+              "24Gi",
+              "32Gi",
+              "48Gi",
+              "64Gi",
+              "90Gi",
+              "96Gi",
+              "180Gi"
+            ],
+            "title": "Memory",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "published": {
+            "title": "Published",
+            "type": "boolean"
+          },
+          "sourceDigest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcedigest"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PublicCustomToolStatus"
+          },
+          "updatedAt": {
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "generation",
+          "displayName",
+          "description",
+          "functions",
+          "status",
+          "gpuType",
+          "memory",
+          "cpu",
+          "homeDiskGi",
+          "maxRuntimeSeconds",
+          "hasSource",
+          "sourceDigest",
+          "published",
+          "autoPublish",
+          "defaultVersion",
+          "createdAt",
+          "updatedAt",
+          "canEdit",
+          "canBuild"
+        ],
+        "title": "PublicCustomTool",
+        "type": "object"
+      },
+      "PublicCustomToolPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PublicCustomTool"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "title": "PublicCustomToolPage",
+        "type": "object"
+      },
+      "PublicCustomToolStatus": {
+        "enum": [
+          "Draft",
+          "Building",
+          "Deployed"
+        ],
+        "title": "PublicCustomToolStatus",
+        "type": "string"
+      },
+      "PublicUpdateCustomToolRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "autoPublish": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Autopublish"
+          },
+          "cpu": {
+            "anyOf": [
+              {
+                "maximum": 8.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "displayName": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Displayname"
+          },
+          "estTime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Esttime"
+          },
+          "functions": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Functions"
+          },
+          "gpuType": {
+            "anyOf": [
+              {
+                "enum": [
+                  "None",
+                  "T4",
+                  "L4",
+                  "L40S",
+                  "A10",
+                  "A100"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gputype"
+          },
+          "homeDiskGi": {
+            "anyOf": [
+              {
+                "maximum": 50.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Homediskgi"
+          },
+          "memory": {
+            "anyOf": [
+              {
+                "enum": [
+                  "8Gi",
+                  "12Gi",
+                  "24Gi",
+                  "32Gi",
+                  "48Gi",
+                  "64Gi",
+                  "90Gi",
+                  "96Gi",
+                  "180Gi"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory"
+          },
+          "paperUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paperurl"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          }
+        },
+        "title": "PublicUpdateCustomToolRequest",
+        "type": "object"
+      },
+      "PublicUploadSession": {
+        "properties": {
+          "expiresAt": {
+            "title": "Expiresat",
+            "type": "string"
+          },
+          "maxBytes": {
+            "title": "Maxbytes",
+            "type": "integer"
+          },
+          "uploadId": {
+            "title": "Uploadid",
+            "type": "string"
+          },
+          "uploadUrl": {
+            "title": "Uploadurl",
+            "type": "string"
+          }
+        },
+        "required": [
+          "uploadId",
+          "uploadUrl",
+          "expiresAt",
+          "maxBytes"
+        ],
+        "title": "PublicUploadSession",
+        "type": "object"
+      },
+      "PublicVersion": {
+        "properties": {
+          "completedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completedat"
+          },
+          "createdAt": {
+            "title": "Createdat",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicBuildError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "sourceDigest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcedigest"
+          },
+          "sourceRevision": {
+            "title": "Sourcerevision",
+            "type": "string"
+          },
+          "startedAt": {
+            "title": "Startedat",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PublicVersionStatus"
+          },
+          "terminal": {
+            "title": "Terminal",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "sourceRevision",
+          "sourceDigest",
+          "status",
+          "origin",
+          "createdAt",
+          "startedAt",
+          "completedAt",
+          "terminal",
+          "error"
+        ],
+        "title": "PublicVersion",
+        "type": "object"
+      },
+      "PublicVersionPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PublicVersion"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "title": "PublicVersionPage",
+        "type": "object"
+      },
+      "PublicVersionStatus": {
+        "enum": [
+          "Launching",
+          "Queued",
+          "Claimed",
+          "Running",
+          "Complete",
+          "Stopped"
+        ],
+        "title": "PublicVersionStatus",
+        "type": "string"
+      }
+    },
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "description": "Your Tamarind API key. Create one at https://app.tamarind.bio/api-docs/api-key.",
+        "in": "header",
+        "name": "x-api-key",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "description": "The Tamarind public API. Code-first: this spec is GENERATED from the backend `Public*` request/response models (the single source of truth) and committed as an artifact; a freshness gate asserts it matches the running server, and a contract test asserts the served routes match it. v1 is frozen for external users. Authenticate with an API key in the `x-api-key` header.",
+    "summary": "The Tamarind public API \u2014 pipelines automation + molecule data management.",
+    "title": "Tamarind Public API",
+    "version": "1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/custom-tools": {
+      "get": {
+        "operationId": "listCustomTools",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/PublicCustomToolStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "published",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Published"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 4096,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicCustomToolPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "List Tools",
+        "tags": [
+          "custom-tools-public"
+        ],
+        "x-tamarind-group": "custom-tools"
+      },
+      "post": {
+        "operationId": "createCustomTool",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicCreateCustomToolRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicCustomTool"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create Tool",
+        "tags": [
+          "custom-tools-public"
+        ],
+        "x-tamarind-group": "custom-tools"
+      }
+    },
+    "/custom-tools/{name}": {
+      "get": {
+        "operationId": "getCustomTool",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicCustomTool"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get Tool",
+        "tags": [
+          "custom-tools-public"
+        ],
+        "x-tamarind-group": "custom-tools"
+      },
+      "patch": {
+        "operationId": "updateCustomTool",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "If-Match",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicUpdateCustomToolRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicCustomTool"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Update Tool",
+        "tags": [
+          "custom-tools-public"
+        ],
+        "x-tamarind-group": "custom-tools"
+      }
+    },
+    "/custom-tools/{name}/uploads": {
+      "post": {
+        "operationId": "createCustomToolUpload",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicUploadSession"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create Upload",
+        "tags": [
+          "custom-tools-public"
+        ],
+        "x-tamarind-group": "custom-tools"
+      }
+    },
+    "/custom-tools/{name}/versions": {
+      "get": {
+        "operationId": "listCustomToolVersions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/PublicVersionStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 4096,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicVersionPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "List Versions",
+        "tags": [
+          "custom-tools-public"
+        ],
+        "x-tamarind-group": "custom-tools"
+      },
+      "post": {
+        "operationId": "buildCustomToolVersion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "If-Match",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicCreateVersionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicBuildResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Build Version",
+        "tags": [
+          "custom-tools-public"
+        ],
+        "x-tamarind-group": "custom-tools"
+      }
+    },
+    "/custom-tools/{name}/versions/{version_name}": {
+      "get": {
+        "operationId": "getCustomToolVersion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_name",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Version Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicVersion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get Version",
+        "tags": [
+          "custom-tools-public"
+        ],
+        "x-tamarind-group": "custom-tools"
+      }
+    },
+    "/custom-tools/{name}/versions/{version_name}/cancel": {
+      "post": {
+        "operationId": "cancelCustomToolBuild",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_name",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Version Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicVersion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Cancel Build",
+        "tags": [
+          "custom-tools-public"
+        ],
+        "x-tamarind-group": "custom-tools"
+      }
+    },
+    "/custom-tools/{name}/versions/{version_name}/logs": {
+      "get": {
+        "operationId": "listCustomToolBuildLogs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_name",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Version Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 4096,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicBuildLogPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "List Build Logs",
+        "tags": [
+          "custom-tools-public"
+        ],
+        "x-tamarind-group": "custom-tools"
+      }
+    }
+  },
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ],
+  "servers": [
+    {
+      "description": "The Tamarind public API. Product-shaped surfaces under /api.",
+      "url": "https://app.tamarind.bio/api"
+    }
+  ]
+}

@@ -16,8 +16,13 @@ from .errors import (
     APIError,
     AuthError,
     BudgetError,
+    CustomToolBuildNotInProgressError,
+    CustomToolExistsError,
+    CustomToolNotFoundError,
+    CustomToolUploadError,
     NotFoundError,
     RateLimitError,
+    StaleCustomToolError,
     TamarindError,
     ValidationError,
 )
@@ -66,6 +71,7 @@ class HTTPClient:
         path: str,
         *,
         params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
         json: Any | None = None,
         timeout: float | None = None,
     ) -> httpx.Response:
@@ -75,14 +81,13 @@ class HTTPClient:
                 "or run `tamarind auth login`."
             )
         # Drop None-valued query params so we don't send `?x=None`.
-        clean_params = (
-            {k: v for k, v in params.items() if v is not None} if params else None
-        )
+        clean_params = {k: v for k, v in params.items() if v is not None} if params else None
         try:
             resp = self._client.request(
                 method,
                 path.lstrip("/"),
                 params=clean_params,
+                headers=headers,
                 json=json,
                 timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
             )
@@ -139,6 +144,17 @@ def _extract_message(resp: httpx.Response) -> str:
 def _map_error(resp: httpx.Response) -> TamarindError:
     msg = _extract_message(resp)
     code = resp.status_code
+    problem_code = _problem_code(resp)
+    if problem_code == "custom_tool_not_found" or problem_code == "custom_tool_version_not_found":
+        return CustomToolNotFoundError(msg)
+    if problem_code == "custom_tool_name_taken":
+        return CustomToolExistsError(msg)
+    if problem_code == "custom_tool_generation_mismatch":
+        return StaleCustomToolError(msg)
+    if problem_code == "custom_tool_source_digest_mismatch":
+        return CustomToolUploadError(msg)
+    if problem_code == "custom_tool_build_not_cancellable":
+        return CustomToolBuildNotInProgressError(msg)
     ml = msg.lower()
     auth_ish = "api key" in ml or "api-key" in ml or "apikey" in ml or "unauthorized" in ml
     resource = (
@@ -177,7 +193,18 @@ def _map_error(resp: httpx.Response) -> TamarindError:
         return ValidationError(msg)
     if code == 429:
         return RateLimitError(f"Rate limited: {msg}")
+    if code == 422:
+        return ValidationError(msg)
     return APIError(msg, status_code=code)
+
+
+def _problem_code(resp: httpx.Response) -> str | None:
+    try:
+        body = resp.json()
+    except ValueError:
+        return None
+    value = body.get("code") if isinstance(body, dict) else None
+    return str(value) if value else None
 
 
 def _version() -> str:
