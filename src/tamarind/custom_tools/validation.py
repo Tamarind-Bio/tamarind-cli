@@ -216,6 +216,11 @@ def _validate_config(value: dict[str, Any], error: Any) -> None:
         primary: list[dict[str, Any]] = []
         for index, item in enumerate(outputs):
             if not isinstance(item, dict):
+                error(
+                    "invalid_output",
+                    f"config.json.producedOutputs[{index}]",
+                    "each produced output must be an object",
+                )
                 continue
             flag = item.get("primary", False)
             if not isinstance(flag, bool):

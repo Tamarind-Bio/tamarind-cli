@@ -118,6 +118,21 @@ def test_error_mapping(status, exc):
 
 
 @respx.mock
+def test_422_preserves_structured_validation_problem() -> None:
+    problem = {
+        "code": "validation_error",
+        "message": "Request validation failed",
+        "errors": [{"field": "name", "message": "invalid"}],
+    }
+    respx.get(f"{BASE}custom-tools").mock(return_value=httpx.Response(422, json=problem))
+
+    with pytest.raises(ValidationError) as raised:
+        client().get_json("custom-tools")
+
+    assert raised.value.detail == problem
+
+
+@respx.mock
 @pytest.mark.parametrize(
     "message,exc",
     [

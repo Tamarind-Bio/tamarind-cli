@@ -194,7 +194,11 @@ def _map_error(resp: httpx.Response) -> TamarindError:
     if code == 429:
         return RateLimitError(f"Rate limited: {msg}")
     if code == 422:
-        return ValidationError(msg)
+        try:
+            detail: object | None = resp.json()
+        except ValueError:
+            detail = None
+        return ValidationError(msg, detail=detail)
     return APIError(msg, status_code=code)
 
 

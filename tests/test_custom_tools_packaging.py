@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from io import BytesIO
 import json
+import os
 from pathlib import Path
+import subprocess
 import zipfile
 
 import pytest
@@ -78,6 +80,39 @@ def test_archive_rejects_symlinks(tmp_path: Path) -> None:
 
     with pytest.raises(CustomToolUploadError, match="symlinks"):
         build_archive(tmp_path)
+
+
+def test_archive_streams_files_without_reading_each_one_into_memory(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _valid_source(tmp_path)
+
+    def fail_read_bytes(_path: Path) -> bytes:
+        raise AssertionError("archive construction must stream source files")
+
+    monkeypatch.setattr(Path, "read_bytes", fail_read_bytes)
+
+    archive = build_archive(tmp_path)
+
+    assert archive.size > 0
+
+
+@pytest.mark.skipif(os.name != "nt", reason="NTFS junctions are Windows-specific")
+def test_archive_rejects_windows_junctions(tmp_path: Path) -> None:
+    _valid_source(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("secret")
+    subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(tmp_path / "junction"), str(outside)],
+        check=True,
+        capture_output=True,
+    )
+
+    with pytest.raises(CustomToolUploadError, match="junctions"):
+        build_archive(tmp_path)
+    (tmp_path / "junction").rmdir()
 
 
 def test_validation_reports_config_errors_and_runtime_network_warning(tmp_path: Path) -> None:
@@ -191,5 +226,20 @@ def test_validation_rejects_non_boolean_output_primary(tmp_path: Path, value: ob
     assert any(
         problem.path == "config.json.producedOutputs[0].primary"
         and problem.code == "invalid_output_primary"
+        for problem in report.errors
+    )
+
+
+def test_validation_rejects_non_object_produced_outputs(tmp_path: Path) -> None:
+    _valid_source(tmp_path)
+    (tmp_path / "config.json").write_text(
+        json.dumps({"displayName": "Example", "inputs": [], "producedOutputs": [42]})
+    )
+
+    report = validate_folder(tmp_path)
+
+    assert not report.valid
+    assert any(
+        problem.path == "config.json.producedOutputs[0]" and problem.code == "invalid_output"
         for problem in report.errors
     )
