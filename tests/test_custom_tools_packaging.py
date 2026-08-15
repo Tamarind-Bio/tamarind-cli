@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 import json
+import os
 from pathlib import Path
 import zipfile
 
@@ -43,6 +44,18 @@ def test_archive_is_deterministic_and_excludes_local_artifacts(tmp_path: Path) -
     with zipfile.ZipFile(BytesIO(first.data)) as archive:
         assert archive.namelist() == ["Dockerfile", "config.json", "main.py", "run.sh"]
         assert all(info.date_time == (1980, 1, 1, 0, 0, 0) for info in archive.infolist())
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not preserve POSIX executable bits")
+def test_archive_preserves_executable_intent(tmp_path: Path) -> None:
+    _valid_source(tmp_path)
+    (tmp_path / "run.sh").chmod(0o755)
+
+    with zipfile.ZipFile(BytesIO(build_archive(tmp_path).data)) as archive:
+        modes = {info.filename: info.external_attr >> 16 for info in archive.infolist()}
+
+    assert modes["run.sh"] == 0o100755
+    assert modes["main.py"] == 0o100644
 
 
 def test_archive_rejects_symlinks(tmp_path: Path) -> None:
@@ -88,3 +101,29 @@ def test_validation_warns_when_run_script_is_missing(tmp_path: Path) -> None:
 
     assert report.valid
     assert [problem.code for problem in report.warnings] == ["run_script_missing"]
+
+
+def test_validation_contains_malformed_enum_and_oversized_number_values(tmp_path: Path) -> None:
+    _valid_source(tmp_path)
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "displayName": "Example",
+                "gpuType": [],
+                "memory": {},
+                "inputs": [
+                    {"name": "bad_type", "type": []},
+                    {"name": "huge", "type": "number", "default": 10**1000},
+                ],
+            }
+        )
+    )
+
+    report = validate_folder(tmp_path)
+
+    assert {problem.code for problem in report.errors} >= {
+        "invalid_gpu_type",
+        "invalid_memory",
+        "invalid_input_type",
+        "invalid_number",
+    }

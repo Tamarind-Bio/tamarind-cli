@@ -26,6 +26,7 @@ from tamarind.errors import (
     CustomToolBuildFailedError,
     CustomToolBuildTimeoutError,
     CustomToolUploadError,
+    TamarindError,
     ValidationError,
 )
 
@@ -174,10 +175,14 @@ class Version:
         return self._collection._get_version(self.tool_name, self.name)
 
     def logs(self, *, cursor: str | None = None) -> BuildLogPage:
+        return self._logs(cursor=cursor, request_timeout=None)
+
+    def _logs(self, *, cursor: str | None, request_timeout: float | None) -> BuildLogPage:
         wire = self._collection._transport.list_custom_tool_build_logs(
             self.tool_name,
             self.name,
             cursor=cursor,
+            timeout=request_timeout,
         )
         return _log_page_from_wire(wire)
 
@@ -206,7 +211,19 @@ class Version:
                     f"Custom Tool Version {self.tool_name}/{self.name} was still {current.status} after {timeout:g}s"
                 )
 
-            page = current.logs(cursor=cursor)
+            try:
+                page = current._logs(cursor=cursor, request_timeout=remaining)
+            except TamarindError as exc:
+                if (
+                    type(exc) is TamarindError
+                    and deadline is not None
+                    and time.monotonic() >= deadline
+                ):
+                    raise CustomToolBuildTimeoutError(
+                        f"Custom Tool Version {self.tool_name}/{self.name} did not return logs "
+                        f"before the {timeout:g}s deadline"
+                    ) from exc
+                raise
             if page.next_cursor is not None:
                 cursor = page.next_cursor
             if on_event is not None:

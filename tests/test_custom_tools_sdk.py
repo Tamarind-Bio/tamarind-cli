@@ -9,7 +9,12 @@ import respx
 
 from tamarind import Tamarind
 from tamarind.custom_tools import BuildEvent
-from tamarind.errors import CustomToolBuildFailedError, CustomToolBuildTimeoutError
+from tamarind.errors import (
+    CustomToolBuildFailedError,
+    CustomToolBuildTimeoutError,
+    ExitCode,
+    TamarindError,
+)
 
 
 BASE = "https://api.test/"
@@ -221,6 +226,51 @@ def test_timeout_does_not_cancel_remote_build(monkeypatch) -> None:
             version.monitor(timeout=1)
 
     assert not cancel_route.called
+    assert CustomToolBuildTimeoutError.exit_code == ExitCode.TIMEOUT
+
+
+@respx.mock
+def test_monitor_caps_log_request_by_remaining_deadline(monkeypatch) -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+        return_value=httpx.Response(200, json=_version())
+    )
+
+    def logs(request: httpx.Request) -> httpx.Response:
+        assert request.extensions["timeout"]["read"] <= 1
+        return httpx.Response(
+            200,
+            json={"status": "Running", "items": [], "nextCursor": None, "error": None},
+        )
+
+    respx.get(f"{BASE}custom-tools/example/versions/v1/logs").mock(side_effect=logs)
+    ticks = iter([0.0, 0.0, 2.0])
+    monkeypatch.setattr("tamarind.custom_tools.resources.time.monotonic", lambda: next(ticks))
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        version = client.custom_tools.get("example").get_version("v1")
+        with pytest.raises(CustomToolBuildTimeoutError):
+            version.monitor(timeout=1)
+
+
+@respx.mock
+def test_monitor_translates_request_timeout_at_deadline(monkeypatch) -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+        return_value=httpx.Response(200, json=_version())
+    )
+    ticks = iter([0.0, 0.0, 2.0])
+    monkeypatch.setattr("tamarind.custom_tools.resources.time.monotonic", lambda: next(ticks))
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        version = client.custom_tools.get("example").get_version("v1")
+        monkeypatch.setattr(
+            client.custom_tools._transport,
+            "list_custom_tool_build_logs",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(TamarindError("request timed out")),
+        )
+        with pytest.raises(CustomToolBuildTimeoutError):
+            version.monitor(timeout=1)
 
 
 @respx.mock

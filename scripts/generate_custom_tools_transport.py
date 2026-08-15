@@ -118,7 +118,9 @@ def generate(spec: dict[str, Any]) -> str:
             body_type = _body_type(operation)
             if body_type:
                 required_params.append(f"body: {body_type}")
-            signature = ", ".join(["self", *required_params, *optional_params])
+            signature = ", ".join(
+                ["self", *required_params, *optional_params, "*", "timeout: float | None = None"]
+            )
             rendered_path = path.lstrip("/")
             for wire_name, py_name in path_params:
                 rendered_path = rendered_path.replace(
@@ -137,6 +139,7 @@ def generate(spec: dict[str, Any]) -> str:
                 call.append(f"            headers={headers},")
             if body_type:
                 call.append("            json=body,")
+            call.append("            timeout=timeout,")
             methods.append(
                 "\n".join(
                     [

@@ -418,6 +418,69 @@
         "title": "PublicCustomToolStatus",
         "type": "string"
       },
+      "PublicProblem": {
+        "description": "RFC 9457 problem detail. Serialized as `application/problem+json` on every public error.",
+        "properties": {
+          "code": {
+            "description": "A stable machine-readable slug; switch on THIS, not prose.",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Instance-specific human explanation.",
+            "title": "Detail"
+          },
+          "errors": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Structured per-item detail (request-validation fields OR pipeline diagnostics).",
+            "title": "Errors"
+          },
+          "status": {
+            "description": "The HTTP status code, duplicated in the body per RFC 9457.",
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "description": "A short, human-readable summary of the error kind.",
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "description": "A URI identifying the error kind (dereferenceable docs).",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "code"
+        ],
+        "title": "PublicProblem",
+        "type": "object"
+      },
       "PublicUpdateCustomToolRequest": {
         "additionalProperties": false,
         "properties": {

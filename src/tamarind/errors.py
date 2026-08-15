@@ -111,3 +111,5 @@ class CustomToolBuildNotInProgressError(CustomToolError):
 
 class CustomToolBuildTimeoutError(CustomToolError):
     """Local monitoring timed out without cancelling the remote build."""
+
+    exit_code = ExitCode.TIMEOUT

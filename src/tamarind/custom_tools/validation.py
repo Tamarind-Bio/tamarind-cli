@@ -104,13 +104,13 @@ def _validate_config(value: dict[str, Any], error: Any) -> None:
         )
 
     gpu_type = value.get("gpuType", "None")
-    if gpu_type not in GPU_TYPES:
+    if not isinstance(gpu_type, str) or gpu_type not in GPU_TYPES:
         error(
             "invalid_gpu_type", "config.json.gpuType", f"gpuType must be one of {sorted(GPU_TYPES)}"
         )
 
     memory = value.get("memory", "8Gi")
-    if memory not in MEMORY_OPTIONS:
+    if not isinstance(memory, str) or memory not in MEMORY_OPTIONS:
         error(
             "invalid_memory",
             "config.json.memory",
@@ -142,7 +142,7 @@ def _validate_config(value: dict[str, Any], error: Any) -> None:
             names.add(name)
 
         kind = item.get("type")
-        if kind not in INPUT_TYPES:
+        if not isinstance(kind, str) or kind not in INPUT_TYPES:
             error(
                 "invalid_input_type",
                 f"{path}.type",
@@ -225,14 +225,11 @@ def _validate_number_input(item: dict[str, Any], path: str, error: Any) -> None:
         if field not in item:
             continue
         value = item[field]
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not math.isfinite(value)
-        ):
+        normalized = _finite_float(value)
+        if normalized is None:
             error("invalid_number", f"{path}.{field}", f"{field} must be a finite number")
         else:
-            values[field] = float(value)
+            values[field] = normalized
     lower = values.get("lowerBound")
     upper = values.get("upperBound")
     default = values.get("default")
@@ -242,3 +239,13 @@ def _validate_number_input(item: dict[str, Any], path: str, error: Any) -> None:
         error("invalid_default", f"{path}.default", "default is below lowerBound")
     if default is not None and upper is not None and default > upper:
         error("invalid_default", f"{path}.default", "default is above upperBound")
+
+
+def _finite_float(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        normalized = float(value)
+    except (OverflowError, ValueError):
+        return None
+    return normalized if math.isfinite(normalized) else None

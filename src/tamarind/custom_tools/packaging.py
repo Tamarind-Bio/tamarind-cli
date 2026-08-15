@@ -32,6 +32,7 @@ EXCLUDED_FILES = frozenset({".DS_Store"})
 EXCLUDED_SUFFIXES = frozenset({".pyc", ".pyo"})
 _ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 _REGULAR_FILE_MODE = 0o100644
+_EXECUTABLE_FILE_MODE = 0o100755
 
 
 @dataclass(frozen=True)
@@ -84,7 +85,8 @@ def build_archive(folder: str | Path) -> SourceArchive:
             info = zipfile.ZipInfo(relative, date_time=_ZIP_TIMESTAMP)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.create_system = 3
-            info.external_attr = _REGULAR_FILE_MODE << 16
+            mode = _EXECUTABLE_FILE_MODE if path.stat().st_mode & 0o111 else _REGULAR_FILE_MODE
+            info.external_attr = mode << 16
             archive.writestr(info, path.read_bytes(), compresslevel=9)
 
     data = output.getvalue()

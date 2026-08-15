@@ -34,8 +34,10 @@ def extract(spec: dict[str, Any]) -> dict[str, Any]:
         if selected:
             paths[path] = selected
 
-    schemas = spec.get("components", {}).get("schemas", {})
-    reachable = _schema_refs(paths)
+    components = spec.get("components", {})
+    schemas = components.get("schemas", {})
+    responses = components.get("responses", {})
+    reachable = _schema_refs(paths) | _schema_refs(responses)
     pending = list(reachable)
     while pending:
         name = pending.pop()
@@ -43,7 +45,6 @@ def extract(spec: dict[str, Any]) -> dict[str, Any]:
             reachable.add(child)
             pending.append(child)
 
-    components = spec.get("components", {})
     return {
         "openapi": spec["openapi"],
         "info": deepcopy(spec["info"]),
@@ -53,7 +54,7 @@ def extract(spec: dict[str, Any]) -> dict[str, Any]:
         "components": {
             "schemas": {name: deepcopy(schemas[name]) for name in sorted(reachable)},
             "securitySchemes": deepcopy(components.get("securitySchemes", {})),
-            "responses": deepcopy(components.get("responses", {})),
+            "responses": deepcopy(responses),
         },
     }
 

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Literal, TypeAlias, TypedDict, cast
+from typing import Any, Literal, TypeAlias, TypedDict, cast
 from typing_extensions import NotRequired
 from urllib.parse import quote
 
 from tamarind.http import HTTPClient
 
-OPENAPI_SHA256 = "6ca215c11b3d28537a07037aed68ed9883430a3dfe3d5b0ad18f439313005cc5"
+OPENAPI_SHA256 = "240383583a52a09e2b9461c4cb25784e6b922e81ae47b7bace9dfdfbba9a0af1"
 
 
 def _segment(value: str) -> str:
@@ -87,6 +87,15 @@ class PublicCustomToolPage(TypedDict):
     nextCursor: str | None
 
 
+class PublicProblem(TypedDict):
+    code: str
+    detail: NotRequired[str | None]
+    errors: NotRequired[list[dict[str, Any]] | None]
+    status: int
+    title: str
+    type: str
+
+
 class PublicUpdateCustomToolRequest(TypedDict):
     autoPublish: NotRequired[bool | None]
     cpu: NotRequired[int | None]
@@ -138,44 +147,60 @@ class GeneratedCustomToolsTransport:
         published: bool | None = None,
         limit: int | None = None,
         cursor: str | None = None,
+        *,
+        timeout: float | None = None,
     ) -> PublicCustomToolPage:
         response = self._client.request(
             "GET",
             "custom-tools",
             params={"status": status, "published": published, "limit": limit, "cursor": cursor},
+            timeout=timeout,
         )
         return cast(PublicCustomToolPage, response.json())
 
-    def create_custom_tool(self, body: PublicCreateCustomToolRequest) -> PublicCustomTool:
+    def create_custom_tool(
+        self, body: PublicCreateCustomToolRequest, *, timeout: float | None = None
+    ) -> PublicCustomTool:
         response = self._client.request(
             "POST",
             "custom-tools",
             json=body,
+            timeout=timeout,
         )
         return cast(PublicCustomTool, response.json())
 
-    def get_custom_tool(self, name: str) -> PublicCustomTool:
+    def get_custom_tool(self, name: str, *, timeout: float | None = None) -> PublicCustomTool:
         response = self._client.request(
             "GET",
             f"custom-tools/{_segment(name)}",
+            timeout=timeout,
         )
         return cast(PublicCustomTool, response.json())
 
     def update_custom_tool(
-        self, name: str, if_match: str, body: PublicUpdateCustomToolRequest
+        self,
+        name: str,
+        if_match: str,
+        body: PublicUpdateCustomToolRequest,
+        *,
+        timeout: float | None = None,
     ) -> PublicCustomTool:
         response = self._client.request(
             "PATCH",
             f"custom-tools/{_segment(name)}",
             headers={"If-Match": if_match},
             json=body,
+            timeout=timeout,
         )
         return cast(PublicCustomTool, response.json())
 
-    def create_custom_tool_upload(self, name: str) -> PublicUploadSession:
+    def create_custom_tool_upload(
+        self, name: str, *, timeout: float | None = None
+    ) -> PublicUploadSession:
         response = self._client.request(
             "POST",
             f"custom-tools/{_segment(name)}/uploads",
+            timeout=timeout,
         )
         return cast(PublicUploadSession, response.json())
 
@@ -185,45 +210,66 @@ class GeneratedCustomToolsTransport:
         status: PublicVersionStatus | None = None,
         limit: int | None = None,
         cursor: str | None = None,
+        *,
+        timeout: float | None = None,
     ) -> PublicVersionPage:
         response = self._client.request(
             "GET",
             f"custom-tools/{_segment(name)}/versions",
             params={"status": status, "limit": limit, "cursor": cursor},
+            timeout=timeout,
         )
         return cast(PublicVersionPage, response.json())
 
     def build_custom_tool_version(
-        self, name: str, if_match: str, body: PublicCreateVersionRequest
+        self,
+        name: str,
+        if_match: str,
+        body: PublicCreateVersionRequest,
+        *,
+        timeout: float | None = None,
     ) -> PublicBuildResult:
         response = self._client.request(
             "POST",
             f"custom-tools/{_segment(name)}/versions",
             headers={"If-Match": if_match},
             json=body,
+            timeout=timeout,
         )
         return cast(PublicBuildResult, response.json())
 
-    def get_custom_tool_version(self, name: str, version_name: str) -> PublicVersion:
+    def get_custom_tool_version(
+        self, name: str, version_name: str, *, timeout: float | None = None
+    ) -> PublicVersion:
         response = self._client.request(
             "GET",
             f"custom-tools/{_segment(name)}/versions/{_segment(version_name)}",
+            timeout=timeout,
         )
         return cast(PublicVersion, response.json())
 
-    def cancel_custom_tool_build(self, name: str, version_name: str) -> PublicVersion:
+    def cancel_custom_tool_build(
+        self, name: str, version_name: str, *, timeout: float | None = None
+    ) -> PublicVersion:
         response = self._client.request(
             "POST",
             f"custom-tools/{_segment(name)}/versions/{_segment(version_name)}/cancel",
+            timeout=timeout,
         )
         return cast(PublicVersion, response.json())
 
     def list_custom_tool_build_logs(
-        self, name: str, version_name: str, cursor: str | None = None
+        self,
+        name: str,
+        version_name: str,
+        cursor: str | None = None,
+        *,
+        timeout: float | None = None,
     ) -> PublicBuildLogPage:
         response = self._client.request(
             "GET",
             f"custom-tools/{_segment(name)}/versions/{_segment(version_name)}/logs",
             params={"cursor": cursor},
+            timeout=timeout,
         )
         return cast(PublicBuildLogPage, response.json())
