@@ -134,6 +134,38 @@ def test_build_uploads_exact_archive_then_creates_version(tmp_path: Path) -> Non
 
 
 @respx.mock
+def test_build_uses_configured_timeout_for_source_upload(tmp_path: Path) -> None:
+    _source(tmp_path)
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.post(f"{BASE}custom-tools/example/uploads").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "uploadId": "upload-1",
+                "uploadUrl": UPLOAD,
+                "expiresAt": "2026-08-15T01:00:00Z",
+                "maxBytes": 1_000_000,
+            },
+        )
+    )
+    upload_route = respx.put(UPLOAD).mock(return_value=httpx.Response(200))
+    respx.post(f"{BASE}custom-tools/example/versions").mock(
+        return_value=httpx.Response(202, json={"action": "build", "version": _version()})
+    )
+
+    with Tamarind(api_key="key", api_base=BASE, timeout=0.25) as client:
+        client.custom_tools.get("example").build(tmp_path)
+
+    request_timeout = upload_route.calls.last.request.extensions["timeout"]
+    assert request_timeout == {
+        "connect": 0.25,
+        "read": 0.25,
+        "write": 0.25,
+        "pool": 0.25,
+    }
+
+
+@respx.mock
 def test_build_redacts_presigned_url_from_upload_failure(tmp_path: Path) -> None:
     _source(tmp_path)
     signed_url = f"{UPLOAD}?X-Amz-Signature=do-not-leak"

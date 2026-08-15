@@ -9,12 +9,15 @@ from pathlib import Path
 import re
 from typing import Any
 
+from tamarind.custom_tools.packaging import is_link_like
+
 
 GPU_TYPES = frozenset({"None", "T4", "L4", "L40S", "A10", "A100"})
 MEMORY_OPTIONS = frozenset({"8Gi", "12Gi", "24Gi", "32Gi", "48Gi", "64Gi", "90Gi", "96Gi", "180Gi"})
 INPUT_TYPES = frozenset(
     {"file", "pdb", "sdf", "smiles", "dropdown", "text", "number", "sequence", "boolean"}
 )
+OUTPUT_TYPES = frozenset({"pdb", "sequence", "csv", "json"})
 _INPUT_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _NETWORK_PATTERN = re.compile(
     r"\b(?:curl|wget)\b\s+https?://|\b(?:requests|httpx)\.(?:get|post)\s*\(|\burllib\.request\.urlopen\s*\(",
@@ -52,6 +55,13 @@ def validate_folder(folder: str | Path) -> ValidationReport:
 
     if not root.is_dir():
         error("folder_not_found", ".", f"Source folder does not exist: {root}")
+        return ValidationReport(tuple(errors), tuple(warnings))
+    if is_link_like(root):
+        error(
+            "linked_source_root",
+            ".",
+            "Source folder cannot be a symlink or junction",
+        )
         return ValidationReport(tuple(errors), tuple(warnings))
 
     for required in ("config.json", "Dockerfile"):
@@ -222,6 +232,13 @@ def _validate_config(value: dict[str, Any], error: Any) -> None:
                     "each produced output must be an object",
                 )
                 continue
+            kind = item.get("type")
+            if not isinstance(kind, str) or kind not in OUTPUT_TYPES:
+                error(
+                    "invalid_output_type",
+                    f"config.json.producedOutputs[{index}].type",
+                    f"output type must be one of {sorted(OUTPUT_TYPES)}",
+                )
             flag = item.get("primary", False)
             if not isinstance(flag, bool):
                 error(
@@ -229,7 +246,7 @@ def _validate_config(value: dict[str, Any], error: Any) -> None:
                     f"config.json.producedOutputs[{index}].primary",
                     "primary must be a boolean",
                 )
-            elif item.get("type") == "csv" and flag:
+            elif kind == "csv" and flag:
                 primary.append(item)
         if len(primary) > 1:
             error(

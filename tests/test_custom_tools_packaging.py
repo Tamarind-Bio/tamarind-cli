@@ -82,6 +82,21 @@ def test_archive_rejects_symlinks(tmp_path: Path) -> None:
         build_archive(tmp_path)
 
 
+def test_validation_rejects_symlinked_source_root(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    _valid_source(source)
+    linked_source = tmp_path / "linked-source"
+    linked_source.symlink_to(source, target_is_directory=True)
+
+    report = validate_folder(linked_source)
+
+    assert not report.valid
+    assert [(problem.code, problem.path) for problem in report.errors] == [
+        ("linked_source_root", ".")
+    ]
+
+
 def test_archive_streams_files_without_reading_each_one_into_memory(
     tmp_path: Path,
     monkeypatch,
@@ -264,5 +279,25 @@ def test_validation_rejects_non_object_produced_outputs(tmp_path: Path) -> None:
     assert not report.valid
     assert any(
         problem.path == "config.json.producedOutputs[0]" and problem.code == "invalid_output"
+        for problem in report.errors
+    )
+
+
+@pytest.mark.parametrize("output", [{}, {"type": []}, {"type": "unsupported"}])
+def test_validation_rejects_missing_or_unsupported_output_types(
+    tmp_path: Path,
+    output: object,
+) -> None:
+    _valid_source(tmp_path)
+    (tmp_path / "config.json").write_text(
+        json.dumps({"displayName": "Example", "inputs": [], "producedOutputs": [output]})
+    )
+
+    report = validate_folder(tmp_path)
+
+    assert not report.valid
+    assert any(
+        problem.path == "config.json.producedOutputs[0].type"
+        and problem.code == "invalid_output_type"
         for problem in report.errors
     )

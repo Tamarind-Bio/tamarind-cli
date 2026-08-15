@@ -21,7 +21,10 @@ class Tamarind:
     ):
         config = load_config(api_key=api_key, api_base=api_base, profile=profile)
         self._http = HTTPClient(config.api_base, config.api_key, timeout=timeout)
-        self.custom_tools = CustomTools(GeneratedCustomToolsTransport(self._http))
+        self.custom_tools = CustomTools(
+            GeneratedCustomToolsTransport(self._http),
+            upload_timeout=timeout,
+        )
 
     def close(self) -> None:
         self._http.close()

@@ -29,6 +29,7 @@ from tamarind.errors import (
     TamarindError,
     ValidationError,
 )
+from tamarind.http import DEFAULT_TIMEOUT
 
 
 T = TypeVar("T")
@@ -281,8 +282,14 @@ class Version:
 class CustomTools:
     """Organization-scoped Custom Tool collection."""
 
-    def __init__(self, transport: GeneratedCustomToolsTransport):
+    def __init__(
+        self,
+        transport: GeneratedCustomToolsTransport,
+        *,
+        upload_timeout: float = DEFAULT_TIMEOUT,
+    ):
         self._transport = transport
+        self._upload_timeout = upload_timeout
 
     def create(
         self,
@@ -344,7 +351,11 @@ class CustomTools:
             raise CustomToolUploadError(
                 f"Source archive is {archive.size} bytes; upload limit is {session['maxBytes']} bytes"
             )
-        _upload_archive(session["uploadUrl"], archive.data)
+        _upload_archive(
+            session["uploadUrl"],
+            archive.data,
+            timeout=self._upload_timeout,
+        )
         wire = self._transport.build_custom_tool_version(
             tool.name,
             tool.generation,
@@ -392,17 +403,17 @@ class CustomTools:
         return _version_from_wire(self, tool_name, wire)
 
 
-def _upload_archive(url: str, data: bytes) -> None:
+def _upload_archive(url: str, data: bytes, *, timeout: float) -> None:
     try:
         response = httpx.put(
             url,
             content=data,
             headers={"Content-Type": "application/zip"},
-            timeout=120.0,
+            timeout=timeout,
         )
         response.raise_for_status()
     except httpx.TimeoutException:
-        raise CustomToolUploadError("Source upload timed out after 120 seconds.") from None
+        raise CustomToolUploadError(f"Source upload timed out after {timeout:g} seconds.") from None
     except httpx.HTTPStatusError as exc:
         raise CustomToolUploadError(
             f"Source upload failed with HTTP {exc.response.status_code}."

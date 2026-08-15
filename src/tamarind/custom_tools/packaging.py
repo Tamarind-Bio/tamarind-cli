@@ -48,7 +48,7 @@ def build_archive(folder: str | Path) -> SourceArchive:
     root = Path(folder).expanduser()
     if not root.is_dir():
         raise CustomToolUploadError(f"Custom Tool source folder does not exist: {root}")
-    if _is_link_like(root):
+    if is_link_like(root):
         raise CustomToolUploadError(f"Source archives cannot contain symlinks or junctions: {root}")
 
     files: list[tuple[str, Path]] = []
@@ -60,7 +60,7 @@ def build_archive(folder: str | Path) -> SourceArchive:
             path = current_path / name
             if name in EXCLUDED_DIRECTORIES:
                 continue
-            if _is_link_like(path):
+            if is_link_like(path):
                 raise CustomToolUploadError(
                     f"Source archives cannot contain symlinks or junctions: {path}"
                 )
@@ -72,7 +72,7 @@ def build_archive(folder: str | Path) -> SourceArchive:
             path = current_path / name
             if name in EXCLUDED_FILES or path.suffix in EXCLUDED_SUFFIXES:
                 continue
-            if _is_link_like(path):
+            if is_link_like(path):
                 raise CustomToolUploadError(
                     f"Source archives cannot contain symlinks or junctions: {path}"
                 )
@@ -119,7 +119,7 @@ def build_archive(folder: str | Path) -> SourceArchive:
     return SourceArchive(data=data, digest=f"sha256:{sha256(data).hexdigest()}")
 
 
-def _is_link_like(path: Path) -> bool:
+def is_link_like(path: Path) -> bool:
     """Reject POSIX links and Windows reparse points such as junctions."""
     if path.is_symlink():
         return True
