@@ -62,8 +62,10 @@ class BuildEvent:
 
 
 @dataclass(frozen=True)
-class BuildLogPage(Page[BuildEvent]):
-    status: PublicVersionStatus = "Launching"
+class BuildLogPage:
+    items: tuple[BuildEvent, ...]
+    status: PublicVersionStatus
+    next_cursor: str | None = None
     error: BuildError | None = None
 
 

@@ -775,7 +775,6 @@
       },
       "PublicVersionStatus": {
         "enum": [
-          "Launching",
           "Queued",
           "Claimed",
           "Running",
