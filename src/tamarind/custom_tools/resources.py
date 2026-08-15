@@ -222,7 +222,6 @@ class Version:
                     f"Custom Tool Version {self.tool_name}/{self.name} was still {page.status} after {timeout:g}s"
                 )
             time.sleep(interval if remaining is None else min(interval, remaining))
-            current = current.refresh()
 
 
 class CustomTools:

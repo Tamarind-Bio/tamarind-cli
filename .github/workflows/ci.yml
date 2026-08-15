@@ -18,8 +18,8 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - name: Regenerate Custom Tools transport
         run: |
-          uv run python scripts/generate_custom_tools_transport.py openapi/custom-tools-v1.json src/tamarind/custom_tools/generated.py
-          uv run ruff format src/tamarind/custom_tools/generated.py
+          uv run --extra dev python scripts/generate_custom_tools_transport.py openapi/custom-tools-v1.json src/tamarind/custom_tools/generated.py
+          uv run --extra dev ruff format src/tamarind/custom_tools/generated.py
           git diff --exit-code -- src/tamarind/custom_tools/generated.py
 
   package:

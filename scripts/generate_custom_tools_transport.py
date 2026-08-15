@@ -68,7 +68,7 @@ def _body_type(operation: dict[str, Any]) -> str | None:
     return _annotation(schema) if isinstance(schema, dict) else None
 
 
-def generate(spec: dict[str, Any], source_bytes: bytes) -> str:
+def generate(spec: dict[str, Any]) -> str:
     schemas = spec.get("components", {}).get("schemas", {})
     aliases: list[str] = []
     objects: list[str] = []
@@ -149,7 +149,8 @@ def generate(spec: dict[str, Any], source_bytes: bytes) -> str:
                 )
             )
 
-    digest = sha256(source_bytes).hexdigest()
+    canonical_spec = json.dumps(spec, sort_keys=True, separators=(",", ":")).encode()
+    digest = sha256(canonical_spec).hexdigest()
     uses_any = any("Any" in definition for definition in [*aliases, *objects, *methods])
     typing_names = (
         "Any, Literal, TypeAlias, TypedDict, cast"
@@ -192,8 +193,7 @@ def main() -> None:
     parser.add_argument("spec", type=Path)
     parser.add_argument("output", type=Path)
     args = parser.parse_args()
-    source = args.spec.read_bytes()
-    generated = generate(json.loads(source), source)
+    generated = generate(json.loads(args.spec.read_text()))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(generated)
 
