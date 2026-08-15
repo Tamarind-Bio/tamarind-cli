@@ -92,6 +92,9 @@ class CustomTool:
     source_digest: str | None
     published: bool
     auto_publish: bool
+    est_time: str
+    paper_url: str
+    tags: tuple[str, ...]
     default_version: str | None
     created_at: str
     updated_at: str
@@ -425,6 +428,9 @@ def _tool_from_wire(collection: CustomTools, wire: PublicCustomTool) -> CustomTo
         source_digest=wire["sourceDigest"],
         published=wire["published"],
         auto_publish=wire["autoPublish"],
+        est_time=wire["estTime"],
+        paper_url=wire["paperUrl"],
+        tags=tuple(wire["tags"]),
         default_version=wire["defaultVersion"],
         created_at=wire["createdAt"],
         updated_at=wire["updatedAt"],

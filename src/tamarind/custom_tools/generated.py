@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from tamarind.http import HTTPClient
 
-OPENAPI_SHA256 = "3c816fd86f32362549b9f40b8bc6729241e4f86e3fb8adb827ca5954b8094a77"
+OPENAPI_SHA256 = "d7b26705f76c1bec56b95cc6e3fb9927757065cf15375d4883cfb007123550a1"
 
 
 def _segment(value: str) -> str:
@@ -16,7 +16,7 @@ def _segment(value: str) -> str:
 
 
 PublicCustomToolStatus: TypeAlias = Literal["Draft", "Building", "Deployed"]
-PublicVersionStatus: TypeAlias = Literal["Queued", "Claimed", "Running", "Complete", "Stopped"]
+PublicVersionStatus: TypeAlias = Literal["Running", "Complete", "Stopped"]
 
 
 class PublicBuildError(TypedDict):
@@ -66,6 +66,7 @@ class PublicCustomTool(TypedDict):
     defaultVersion: str | None
     description: str
     displayName: str
+    estTime: str
     functions: list[str]
     generation: str
     gpuType: Literal["None", "T4", "L4", "L40S", "A10", "A100"]
@@ -74,9 +75,11 @@ class PublicCustomTool(TypedDict):
     maxRuntimeSeconds: int | None
     memory: Literal["8Gi", "12Gi", "24Gi", "32Gi", "48Gi", "64Gi", "90Gi", "96Gi", "180Gi"]
     name: str
+    paperUrl: str
     published: bool
     sourceDigest: str | None
     status: PublicCustomToolStatus
+    tags: list[str]
     updatedAt: str
 
 

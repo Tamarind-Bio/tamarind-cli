@@ -40,6 +40,9 @@ def _tool(*, generation: str = "generation-1") -> dict:
         "sourceDigest": None,
         "published": False,
         "autoPublish": False,
+        "estTime": "1:30:00",
+        "paperUrl": "https://example.com/paper",
+        "tags": ["structure"],
         "defaultVersion": None,
         "createdAt": "2026-08-15T00:00:00Z",
         "updatedAt": "2026-08-15T00:00:00Z",
@@ -91,6 +94,9 @@ def test_collection_get_list_and_update_use_resource_generation() -> None:
     assert update_route.calls.last.request.headers["If-Match"] == "generation-1"
     assert json.loads(update_route.calls.last.request.content) == {"description": "updated"}
     assert updated.description == "updated"
+    assert updated.est_time == "1:30:00"
+    assert updated.paper_url == "https://example.com/paper"
+    assert updated.tags == ("structure",)
 
 
 @respx.mock
