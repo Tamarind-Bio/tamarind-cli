@@ -175,7 +175,14 @@ def _validate_config(value: dict[str, Any], error: Any) -> None:
             if default is not None and not isinstance(default, expected):
                 error("invalid_default", f"{path}.default", f"{kind} default has the wrong type")
 
-        if item.get("designBatching"):
+        design_batching = item.get("designBatching", False)
+        if not isinstance(design_batching, bool):
+            error(
+                "invalid_design_batching",
+                f"{path}.designBatching",
+                "designBatching must be a boolean",
+            )
+        elif design_batching:
             batching.append(str(name))
             if kind != "number":
                 error(

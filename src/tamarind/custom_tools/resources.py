@@ -174,7 +174,14 @@ class Version:
     _collection: "CustomTools" = field(repr=False, compare=False)
 
     def refresh(self) -> "Version":
-        return self._collection._get_version(self.tool_name, self.name)
+        return self._refresh(request_timeout=None)
+
+    def _refresh(self, *, request_timeout: float | None) -> "Version":
+        return self._collection._get_version(
+            self.tool_name,
+            self.name,
+            request_timeout=request_timeout,
+        )
 
     def logs(self, *, cursor: str | None = None) -> BuildLogPage:
         return self._logs(cursor=cursor, request_timeout=None)
@@ -233,7 +240,26 @@ class Version:
                     on_event(event)
 
             if page.status in ("Complete", "Stopped"):
-                return _require_success(current.refresh())
+                remaining = None if deadline is None else deadline - time.monotonic()
+                if remaining is not None and remaining <= 0:
+                    raise CustomToolBuildTimeoutError(
+                        f"Custom Tool Version {self.tool_name}/{self.name} did not return its terminal state "
+                        f"before the {timeout:g}s deadline"
+                    )
+                try:
+                    terminal = current._refresh(request_timeout=remaining)
+                except TamarindError as exc:
+                    if (
+                        type(exc) is TamarindError
+                        and deadline is not None
+                        and time.monotonic() >= deadline
+                    ):
+                        raise CustomToolBuildTimeoutError(
+                            f"Custom Tool Version {self.tool_name}/{self.name} did not return its terminal state "
+                            f"before the {timeout:g}s deadline"
+                        ) from exc
+                    raise
+                return _require_success(terminal)
 
             remaining = None if deadline is None else deadline - time.monotonic()
             if remaining is not None and remaining <= 0:
@@ -342,8 +368,18 @@ class CustomTools:
             next_cursor=wire["nextCursor"],
         )
 
-    def _get_version(self, tool_name: str, version_name: str) -> Version:
-        wire = self._transport.get_custom_tool_version(tool_name, version_name)
+    def _get_version(
+        self,
+        tool_name: str,
+        version_name: str,
+        *,
+        request_timeout: float | None = None,
+    ) -> Version:
+        wire = self._transport.get_custom_tool_version(
+            tool_name,
+            version_name,
+            timeout=request_timeout,
+        )
         return _version_from_wire(self, tool_name, wire)
 
 

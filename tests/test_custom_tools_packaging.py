@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from io import BytesIO
 import json
-import os
 from pathlib import Path
 import zipfile
 
@@ -46,10 +45,8 @@ def test_archive_is_deterministic_and_excludes_local_artifacts(tmp_path: Path) -
         assert all(info.date_time == (1980, 1, 1, 0, 0, 0) for info in archive.infolist())
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Windows does not preserve POSIX executable bits")
-def test_archive_preserves_executable_intent(tmp_path: Path) -> None:
+def test_archive_makes_runtime_entrypoint_executable_on_every_platform(tmp_path: Path) -> None:
     _valid_source(tmp_path)
-    (tmp_path / "run.sh").chmod(0o755)
 
     with zipfile.ZipFile(BytesIO(build_archive(tmp_path).data)) as archive:
         modes = {info.filename: info.external_attr >> 16 for info in archive.infolist()}
@@ -127,3 +124,32 @@ def test_validation_contains_malformed_enum_and_oversized_number_values(tmp_path
         "invalid_input_type",
         "invalid_number",
     }
+
+
+@pytest.mark.parametrize("value", ["false", 0, 1, None])
+def test_validation_rejects_non_boolean_design_batching(tmp_path: Path, value: object) -> None:
+    _valid_source(tmp_path)
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "displayName": "Example",
+                "inputs": [
+                    {
+                        "name": "count",
+                        "type": "number",
+                        "designBatching": value,
+                        "designsPerBatch": 2,
+                    }
+                ],
+            }
+        )
+    )
+
+    report = validate_folder(tmp_path)
+
+    assert not report.valid
+    assert any(
+        problem.path == "config.json.inputs[0].designBatching"
+        and problem.code == "invalid_design_batching"
+        for problem in report.errors
+    )

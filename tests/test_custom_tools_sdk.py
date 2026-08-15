@@ -302,6 +302,42 @@ def test_monitor_translates_request_timeout_at_deadline(monkeypatch) -> None:
 
 
 @respx.mock
+def test_monitor_bounds_terminal_refresh_by_remaining_deadline(monkeypatch) -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+        return_value=httpx.Response(200, json=_version())
+    )
+    respx.get(f"{BASE}custom-tools/example/versions/v1/logs").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "status": "Complete",
+                "items": [],
+                "nextCursor": None,
+                "error": None,
+            },
+        )
+    )
+    ticks = iter([0.0, 0.0, 0.5, 2.0])
+    monkeypatch.setattr("tamarind.custom_tools.resources.time.monotonic", lambda: next(ticks))
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        version = client.custom_tools.get("example").get_version("v1")
+
+        def terminal_refresh(*_args, **kwargs):
+            assert kwargs["timeout"] == pytest.approx(0.5)
+            raise TamarindError("request timed out")
+
+        monkeypatch.setattr(
+            client.custom_tools._transport,
+            "get_custom_tool_version",
+            terminal_refresh,
+        )
+        with pytest.raises(CustomToolBuildTimeoutError, match="terminal state"):
+            version.monitor(timeout=1)
+
+
+@respx.mock
 def test_terminal_failure_raises_typed_error() -> None:
     failed = _version(
         status="Stopped",

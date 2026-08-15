@@ -85,7 +85,8 @@ def build_archive(folder: str | Path) -> SourceArchive:
             info = zipfile.ZipInfo(relative, date_time=_ZIP_TIMESTAMP)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.create_system = 3
-            mode = _EXECUTABLE_FILE_MODE if path.stat().st_mode & 0o111 else _REGULAR_FILE_MODE
+            executable = relative == "run.sh" or bool(path.stat().st_mode & 0o111)
+            mode = _EXECUTABLE_FILE_MODE if executable else _REGULAR_FILE_MODE
             info.external_attr = mode << 16
             archive.writestr(info, path.read_bytes(), compresslevel=9)
 
