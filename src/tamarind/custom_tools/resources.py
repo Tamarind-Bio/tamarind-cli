@@ -354,8 +354,14 @@ def _upload_archive(url: str, data: bytes) -> None:
             timeout=120.0,
         )
         response.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise CustomToolUploadError(f"Source upload failed: {exc}") from exc
+    except httpx.TimeoutException:
+        raise CustomToolUploadError("Source upload timed out after 120 seconds.") from None
+    except httpx.HTTPStatusError as exc:
+        raise CustomToolUploadError(
+            f"Source upload failed with HTTP {exc.response.status_code}."
+        ) from None
+    except (httpx.RequestError, httpx.InvalidURL, httpx.StreamError) as exc:
+        raise CustomToolUploadError(f"Source upload failed ({type(exc).__name__}).") from None
 
 
 def _tool_from_wire(collection: CustomTools, wire: PublicCustomTool) -> CustomTool:

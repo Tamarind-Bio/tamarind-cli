@@ -12,6 +12,7 @@ from tamarind.custom_tools import BuildEvent
 from tamarind.errors import (
     CustomToolBuildFailedError,
     CustomToolBuildTimeoutError,
+    CustomToolUploadError,
     ExitCode,
     TamarindError,
 )
@@ -123,6 +124,33 @@ def test_build_uploads_exact_archive_then_creates_version(tmp_path: Path) -> Non
     assert uploaded.startswith(b"PK")
     assert result.action == "build"
     assert result.version.name == "v1"
+
+
+@respx.mock
+def test_build_redacts_presigned_url_from_upload_failure(tmp_path: Path) -> None:
+    _source(tmp_path)
+    signed_url = f"{UPLOAD}?X-Amz-Signature=do-not-leak"
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.post(f"{BASE}custom-tools/example/uploads").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "uploadId": "upload-1",
+                "uploadUrl": signed_url,
+                "expiresAt": "2026-08-15T01:00:00Z",
+                "maxBytes": 1_000_000,
+            },
+        )
+    )
+    respx.put(signed_url).mock(return_value=httpx.Response(403))
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(CustomToolUploadError) as raised:
+            client.custom_tools.get("example").build(tmp_path)
+
+    assert "403" in str(raised.value)
+    assert "do-not-leak" not in str(raised.value)
+    assert raised.value.__cause__ is None
 
 
 @respx.mock
@@ -289,3 +317,5 @@ def test_terminal_failure_raises_typed_error() -> None:
         version = client.custom_tools.get("example").get_version("v1")
         with pytest.raises(CustomToolBuildFailedError, match="Docker build failed"):
             version.monitor(timeout=10)
+
+    assert CustomToolBuildFailedError.exit_code == ExitCode.JOB_FAILED

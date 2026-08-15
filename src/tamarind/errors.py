@@ -104,6 +104,8 @@ class CustomToolUploadError(CustomToolError):
 class CustomToolBuildFailedError(CustomToolError):
     """A Custom Tool Version reached an unsuccessful terminal state."""
 
+    exit_code = ExitCode.JOB_FAILED
+
 
 class CustomToolBuildNotInProgressError(CustomToolError):
     """Cancellation was requested for a Version without an active build."""
