@@ -43,8 +43,14 @@ class SourceArchive:
         return len(self.data)
 
 
-def build_archive(folder: str | Path) -> SourceArchive:
-    """Package a folder into byte-for-byte reproducible ZIP content."""
+@dataclass(frozen=True)
+class SourceTree:
+    files: tuple[tuple[str, Path], ...]
+    empty_directories: tuple[str, ...]
+
+
+def inspect_source_tree(folder: str | Path) -> SourceTree:
+    """Collect the exact retained tree while enforcing archive link policy."""
     root = Path(folder).expanduser()
     if not root.is_dir():
         raise CustomToolUploadError(f"Custom Tool source folder does not exist: {root}")
@@ -82,6 +88,15 @@ def build_archive(folder: str | Path) -> SourceArchive:
         if current_path != root and not kept_directories and not kept_files:
             empty_directories.append(current_path.relative_to(root).as_posix())
 
+    return SourceTree(
+        files=tuple(files),
+        empty_directories=tuple(empty_directories),
+    )
+
+
+def build_archive(folder: str | Path) -> SourceArchive:
+    """Package a folder into byte-for-byte reproducible ZIP content."""
+    tree = inspect_source_tree(folder)
     output = BytesIO()
     with zipfile.ZipFile(
         output,
@@ -91,12 +106,12 @@ def build_archive(folder: str | Path) -> SourceArchive:
         strict_timestamps=True,
     ) as archive:
         entries: list[tuple[str, Path | None, int]] = []
-        for relative in empty_directories:
+        for relative in tree.empty_directories:
             entries.append((f"{relative}/", None, _DIRECTORY_MODE))
             # Git cannot persist an empty tree. The marker keeps the directory
             # present when the backend commits the uploaded archive to Gitea.
             entries.append((f"{relative}/.gitkeep", None, _REGULAR_FILE_MODE))
-        for relative, path in files:
+        for relative, path in tree.files:
             executable = relative == "run.sh" or bool(path.stat().st_mode & 0o111)
             mode = _EXECUTABLE_FILE_MODE if executable else _REGULAR_FILE_MODE
             entries.append((relative, path, mode))

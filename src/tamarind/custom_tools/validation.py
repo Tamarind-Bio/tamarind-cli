@@ -9,7 +9,8 @@ from pathlib import Path
 import re
 from typing import Any
 
-from tamarind.custom_tools.packaging import is_link_like
+from tamarind.custom_tools.packaging import inspect_source_tree
+from tamarind.errors import CustomToolUploadError
 
 
 GPU_TYPES = frozenset({"None", "T4", "L4", "L40S", "A10", "A100"})
@@ -56,27 +57,30 @@ def validate_folder(folder: str | Path) -> ValidationReport:
     if not root.is_dir():
         error("folder_not_found", ".", f"Source folder does not exist: {root}")
         return ValidationReport(tuple(errors), tuple(warnings))
-    if is_link_like(root):
+    try:
+        tree = inspect_source_tree(root)
+    except CustomToolUploadError as exc:
         error(
-            "linked_source_root",
+            "invalid_source_tree",
             ".",
-            "Source folder cannot be a symlink or junction",
+            str(exc),
         )
         return ValidationReport(tuple(errors), tuple(warnings))
 
+    files = dict(tree.files)
     for required in ("config.json", "Dockerfile"):
-        if not (root / required).is_file():
+        if required not in files:
             error("required_file_missing", required, f"{required} is required")
 
-    if not (root / "run.sh").is_file():
+    if "run.sh" not in files:
         warning(
             "run_script_missing",
             "run.sh",
             "run.sh is recommended because the Custom Tool runtime invokes it directly",
         )
 
-    config_path = root / "config.json"
-    if config_path.is_file():
+    config_path = files.get("config.json")
+    if config_path is not None:
         try:
             value = json.loads(config_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -87,9 +91,12 @@ def validate_folder(folder: str | Path) -> ValidationReport:
             else:
                 _validate_config(value, error)
 
-    for candidate in (root / "run.sh", *sorted(root.glob("*.py"))):
-        if not candidate.is_file() or candidate.is_symlink():
-            continue
+    runtime_files = [
+        path
+        for relative, path in tree.files
+        if relative == "run.sh" or ("/" not in relative and path.suffix == ".py")
+    ]
+    for candidate in runtime_files:
         try:
             text = candidate.read_text(encoding="utf-8")
         except (OSError, UnicodeError):

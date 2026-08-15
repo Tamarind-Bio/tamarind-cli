@@ -93,7 +93,41 @@ def test_validation_rejects_symlinked_source_root(tmp_path: Path) -> None:
 
     assert not report.valid
     assert [(problem.code, problem.path) for problem in report.errors] == [
-        ("linked_source_root", ".")
+        ("invalid_source_tree", ".")
+    ]
+
+
+def test_validation_rejects_linked_descendants(tmp_path: Path) -> None:
+    _valid_source(tmp_path)
+    (tmp_path / "linked.py").symlink_to(tmp_path / "main.py")
+
+    report = validate_folder(tmp_path)
+
+    assert not report.valid
+    assert [(problem.code, problem.path) for problem in report.errors] == [
+        ("invalid_source_tree", ".")
+    ]
+
+
+def test_validation_requires_exact_runtime_filename_casing(tmp_path: Path) -> None:
+    _valid_source(tmp_path)
+    for exact, alternate in (
+        ("config.json", "CONFIG.JSON"),
+        ("Dockerfile", "dockerfile"),
+        ("run.sh", "RUN.SH"),
+    ):
+        contents = (tmp_path / exact).read_bytes()
+        (tmp_path / exact).unlink()
+        (tmp_path / alternate).write_bytes(contents)
+
+    report = validate_folder(tmp_path)
+
+    assert [(problem.code, problem.path) for problem in report.errors] == [
+        ("required_file_missing", "config.json"),
+        ("required_file_missing", "Dockerfile"),
+    ]
+    assert ("run_script_missing", "run.sh") in [
+        (problem.code, problem.path) for problem in report.warnings
     ]
 
 

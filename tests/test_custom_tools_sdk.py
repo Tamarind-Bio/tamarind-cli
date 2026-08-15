@@ -313,6 +313,15 @@ def test_monitor_does_not_replay_events_when_a_cursor_appears(monkeypatch) -> No
                     "error": None,
                 },
             ),
+            httpx.Response(
+                200,
+                json={
+                    "status": "Complete",
+                    "items": [{"message": "published image", "timestamp": 3}],
+                    "nextCursor": None,
+                    "error": None,
+                },
+            ),
         ]
     )
     monkeypatch.setattr("tamarind.custom_tools.resources.time.sleep", lambda _: None)
@@ -322,7 +331,7 @@ def test_monitor_does_not_replay_events_when_a_cursor_appears(monkeypatch) -> No
         events: list[BuildEvent] = []
         version.monitor(timeout=10, interval=0.01, on_event=events.append)
 
-    assert [event.message for event in events] == ["building", "done"]
+    assert [event.message for event in events] == ["building", "done", "published image"]
 
 
 @respx.mock

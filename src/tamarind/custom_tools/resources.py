@@ -249,6 +249,9 @@ class Version:
                 for event in events:
                     on_event(event)
 
+            if page.next_cursor is not None:
+                continue
+
             if page.status in ("Complete", "Stopped"):
                 remaining = None if deadline is None else deadline - time.monotonic()
                 if remaining is not None and remaining <= 0:
