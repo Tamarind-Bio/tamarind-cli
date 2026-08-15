@@ -357,6 +357,8 @@ class CustomTools:
         _upload_archive(
             session["uploadUrl"],
             archive.data,
+            method=session["uploadMethod"],
+            headers=session["uploadHeaders"],
             timeout=self._upload_timeout,
         )
         wire = self._transport.build_custom_tool_version(
@@ -406,12 +408,20 @@ class CustomTools:
         return _version_from_wire(self, tool_name, wire)
 
 
-def _upload_archive(url: str, data: bytes, *, timeout: float) -> None:
+def _upload_archive(
+    url: str,
+    data: bytes,
+    *,
+    method: Literal["PUT"],
+    headers: dict[str, str],
+    timeout: float,
+) -> None:
     try:
-        response = httpx.put(
+        response = httpx.request(
+            method,
             url,
             content=data,
-            headers={"Content-Type": "application/zip"},
+            headers=headers,
             timeout=timeout,
         )
         response.raise_for_status()

@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from tamarind.http import HTTPClient
 
-OPENAPI_SHA256 = "3a1f89370e0af6f4d7d086478216895ed64806d7be7aae3cac5973750484fdab"
+OPENAPI_SHA256 = "e264142c1b1b7f235f1005c42406d9d9a8cd474569d910c7aba2d2e316772fff"
 
 
 def _segment(value: str) -> str:
@@ -116,7 +116,9 @@ class PublicUpdateCustomToolRequest(TypedDict):
 class PublicUploadSession(TypedDict):
     expiresAt: str
     maxBytes: int
+    uploadHeaders: dict[str, str]
     uploadId: str
+    uploadMethod: Literal["PUT"]
     uploadUrl: str
 
 

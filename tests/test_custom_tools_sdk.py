@@ -109,6 +109,11 @@ def test_build_uploads_exact_archive_then_creates_version(tmp_path: Path) -> Non
             json={
                 "uploadId": "upload-1",
                 "uploadUrl": UPLOAD,
+                "uploadMethod": "PUT",
+                "uploadHeaders": {
+                    "Content-Type": "application/zip",
+                    "x-amz-meta-upload": "source",
+                },
                 "expiresAt": "2026-08-15T01:00:00Z",
                 "maxBytes": 1_000_000,
             },
@@ -125,6 +130,7 @@ def test_build_uploads_exact_archive_then_creates_version(tmp_path: Path) -> Non
     uploaded = upload_route.calls.last.request.content
     body = json.loads(build_route.calls.last.request.content)
     assert upload_route.calls.last.request.headers["Content-Type"] == "application/zip"
+    assert upload_route.calls.last.request.headers["x-amz-meta-upload"] == "source"
     assert body["uploadId"] == "upload-1"
     assert body["expectedSourceDigest"].startswith("sha256:")
     assert build_route.calls.last.request.headers["If-Match"] == "generation-1"
@@ -143,6 +149,8 @@ def test_build_uses_configured_timeout_for_source_upload(tmp_path: Path) -> None
             json={
                 "uploadId": "upload-1",
                 "uploadUrl": UPLOAD,
+                "uploadMethod": "PUT",
+                "uploadHeaders": {"Content-Type": "application/zip"},
                 "expiresAt": "2026-08-15T01:00:00Z",
                 "maxBytes": 1_000_000,
             },
@@ -176,6 +184,8 @@ def test_build_redacts_presigned_url_from_upload_failure(tmp_path: Path) -> None
             json={
                 "uploadId": "upload-1",
                 "uploadUrl": signed_url,
+                "uploadMethod": "PUT",
+                "uploadHeaders": {"Content-Type": "application/zip"},
                 "expiresAt": "2026-08-15T01:00:00Z",
                 "maxBytes": 1_000_000,
             },

@@ -26,6 +26,8 @@ def _annotation(schema: dict[str, Any]) -> str:
         return " | ".join(dict.fromkeys(parts))
     if "oneOf" in schema:
         return " | ".join(dict.fromkeys(_annotation(part) for part in schema["oneOf"]))
+    if "const" in schema:
+        return f"Literal[{schema['const']!r}]"
     if "enum" in schema:
         return "Literal[" + ", ".join(repr(value) for value in schema["enum"]) + "]"
     kind = schema.get("type")

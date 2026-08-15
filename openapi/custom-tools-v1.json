@@ -565,8 +565,11 @@
             "anyOf": [
               {
                 "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
                   "type": "string"
                 },
+                "maxItems": 100,
                 "type": "array"
               },
               {
@@ -632,6 +635,7 @@
           "paperUrl": {
             "anyOf": [
               {
+                "maxLength": 2000,
                 "type": "string"
               },
               {
@@ -644,8 +648,11 @@
             "anyOf": [
               {
                 "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
                   "type": "string"
                 },
+                "maxItems": 100,
                 "type": "array"
               },
               {
@@ -668,8 +675,20 @@
             "title": "Maxbytes",
             "type": "integer"
           },
+          "uploadHeaders": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Uploadheaders",
+            "type": "object"
+          },
           "uploadId": {
             "title": "Uploadid",
+            "type": "string"
+          },
+          "uploadMethod": {
+            "const": "PUT",
+            "title": "Uploadmethod",
             "type": "string"
           },
           "uploadUrl": {
@@ -680,6 +699,8 @@
         "required": [
           "uploadId",
           "uploadUrl",
+          "uploadMethod",
+          "uploadHeaders",
           "expiresAt",
           "maxBytes"
         ],
@@ -1296,7 +1317,8 @@
             "required": true,
             "schema": {
               "maxLength": 200,
-              "minLength": 1,
+              "minLength": 2,
+              "pattern": "^v[1-9][0-9]*$",
               "title": "Version Name",
               "type": "string"
             }
@@ -1355,7 +1377,8 @@
             "required": true,
             "schema": {
               "maxLength": 200,
-              "minLength": 1,
+              "minLength": 2,
+              "pattern": "^v[1-9][0-9]*$",
               "title": "Version Name",
               "type": "string"
             }
@@ -1414,7 +1437,8 @@
             "required": true,
             "schema": {
               "maxLength": 200,
-              "minLength": 1,
+              "minLength": 2,
+              "pattern": "^v[1-9][0-9]*$",
               "title": "Version Name",
               "type": "string"
             }
