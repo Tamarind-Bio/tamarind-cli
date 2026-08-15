@@ -240,12 +240,12 @@ def _validate_config(value: dict[str, Any], error: Any) -> None:
 
 
 def _validate_number_input(item: dict[str, Any], path: str, error: Any) -> None:
-    values: dict[str, float] = {}
+    values: dict[str, int | float] = {}
     for field in ("lowerBound", "upperBound", "default"):
         if field not in item:
             continue
         value = item[field]
-        normalized = _finite_float(value)
+        normalized = _finite_number(value)
         if normalized is None:
             error("invalid_number", f"{path}.{field}", f"{field} must be a finite number")
         else:
@@ -261,11 +261,13 @@ def _validate_number_input(item: dict[str, Any], path: str, error: Any) -> None:
         error("invalid_default", f"{path}.default", "default is above upperBound")
 
 
-def _finite_float(value: object) -> float | None:
+def _finite_number(value: object) -> int | float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
     try:
         normalized = float(value)
     except (OverflowError, ValueError):
         return None
-    return normalized if math.isfinite(normalized) else None
+    return value if math.isfinite(normalized) else None

@@ -142,6 +142,29 @@ def test_validation_reports_config_errors_and_runtime_network_warning(tmp_path: 
     assert {problem.code for problem in report.warnings} == {"runtime_network_access"}
 
 
+def test_validation_preserves_integer_precision_for_numeric_bounds(tmp_path: Path) -> None:
+    _valid_source(tmp_path)
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "displayName": "Example",
+                "inputs": [
+                    {
+                        "name": "count",
+                        "type": "number",
+                        "lowerBound": 9_007_199_254_740_993,
+                        "upperBound": 9_007_199_254_740_992,
+                    }
+                ],
+            }
+        )
+    )
+
+    report = validate_folder(tmp_path)
+
+    assert "invalid_number_bounds" in {problem.code for problem in report.errors}
+
+
 def test_validation_warns_when_run_script_is_missing(tmp_path: Path) -> None:
     _valid_source(tmp_path)
     (tmp_path / "run.sh").unlink()
