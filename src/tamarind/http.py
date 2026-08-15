@@ -133,7 +133,7 @@ def _extract_message(resp: httpx.Response) -> str:
     except ValueError:
         return resp.text.strip() or resp.reason_phrase or f"HTTP {resp.status_code}"
     if isinstance(body, dict):
-        for key in ("error", "message", "detail"):
+        for key in ("error", "message", "detail", "title"):
             if body.get(key):
                 return str(body[key])
     if isinstance(body, str):

@@ -133,6 +133,22 @@ def test_422_preserves_structured_validation_problem() -> None:
 
 
 @respx.mock
+def test_422_uses_problem_title_when_detail_is_absent() -> None:
+    problem = {
+        "type": "about:blank",
+        "title": "Request validation failed",
+        "status": 422,
+        "detail": None,
+    }
+    respx.get(f"{BASE}custom-tools").mock(return_value=httpx.Response(422, json=problem))
+
+    with pytest.raises(ValidationError, match="Request validation failed") as raised:
+        client().get_json("custom-tools")
+
+    assert raised.value.detail == problem
+
+
+@respx.mock
 @pytest.mark.parametrize(
     "message,exc",
     [

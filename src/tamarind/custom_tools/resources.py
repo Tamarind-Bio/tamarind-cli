@@ -206,9 +206,10 @@ class Version:
         interval: float = 2.0,
         on_event: EventCallback | None = None,
     ) -> "Version":
-        _validate_monitor_options(timeout=timeout, interval=interval)
+        timeout, interval = _validate_monitor_options(timeout=timeout, interval=interval)
         deadline = None if timeout is None else time.monotonic() + timeout
         cursor: str | None = None
+        delivered_for_cursor = 0
         current = self
 
         while True:
@@ -233,10 +234,15 @@ class Version:
                         f"before the {timeout:g}s deadline"
                     ) from exc
                 raise
-            if page.next_cursor is not None:
+            if page.next_cursor is None:
+                events = page.items[delivered_for_cursor:]
+                delivered_for_cursor = max(delivered_for_cursor, len(page.items))
+            else:
+                events = page.items
                 cursor = page.next_cursor
+                delivered_for_cursor = 0
             if on_event is not None:
-                for event in page.items:
+                for event in events:
                     on_event(event)
 
             if page.status in ("Complete", "Stopped"):
@@ -470,8 +476,25 @@ def _require_success(version: Version) -> Version:
     return version
 
 
-def _validate_monitor_options(*, timeout: float | None, interval: float) -> None:
-    if not math.isfinite(interval) or interval <= 0:
-        raise ValidationError("monitor interval must be a finite number greater than zero")
-    if timeout is not None and (not math.isfinite(timeout) or timeout <= 0):
-        raise ValidationError("monitor timeout must be a finite number greater than zero")
+def _validate_monitor_options(
+    *,
+    timeout: float | None,
+    interval: float,
+) -> tuple[float | None, float]:
+    normalized_interval = _positive_finite_number(interval, "monitor interval")
+    normalized_timeout = (
+        None if timeout is None else _positive_finite_number(timeout, "monitor timeout")
+    )
+    return normalized_timeout, normalized_interval
+
+
+def _positive_finite_number(value: object, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValidationError(f"{label} must be a finite number greater than zero")
+    try:
+        normalized = float(value)
+    except (OverflowError, ValueError):
+        raise ValidationError(f"{label} must be a finite number greater than zero") from None
+    if not math.isfinite(normalized) or normalized <= 0:
+        raise ValidationError(f"{label} must be a finite number greater than zero")
+    return normalized
