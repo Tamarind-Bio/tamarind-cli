@@ -45,6 +45,23 @@ def test_archive_is_deterministic_and_excludes_local_artifacts(tmp_path: Path) -
         assert all(info.date_time == (1980, 1, 1, 0, 0, 0) for info in archive.infolist())
 
 
+def test_archive_preserves_explicit_build_inputs_and_empty_directories(tmp_path: Path) -> None:
+    _valid_source(tmp_path)
+    (tmp_path / "dist").mkdir()
+    (tmp_path / "dist" / "model.whl").write_bytes(b"wheel")
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "runtime.js").write_text("export {}\n")
+    (tmp_path / "empty-cache").mkdir()
+
+    with zipfile.ZipFile(BytesIO(build_archive(tmp_path).data)) as archive:
+        names = archive.namelist()
+
+    assert "dist/model.whl" in names
+    assert "node_modules/runtime.js" in names
+    assert "empty-cache/" in names
+    assert "empty-cache/.gitkeep" in names
+
+
 def test_archive_makes_runtime_entrypoint_executable_on_every_platform(tmp_path: Path) -> None:
     _valid_source(tmp_path)
 
@@ -151,5 +168,28 @@ def test_validation_rejects_non_boolean_design_batching(tmp_path: Path, value: o
     assert any(
         problem.path == "config.json.inputs[0].designBatching"
         and problem.code == "invalid_design_batching"
+        for problem in report.errors
+    )
+
+
+@pytest.mark.parametrize("value", ["false", 0, 1, None])
+def test_validation_rejects_non_boolean_output_primary(tmp_path: Path, value: object) -> None:
+    _valid_source(tmp_path)
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "displayName": "Example",
+                "inputs": [],
+                "producedOutputs": [{"type": "csv", "primary": value}],
+            }
+        )
+    )
+
+    report = validate_folder(tmp_path)
+
+    assert not report.valid
+    assert any(
+        problem.path == "config.json.producedOutputs[0].primary"
+        and problem.code == "invalid_output_primary"
         for problem in report.errors
     )

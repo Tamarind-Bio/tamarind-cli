@@ -20,12 +20,7 @@ EXCLUDED_DIRECTORIES = frozenset(
         ".mypy_cache",
         ".pytest_cache",
         ".ruff_cache",
-        ".tox",
-        ".venv",
         "__pycache__",
-        "build",
-        "dist",
-        "node_modules",
     }
 )
 EXCLUDED_FILES = frozenset({".DS_Store"})
@@ -33,6 +28,7 @@ EXCLUDED_SUFFIXES = frozenset({".pyc", ".pyo"})
 _ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 _REGULAR_FILE_MODE = 0o100644
 _EXECUTABLE_FILE_MODE = 0o100755
+_DIRECTORY_MODE = 0o040755
 
 
 @dataclass(frozen=True)
@@ -52,6 +48,7 @@ def build_archive(folder: str | Path) -> SourceArchive:
         raise CustomToolUploadError(f"Custom Tool source folder does not exist: {root}")
 
     files: list[tuple[str, Path]] = []
+    empty_directories: list[str] = []
     for current, directories, filenames in os.walk(root, followlinks=False):
         current_path = Path(current)
         kept_directories: list[str] = []
@@ -64,6 +61,7 @@ def build_archive(folder: str | Path) -> SourceArchive:
             kept_directories.append(name)
         directories[:] = kept_directories
 
+        kept_files: list[tuple[str, Path]] = []
         for name in sorted(filenames):
             path = current_path / name
             if name in EXCLUDED_FILES or path.suffix in EXCLUDED_SUFFIXES:
@@ -71,7 +69,10 @@ def build_archive(folder: str | Path) -> SourceArchive:
             if path.is_symlink():
                 raise CustomToolUploadError(f"Source archives cannot contain symlinks: {path}")
             relative = path.relative_to(root).as_posix()
-            files.append((relative, path))
+            kept_files.append((relative, path))
+        files.extend(kept_files)
+        if current_path != root and not kept_directories and not kept_files:
+            empty_directories.append(current_path.relative_to(root).as_posix())
 
     output = BytesIO()
     with zipfile.ZipFile(
@@ -81,14 +82,23 @@ def build_archive(folder: str | Path) -> SourceArchive:
         compresslevel=9,
         strict_timestamps=True,
     ) as archive:
-        for relative, path in sorted(files):
+        entries: list[tuple[str, bytes, int]] = []
+        for relative in empty_directories:
+            entries.append((f"{relative}/", b"", _DIRECTORY_MODE))
+            # Git cannot persist an empty tree. The marker keeps the directory
+            # present when the backend commits the uploaded archive to Gitea.
+            entries.append((f"{relative}/.gitkeep", b"", _REGULAR_FILE_MODE))
+        for relative, path in files:
+            executable = relative == "run.sh" or bool(path.stat().st_mode & 0o111)
+            mode = _EXECUTABLE_FILE_MODE if executable else _REGULAR_FILE_MODE
+            entries.append((relative, path.read_bytes(), mode))
+
+        for relative, content, mode in sorted(entries):
             info = zipfile.ZipInfo(relative, date_time=_ZIP_TIMESTAMP)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.create_system = 3
-            executable = relative == "run.sh" or bool(path.stat().st_mode & 0o111)
-            mode = _EXECUTABLE_FILE_MODE if executable else _REGULAR_FILE_MODE
             info.external_attr = mode << 16
-            archive.writestr(info, path.read_bytes(), compresslevel=9)
+            archive.writestr(info, content, compresslevel=9)
 
     data = output.getvalue()
     return SourceArchive(data=data, digest=f"sha256:{sha256(data).hexdigest()}")

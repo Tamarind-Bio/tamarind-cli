@@ -213,11 +213,19 @@ def _validate_config(value: dict[str, Any], error: Any) -> None:
     if not isinstance(outputs, list):
         error("invalid_outputs", "config.json.producedOutputs", "producedOutputs must be an array")
     else:
-        primary = [
-            item
-            for item in outputs
-            if isinstance(item, dict) and item.get("type") == "csv" and item.get("primary")
-        ]
+        primary: list[dict[str, Any]] = []
+        for index, item in enumerate(outputs):
+            if not isinstance(item, dict):
+                continue
+            flag = item.get("primary", False)
+            if not isinstance(flag, bool):
+                error(
+                    "invalid_output_primary",
+                    f"config.json.producedOutputs[{index}].primary",
+                    "primary must be a boolean",
+                )
+            elif item.get("type") == "csv" and flag:
+                primary.append(item)
         if len(primary) > 1:
             error(
                 "multiple_primary_outputs",
