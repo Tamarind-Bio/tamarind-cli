@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from threading import Event
+import time
 
 import httpx
 import pytest
@@ -301,6 +303,33 @@ def test_monitor_advances_cursor_and_returns_terminal_version(monkeypatch) -> No
 
 
 @respx.mock
+def test_monitor_waits_for_version_projection_after_terminal_logs(monkeypatch) -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    version_route = respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+        side_effect=[
+            httpx.Response(200, json=_version()),
+            httpx.Response(200, json=_version()),
+            httpx.Response(200, json=_version(status="Complete", terminal=True)),
+        ]
+    )
+    respx.get(f"{BASE}custom-tools/example/versions/v1/logs").mock(
+        return_value=httpx.Response(
+            200,
+            json={"status": "Complete", "items": [], "nextCursor": None, "error": None},
+        )
+    )
+    monkeypatch.setattr("tamarind.custom_tools.resources.time.sleep", lambda _: None)
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        version = client.custom_tools.get("example").get_version("v1")
+        final = version.monitor(timeout=10, interval=0.01)
+
+    assert final.terminal
+    assert final.status == "Complete"
+    assert version_route.call_count == 3
+
+
+@respx.mock
 def test_monitor_does_not_replay_cumulative_events_without_a_cursor(monkeypatch) -> None:
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
     respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
@@ -478,6 +507,29 @@ def test_monitor_caps_log_request_by_remaining_deadline(monkeypatch) -> None:
         version = client.custom_tools.get("example").get_version("v1")
         with pytest.raises(CustomToolBuildTimeoutError):
             version.monitor(timeout=1)
+
+
+@respx.mock
+def test_monitor_wall_clock_deadline_bounds_a_blocked_http_phase() -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+        return_value=httpx.Response(200, json=_version())
+    )
+    release = Event()
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        version = client.custom_tools.get("example").get_version("v1")
+        client.custom_tools._transport.list_custom_tool_build_logs = lambda *_args, **_kwargs: (
+            release.wait(2)
+        )
+        started = time.monotonic()
+        try:
+            with pytest.raises(CustomToolBuildTimeoutError, match="did not return logs"):
+                version.monitor(timeout=0.05)
+        finally:
+            release.set()
+
+    assert time.monotonic() - started < 1
 
 
 @respx.mock
