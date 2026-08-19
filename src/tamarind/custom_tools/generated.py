@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from tamarind.http import HTTPClient
 
-OPENAPI_SHA256 = "e264142c1b1b7f235f1005c42406d9d9a8cd474569d910c7aba2d2e316772fff"
+OPENAPI_SHA256 = "2bbe74cc06815ab20faeacbedcbf2b72345cb57d0675a925065f7e574d5e7976"
 
 
 def _segment(value: str) -> str:
@@ -16,7 +16,7 @@ def _segment(value: str) -> str:
 
 
 PublicCustomToolStatus: TypeAlias = Literal["Draft", "Building", "Deployed"]
-PublicVersionStatus: TypeAlias = Literal["Queued", "Claimed", "Running", "Complete", "Stopped"]
+PublicVersionStatus: TypeAlias = Literal["Queued", "Running", "Complete", "Stopped"]
 
 
 class PublicBuildError(TypedDict):
@@ -198,11 +198,12 @@ class GeneratedCustomToolsTransport:
         return cast(PublicCustomTool, response.json())
 
     def create_custom_tool_upload(
-        self, name: str, *, timeout: float | None = None
+        self, name: str, if_match: str, *, timeout: float | None = None
     ) -> PublicUploadSession:
         response = self._client.request(
             "POST",
             f"custom-tools/{_segment(name)}/uploads",
+            headers={"If-Match": if_match},
             timeout=timeout,
         )
         return cast(PublicUploadSession, response.json())
@@ -252,11 +253,12 @@ class GeneratedCustomToolsTransport:
         return cast(PublicVersion, response.json())
 
     def cancel_custom_tool_build(
-        self, name: str, version_name: str, *, timeout: float | None = None
+        self, name: str, version_name: str, if_match: str, *, timeout: float | None = None
     ) -> PublicVersion:
         response = self._client.request(
             "POST",
             f"custom-tools/{_segment(name)}/versions/{_segment(version_name)}/cancel",
+            headers={"If-Match": if_match},
             timeout=timeout,
         )
         return cast(PublicVersion, response.json())

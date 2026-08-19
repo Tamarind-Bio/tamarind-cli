@@ -815,7 +815,6 @@
       "PublicVersionStatus": {
         "enum": [
           "Queued",
-          "Claimed",
           "Running",
           "Complete",
           "Stopped"
@@ -1103,6 +1102,16 @@
               "title": "Name",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "If-Match",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1380,6 +1389,16 @@
               "minLength": 2,
               "pattern": "^v[1-9][0-9]*$",
               "title": "Version Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "If-Match",
               "type": "string"
             }
           }

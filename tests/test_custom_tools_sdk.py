@@ -104,7 +104,7 @@ def test_collection_get_list_and_update_use_resource_generation() -> None:
 def test_build_uploads_exact_archive_then_creates_version(tmp_path: Path) -> None:
     _source(tmp_path)
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
-    respx.post(f"{BASE}custom-tools/example/uploads").mock(
+    upload_session_route = respx.post(f"{BASE}custom-tools/example/uploads").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -132,12 +132,43 @@ def test_build_uploads_exact_archive_then_creates_version(tmp_path: Path) -> Non
     body = json.loads(build_route.calls.last.request.content)
     assert upload_route.calls.last.request.headers["Content-Type"] == "application/zip"
     assert upload_route.calls.last.request.headers["x-amz-meta-upload"] == "source"
+    assert upload_session_route.calls.last.request.headers["If-Match"] == "generation-1"
     assert body["uploadId"] == "upload-1"
     assert body["expectedSourceDigest"].startswith("sha256:")
     assert build_route.calls.last.request.headers["If-Match"] == "generation-1"
     assert uploaded.startswith(b"PK")
     assert result.action == "build"
     assert result.version.name == "v1"
+    assert result.version.tool_generation == "generation-1"
+
+
+@respx.mock
+def test_versions_retain_parent_generation_for_refresh_and_cancellation() -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(generation="generation-1"))
+    )
+    respx.get(f"{BASE}custom-tools/example/versions").mock(
+        return_value=httpx.Response(200, json={"items": [_version()], "nextCursor": None})
+    )
+    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+        return_value=httpx.Response(200, json=_version())
+    )
+    cancel_route = respx.post(f"{BASE}custom-tools/example/versions/v1/cancel").mock(
+        return_value=httpx.Response(200, json=_version(status="Stopped", terminal=True))
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        tool = client.custom_tools.get("example")
+        listed = tool.versions().items[0]
+        fetched = tool.get_version("v1")
+        refreshed = fetched.refresh()
+        cancelled = refreshed.cancel()
+
+    assert listed.tool_generation == "generation-1"
+    assert fetched.tool_generation == "generation-1"
+    assert refreshed.tool_generation == "generation-1"
+    assert cancelled.tool_generation == "generation-1"
+    assert cancel_route.calls.last.request.headers["If-Match"] == "generation-1"
 
 
 @respx.mock

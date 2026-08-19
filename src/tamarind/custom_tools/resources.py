@@ -166,7 +166,7 @@ class CustomTool:
         return self._collection._build(self, build_source_tree_archive(tree))
 
     def get_version(self, name: str) -> "Version":
-        return self._collection._get_version(self.name, name)
+        return self._collection._get_version(self.name, self.generation, name)
 
     def versions(
         self,
@@ -175,7 +175,13 @@ class CustomTool:
         limit: int = 50,
         cursor: str | None = None,
     ) -> Page["Version"]:
-        return self._collection._versions(self.name, status=status, limit=limit, cursor=cursor)
+        return self._collection._versions(
+            self.name,
+            self.generation,
+            status=status,
+            limit=limit,
+            cursor=cursor,
+        )
 
 
 @dataclass(frozen=True)
@@ -191,6 +197,7 @@ class Version:
     terminal: bool
     error: BuildError | None
     tool_name: str
+    tool_generation: str
     _collection: "CustomTools" = field(repr=False, compare=False)
 
     def refresh(self) -> "Version":
@@ -199,6 +206,7 @@ class Version:
     def _refresh(self, *, request_timeout: float | None) -> "Version":
         return self._collection._get_version(
             self.tool_name,
+            self.tool_generation,
             self.name,
             request_timeout=request_timeout,
         )
@@ -216,8 +224,17 @@ class Version:
         return _log_page_from_wire(wire)
 
     def cancel(self) -> "Version":
-        wire = self._collection._transport.cancel_custom_tool_build(self.tool_name, self.name)
-        return _version_from_wire(self._collection, self.tool_name, wire)
+        wire = self._collection._transport.cancel_custom_tool_build(
+            self.tool_name,
+            self.name,
+            self.tool_generation,
+        )
+        return _version_from_wire(
+            self._collection,
+            self.tool_name,
+            self.tool_generation,
+            wire,
+        )
 
     def monitor(
         self,
@@ -365,7 +382,7 @@ class CustomTools:
         return _tool_from_wire(self, wire)
 
     def _build(self, tool: CustomTool, archive: SourceArchive) -> BuildResult:
-        session = self._transport.create_custom_tool_upload(tool.name)
+        session = self._transport.create_custom_tool_upload(tool.name, tool.generation)
         if archive.size > session["maxBytes"]:
             raise CustomToolUploadError(
                 f"Source archive is {archive.size} bytes; upload limit is {session['maxBytes']} bytes"
@@ -387,12 +404,13 @@ class CustomTools:
         )
         return BuildResult(
             action=wire["action"],
-            version=_version_from_wire(self, tool.name, wire["version"]),
+            version=_version_from_wire(self, tool.name, tool.generation, wire["version"]),
         )
 
     def _versions(
         self,
         tool_name: str,
+        tool_generation: str,
         *,
         status: PublicVersionStatus | None,
         limit: int,
@@ -405,13 +423,16 @@ class CustomTools:
             cursor=cursor,
         )
         return Page(
-            items=tuple(_version_from_wire(self, tool_name, item) for item in wire["items"]),
+            items=tuple(
+                _version_from_wire(self, tool_name, tool_generation, item) for item in wire["items"]
+            ),
             next_cursor=wire["nextCursor"],
         )
 
     def _get_version(
         self,
         tool_name: str,
+        tool_generation: str,
         version_name: str,
         *,
         request_timeout: float | None = None,
@@ -421,7 +442,7 @@ class CustomTools:
             version_name,
             timeout=request_timeout,
         )
-        return _version_from_wire(self, tool_name, wire)
+        return _version_from_wire(self, tool_name, tool_generation, wire)
 
 
 def _upload_archive(
@@ -483,6 +504,7 @@ def _tool_from_wire(collection: CustomTools, wire: PublicCustomTool) -> CustomTo
 def _version_from_wire(
     collection: CustomTools,
     tool_name: str,
+    tool_generation: str,
     wire: PublicVersion,
 ) -> Version:
     error = wire["error"]
@@ -498,6 +520,7 @@ def _version_from_wire(
         terminal=wire["terminal"],
         error=BuildError(**error) if error else None,
         tool_name=tool_name,
+        tool_generation=tool_generation,
         _collection=collection,
     )
 
