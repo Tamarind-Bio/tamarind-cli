@@ -574,6 +574,39 @@ def test_monitor_caps_log_request_by_remaining_deadline(monkeypatch) -> None:
 
 
 @respx.mock
+@pytest.mark.parametrize("async_entrypoint", [False, True])
+def test_monitor_supports_an_unbounded_timeout(async_entrypoint: bool) -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+        side_effect=[
+            httpx.Response(200, json=_version()),
+            httpx.Response(200, json=_version(status="Complete", terminal=True)),
+        ]
+    )
+    respx.get(f"{BASE}custom-tools/example/versions/v1/logs").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "status": "Complete",
+                "items": [],
+                "nextCursor": None,
+                "error": None,
+            },
+        )
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        version = client.custom_tools.get("example").get_version("v1")
+        if async_entrypoint:
+            completed = asyncio.run(version.monitor_async(timeout=None, interval=0))
+        else:
+            completed = version.monitor(timeout=None, interval=0)
+
+    assert completed.terminal
+    assert completed.status == "Complete"
+
+
+@respx.mock
 def test_monitor_wall_clock_deadline_bounds_a_blocked_http_phase() -> None:
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
     respx.get(f"{BASE}custom-tools/example/versions/v1").mock(

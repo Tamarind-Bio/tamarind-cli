@@ -324,6 +324,7 @@ class Version:
         on_event: EventCallback | None,
     ) -> "Version":
         deadline = None if timeout is None else _clock() + timeout
+        timeout_label = "no configured timeout" if timeout is None else f"{timeout:g}s"
         cursor: str | None = None
         delivered_for_cursor = 0
         current = self
@@ -335,7 +336,7 @@ class Version:
             if remaining is not None and remaining <= 0:
                 raise CustomToolBuildTimeoutError(
                     f"Custom Tool Version {self.tool_name}/{self.name} was still "
-                    f"{current.status} after {timeout:g}s"
+                    f"{current.status} after {timeout_label}"
                 )
 
             page = await _await_monitor_phase(
@@ -344,7 +345,7 @@ class Version:
                 deadline=deadline,
                 timeout_message=(
                     f"Custom Tool Version {self.tool_name}/{self.name} did not return "
-                    f"logs before the {timeout:g}s deadline"
+                    f"logs before the {timeout_label} deadline"
                 ),
             )
             if page.next_cursor is None:
@@ -366,7 +367,7 @@ class Version:
                 if remaining is not None and remaining <= 0:
                     raise CustomToolBuildTimeoutError(
                         f"Custom Tool Version {self.tool_name}/{self.name} did not return "
-                        f"its terminal state before the {timeout:g}s deadline"
+                        f"its terminal state before the {timeout_label} deadline"
                     )
                 refreshed = await _await_monitor_phase(
                     current._refresh_async(request_timeout=remaining),
@@ -374,7 +375,7 @@ class Version:
                     deadline=deadline,
                     timeout_message=(
                         f"Custom Tool Version {self.tool_name}/{self.name} did not return "
-                        f"its terminal state before the {timeout:g}s deadline"
+                        f"its terminal state before the {timeout_label} deadline"
                     ),
                 )
                 if refreshed.terminal:
@@ -385,7 +386,7 @@ class Version:
             if remaining is not None and remaining <= 0:
                 raise CustomToolBuildTimeoutError(
                     f"Custom Tool Version {self.tool_name}/{self.name} was still "
-                    f"{current.status} after {timeout:g}s"
+                    f"{current.status} after {timeout_label}"
                 )
             await asyncio.sleep(interval if remaining is None else min(interval, remaining))
 
@@ -403,6 +404,8 @@ async def _await_monitor_phase(
             await awaitable if remaining is None else await asyncio.wait_for(awaitable, remaining)
         )
     except asyncio.TimeoutError:
+        if deadline is None:
+            raise
         raise CustomToolBuildTimeoutError(timeout_message) from None
     except TamarindError as exc:
         if type(exc) is TamarindError and deadline is not None and _clock() >= deadline:
