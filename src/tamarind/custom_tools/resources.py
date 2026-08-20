@@ -13,6 +13,8 @@ import httpx
 
 from tamarind.custom_tools.generated import (
     GeneratedCustomToolsTransport,
+    PublicBuildError,
+    PublicBuildEvent,
     PublicBuildLogPage,
     PublicCreateCustomToolRequest,
     PublicCustomTool,
@@ -613,7 +615,7 @@ def _version_from_wire(
         started_at=wire["startedAt"],
         completed_at=wire["completedAt"],
         terminal=wire["terminal"],
-        error=BuildError(**error) if error else None,
+        error=_build_error_from_wire(error),
         tool_name=tool_name,
         tool_generation=tool_generation,
         _collection=collection,
@@ -623,11 +625,21 @@ def _version_from_wire(
 def _log_page_from_wire(wire: PublicBuildLogPage) -> BuildLogPage:
     error = wire["error"]
     return BuildLogPage(
-        items=tuple(BuildEvent(**item) for item in wire["items"]),
+        items=tuple(_build_event_from_wire(item) for item in wire["items"]),
         next_cursor=wire["nextCursor"],
         status=wire["status"],
-        error=BuildError(**error) if error else None,
+        error=_build_error_from_wire(error),
     )
+
+
+def _build_error_from_wire(wire: PublicBuildError | None) -> BuildError | None:
+    if wire is None:
+        return None
+    return BuildError(code=wire["code"], message=wire["message"])
+
+
+def _build_event_from_wire(wire: PublicBuildEvent) -> BuildEvent:
+    return BuildEvent(message=wire["message"], timestamp=wire["timestamp"])
 
 
 def _require_success(version: Version) -> Version:

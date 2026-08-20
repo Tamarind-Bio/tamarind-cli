@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import re
+from typing import NoReturn
 
 from tamarind.custom_tools.packaging import SourceTree, inspect_source_tree
 from tamarind.errors import CustomToolUploadError
@@ -17,6 +18,10 @@ _NETWORK_PATTERN = re.compile(
 )
 _MAX_NETWORK_SCAN_BYTES = 1024 * 1024
 _MAX_CONFIG_BYTES = 8 * 1024 * 1024
+
+
+def _reject_json_constant(value: str) -> NoReturn:
+    raise ValueError(f"non-standard JSON constant {value!r}")
 
 
 @dataclass(frozen=True)
@@ -89,11 +94,14 @@ def validate_source_tree(tree: SourceTree) -> ValidationReport:
             )
         else:
             try:
-                value = json.loads(config_file.read_text())
+                value = json.loads(
+                    config_file.read_text(),
+                    parse_constant=_reject_json_constant,
+                )
             except CustomToolUploadError as exc:
                 error("invalid_source_tree", ".", str(exc))
                 return ValidationReport(tuple(errors), tuple(warnings))
-            except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
+            except (OSError, UnicodeError, ValueError, RecursionError) as exc:
                 error("invalid_json", "config.json", f"config.json is not valid JSON: {exc}")
             else:
                 if not isinstance(value, dict):

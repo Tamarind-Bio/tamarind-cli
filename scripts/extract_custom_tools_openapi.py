@@ -42,6 +42,9 @@ def extract(spec: dict[str, Any]) -> dict[str, Any]:
             if method in HTTP_METHODS and isinstance(operation, dict)
         }
         if selected:
+            parameters = path_item.get("parameters")
+            if isinstance(parameters, list):
+                selected["parameters"] = parameters
             paths[path] = selected
 
     components = spec.get("components", {})

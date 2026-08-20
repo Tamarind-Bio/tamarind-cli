@@ -71,6 +71,18 @@ def _body_type(operation: dict[str, Any]) -> str | None:
     return _annotation(schema) if isinstance(schema, dict) else None
 
 
+def _operation_parameters(
+    path_item: dict[str, Any],
+    operation: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Merge path parameters with operation overrides by OpenAPI identity."""
+    merged: dict[tuple[object, object], dict[str, Any]] = {}
+    for parameter in [*path_item.get("parameters", []), *operation.get("parameters", [])]:
+        if isinstance(parameter, dict):
+            merged[(parameter.get("in"), parameter.get("name"))] = parameter
+    return list(merged.values())
+
+
 def generate(spec: dict[str, Any]) -> str:
     schemas = spec.get("components", {}).get("schemas", {})
     aliases: list[str] = []
@@ -96,7 +108,7 @@ def generate(spec: dict[str, Any]) -> str:
             operation = path_item.get(method)
             if not operation:
                 continue
-            parameters = operation.get("parameters", [])
+            parameters = _operation_parameters(path_item, operation)
             required_params: list[str] = []
             optional_params: list[str] = []
             path_params: list[tuple[str, str]] = []

@@ -175,6 +175,47 @@ def test_versions_retain_parent_generation_for_refresh_and_cancellation() -> Non
 
 
 @respx.mock
+def test_build_wire_projection_ignores_additional_fields() -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+        return_value=httpx.Response(
+            200,
+            json=_version(
+                error={
+                    "code": "build_warning",
+                    "message": "warning detail",
+                    "retryable": True,
+                }
+            ),
+        )
+    )
+    respx.get(f"{BASE}custom-tools/example/versions/v1/logs").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "status": "Running",
+                "items": [{"message": "building", "timestamp": 1, "level": "info"}],
+                "nextCursor": None,
+                "error": {
+                    "code": "build_warning",
+                    "message": "warning detail",
+                    "retryable": True,
+                },
+            },
+        )
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        version = client.custom_tools.get("example").get_version("v1")
+        logs = version.logs()
+
+    assert version.error is not None
+    assert version.error.code == "build_warning"
+    assert logs.items == (BuildEvent(message="building", timestamp=1),)
+    assert logs.error == version.error
+
+
+@respx.mock
 def test_version_publish_uses_parent_generation_and_returns_tool() -> None:
     respx.get(f"{BASE}custom-tools/example").mock(
         return_value=httpx.Response(200, json=_tool(generation="generation-1"))

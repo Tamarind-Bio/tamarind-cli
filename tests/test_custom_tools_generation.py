@@ -17,7 +17,17 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
         "info": {"title": "test", "version": "1"},
         "paths": {
             "/custom-tools": {"get": operation},
-            "/custom-tools/{name}": {"get": {**operation, "operationId": "getCustomTool"}},
+            "/custom-tools/{name}": {
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "name",
+                        "required": True,
+                        "schema": {"type": "string"},
+                    }
+                ],
+                "get": {**operation, "operationId": "getCustomTool"},
+            },
             "/custom-tools-preview": {"get": operation},
             "/molecules": {"get": operation},
         },
@@ -39,6 +49,21 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     sliced = json.loads(sliced_path.read_text())
 
     assert set(sliced["paths"]) == {"/custom-tools", "/custom-tools/{name}"}
+    assert sliced["paths"]["/custom-tools/{name}"]["parameters"][0]["name"] == "name"
+
+    generated = tmp_path / "generated.py"
+    subprocess.run(
+        [
+            sys.executable,
+            str(root / "scripts/generate_custom_tools_transport.py"),
+            str(sliced_path),
+            str(generated),
+        ],
+        check=True,
+    )
+    generated_text = generated.read_text()
+    assert "def get_custom_tool(self, name: str" in generated_text
+    assert "f'custom-tools/{_segment(name)}'" in generated_text
 
 
 def test_generated_transport_matches_committed_openapi(tmp_path: Path) -> None:
