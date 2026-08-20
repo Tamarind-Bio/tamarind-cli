@@ -22,6 +22,23 @@ jobs:
           uv run --extra dev ruff format src/tamarind/custom_tools/generated.py
           git diff --exit-code -- src/tamarind/custom_tools/generated.py
 
+  typecheck:
+    name: Custom Tools type check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Check the public SDK and transport boundary
+        run: >-
+          uv run --extra dev mypy
+          src/tamarind/custom_tools
+          src/tamarind/http.py
+          src/tamarind/errors.py
+
   package:
     name: Build release artifacts
     runs-on: ubuntu-latest

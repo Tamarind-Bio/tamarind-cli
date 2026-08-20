@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from tamarind.http import HTTPClient
 
-OPENAPI_SHA256 = "0a2b91ce20bca7d992f892fd31920d6691fe7888b48fdfc56bbb59b5421eb8d3"
+OPENAPI_SHA256 = "9a149fac08039fbec69d685908c8e6a8591e1bd5fd0010da0781030b4ed05652"
 
 
 def _segment(value: str) -> str:

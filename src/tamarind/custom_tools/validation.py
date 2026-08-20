@@ -1,51 +1,21 @@
-"""Fast local validation for Custom Tool source folders."""
+"""Archive-local Custom Tool checks; the server owns config semantics."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-import math
 from pathlib import Path
 import re
-from typing import Any
 
 from tamarind.custom_tools.packaging import SourceTree, inspect_source_tree
 from tamarind.errors import CustomToolUploadError
 
 
-GPU_TYPES = frozenset({"None", "T4", "L4", "L40S", "A10", "A100"})
-MEMORY_OPTIONS = frozenset({"8Gi", "12Gi", "24Gi", "32Gi", "48Gi", "64Gi", "90Gi", "96Gi", "180Gi"})
-INPUT_TYPES = frozenset(
-    {"file", "pdb", "sdf", "smiles", "dropdown", "text", "number", "sequence", "boolean"}
-)
-OUTPUT_TYPES = frozenset({"pdb", "sequence", "csv", "json"})
-_INPUT_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _NETWORK_PATTERN = re.compile(
     r"\b(?:curl|wget)\b\s+https?://|\b(?:requests|httpx)\.(?:get|post)\s*\(|\burllib\.request\.urlopen\s*\(",
     re.IGNORECASE,
 )
 _MAX_NETWORK_SCAN_BYTES = 1024 * 1024
-
-
-class _InvalidJSONConstant(ValueError):
-    pass
-
-
-class _DuplicateJSONMember(ValueError):
-    pass
-
-
-def _reject_json_constant(value: str) -> Any:
-    raise _InvalidJSONConstant(f"non-standard numeric constant {value!r}")
-
-
-def _reject_duplicate_json_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    value: dict[str, Any] = {}
-    for name, member in pairs:
-        if name in value:
-            raise _DuplicateJSONMember(f"duplicate object member {name!r}")
-        value[name] = member
-    return value
 
 
 @dataclass(frozen=True)
@@ -87,7 +57,7 @@ def validate_folder(folder: str | Path) -> ValidationReport:
 
 
 def validate_source_tree(tree: SourceTree) -> ValidationReport:
-    """Validate the exact inspected snapshot that will be archived."""
+    """Check only facts available from the exact archive snapshot."""
     errors: list[ValidationProblem] = []
     warnings: list[ValidationProblem] = []
 
@@ -98,9 +68,8 @@ def validate_source_tree(tree: SourceTree) -> ValidationReport:
         warnings.append(ValidationProblem(code=code, path=path, message=message))
 
     files = {source_file.relative: source_file for source_file in tree.files}
-    for required in ("config.json", "Dockerfile"):
-        if required not in files:
-            error("required_file_missing", required, f"{required} is required")
+    if "Dockerfile" not in files:
+        error("required_file_missing", "Dockerfile", "Dockerfile is required")
 
     if "run.sh" not in files:
         warning(
@@ -112,27 +81,15 @@ def validate_source_tree(tree: SourceTree) -> ValidationReport:
     config_file = files.get("config.json")
     if config_file is not None:
         try:
-            value = json.loads(
-                config_file.read_text(),
-                parse_constant=_reject_json_constant,
-                object_pairs_hook=_reject_duplicate_json_members,
-            )
+            value = json.loads(config_file.read_text())
         except CustomToolUploadError as exc:
             error("invalid_source_tree", ".", str(exc))
             return ValidationReport(tuple(errors), tuple(warnings))
-        except (
-            OSError,
-            UnicodeError,
-            json.JSONDecodeError,
-            _InvalidJSONConstant,
-            _DuplicateJSONMember,
-        ) as exc:
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             error("invalid_json", "config.json", f"config.json is not valid JSON: {exc}")
         else:
             if not isinstance(value, dict):
                 error("invalid_config", "config.json", "config.json must contain a JSON object")
-            else:
-                _validate_config(value, error)
 
     runtime_files = [
         source_file
@@ -158,189 +115,3 @@ def validate_source_tree(tree: SourceTree) -> ValidationReport:
             )
 
     return ValidationReport(tuple(errors), tuple(warnings))
-
-
-def _validate_config(value: dict[str, Any], error: Any) -> None:
-    display_name = value.get("displayName")
-    if not isinstance(display_name, str) or not display_name.strip():
-        error(
-            "invalid_display_name",
-            "config.json.displayName",
-            "displayName must be a non-empty string",
-        )
-
-    gpu_type = value.get("gpuType", "None")
-    if not isinstance(gpu_type, str) or gpu_type not in GPU_TYPES:
-        error(
-            "invalid_gpu_type", "config.json.gpuType", f"gpuType must be one of {sorted(GPU_TYPES)}"
-        )
-
-    memory = value.get("memory", "8Gi")
-    if not isinstance(memory, str) or memory not in MEMORY_OPTIONS:
-        error(
-            "invalid_memory",
-            "config.json.memory",
-            f"memory must be one of {sorted(MEMORY_OPTIONS)}",
-        )
-
-    cpu = value.get("cpu", 1)
-    if isinstance(cpu, bool) or not isinstance(cpu, int) or not 1 <= cpu <= 8:
-        error("invalid_cpu", "config.json.cpu", "cpu must be an integer from 1 through 8")
-
-    inputs = value.get("inputs")
-    if not isinstance(inputs, list):
-        error("invalid_inputs", "config.json.inputs", "inputs must be an array")
-        return
-
-    names: set[str] = set()
-    batching: list[str] = []
-    for index, item in enumerate(inputs):
-        path = f"config.json.inputs[{index}]"
-        if not isinstance(item, dict):
-            error("invalid_input", path, "each input must be an object")
-            continue
-        name = item.get("name")
-        if not isinstance(name, str) or not _INPUT_NAME.fullmatch(name):
-            error("invalid_input_name", f"{path}.name", "input name must be a valid identifier")
-        elif name in names:
-            error("duplicate_input_name", f"{path}.name", f"input name {name!r} is duplicated")
-        else:
-            names.add(name)
-
-        kind = item.get("type")
-        if not isinstance(kind, str) or kind not in INPUT_TYPES:
-            error(
-                "invalid_input_type",
-                f"{path}.type",
-                f"input type must be one of {sorted(INPUT_TYPES)}",
-            )
-            continue
-        if kind == "dropdown":
-            options = item.get("options")
-            if (
-                not isinstance(options, list)
-                or not options
-                or not all(isinstance(option, str) for option in options)
-            ):
-                error(
-                    "invalid_dropdown_options",
-                    f"{path}.options",
-                    "dropdown options must be a non-empty string array",
-                )
-            elif "default" in item and item["default"] not in options:
-                error(
-                    "invalid_default",
-                    f"{path}.default",
-                    "dropdown default must be one of its options",
-                )
-        if kind == "number":
-            _validate_number_input(item, path, error)
-        elif "default" in item:
-            expected = bool if kind == "boolean" else str
-            default = item["default"]
-            if default is not None and not isinstance(default, expected):
-                error("invalid_default", f"{path}.default", f"{kind} default has the wrong type")
-
-        design_batching = item.get("designBatching", False)
-        if not isinstance(design_batching, bool):
-            error(
-                "invalid_design_batching",
-                f"{path}.designBatching",
-                "designBatching must be a boolean",
-            )
-        elif design_batching:
-            batching.append(str(name))
-            if kind != "number":
-                error(
-                    "invalid_design_batching",
-                    f"{path}.designBatching",
-                    "designBatching is only valid on a number input",
-                )
-            designs_per_batch = item.get("designsPerBatch")
-            if (
-                isinstance(designs_per_batch, bool)
-                or not isinstance(designs_per_batch, int)
-                or designs_per_batch < 1
-            ):
-                error(
-                    "invalid_design_batching",
-                    f"{path}.designsPerBatch",
-                    "designsPerBatch must be an integer of at least 1",
-                )
-
-    if len(batching) > 1:
-        error(
-            "invalid_design_batching",
-            "config.json.inputs",
-            "at most one input may enable designBatching",
-        )
-
-    outputs = value.get("producedOutputs", [])
-    if not isinstance(outputs, list):
-        error("invalid_outputs", "config.json.producedOutputs", "producedOutputs must be an array")
-    else:
-        primary: list[dict[str, Any]] = []
-        for index, item in enumerate(outputs):
-            if not isinstance(item, dict):
-                error(
-                    "invalid_output",
-                    f"config.json.producedOutputs[{index}]",
-                    "each produced output must be an object",
-                )
-                continue
-            kind = item.get("type")
-            if not isinstance(kind, str) or kind not in OUTPUT_TYPES:
-                error(
-                    "invalid_output_type",
-                    f"config.json.producedOutputs[{index}].type",
-                    f"output type must be one of {sorted(OUTPUT_TYPES)}",
-                )
-            flag = item.get("primary", False)
-            if not isinstance(flag, bool):
-                error(
-                    "invalid_output_primary",
-                    f"config.json.producedOutputs[{index}].primary",
-                    "primary must be a boolean",
-                )
-            elif kind == "csv" and flag:
-                primary.append(item)
-        if len(primary) > 1:
-            error(
-                "multiple_primary_outputs",
-                "config.json.producedOutputs",
-                "at most one CSV output may be primary",
-            )
-
-
-def _validate_number_input(item: dict[str, Any], path: str, error: Any) -> None:
-    values: dict[str, int | float] = {}
-    for field in ("lowerBound", "upperBound", "default"):
-        if field not in item:
-            continue
-        value = item[field]
-        normalized = _finite_number(value)
-        if normalized is None:
-            error("invalid_number", f"{path}.{field}", f"{field} must be a finite number")
-        else:
-            values[field] = normalized
-    lower = values.get("lowerBound")
-    upper = values.get("upperBound")
-    default = values.get("default")
-    if lower is not None and upper is not None and lower > upper:
-        error("invalid_number_bounds", path, "lowerBound cannot exceed upperBound")
-    if default is not None and lower is not None and default < lower:
-        error("invalid_default", f"{path}.default", "default is below lowerBound")
-    if default is not None and upper is not None and default > upper:
-        error("invalid_default", f"{path}.default", "default is above upperBound")
-
-
-def _finite_number(value: object) -> int | float | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-    try:
-        normalized = float(value)
-    except (OverflowError, ValueError):
-        return None
-    return value if math.isfinite(normalized) else None

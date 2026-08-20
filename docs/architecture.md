@@ -2,10 +2,10 @@
 
 The CLI, the [MCP server](https://mcp.tamarind.bio), and the web app are all
 **thin clients** over the same platform. The CLI never re-implements business
-logic; it only knows how to call two well-defined surfaces. This is what keeps
+logic; it only knows how to call three well-defined surfaces. This is what keeps
 the CLI and the MCP from drifting as the platform evolves.
 
-## Two surfaces, two single sources of truth
+## Three surfaces, three single sources of truth
 
 ### 1. Job/file REST surface — source of truth: the OpenAPI spec
 
@@ -36,6 +36,21 @@ implementation**, so a tool looks identical no matter which client you use.
 Because the logic lives in one module, *where* discovery is hosted (the MCP host
 today; potentially the main API or a dedicated service later) is a deployment
 detail that can change without any client change and without drift.
+
+### 3. Custom Tools surface — source of truth: the public OpenAPI artifact
+
+Custom Tool creation, source upload, version builds, logs, cancellation, and
+publication are generated from the website backend's public OpenAPI artifact.
+The committed SDK slice is selected by the `/custom-tools` path boundary; it
+does not depend on optional documentation tags. CI regenerates the typed
+transport from that slice and rejects drift.
+
+The SDK owns archive-local concerns that only the client can decide safely:
+deterministic ZIP construction, symlink and junction rejection, upload limits,
+JSON parseability and top-level object shape, and warnings about the networkless
+runtime. The backend owns the evolving `config.json` business contract and
+validates it before accepting a build. The SDK deliberately does not maintain a
+second list of configuration fields, enums, or cross-field rules.
 
 ## Why not a single binary that re-encodes the API?
 

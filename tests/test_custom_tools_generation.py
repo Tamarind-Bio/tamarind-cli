@@ -5,6 +5,30 @@ import json
 import subprocess
 import sys
 
+from scripts.extract_custom_tools_openapi import extract
+
+
+def test_openapi_extraction_uses_the_public_path_boundary() -> None:
+    operation = {
+        "operationId": "listCustomTools",
+        "responses": {"200": {"description": "ok"}},
+    }
+    spec = {
+        "openapi": "3.1.0",
+        "info": {"title": "test", "version": "1"},
+        "paths": {
+            "/custom-tools": {"get": operation},
+            "/custom-tools/{name}": {"get": {**operation, "operationId": "getCustomTool"}},
+            "/custom-tools-preview": {"get": operation},
+            "/molecules": {"get": operation},
+        },
+        "components": {"schemas": {}, "responses": {}, "securitySchemes": {}},
+    }
+
+    sliced = extract(spec)
+
+    assert set(sliced["paths"]) == {"/custom-tools", "/custom-tools/{name}"}
+
 
 def test_generated_transport_matches_committed_openapi(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
@@ -44,3 +68,17 @@ def test_openapi_slice_has_no_dangling_schema_references() -> None:
 
     visit(spec)
     assert not missing
+
+
+def test_readable_version_routes_accept_queued_build_handles() -> None:
+    root = Path(__file__).resolve().parents[1]
+    spec = json.loads((root / "openapi/custom-tools-v1.json").read_text())
+    readable_paths = (
+        "/custom-tools/{name}/versions/{version_name}",
+        "/custom-tools/{name}/versions/{version_name}/logs",
+    )
+
+    for path in readable_paths:
+        parameters = spec["paths"][path]["get"]["parameters"]
+        version = next(item for item in parameters if item["name"] == "version_name")
+        assert "queued-" in version["schema"]["pattern"]

@@ -85,12 +85,20 @@ class CustomToolError(TamarindError):
     """Base class for Custom Tools SDK failures."""
 
 
+class CustomToolValidationError(ValidationError, CustomToolError):
+    """The server rejected a Custom Tool state or source contract."""
+
+
 class CustomToolNotFoundError(NotFoundError, CustomToolError):
     """The Custom Tool does not exist or is not visible to the caller."""
 
 
-class CustomToolExistsError(CustomToolError):
+class CustomToolExistsError(CustomToolValidationError):
     """A Custom Tool already owns the requested organization-scoped name."""
+
+
+class CustomToolNotDeployableError(CustomToolValidationError):
+    """The Custom Tool cannot be built or published from its current state."""
 
 
 class StaleCustomToolError(CustomToolError):
@@ -109,6 +117,10 @@ class CustomToolBuildFailedError(CustomToolError):
 
 class CustomToolBuildNotInProgressError(CustomToolError):
     """Cancellation was requested for a Version without an active build."""
+
+
+class CustomToolBuildInProgressError(CustomToolError):
+    """A new build was requested while this Tool already has an active build."""
 
 
 class CustomToolBuildTimeoutError(CustomToolError):

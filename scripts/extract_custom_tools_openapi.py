@@ -9,6 +9,14 @@ from pathlib import Path
 from typing import Any
 
 
+CUSTOM_TOOLS_PATH = "/custom-tools"
+HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete"})
+
+
+def _is_custom_tools_path(path: str) -> bool:
+    return path == CUSTOM_TOOLS_PATH or path.startswith(f"{CUSTOM_TOOLS_PATH}/")
+
+
 def _schema_refs(node: object) -> set[str]:
     refs: set[str] = set()
     if isinstance(node, dict):
@@ -26,10 +34,12 @@ def _schema_refs(node: object) -> set[str]:
 def extract(spec: dict[str, Any]) -> dict[str, Any]:
     paths: dict[str, Any] = {}
     for path, path_item in spec.get("paths", {}).items():
+        if not _is_custom_tools_path(path):
+            continue
         selected = {
             method: operation
             for method, operation in path_item.items()
-            if isinstance(operation, dict) and operation.get("x-tamarind-group") == "custom-tools"
+            if method in HTTP_METHODS and isinstance(operation, dict)
         }
         if selected:
             paths[path] = selected

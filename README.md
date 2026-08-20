@@ -80,9 +80,11 @@ tamarind submit boltz \
 
 ## Python SDK
 
-The package also exposes a typed Custom Tools SDK. It validates and packages a
-local folder, uploads it directly to object storage, creates an exact Version,
-and monitors its build without writing progress to stdout or stderr.
+The package also exposes a typed Custom Tools SDK. It checks archive-local
+safety, packages a folder, uploads it directly to object storage, creates an
+exact Version, and monitors its build without writing progress to stdout or
+stderr. The server remains authoritative for the evolving `config.json`
+contract.
 
 ```python
 from tamarind import Tamarind
@@ -98,6 +100,7 @@ with Tamarind() as client:
     version = build.version
     if not version.terminal:
         version = version.monitor(timeout=1800, on_event=print)
+    tool = version.publish()
 ```
 
 Custom Tool CLI commands are not part of this release. Existing CLI commands

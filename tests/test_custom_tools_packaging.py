@@ -188,7 +188,6 @@ def test_validation_requires_exact_runtime_filename_casing(tmp_path: Path) -> No
     report = validate_folder(tmp_path)
 
     assert [(problem.code, problem.path) for problem in report.errors] == [
-        ("required_file_missing", "config.json"),
         ("required_file_missing", "Dockerfile"),
     ]
     assert ("run_script_missing", "run.sh") in [
@@ -237,62 +236,37 @@ def test_archive_rejects_windows_junctions(tmp_path: Path) -> None:
     (tmp_path / "junction").rmdir()
 
 
-def test_validation_reports_config_errors_and_runtime_network_warning(tmp_path: Path) -> None:
+def test_validation_leaves_config_semantics_to_the_server(tmp_path: Path) -> None:
     (tmp_path / "Dockerfile").write_text("FROM python:3.12-slim\n")
     (tmp_path / "run.sh").write_text("#!/bin/sh\ncurl https://example.com/model.bin\n")
     (tmp_path / "config.json").write_text(
         json.dumps(
             {
-                "displayName": "Example",
                 "gpuType": "quantum",
-                "inputs": [
-                    {"name": "mode", "type": "dropdown", "options": [], "default": "x"},
-                    {"name": "count", "type": "number", "lowerBound": 5, "upperBound": 1},
-                ],
+                "inputs": "the server owns this evolving contract",
+                "usesMsa": {"future": "shape"},
             }
         )
     )
 
     report = validate_folder(tmp_path)
 
-    assert not report.valid
-    assert {problem.code for problem in report.errors} >= {
-        "invalid_gpu_type",
-        "invalid_dropdown_options",
-        "invalid_number_bounds",
-    }
+    assert report.valid
     assert {problem.code for problem in report.warnings} == {"runtime_network_access"}
 
 
-def test_validation_preserves_integer_precision_for_numeric_bounds(tmp_path: Path) -> None:
+def test_validation_accepts_an_absent_config_file(tmp_path: Path) -> None:
     _valid_source(tmp_path)
-    (tmp_path / "config.json").write_text(
-        json.dumps(
-            {
-                "displayName": "Example",
-                "inputs": [
-                    {
-                        "name": "count",
-                        "type": "number",
-                        "lowerBound": 9_007_199_254_740_993,
-                        "upperBound": 9_007_199_254_740_992,
-                    }
-                ],
-            }
-        )
-    )
+    (tmp_path / "config.json").unlink()
 
     report = validate_folder(tmp_path)
 
-    assert "invalid_number_bounds" in {problem.code for problem in report.errors}
+    assert report.valid
 
 
-@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
-def test_validation_rejects_non_standard_json_constants(tmp_path: Path, constant: str) -> None:
+def test_validation_rejects_malformed_config_json(tmp_path: Path) -> None:
     _valid_source(tmp_path)
-    (tmp_path / "config.json").write_text(
-        '{"displayName":"Example","inputs":[],"extension":' + constant + "}"
-    )
+    (tmp_path / "config.json").write_text("{")
 
     report = validate_folder(tmp_path)
 
@@ -301,16 +275,14 @@ def test_validation_rejects_non_standard_json_constants(tmp_path: Path, constant
     ]
 
 
-def test_validation_rejects_duplicate_json_members_recursively(tmp_path: Path) -> None:
+def test_validation_rejects_non_object_config_json(tmp_path: Path) -> None:
     _valid_source(tmp_path)
-    (tmp_path / "config.json").write_text(
-        '{"displayName":"Example","inputs":[{"name":"x","name":"y","type":"text"}]}'
-    )
+    (tmp_path / "config.json").write_text("[]")
 
     report = validate_folder(tmp_path)
 
     assert [(problem.code, problem.path) for problem in report.errors] == [
-        ("invalid_json", "config.json")
+        ("invalid_config", "config.json")
     ]
 
 
@@ -334,116 +306,3 @@ def test_validation_warns_when_run_script_is_missing(tmp_path: Path) -> None:
 
     assert report.valid
     assert [problem.code for problem in report.warnings] == ["run_script_missing"]
-
-
-def test_validation_contains_malformed_enum_and_oversized_number_values(tmp_path: Path) -> None:
-    _valid_source(tmp_path)
-    (tmp_path / "config.json").write_text(
-        json.dumps(
-            {
-                "displayName": "Example",
-                "gpuType": [],
-                "memory": {},
-                "inputs": [
-                    {"name": "bad_type", "type": []},
-                    {"name": "huge", "type": "number", "default": 10**1000},
-                ],
-            }
-        )
-    )
-
-    report = validate_folder(tmp_path)
-
-    assert {problem.code for problem in report.errors} >= {
-        "invalid_gpu_type",
-        "invalid_memory",
-        "invalid_input_type",
-        "invalid_number",
-    }
-
-
-@pytest.mark.parametrize("value", ["false", 0, 1, None])
-def test_validation_rejects_non_boolean_design_batching(tmp_path: Path, value: object) -> None:
-    _valid_source(tmp_path)
-    (tmp_path / "config.json").write_text(
-        json.dumps(
-            {
-                "displayName": "Example",
-                "inputs": [
-                    {
-                        "name": "count",
-                        "type": "number",
-                        "designBatching": value,
-                        "designsPerBatch": 2,
-                    }
-                ],
-            }
-        )
-    )
-
-    report = validate_folder(tmp_path)
-
-    assert not report.valid
-    assert any(
-        problem.path == "config.json.inputs[0].designBatching"
-        and problem.code == "invalid_design_batching"
-        for problem in report.errors
-    )
-
-
-@pytest.mark.parametrize("value", ["false", 0, 1, None])
-def test_validation_rejects_non_boolean_output_primary(tmp_path: Path, value: object) -> None:
-    _valid_source(tmp_path)
-    (tmp_path / "config.json").write_text(
-        json.dumps(
-            {
-                "displayName": "Example",
-                "inputs": [],
-                "producedOutputs": [{"type": "csv", "primary": value}],
-            }
-        )
-    )
-
-    report = validate_folder(tmp_path)
-
-    assert not report.valid
-    assert any(
-        problem.path == "config.json.producedOutputs[0].primary"
-        and problem.code == "invalid_output_primary"
-        for problem in report.errors
-    )
-
-
-def test_validation_rejects_non_object_produced_outputs(tmp_path: Path) -> None:
-    _valid_source(tmp_path)
-    (tmp_path / "config.json").write_text(
-        json.dumps({"displayName": "Example", "inputs": [], "producedOutputs": [42]})
-    )
-
-    report = validate_folder(tmp_path)
-
-    assert not report.valid
-    assert any(
-        problem.path == "config.json.producedOutputs[0]" and problem.code == "invalid_output"
-        for problem in report.errors
-    )
-
-
-@pytest.mark.parametrize("output", [{}, {"type": []}, {"type": "unsupported"}])
-def test_validation_rejects_missing_or_unsupported_output_types(
-    tmp_path: Path,
-    output: object,
-) -> None:
-    _valid_source(tmp_path)
-    (tmp_path / "config.json").write_text(
-        json.dumps({"displayName": "Example", "inputs": [], "producedOutputs": [output]})
-    )
-
-    report = validate_folder(tmp_path)
-
-    assert not report.valid
-    assert any(
-        problem.path == "config.json.producedOutputs[0].type"
-        and problem.code == "invalid_output_type"
-        for problem in report.errors
-    )

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import math
 from pathlib import Path
 import time
-from typing import Callable, Generic, Literal, TypeVar, cast
+from typing import Awaitable, Callable, Generic, Literal, TypeVar, cast
 
 import httpx
 
@@ -338,21 +338,15 @@ class Version:
                     f"{current.status} after {timeout:g}s"
                 )
 
-            try:
-                logs = current._logs_async(cursor=cursor, request_timeout=remaining)
-                page = await logs if remaining is None else await asyncio.wait_for(logs, remaining)
-            except TimeoutError:
-                raise CustomToolBuildTimeoutError(
-                    f"Custom Tool Version {self.tool_name}/{self.name} did not return logs "
-                    f"before the {timeout:g}s deadline"
-                ) from None
-            except TamarindError as exc:
-                if type(exc) is TamarindError and deadline is not None and _clock() >= deadline:
-                    raise CustomToolBuildTimeoutError(
-                        f"Custom Tool Version {self.tool_name}/{self.name} did not return logs "
-                        f"before the {timeout:g}s deadline"
-                    ) from exc
-                raise
+            page = await _await_monitor_phase(
+                current._logs_async(cursor=cursor, request_timeout=remaining),
+                remaining=remaining,
+                deadline=deadline,
+                timeout_message=(
+                    f"Custom Tool Version {self.tool_name}/{self.name} did not return "
+                    f"logs before the {timeout:g}s deadline"
+                ),
+            )
             if page.next_cursor is None:
                 events = page.items[delivered_for_cursor:]
                 delivered_for_cursor = max(delivered_for_cursor, len(page.items))
@@ -374,25 +368,15 @@ class Version:
                         f"Custom Tool Version {self.tool_name}/{self.name} did not return "
                         f"its terminal state before the {timeout:g}s deadline"
                     )
-                try:
-                    refresh = current._refresh_async(request_timeout=remaining)
-                    refreshed = (
-                        await refresh
-                        if remaining is None
-                        else await asyncio.wait_for(refresh, remaining)
-                    )
-                except TimeoutError:
-                    raise CustomToolBuildTimeoutError(
+                refreshed = await _await_monitor_phase(
+                    current._refresh_async(request_timeout=remaining),
+                    remaining=remaining,
+                    deadline=deadline,
+                    timeout_message=(
                         f"Custom Tool Version {self.tool_name}/{self.name} did not return "
                         f"its terminal state before the {timeout:g}s deadline"
-                    ) from None
-                except TamarindError as exc:
-                    if type(exc) is TamarindError and deadline is not None and _clock() >= deadline:
-                        raise CustomToolBuildTimeoutError(
-                            f"Custom Tool Version {self.tool_name}/{self.name} did not return "
-                            f"its terminal state before the {timeout:g}s deadline"
-                        ) from exc
-                    raise
+                    ),
+                )
                 if refreshed.terminal:
                     return _require_success(refreshed)
                 current = refreshed
@@ -404,6 +388,26 @@ class Version:
                     f"{current.status} after {timeout:g}s"
                 )
             await asyncio.sleep(interval if remaining is None else min(interval, remaining))
+
+
+async def _await_monitor_phase(
+    awaitable: Awaitable[T],
+    *,
+    remaining: float | None,
+    deadline: float | None,
+    timeout_message: str,
+) -> T:
+    """Own timeout translation for every cancellable monitor I/O phase."""
+    try:
+        return (
+            await awaitable if remaining is None else await asyncio.wait_for(awaitable, remaining)
+        )
+    except asyncio.TimeoutError:
+        raise CustomToolBuildTimeoutError(timeout_message) from None
+    except TamarindError as exc:
+        if type(exc) is TamarindError and deadline is not None and _clock() >= deadline:
+            raise CustomToolBuildTimeoutError(timeout_message) from exc
+        raise
 
 
 class CustomTools:

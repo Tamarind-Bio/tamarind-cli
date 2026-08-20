@@ -16,10 +16,13 @@ from .errors import (
     APIError,
     AuthError,
     BudgetError,
+    CustomToolBuildInProgressError,
     CustomToolBuildNotInProgressError,
     CustomToolExistsError,
     CustomToolNotFoundError,
+    CustomToolNotDeployableError,
     CustomToolUploadError,
+    CustomToolValidationError,
     NotFoundError,
     RateLimitError,
     StaleCustomToolError,
@@ -193,10 +196,16 @@ def _map_error(resp: httpx.Response) -> TamarindError:
         return CustomToolNotFoundError(msg)
     if problem_code == "custom_tool_name_taken":
         return CustomToolExistsError(msg)
+    if problem_code == "custom_tool_not_deployable":
+        return CustomToolNotDeployableError(msg)
+    if problem_code == "invalid_custom_tool_config" or problem_code == "invalid_custom_tool_source":
+        return CustomToolValidationError(msg)
     if problem_code == "custom_tool_generation_mismatch":
         return StaleCustomToolError(msg)
-    if problem_code == "custom_tool_source_digest_mismatch":
+    if problem_code == "custom_tool_source_digest_mismatch" or problem_code == "custom_tool_upload_not_found":
         return CustomToolUploadError(msg)
+    if problem_code == "custom_tool_build_in_progress":
+        return CustomToolBuildInProgressError(msg)
     if problem_code == "custom_tool_build_not_cancellable":
         return CustomToolBuildNotInProgressError(msg)
     ml = msg.lower()

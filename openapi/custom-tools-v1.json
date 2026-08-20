@@ -68,6 +68,7 @@
             "type": "string"
           },
           "timestamp": {
+            "description": "Event time as Unix milliseconds.",
             "title": "Timestamp",
             "type": "integer"
           }
@@ -107,6 +108,7 @@
                 "type": "null"
               }
             ],
+            "description": "Pass as `cursor` for the next page. Null when there are no more events.",
             "title": "Nextcursor"
           },
           "status": {
@@ -125,6 +127,7 @@
       "PublicBuildResult": {
         "properties": {
           "action": {
+            "description": "What happened: `build` started a new image build, `reuse_image` created a version from the current image, and `unchanged` returned the version already associated with this source.",
             "enum": [
               "build",
               "reuse_image",
@@ -196,6 +199,7 @@
             "type": "string"
           },
           "name": {
+            "description": "A unique lowercase name containing letters, numbers, and hyphens.",
             "maxLength": 50,
             "minLength": 3,
             "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
@@ -213,11 +217,13 @@
         "additionalProperties": false,
         "properties": {
           "expectedSourceDigest": {
+            "description": "SHA-256 digest of the uploaded archive, formatted as `sha256:<hex>`.",
             "pattern": "^sha256:[a-f0-9]{64}$",
             "title": "Expectedsourcedigest",
             "type": "string"
           },
           "uploadId": {
+            "description": "The `uploadId` returned when the source upload was created.",
             "maxLength": 200,
             "minLength": 1,
             "title": "Uploadid",
@@ -262,6 +268,7 @@
                 "type": "null"
               }
             ],
+            "description": "The version used by default, such as `v3`. Null when no version is published.",
             "title": "Defaultversion"
           },
           "description": {
@@ -284,6 +291,7 @@
             "type": "array"
           },
           "generation": {
+            "description": "The current tool generation. Send this value in the `If-Match` header when updating the tool, uploading source, building a version, or canceling a build.",
             "title": "Generation",
             "type": "string"
           },
@@ -316,6 +324,7 @@
                 "type": "null"
               }
             ],
+            "description": "Maximum runtime for a tool run, in seconds. Null means no tool-specific limit.",
             "title": "Maxruntimeseconds"
           },
           "memory": {
@@ -354,6 +363,7 @@
                 "type": "null"
               }
             ],
+            "description": "SHA-256 digest of the current source archive. Null when source is absent or hidden.",
             "title": "Sourcedigest"
           },
           "status": {
@@ -417,6 +427,7 @@
                 "type": "null"
               }
             ],
+            "description": "Pass as `cursor` for the next page. Null when there are no more results.",
             "title": "Nextcursor"
           }
         },
@@ -668,10 +679,12 @@
       "PublicUploadSession": {
         "properties": {
           "expiresAt": {
+            "description": "When the upload URL expires, as an ISO 8601 timestamp.",
             "title": "Expiresat",
             "type": "string"
           },
           "maxBytes": {
+            "description": "Maximum source-archive size, in bytes.",
             "title": "Maxbytes",
             "type": "integer"
           },
@@ -679,19 +692,23 @@
             "additionalProperties": {
               "type": "string"
             },
+            "description": "Headers to include exactly as provided when uploading to `uploadUrl`.",
             "title": "Uploadheaders",
             "type": "object"
           },
           "uploadId": {
+            "description": "Pass this value to the version-build request after uploading.",
             "title": "Uploadid",
             "type": "string"
           },
           "uploadMethod": {
             "const": "PUT",
+            "description": "HTTP method to use with `uploadUrl`.",
             "title": "Uploadmethod",
             "type": "string"
           },
           "uploadUrl": {
+            "description": "Short-lived URL for uploading the source archive.",
             "title": "Uploadurl",
             "type": "string"
           }
@@ -735,6 +752,7 @@
             ]
           },
           "name": {
+            "description": "The version handle, such as `v3`, or `queued-<sha>` while a GitHub build waits.",
             "title": "Name",
             "type": "string"
           },
@@ -751,9 +769,11 @@
                 "type": "null"
               }
             ],
+            "description": "SHA-256 digest of this version's source archive. Null when source is hidden.",
             "title": "Sourcedigest"
           },
           "sourceRevision": {
+            "description": "Immutable source revision used by this version.",
             "title": "Sourcerevision",
             "type": "string"
           },
@@ -765,6 +785,7 @@
             "$ref": "#/components/schemas/PublicVersionStatus"
           },
           "terminal": {
+            "description": "Whether the build has reached a final status and will not run again.",
             "title": "Terminal",
             "type": "boolean"
           }
@@ -802,6 +823,7 @@
                 "type": "null"
               }
             ],
+            "description": "Pass as `cursor` for the next page. Null when there are no more results.",
             "title": "Nextcursor"
           }
         },
@@ -834,7 +856,7 @@
   },
   "info": {
     "description": "The Tamarind public API. Code-first: this spec is GENERATED from the backend `Public*` request/response models (the single source of truth) and committed as an artifact; a freshness gate asserts it matches the running server, and a contract test asserts the served routes match it. v1 is frozen for external users. Authenticate with an API key in the `x-api-key` header.",
-    "summary": "The Tamarind public API \u2014 pipelines automation + molecule data management.",
+    "summary": "The Tamarind public API \u2014 custom tools, jobs, pipelines, molecules, and tool recommendations.",
     "title": "Tamarind Public API",
     "version": "1.0"
   },
@@ -842,9 +864,11 @@
   "paths": {
     "/custom-tools": {
       "get": {
+        "description": "List custom tools in your organization.\n\nFilter by status or publication state. Paginated \u2014 follow `nextCursor` until it is null.",
         "operationId": "listCustomTools",
         "parameters": [
           {
+            "description": "Filter by status.",
             "in": "query",
             "name": "status",
             "required": false,
@@ -857,10 +881,12 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by status.",
               "title": "Status"
             }
           },
           {
+            "description": "Filter to published (`true`) or unpublished (`false`) tools.",
             "in": "query",
             "name": "published",
             "required": false,
@@ -873,15 +899,18 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter to published (`true`) or unpublished (`false`) tools.",
               "title": "Published"
             }
           },
           {
+            "description": "Maximum number of tools to return in one page.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 50,
+              "description": "Maximum number of tools to return in one page.",
               "maximum": 200,
               "minimum": 1,
               "title": "Limit",
@@ -889,6 +918,7 @@
             }
           },
           {
+            "description": "Pagination token from the previous response's `nextCursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -902,6 +932,7 @@
                   "type": "null"
                 }
               ],
+              "description": "Pagination token from the previous response's `nextCursor`.",
               "title": "Cursor"
             }
           }
@@ -927,13 +958,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "List Tools",
+        "summary": "List custom tools",
         "tags": [
           "custom-tools-public"
         ],
-        "x-tamarind-group": "custom-tools"
+        "x-doc-group": "Custom Tools"
       },
       "post": {
+        "description": "Create a custom tool in Draft status.\n\nThis creates the tool record only. Upload its source and build a version in separate requests.",
         "operationId": "createCustomTool",
         "requestBody": {
           "content": {
@@ -966,22 +998,25 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Create Tool",
+        "summary": "Create a custom tool",
         "tags": [
           "custom-tools-public"
         ],
-        "x-tamarind-group": "custom-tools"
+        "x-doc-group": "Custom Tools"
       }
     },
     "/custom-tools/{name}": {
       "get": {
+        "description": "Get a custom tool's configuration, source status, and current version.",
         "operationId": "getCustomTool",
         "parameters": [
           {
+            "description": "The custom tool name.",
             "in": "path",
             "name": "name",
             "required": true,
             "schema": {
+              "description": "The custom tool name.",
               "maxLength": 50,
               "minLength": 3,
               "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
@@ -1014,20 +1049,23 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get Tool",
+        "summary": "Get a custom tool",
         "tags": [
           "custom-tools-public"
         ],
-        "x-tamarind-group": "custom-tools"
+        "x-doc-group": "Custom Tools"
       },
       "patch": {
+        "description": "Update a custom tool's metadata or compute resources.\n\nFields you omit are left unchanged.",
         "operationId": "updateCustomTool",
         "parameters": [
           {
+            "description": "The custom tool name.",
             "in": "path",
             "name": "name",
             "required": true,
             "schema": {
+              "description": "The custom tool name.",
               "maxLength": 50,
               "minLength": 3,
               "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
@@ -1036,10 +1074,12 @@
             }
           },
           {
+            "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
             "in": "header",
             "name": "If-Match",
             "required": true,
             "schema": {
+              "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
               "minLength": 1,
               "title": "If-Match",
               "type": "string"
@@ -1080,22 +1120,25 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Update Tool",
+        "summary": "Update a custom tool",
         "tags": [
           "custom-tools-public"
         ],
-        "x-tamarind-group": "custom-tools"
+        "x-doc-group": "Custom Tools"
       }
     },
     "/custom-tools/{name}/uploads": {
       "post": {
+        "description": "Create a temporary upload for a source archive.\n\nUpload the file to `uploadUrl` using `uploadMethod` and every value in `uploadHeaders`, then use\n`uploadId` to build a version.",
         "operationId": "createCustomToolUpload",
         "parameters": [
           {
+            "description": "The custom tool name.",
             "in": "path",
             "name": "name",
             "required": true,
             "schema": {
+              "description": "The custom tool name.",
               "maxLength": 50,
               "minLength": 3,
               "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
@@ -1104,10 +1147,12 @@
             }
           },
           {
+            "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
             "in": "header",
             "name": "If-Match",
             "required": true,
             "schema": {
+              "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
               "minLength": 1,
               "title": "If-Match",
               "type": "string"
@@ -1138,22 +1183,25 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Create Upload",
+        "summary": "Create a source upload",
         "tags": [
           "custom-tools-public"
         ],
-        "x-tamarind-group": "custom-tools"
+        "x-doc-group": "Custom Tools"
       }
     },
     "/custom-tools/{name}/versions": {
       "get": {
+        "description": "List versions of a custom tool.\n\nFilter by build status. Paginated \u2014 follow `nextCursor` until it is null.",
         "operationId": "listCustomToolVersions",
         "parameters": [
           {
+            "description": "The custom tool name.",
             "in": "path",
             "name": "name",
             "required": true,
             "schema": {
+              "description": "The custom tool name.",
               "maxLength": 50,
               "minLength": 3,
               "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
@@ -1162,6 +1210,7 @@
             }
           },
           {
+            "description": "Filter by build status.",
             "in": "query",
             "name": "status",
             "required": false,
@@ -1174,15 +1223,18 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by build status.",
               "title": "Status"
             }
           },
           {
+            "description": "Maximum number of versions to return in one page.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 50,
+              "description": "Maximum number of versions to return in one page.",
               "maximum": 200,
               "minimum": 1,
               "title": "Limit",
@@ -1190,6 +1242,7 @@
             }
           },
           {
+            "description": "Pagination token from the previous response's `nextCursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -1203,6 +1256,7 @@
                   "type": "null"
                 }
               ],
+              "description": "Pagination token from the previous response's `nextCursor`.",
               "title": "Cursor"
             }
           }
@@ -1231,20 +1285,23 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "List Versions",
+        "summary": "List custom tool versions",
         "tags": [
           "custom-tools-public"
         ],
-        "x-tamarind-group": "custom-tools"
+        "x-doc-group": "Custom Tools"
       },
       "post": {
+        "description": "Build a version from an uploaded source archive.\n\nReturns immediately with the numbered version and its current status.",
         "operationId": "buildCustomToolVersion",
         "parameters": [
           {
+            "description": "The custom tool name.",
             "in": "path",
             "name": "name",
             "required": true,
             "schema": {
+              "description": "The custom tool name.",
               "maxLength": 50,
               "minLength": 3,
               "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
@@ -1253,10 +1310,12 @@
             }
           },
           {
+            "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
             "in": "header",
             "name": "If-Match",
             "required": true,
             "schema": {
+              "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
               "minLength": 1,
               "title": "If-Match",
               "type": "string"
@@ -1297,22 +1356,25 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Build Version",
+        "summary": "Build a custom tool version",
         "tags": [
           "custom-tools-public"
         ],
-        "x-tamarind-group": "custom-tools"
+        "x-doc-group": "Custom Tools"
       }
     },
     "/custom-tools/{name}/versions/{version_name}": {
       "get": {
+        "description": "Get a version's source, build status, and error details.",
         "operationId": "getCustomToolVersion",
         "parameters": [
           {
+            "description": "The custom tool name.",
             "in": "path",
             "name": "name",
             "required": true,
             "schema": {
+              "description": "The custom tool name.",
               "maxLength": 50,
               "minLength": 3,
               "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
@@ -1321,13 +1383,15 @@
             }
           },
           {
+            "description": "A numbered version handle such as `v3`, or a queued build handle such as `queued-a1b2c3d4`.",
             "in": "path",
             "name": "version_name",
             "required": true,
             "schema": {
+              "description": "A numbered version handle such as `v3`, or a queued build handle such as `queued-a1b2c3d4`.",
               "maxLength": 200,
               "minLength": 2,
-              "pattern": "^v[1-9][0-9]*$",
+              "pattern": "^(?:v[1-9][0-9]*|queued-[a-f0-9]+)$",
               "title": "Version Name",
               "type": "string"
             }
@@ -1357,22 +1421,25 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Get Version",
+        "summary": "Get a custom tool version",
         "tags": [
           "custom-tools-public"
         ],
-        "x-tamarind-group": "custom-tools"
+        "x-doc-group": "Custom Tools"
       }
     },
     "/custom-tools/{name}/versions/{version_name}/cancel": {
       "post": {
+        "description": "Request cancellation of an active build.\n\nCompleted and stopped builds cannot be canceled.",
         "operationId": "cancelCustomToolBuild",
         "parameters": [
           {
+            "description": "The custom tool name.",
             "in": "path",
             "name": "name",
             "required": true,
             "schema": {
+              "description": "The custom tool name.",
               "maxLength": 50,
               "minLength": 3,
               "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
@@ -1381,10 +1448,12 @@
             }
           },
           {
+            "description": "A numbered version handle, such as `v3`.",
             "in": "path",
             "name": "version_name",
             "required": true,
             "schema": {
+              "description": "A numbered version handle, such as `v3`.",
               "maxLength": 200,
               "minLength": 2,
               "pattern": "^v[1-9][0-9]*$",
@@ -1393,10 +1462,12 @@
             }
           },
           {
+            "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
             "in": "header",
             "name": "If-Match",
             "required": true,
             "schema": {
+              "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
               "minLength": 1,
               "title": "If-Match",
               "type": "string"
@@ -1427,22 +1498,25 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Cancel Build",
+        "summary": "Cancel a custom tool build",
         "tags": [
           "custom-tools-public"
         ],
-        "x-tamarind-group": "custom-tools"
+        "x-doc-group": "Custom Tools"
       }
     },
-    "/custom-tools/{name}/versions/{version_name}/publish": {
-      "post": {
-        "operationId": "publishCustomToolVersion",
+    "/custom-tools/{name}/versions/{version_name}/logs": {
+      "get": {
+        "description": "List build log events for a version.\n\nPaginated \u2014 follow `nextCursor` until it is null.",
+        "operationId": "listCustomToolBuildLogs",
         "parameters": [
           {
+            "description": "The custom tool name.",
             "in": "path",
             "name": "name",
             "required": true,
             "schema": {
+              "description": "The custom tool name.",
               "maxLength": 50,
               "minLength": 3,
               "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
@@ -1451,10 +1525,96 @@
             }
           },
           {
+            "description": "A numbered version handle such as `v3`, or a queued build handle such as `queued-a1b2c3d4`.",
             "in": "path",
             "name": "version_name",
             "required": true,
             "schema": {
+              "description": "A numbered version handle such as `v3`, or a queued build handle such as `queued-a1b2c3d4`.",
+              "maxLength": 200,
+              "minLength": 2,
+              "pattern": "^(?:v[1-9][0-9]*|queued-[a-f0-9]+)$",
+              "title": "Version Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Pagination token from the previous response's `nextCursor`.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 4096,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Pagination token from the previous response's `nextCursor`.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicBuildLogPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "List build logs",
+        "tags": [
+          "custom-tools-public"
+        ],
+        "x-doc-group": "Custom Tools"
+      }
+    },
+    "/custom-tools/{name}/versions/{version_name}/publish": {
+      "post": {
+        "description": "Make a completed version the tool's published runtime version.\n\nThis also supports an explicit rollback to an older completed version.",
+        "operationId": "publishCustomToolVersion",
+        "parameters": [
+          {
+            "description": "The custom tool name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The custom tool name.",
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A numbered version handle, such as `v3`.",
+            "in": "path",
+            "name": "version_name",
+            "required": true,
+            "schema": {
+              "description": "A numbered version handle, such as `v3`.",
               "maxLength": 200,
               "minLength": 2,
               "pattern": "^v[1-9][0-9]*$",
@@ -1463,10 +1623,12 @@
             }
           },
           {
+            "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
             "in": "header",
             "name": "If-Match",
             "required": true,
             "schema": {
+              "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
               "minLength": 1,
               "title": "If-Match",
               "type": "string"
@@ -1497,88 +1659,11 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Publish Version",
+        "summary": "Publish a custom tool version",
         "tags": [
           "custom-tools-public"
         ],
-        "x-tamarind-group": "custom-tools"
-      }
-    },
-    "/custom-tools/{name}/versions/{version_name}/logs": {
-      "get": {
-        "operationId": "listCustomToolBuildLogs",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "maxLength": 50,
-              "minLength": 3,
-              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
-              "title": "Name",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "version_name",
-            "required": true,
-            "schema": {
-              "maxLength": 200,
-              "minLength": 2,
-              "pattern": "^v[1-9][0-9]*$",
-              "title": "Version Name",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 4096,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PublicBuildLogPage"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationProblem"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "summary": "List Build Logs",
-        "tags": [
-          "custom-tools-public"
-        ],
-        "x-tamarind-group": "custom-tools"
+        "x-doc-group": "Custom Tools"
       }
     }
   },
@@ -1589,7 +1674,7 @@
   ],
   "servers": [
     {
-      "description": "The Tamarind public API. Product-shaped surfaces under /api.",
+      "description": "The Tamarind public API. Product-shaped Custom Tools, Jobs, Molecules, Pipelines, and tool recommendations.",
       "url": "https://app.tamarind.bio/api"
     }
   ]

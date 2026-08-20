@@ -9,8 +9,16 @@ from tamarind.errors import (
     APIError,
     AuthError,
     BudgetError,
+    CustomToolBuildInProgressError,
+    CustomToolBuildNotInProgressError,
+    CustomToolExistsError,
+    CustomToolNotFoundError,
+    CustomToolNotDeployableError,
+    CustomToolUploadError,
+    CustomToolValidationError,
     NotFoundError,
     RateLimitError,
+    StaleCustomToolError,
     ValidationError,
 )
 from tamarind.http import HTTPClient
@@ -146,6 +154,41 @@ def test_422_uses_problem_title_when_detail_is_absent() -> None:
         client().get_json("custom-tools")
 
     assert raised.value.detail == problem
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "code,exc",
+    [
+        ("custom_tool_not_found", CustomToolNotFoundError),
+        ("custom_tool_version_not_found", CustomToolNotFoundError),
+        ("custom_tool_name_taken", CustomToolExistsError),
+        ("custom_tool_not_deployable", CustomToolNotDeployableError),
+        ("invalid_custom_tool_config", CustomToolValidationError),
+        ("invalid_custom_tool_source", CustomToolValidationError),
+        ("custom_tool_generation_mismatch", StaleCustomToolError),
+        ("custom_tool_source_digest_mismatch", CustomToolUploadError),
+        ("custom_tool_upload_not_found", CustomToolUploadError),
+        ("custom_tool_build_in_progress", CustomToolBuildInProgressError),
+        ("custom_tool_build_not_cancellable", CustomToolBuildNotInProgressError),
+    ],
+)
+def test_custom_tool_problem_codes_have_stable_error_types(code, exc) -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(
+            409,
+            json={
+                "type": f"https://app.tamarind.bio/errors/{code}",
+                "title": "Custom Tool request failed",
+                "status": 409,
+                "code": code,
+                "detail": "actionable detail",
+            },
+        )
+    )
+
+    with pytest.raises(exc, match="actionable detail"):
+        client().get_json("custom-tools/example")
 
 
 @respx.mock
