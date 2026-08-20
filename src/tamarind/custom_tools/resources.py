@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 import math
 from pathlib import Path
-from queue import Empty, Queue
-from threading import Thread
 import time
 from typing import Callable, Generic, Literal, TypeVar, cast
 
@@ -46,52 +45,7 @@ from tamarind.http import DEFAULT_TIMEOUT
 T = TypeVar("T")
 BuildAction = Literal["build", "reuse_image", "unchanged"]
 EventCallback = Callable[["BuildEvent"], None]
-
-
-class _MonitorDeadlineExceeded(Exception):
-    pass
-
-
-class _MonitorRequestWorker:
-    """Run blocking reads behind one wall-clock deadline boundary."""
-
-    def __init__(self, cancel_active_request: Callable[[], None]) -> None:
-        self._requests: Queue[Callable[[], object] | None] = Queue()
-        self._results: Queue[tuple[bool, object]] = Queue()
-        self._cancel_active_request = cancel_active_request
-        self._closed = False
-        self._thread = Thread(target=self._run, name="tamarind-monitor-http", daemon=True)
-        self._thread.start()
-
-    def _run(self) -> None:
-        while (operation := self._requests.get()) is not None:
-            try:
-                value = operation()
-            except BaseException as exc:
-                self._results.put((False, exc))
-            else:
-                self._results.put((True, value))
-
-    def call(self, operation: Callable[[], T], *, timeout: float) -> T:
-        self._requests.put(cast(Callable[[], object], operation))
-        try:
-            succeeded, value = self._results.get(timeout=timeout)
-        except Empty:
-            raise _MonitorDeadlineExceeded from None
-        if succeeded:
-            return cast(T, value)
-        raise cast(BaseException, value)
-
-    def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        # The worker may be inside a synchronous HTTP read. Closing its
-        # dedicated transport interrupts that connection before shutdown is
-        # queued, instead of leaving a daemon request behind after timeout.
-        self._cancel_active_request()
-        self._requests.put(None)
-        self._thread.join(timeout=1)
+_clock = time.monotonic
 
 
 class _Unset:
@@ -255,10 +209,21 @@ class Version:
         self,
         *,
         request_timeout: float | None,
-        transport: GeneratedCustomToolsTransport | None = None,
     ) -> "Version":
-        active_transport = transport or self._collection._transport
-        wire = active_transport.get_custom_tool_version(
+        wire = self._collection._transport.get_custom_tool_version(
+            self.tool_name,
+            self.name,
+            timeout=request_timeout,
+        )
+        return _version_from_wire(
+            self._collection,
+            self.tool_name,
+            self.tool_generation,
+            wire,
+        )
+
+    async def _refresh_async(self, *, request_timeout: float | None) -> "Version":
+        wire = await self._collection._transport.get_custom_tool_version_async(
             self.tool_name,
             self.name,
             timeout=request_timeout,
@@ -278,10 +243,22 @@ class Version:
         *,
         cursor: str | None,
         request_timeout: float | None,
-        transport: GeneratedCustomToolsTransport | None = None,
     ) -> BuildLogPage:
-        active_transport = transport or self._collection._transport
-        wire = active_transport.list_custom_tool_build_logs(
+        wire = self._collection._transport.list_custom_tool_build_logs(
+            self.tool_name,
+            self.name,
+            cursor=cursor,
+            timeout=request_timeout,
+        )
+        return _log_page_from_wire(wire)
+
+    async def _logs_async(
+        self,
+        *,
+        cursor: str | None,
+        request_timeout: float | None,
+    ) -> BuildLogPage:
+        wire = await self._collection._transport.list_custom_tool_build_logs_async(
             self.tool_name,
             self.name,
             cursor=cursor,
@@ -318,123 +295,115 @@ class Version:
         interval: float = 2.0,
         on_event: EventCallback | None = None,
     ) -> "Version":
+        """Wait synchronously for this build; async callers use ``monitor_async``."""
         timeout, interval = _validate_monitor_options(timeout=timeout, interval=interval)
-        deadline = None if timeout is None else time.monotonic() + timeout
-        monitor_transport = self._collection._transport.fork() if deadline is not None else None
-        request_worker = (
-            _MonitorRequestWorker(monitor_transport.close)
-            if monitor_transport is not None
-            else None
+        return asyncio.run(
+            self._monitor_validated(timeout=timeout, interval=interval, on_event=on_event)
         )
+
+    async def monitor_async(
+        self,
+        *,
+        timeout: float | None,
+        interval: float = 2.0,
+        on_event: EventCallback | None = None,
+    ) -> "Version":
+        """Wait for this build without blocking the caller's event loop."""
+        timeout, interval = _validate_monitor_options(timeout=timeout, interval=interval)
+        return await self._monitor_validated(
+            timeout=timeout,
+            interval=interval,
+            on_event=on_event,
+        )
+
+    async def _monitor_validated(
+        self,
+        *,
+        timeout: float | None,
+        interval: float,
+        on_event: EventCallback | None,
+    ) -> "Version":
+        deadline = None if timeout is None else _clock() + timeout
         cursor: str | None = None
         delivered_for_cursor = 0
         current = self
 
-        try:
-            while True:
-                if current.terminal:
-                    return _require_success(current)
-                remaining = None if deadline is None else deadline - time.monotonic()
-                if remaining is not None and remaining <= 0:
-                    raise CustomToolBuildTimeoutError(
-                        f"Custom Tool Version {self.tool_name}/{self.name} was still "
-                        f"{current.status} after {timeout:g}s"
-                    )
+        while True:
+            if current.terminal:
+                return _require_success(current)
+            remaining = None if deadline is None else deadline - _clock()
+            if remaining is not None and remaining <= 0:
+                raise CustomToolBuildTimeoutError(
+                    f"Custom Tool Version {self.tool_name}/{self.name} was still "
+                    f"{current.status} after {timeout:g}s"
+                )
 
-                try:
-
-                    def read_logs() -> BuildLogPage:
-                        return current._logs(
-                            cursor=cursor,
-                            request_timeout=remaining,
-                            transport=monitor_transport,
-                        )
-
-                    page = (
-                        read_logs()
-                        if request_worker is None
-                        else request_worker.call(read_logs, timeout=cast(float, remaining))
-                    )
-                except _MonitorDeadlineExceeded:
+            try:
+                logs = current._logs_async(cursor=cursor, request_timeout=remaining)
+                page = await logs if remaining is None else await asyncio.wait_for(logs, remaining)
+            except TimeoutError:
+                raise CustomToolBuildTimeoutError(
+                    f"Custom Tool Version {self.tool_name}/{self.name} did not return logs "
+                    f"before the {timeout:g}s deadline"
+                ) from None
+            except TamarindError as exc:
+                if type(exc) is TamarindError and deadline is not None and _clock() >= deadline:
                     raise CustomToolBuildTimeoutError(
                         f"Custom Tool Version {self.tool_name}/{self.name} did not return logs "
                         f"before the {timeout:g}s deadline"
-                    ) from None
-                except TamarindError as exc:
-                    if (
-                        type(exc) is TamarindError
-                        and deadline is not None
-                        and time.monotonic() >= deadline
-                    ):
-                        raise CustomToolBuildTimeoutError(
-                            f"Custom Tool Version {self.tool_name}/{self.name} did not return logs "
-                            f"before the {timeout:g}s deadline"
-                        ) from exc
-                    raise
-                if page.next_cursor is None:
-                    events = page.items[delivered_for_cursor:]
-                    delivered_for_cursor = max(delivered_for_cursor, len(page.items))
-                else:
-                    events = page.items[delivered_for_cursor:]
-                    cursor = page.next_cursor
-                    delivered_for_cursor = 0
-                if on_event is not None:
-                    for event in events:
-                        on_event(event)
+                    ) from exc
+                raise
+            if page.next_cursor is None:
+                events = page.items[delivered_for_cursor:]
+                delivered_for_cursor = max(delivered_for_cursor, len(page.items))
+            else:
+                events = page.items[delivered_for_cursor:]
+                cursor = page.next_cursor
+                delivered_for_cursor = 0
+            if on_event is not None:
+                for event in events:
+                    on_event(event)
 
-                if page.next_cursor is not None:
-                    continue
+            if page.next_cursor is not None:
+                continue
 
-                if page.status in ("Complete", "Stopped"):
-                    remaining = None if deadline is None else deadline - time.monotonic()
-                    if remaining is not None and remaining <= 0:
-                        raise CustomToolBuildTimeoutError(
-                            f"Custom Tool Version {self.tool_name}/{self.name} did not return "
-                            f"its terminal state before the {timeout:g}s deadline"
-                        )
-                    try:
-
-                        def refresh() -> Version:
-                            return current._refresh(
-                                request_timeout=remaining,
-                                transport=monitor_transport,
-                            )
-
-                        refreshed = (
-                            refresh()
-                            if request_worker is None
-                            else request_worker.call(refresh, timeout=cast(float, remaining))
-                        )
-                    except _MonitorDeadlineExceeded:
-                        raise CustomToolBuildTimeoutError(
-                            f"Custom Tool Version {self.tool_name}/{self.name} did not return "
-                            f"its terminal state before the {timeout:g}s deadline"
-                        ) from None
-                    except TamarindError as exc:
-                        if (
-                            type(exc) is TamarindError
-                            and deadline is not None
-                            and time.monotonic() >= deadline
-                        ):
-                            raise CustomToolBuildTimeoutError(
-                                f"Custom Tool Version {self.tool_name}/{self.name} did not return "
-                                f"its terminal state before the {timeout:g}s deadline"
-                            ) from exc
-                        raise
-                    if refreshed.terminal:
-                        return _require_success(refreshed)
-                    current = refreshed
-
-                remaining = None if deadline is None else deadline - time.monotonic()
+            if page.status in ("Complete", "Stopped"):
+                remaining = None if deadline is None else deadline - _clock()
                 if remaining is not None and remaining <= 0:
                     raise CustomToolBuildTimeoutError(
-                        f"Custom Tool Version {self.tool_name}/{self.name} was still "
-                        f"{current.status} after {timeout:g}s"
+                        f"Custom Tool Version {self.tool_name}/{self.name} did not return "
+                        f"its terminal state before the {timeout:g}s deadline"
                     )
-                time.sleep(interval if remaining is None else min(interval, remaining))
-        finally:
-            if request_worker is not None:
-                request_worker.close()
+                try:
+                    refresh = current._refresh_async(request_timeout=remaining)
+                    refreshed = (
+                        await refresh
+                        if remaining is None
+                        else await asyncio.wait_for(refresh, remaining)
+                    )
+                except TimeoutError:
+                    raise CustomToolBuildTimeoutError(
+                        f"Custom Tool Version {self.tool_name}/{self.name} did not return "
+                        f"its terminal state before the {timeout:g}s deadline"
+                    ) from None
+                except TamarindError as exc:
+                    if type(exc) is TamarindError and deadline is not None and _clock() >= deadline:
+                        raise CustomToolBuildTimeoutError(
+                            f"Custom Tool Version {self.tool_name}/{self.name} did not return "
+                            f"its terminal state before the {timeout:g}s deadline"
+                        ) from exc
+                    raise
+                if refreshed.terminal:
+                    return _require_success(refreshed)
+                current = refreshed
+
+            remaining = None if deadline is None else deadline - _clock()
+            if remaining is not None and remaining <= 0:
+                raise CustomToolBuildTimeoutError(
+                    f"Custom Tool Version {self.tool_name}/{self.name} was still "
+                    f"{current.status} after {timeout:g}s"
+                )
+            await asyncio.sleep(interval if remaining is None else min(interval, remaining))
 
 
 class CustomTools:

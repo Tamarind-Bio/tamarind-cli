@@ -11,6 +11,7 @@ from typing import Any
 
 
 HTTP_METHODS = ("get", "post", "put", "patch", "delete")
+ASYNC_METHODS = frozenset({"get_custom_tool_version", "list_custom_tool_build_logs"})
 
 
 def _name(value: str) -> str:
@@ -89,6 +90,7 @@ def generate(spec: dict[str, Any]) -> str:
         objects.append("\n".join(lines))
 
     methods: list[str] = []
+    async_methods: list[str] = []
     for path, path_item in sorted(spec.get("paths", {}).items()):
         for method in HTTP_METHODS:
             operation = path_item.get(method)
@@ -142,10 +144,11 @@ def generate(spec: dict[str, Any]) -> str:
             if body_type:
                 call.append("            json=body,")
             call.append("            timeout=timeout,")
+            method_name = _name(operation["operationId"])
             methods.append(
                 "\n".join(
                     [
-                        f"    def {_name(operation['operationId'])}({signature}) -> {result}:",
+                        f"    def {method_name}({signature}) -> {result}:",
                         "        response = self._client.request(",
                         *call,
                         "        )",
@@ -153,6 +156,18 @@ def generate(spec: dict[str, Any]) -> str:
                     ]
                 )
             )
+            if method_name in ASYNC_METHODS:
+                async_methods.append(
+                    "\n".join(
+                        [
+                            f"    async def {method_name}_async({signature}) -> {result}:",
+                            "        response = await self._client.request_async(",
+                            *call,
+                            "        )",
+                            f"        return cast({result}, response.json())",
+                        ]
+                    )
+                )
 
     canonical_spec = json.dumps(spec, sort_keys=True, separators=(",", ":")).encode()
     digest = sha256(canonical_spec).hexdigest()
@@ -187,13 +202,8 @@ def generate(spec: dict[str, Any]) -> str:
             "    def __init__(self, client: HTTPClient):",
             "        self._client = client",
             "",
-            "    def fork(self) -> GeneratedCustomToolsTransport:",
-            "        return GeneratedCustomToolsTransport(self._client.fork())",
-            "",
-            "    def close(self) -> None:",
-            "        self._client.close()",
-            "",
             "\n\n".join(methods),
+            "\n\n".join(async_methods),
             "",
         ]
     )

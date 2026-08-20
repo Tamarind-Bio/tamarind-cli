@@ -301,6 +301,31 @@ def test_validation_rejects_non_standard_json_constants(tmp_path: Path, constant
     ]
 
 
+def test_validation_rejects_duplicate_json_members_recursively(tmp_path: Path) -> None:
+    _valid_source(tmp_path)
+    (tmp_path / "config.json").write_text(
+        '{"displayName":"Example","inputs":[{"name":"x","name":"y","type":"text"}]}'
+    )
+
+    report = validate_folder(tmp_path)
+
+    assert [(problem.code, problem.path) for problem in report.errors] == [
+        ("invalid_json", "config.json")
+    ]
+
+
+def test_validation_skips_warning_only_network_scan_for_large_runtime_file(tmp_path: Path) -> None:
+    _valid_source(tmp_path)
+    (tmp_path / "run.sh").write_text(
+        "#!/bin/sh\n" + ("# padding\n" * 120_000) + "curl https://example.com/model.bin\n"
+    )
+
+    report = validate_folder(tmp_path)
+
+    assert report.valid
+    assert report.warnings == ()
+
+
 def test_validation_warns_when_run_script_is_missing(tmp_path: Path) -> None:
     _valid_source(tmp_path)
     (tmp_path / "run.sh").unlink()

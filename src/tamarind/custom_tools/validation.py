@@ -24,14 +24,28 @@ _NETWORK_PATTERN = re.compile(
     r"\b(?:curl|wget)\b\s+https?://|\b(?:requests|httpx)\.(?:get|post)\s*\(|\burllib\.request\.urlopen\s*\(",
     re.IGNORECASE,
 )
+_MAX_NETWORK_SCAN_BYTES = 1024 * 1024
 
 
 class _InvalidJSONConstant(ValueError):
     pass
 
 
+class _DuplicateJSONMember(ValueError):
+    pass
+
+
 def _reject_json_constant(value: str) -> Any:
     raise _InvalidJSONConstant(f"non-standard numeric constant {value!r}")
+
+
+def _reject_duplicate_json_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for name, member in pairs:
+        if name in value:
+            raise _DuplicateJSONMember(f"duplicate object member {name!r}")
+        value[name] = member
+    return value
 
 
 @dataclass(frozen=True)
@@ -101,11 +115,18 @@ def validate_source_tree(tree: SourceTree) -> ValidationReport:
             value = json.loads(
                 config_file.read_text(),
                 parse_constant=_reject_json_constant,
+                object_pairs_hook=_reject_duplicate_json_members,
             )
         except CustomToolUploadError as exc:
             error("invalid_source_tree", ".", str(exc))
             return ValidationReport(tuple(errors), tuple(warnings))
-        except (OSError, UnicodeError, json.JSONDecodeError, _InvalidJSONConstant) as exc:
+        except (
+            OSError,
+            UnicodeError,
+            json.JSONDecodeError,
+            _InvalidJSONConstant,
+            _DuplicateJSONMember,
+        ) as exc:
             error("invalid_json", "config.json", f"config.json is not valid JSON: {exc}")
         else:
             if not isinstance(value, dict):
@@ -120,6 +141,8 @@ def validate_source_tree(tree: SourceTree) -> ValidationReport:
         or ("/" not in source_file.relative and source_file.path.suffix == ".py")
     ]
     for candidate in runtime_files:
+        if candidate.size > _MAX_NETWORK_SCAN_BYTES:
+            continue
         try:
             text = candidate.read_text()
         except CustomToolUploadError as exc:

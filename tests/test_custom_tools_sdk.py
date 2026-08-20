@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
-from threading import Event
 import time
 
 import httpx
@@ -538,7 +538,7 @@ def test_timeout_does_not_cancel_remote_build(monkeypatch) -> None:
         return_value=httpx.Response(200, json=_version(status="Stopped", terminal=True))
     )
     ticks = iter([0.0, 0.0, 2.0])
-    monkeypatch.setattr("tamarind.custom_tools.resources.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr("tamarind.custom_tools.resources._clock", lambda: next(ticks))
 
     with Tamarind(api_key="key", api_base=BASE) as client:
         version = client.custom_tools.get("example").get_version("v1")
@@ -565,7 +565,7 @@ def test_monitor_caps_log_request_by_remaining_deadline(monkeypatch) -> None:
 
     respx.get(f"{BASE}custom-tools/example/versions/v1/logs").mock(side_effect=logs)
     ticks = iter([0.0, 0.0, 2.0])
-    monkeypatch.setattr("tamarind.custom_tools.resources.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr("tamarind.custom_tools.resources._clock", lambda: next(ticks))
 
     with Tamarind(api_key="key", api_base=BASE) as client:
         version = client.custom_tools.get("example").get_version("v1")
@@ -579,27 +579,25 @@ def test_monitor_wall_clock_deadline_bounds_a_blocked_http_phase() -> None:
     respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
         return_value=httpx.Response(200, json=_version())
     )
-    release = Event()
-    cancelled = Event()
+    cancelled = False
 
     with Tamarind(api_key="key", api_base=BASE) as client:
         version = client.custom_tools.get("example").get_version("v1")
 
-        class CancellableMonitorTransport:
-            def list_custom_tool_build_logs(self, *_args, **_kwargs):
-                release.wait(2)
+        async def blocked_logs(*_args, **_kwargs):
+            nonlocal cancelled
+            try:
+                await asyncio.Future()
+            finally:
+                cancelled = True
 
-            def close(self) -> None:
-                cancelled.set()
-                release.set()
-
-        client.custom_tools._transport.fork = CancellableMonitorTransport
+        client.custom_tools._transport.list_custom_tool_build_logs_async = blocked_logs
         started = time.monotonic()
         with pytest.raises(CustomToolBuildTimeoutError, match="did not return logs"):
             version.monitor(timeout=0.05)
 
     assert time.monotonic() - started < 1
-    assert cancelled.is_set()
+    assert cancelled
 
 
 @respx.mock
@@ -609,22 +607,18 @@ def test_monitor_translates_request_timeout_at_deadline(monkeypatch) -> None:
         return_value=httpx.Response(200, json=_version())
     )
     ticks = iter([0.0, 0.0, 2.0])
-    monkeypatch.setattr("tamarind.custom_tools.resources.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr("tamarind.custom_tools.resources._clock", lambda: next(ticks))
 
     with Tamarind(api_key="key", api_base=BASE) as client:
         version = client.custom_tools.get("example").get_version("v1")
 
-        class TimedOutMonitorTransport:
-            def list_custom_tool_build_logs(self, *_args, **_kwargs):
-                raise TamarindError("request timed out")
-
-            def close(self) -> None:
-                pass
+        async def timed_out_logs(*_args, **_kwargs):
+            raise TamarindError("request timed out")
 
         monkeypatch.setattr(
             client.custom_tools._transport,
-            "fork",
-            TimedOutMonitorTransport,
+            "list_custom_tool_build_logs_async",
+            timed_out_logs,
         )
         with pytest.raises(CustomToolBuildTimeoutError):
             version.monitor(timeout=1)
@@ -648,31 +642,32 @@ def test_monitor_bounds_terminal_refresh_by_remaining_deadline(monkeypatch) -> N
         )
     )
     ticks = iter([0.0, 0.0, 0.5, 2.0])
-    monkeypatch.setattr("tamarind.custom_tools.resources.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr("tamarind.custom_tools.resources._clock", lambda: next(ticks))
 
     with Tamarind(api_key="key", api_base=BASE) as client:
         version = client.custom_tools.get("example").get_version("v1")
 
-        class TerminalRefreshTimeoutTransport:
-            def list_custom_tool_build_logs(self, *_args, **_kwargs):
-                return {
-                    "status": "Complete",
-                    "items": [],
-                    "nextCursor": None,
-                    "error": None,
-                }
+        async def terminal_logs(*_args, **_kwargs):
+            return {
+                "status": "Complete",
+                "items": [],
+                "nextCursor": None,
+                "error": None,
+            }
 
-            def get_custom_tool_version(self, *_args, **kwargs):
-                assert kwargs["timeout"] == pytest.approx(0.5)
-                raise TamarindError("request timed out")
-
-            def close(self) -> None:
-                pass
+        async def timed_out_refresh(*_args, **kwargs):
+            assert kwargs["timeout"] == pytest.approx(0.5)
+            raise TamarindError("request timed out")
 
         monkeypatch.setattr(
             client.custom_tools._transport,
-            "fork",
-            TerminalRefreshTimeoutTransport,
+            "list_custom_tool_build_logs_async",
+            terminal_logs,
+        )
+        monkeypatch.setattr(
+            client.custom_tools._transport,
+            "get_custom_tool_version_async",
+            timed_out_refresh,
         )
         with pytest.raises(CustomToolBuildTimeoutError, match="terminal state"):
             version.monitor(timeout=1)

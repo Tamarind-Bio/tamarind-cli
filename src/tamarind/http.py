@@ -53,15 +53,12 @@ class HTTPClient:
         }
         if api_key:
             headers["x-api-key"] = api_key
+        self._headers = headers
         self._client = httpx.Client(base_url=base_url, headers=headers, timeout=timeout)
 
     # -- lifecycle ---------------------------------------------------------
     def close(self) -> None:
         self._client.close()
-
-    def fork(self) -> "HTTPClient":
-        """Create an independently cancellable client with the same settings."""
-        return HTTPClient(self.base_url, self.api_key, timeout=self._timeout)
 
     def __enter__(self) -> "HTTPClient":
         return self
@@ -96,6 +93,48 @@ class HTTPClient:
                 json=json,
                 timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
             )
+        except httpx.HTTPError as exc:
+            raise TamarindError(f"Network error talking to {self.base_url}: {exc}") from exc
+
+        if resp.is_success:
+            return resp
+        raise _map_error(resp)
+
+    async def request_async(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        json: Any | None = None,
+        timeout: float | None = None,
+    ) -> httpx.Response:
+        """Perform one cancellable request for a wall-clock-bounded operation.
+
+        The client is scoped to the coroutine so cancellation closes its socket
+        before returning. Synchronous calls keep their pooled client above.
+        """
+        if not self.api_key:
+            raise AuthError(
+                "No API key configured. Set TAMARIND_API_KEY, pass --api-key, "
+                "or run `tamarind auth login`."
+            )
+        clean_params = {k: v for k, v in params.items() if v is not None} if params else None
+        try:
+            async with httpx.AsyncClient(
+                base_url=self.base_url,
+                headers=self._headers,
+                timeout=self._timeout,
+            ) as client:
+                resp = await client.request(
+                    method,
+                    path.lstrip("/"),
+                    params=clean_params,
+                    headers=headers,
+                    json=json,
+                    timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
+                )
         except httpx.HTTPError as exc:
             raise TamarindError(f"Network error talking to {self.base_url}: {exc}") from exc
 

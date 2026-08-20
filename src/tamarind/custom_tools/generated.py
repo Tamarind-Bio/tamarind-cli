@@ -144,12 +144,6 @@ class GeneratedCustomToolsTransport:
     def __init__(self, client: HTTPClient):
         self._client = client
 
-    def fork(self) -> GeneratedCustomToolsTransport:
-        return GeneratedCustomToolsTransport(self._client.fork())
-
-    def close(self) -> None:
-        self._client.close()
-
     def list_custom_tools(
         self,
         status: PublicCustomToolStatus | None = None,
@@ -295,3 +289,29 @@ class GeneratedCustomToolsTransport:
             timeout=timeout,
         )
         return cast(PublicCustomTool, response.json())
+
+    async def get_custom_tool_version_async(
+        self, name: str, version_name: str, *, timeout: float | None = None
+    ) -> PublicVersion:
+        response = await self._client.request_async(
+            "GET",
+            f"custom-tools/{_segment(name)}/versions/{_segment(version_name)}",
+            timeout=timeout,
+        )
+        return cast(PublicVersion, response.json())
+
+    async def list_custom_tool_build_logs_async(
+        self,
+        name: str,
+        version_name: str,
+        cursor: str | None = None,
+        *,
+        timeout: float | None = None,
+    ) -> PublicBuildLogPage:
+        response = await self._client.request_async(
+            "GET",
+            f"custom-tools/{_segment(name)}/versions/{_segment(version_name)}/logs",
+            params={"cursor": cursor},
+            timeout=timeout,
+        )
+        return cast(PublicBuildLogPage, response.json())
