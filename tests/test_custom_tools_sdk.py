@@ -174,6 +174,29 @@ def test_versions_retain_parent_generation_for_refresh_and_cancellation() -> Non
 
 
 @respx.mock
+def test_version_publish_uses_parent_generation_and_returns_tool() -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(generation="generation-1"))
+    )
+    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+        return_value=httpx.Response(200, json=_version(status="Complete", terminal=True))
+    )
+    publish_route = respx.post(f"{BASE}custom-tools/example/versions/v1/publish").mock(
+        return_value=httpx.Response(
+            200,
+            json={**_tool(generation="generation-1"), "published": True, "defaultVersion": "v1"},
+        )
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        published = client.custom_tools.get("example").get_version("v1").publish()
+
+    assert publish_route.calls.last.request.headers["If-Match"] == "generation-1"
+    assert published.published is True
+    assert published.default_version == "v1"
+
+
+@respx.mock
 def test_build_archives_the_same_source_snapshot_that_passed_validation(
     tmp_path: Path,
     monkeypatch,

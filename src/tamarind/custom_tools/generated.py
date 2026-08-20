@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from tamarind.http import HTTPClient
 
-OPENAPI_SHA256 = "2bbe74cc06815ab20faeacbedcbf2b72345cb57d0675a925065f7e574d5e7976"
+OPENAPI_SHA256 = "0a2b91ce20bca7d992f892fd31920d6691fe7888b48fdfc56bbb59b5421eb8d3"
 
 
 def _segment(value: str) -> str:
@@ -278,3 +278,14 @@ class GeneratedCustomToolsTransport:
             timeout=timeout,
         )
         return cast(PublicBuildLogPage, response.json())
+
+    def publish_custom_tool_version(
+        self, name: str, version_name: str, if_match: str, *, timeout: float | None = None
+    ) -> PublicCustomTool:
+        response = self._client.request(
+            "POST",
+            f"custom-tools/{_segment(name)}/versions/{_segment(version_name)}/publish",
+            headers={"If-Match": if_match},
+            timeout=timeout,
+        )
+        return cast(PublicCustomTool, response.json())

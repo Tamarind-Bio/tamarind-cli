@@ -274,6 +274,15 @@ class Version:
             wire,
         )
 
+    def publish(self) -> CustomTool:
+        """Make this completed Version the Tool's published runtime."""
+        wire = self._collection._transport.publish_custom_tool_version(
+            self.tool_name,
+            self.name,
+            self.tool_generation,
+        )
+        return _tool_from_wire(self._collection, wire)
+
     def monitor(
         self,
         *,
