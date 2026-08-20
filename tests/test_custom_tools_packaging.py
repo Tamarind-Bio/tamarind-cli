@@ -317,9 +317,13 @@ def test_validation_bounds_config_json_before_parsing(tmp_path: Path, monkeypatc
     ]
 
 
-def test_validation_translates_excessive_json_nesting(tmp_path: Path) -> None:
+def test_validation_translates_parser_recursion(tmp_path: Path, monkeypatch) -> None:
     _valid_source(tmp_path)
-    (tmp_path / "config.json").write_text("[" * 2_000 + "0" + "]" * 2_000)
+
+    def raise_recursion(_raw: str) -> object:
+        raise RecursionError("excessive nesting")
+
+    monkeypatch.setattr(validation.json, "loads", raise_recursion)
 
     report = validate_folder(tmp_path)
 
