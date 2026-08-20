@@ -598,9 +598,9 @@ def test_monitor_supports_an_unbounded_timeout(async_entrypoint: bool) -> None:
     with Tamarind(api_key="key", api_base=BASE) as client:
         version = client.custom_tools.get("example").get_version("v1")
         if async_entrypoint:
-            completed = asyncio.run(version.monitor_async(timeout=None, interval=0))
+            completed = asyncio.run(version.monitor_async(timeout=None, interval=0.01))
         else:
-            completed = version.monitor(timeout=None, interval=0)
+            completed = version.monitor(timeout=None, interval=0.01)
 
     assert completed.terminal
     assert completed.status == "Complete"
