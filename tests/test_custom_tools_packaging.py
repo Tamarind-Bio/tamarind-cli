@@ -212,6 +212,14 @@ def test_archive_streams_files_without_reading_each_one_into_memory(
     assert archive.size > 0
 
 
+def test_archive_aborts_while_compressed_output_crosses_upload_limit(tmp_path: Path) -> None:
+    _valid_source(tmp_path)
+    (tmp_path / "weights.bin").write_bytes(os.urandom(64 * 1024))
+
+    with pytest.raises(CustomToolUploadError, match="1024-byte upload limit"):
+        build_archive(tmp_path, max_bytes=1024)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="NTFS junctions are Windows-specific")
 def test_archive_rejects_windows_junctions(tmp_path: Path) -> None:
     _valid_source(tmp_path)

@@ -13,6 +13,8 @@ import stat
 from typing import BinaryIO
 import zipfile
 
+from typing_extensions import Buffer
+
 from tamarind.errors import CustomToolUploadError
 
 
@@ -33,6 +35,22 @@ _ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 _REGULAR_FILE_MODE = 0o100644
 _EXECUTABLE_FILE_MODE = 0o100755
 _DIRECTORY_MODE = 0o040755
+
+
+class _CappedBytesIO(BytesIO):
+    """A seekable ZIP target whose retained content cannot exceed the service cap."""
+
+    def __init__(self, max_bytes: int | None) -> None:
+        super().__init__()
+        self._max_bytes = max_bytes
+
+    def write(self, data: Buffer) -> int:
+        data_size = memoryview(data).nbytes
+        if self._max_bytes is not None and self.tell() + data_size > self._max_bytes:
+            raise CustomToolUploadError(
+                f"Source archive exceeds the {self._max_bytes}-byte upload limit"
+            )
+        return super().write(data)
 
 
 @dataclass(frozen=True)
@@ -184,14 +202,18 @@ def inspect_source_tree(folder: str | Path) -> SourceTree:
     )
 
 
-def build_archive(folder: str | Path) -> SourceArchive:
+def build_archive(folder: str | Path, *, max_bytes: int | None = None) -> SourceArchive:
     """Package a folder into byte-for-byte reproducible ZIP content."""
-    return build_source_tree_archive(inspect_source_tree(folder))
+    return build_source_tree_archive(inspect_source_tree(folder), max_bytes=max_bytes)
 
 
-def build_source_tree_archive(tree: SourceTree) -> SourceArchive:
+def build_source_tree_archive(
+    tree: SourceTree,
+    *,
+    max_bytes: int | None = None,
+) -> SourceArchive:
     """Package one previously inspected source snapshot."""
-    output = BytesIO()
+    output = _CappedBytesIO(max_bytes)
     with zipfile.ZipFile(
         output,
         mode="w",

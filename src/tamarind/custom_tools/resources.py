@@ -23,7 +23,7 @@ from tamarind.custom_tools.generated import (
     PublicVersionStatus,
 )
 from tamarind.custom_tools.packaging import (
-    SourceArchive,
+    SourceTree,
     build_source_tree_archive,
     inspect_source_tree,
 )
@@ -201,7 +201,7 @@ class CustomTool:
         report = validate_source_tree(tree)
         if not report.valid:
             raise ValidationError("Custom Tool source validation failed", detail=report)
-        return self._collection._build(self, build_source_tree_archive(tree))
+        return self._collection._build(self, tree)
 
     def get_version(self, name: str) -> "Version":
         return self._collection._get_version(self.name, self.generation, name)
@@ -463,12 +463,9 @@ class CustomTools:
         wire = self._transport.update_custom_tool(name, generation, body)
         return _tool_from_wire(self, wire)
 
-    def _build(self, tool: CustomTool, archive: SourceArchive) -> BuildResult:
+    def _build(self, tool: CustomTool, tree: SourceTree) -> BuildResult:
         session = self._transport.create_custom_tool_upload(tool.name, tool.generation)
-        if archive.size > session["maxBytes"]:
-            raise CustomToolUploadError(
-                f"Source archive is {archive.size} bytes; upload limit is {session['maxBytes']} bytes"
-            )
+        archive = build_source_tree_archive(tree, max_bytes=session["maxBytes"])
         _upload_archive(
             session["uploadUrl"],
             archive.data,

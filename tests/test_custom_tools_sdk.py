@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from threading import Event
 import time
@@ -211,10 +212,50 @@ def test_build_archives_the_same_source_snapshot_that_passed_validation(
         return report
 
     monkeypatch.setattr(resources, "validate_source_tree", mutate_after_validation)
+    respx.post(f"{BASE}custom-tools/example/uploads").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "uploadId": "upload-1",
+                "uploadUrl": UPLOAD,
+                "uploadMethod": "PUT",
+                "uploadHeaders": {"Content-Type": "application/zip"},
+                "expiresAt": "2026-08-15T01:00:00Z",
+                "maxBytes": 1_000_000,
+            },
+        )
+    )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
         with pytest.raises(CustomToolUploadError, match="changed after inspection"):
             client.custom_tools.get("example").build(tmp_path)
+
+
+@respx.mock
+def test_build_caps_archive_construction_at_the_upload_session_limit(tmp_path: Path) -> None:
+    _source(tmp_path)
+    (tmp_path / "weights.bin").write_bytes(os.urandom(64 * 1024))
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.post(f"{BASE}custom-tools/example/uploads").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "uploadId": "upload-1",
+                "uploadUrl": UPLOAD,
+                "uploadMethod": "PUT",
+                "uploadHeaders": {"Content-Type": "application/zip"},
+                "expiresAt": "2026-08-15T01:00:00Z",
+                "maxBytes": 1024,
+            },
+        )
+    )
+    upload_route = respx.put(UPLOAD).mock(return_value=httpx.Response(200))
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(CustomToolUploadError, match="1024-byte upload limit"):
+            client.custom_tools.get("example").build(tmp_path)
+
+    assert not upload_route.called
 
 
 @respx.mock
