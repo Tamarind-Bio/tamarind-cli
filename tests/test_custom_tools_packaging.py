@@ -335,7 +335,7 @@ def test_validation_bounds_config_json_before_parsing(tmp_path: Path, monkeypatc
 def test_validation_translates_parser_recursion(tmp_path: Path, monkeypatch) -> None:
     _valid_source(tmp_path)
 
-    def raise_recursion(_raw: str) -> object:
+    def raise_recursion(_raw: str, **_kwargs: object) -> object:
         raise RecursionError("excessive nesting")
 
     monkeypatch.setattr(validation.json, "loads", raise_recursion)
