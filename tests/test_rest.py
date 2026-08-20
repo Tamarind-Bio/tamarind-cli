@@ -174,21 +174,22 @@ def test_422_uses_problem_title_when_detail_is_absent() -> None:
     ],
 )
 def test_custom_tool_problem_codes_have_stable_error_types(code, exc) -> None:
+    problem = {
+        "type": f"https://app.tamarind.bio/errors/{code}",
+        "title": "Custom Tool request failed",
+        "status": 409,
+        "code": code,
+        "detail": "actionable detail",
+        "errors": [{"field": "config.json", "message": "specific diagnosis"}],
+    }
     respx.get(f"{BASE}custom-tools/example").mock(
-        return_value=httpx.Response(
-            409,
-            json={
-                "type": f"https://app.tamarind.bio/errors/{code}",
-                "title": "Custom Tool request failed",
-                "status": 409,
-                "code": code,
-                "detail": "actionable detail",
-            },
-        )
+        return_value=httpx.Response(409, json=problem)
     )
 
-    with pytest.raises(exc, match="actionable detail"):
+    with pytest.raises(exc, match="actionable detail") as raised:
         client().get_json("custom-tools/example")
+
+    assert raised.value.detail == problem
 
 
 @respx.mock

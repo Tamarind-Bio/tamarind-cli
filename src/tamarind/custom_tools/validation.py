@@ -16,6 +16,7 @@ _NETWORK_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _MAX_NETWORK_SCAN_BYTES = 1024 * 1024
+_MAX_CONFIG_BYTES = 8 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -80,16 +81,23 @@ def validate_source_tree(tree: SourceTree) -> ValidationReport:
 
     config_file = files.get("config.json")
     if config_file is not None:
-        try:
-            value = json.loads(config_file.read_text())
-        except CustomToolUploadError as exc:
-            error("invalid_source_tree", ".", str(exc))
-            return ValidationReport(tuple(errors), tuple(warnings))
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-            error("invalid_json", "config.json", f"config.json is not valid JSON: {exc}")
+        if config_file.size > _MAX_CONFIG_BYTES:
+            error(
+                "config_too_large",
+                "config.json",
+                f"config.json exceeds the {_MAX_CONFIG_BYTES}-byte local validation limit",
+            )
         else:
-            if not isinstance(value, dict):
-                error("invalid_config", "config.json", "config.json must contain a JSON object")
+            try:
+                value = json.loads(config_file.read_text())
+            except CustomToolUploadError as exc:
+                error("invalid_source_tree", ".", str(exc))
+                return ValidationReport(tuple(errors), tuple(warnings))
+            except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
+                error("invalid_json", "config.json", f"config.json is not valid JSON: {exc}")
+            else:
+                if not isinstance(value, dict):
+                    error("invalid_config", "config.json", "config.json must contain a JSON object")
 
     runtime_files = [
         source_file

@@ -174,10 +174,15 @@ def _parse_json(resp: httpx.Response) -> Any:
         return text
 
 
-def _extract_message(resp: httpx.Response) -> str:
+def _error_body(resp: httpx.Response) -> tuple[object | None, bool]:
     try:
-        body = resp.json()
+        return resp.json(), True
     except ValueError:
+        return None, False
+
+
+def _extract_message(resp: httpx.Response, body: object | None, *, is_json: bool) -> str:
+    if not is_json:
         return resp.text.strip() or resp.reason_phrase or f"HTTP {resp.status_code}"
     if isinstance(body, dict):
         for key in ("error", "message", "detail", "title"):
@@ -189,25 +194,27 @@ def _extract_message(resp: httpx.Response) -> str:
 
 
 def _map_error(resp: httpx.Response) -> TamarindError:
-    msg = _extract_message(resp)
+    body, is_json = _error_body(resp)
+    detail = body if is_json else None
+    msg = _extract_message(resp, body, is_json=is_json)
     code = resp.status_code
-    problem_code = _problem_code(resp)
+    problem_code = _problem_code(detail)
     if problem_code == "custom_tool_not_found" or problem_code == "custom_tool_version_not_found":
-        return CustomToolNotFoundError(msg)
+        return CustomToolNotFoundError(msg, detail=detail)
     if problem_code == "custom_tool_name_taken":
-        return CustomToolExistsError(msg)
+        return CustomToolExistsError(msg, detail=detail)
     if problem_code == "custom_tool_not_deployable":
-        return CustomToolNotDeployableError(msg)
+        return CustomToolNotDeployableError(msg, detail=detail)
     if problem_code == "invalid_custom_tool_config" or problem_code == "invalid_custom_tool_source":
-        return CustomToolValidationError(msg)
+        return CustomToolValidationError(msg, detail=detail)
     if problem_code == "custom_tool_generation_mismatch":
-        return StaleCustomToolError(msg)
+        return StaleCustomToolError(msg, detail=detail)
     if problem_code == "custom_tool_source_digest_mismatch" or problem_code == "custom_tool_upload_not_found":
-        return CustomToolUploadError(msg)
+        return CustomToolUploadError(msg, detail=detail)
     if problem_code == "custom_tool_build_in_progress":
-        return CustomToolBuildInProgressError(msg)
+        return CustomToolBuildInProgressError(msg, detail=detail)
     if problem_code == "custom_tool_build_not_cancellable":
-        return CustomToolBuildNotInProgressError(msg)
+        return CustomToolBuildNotInProgressError(msg, detail=detail)
     ml = msg.lower()
     auth_ish = "api key" in ml or "api-key" in ml or "apikey" in ml or "unauthorized" in ml
     resource = (
@@ -226,40 +233,32 @@ def _map_error(resp: httpx.Response) -> TamarindError:
     )
     notfound_ish = "not found" in ml or "does not exist" in ml or "no such" in ml
     if code == 401:
-        return AuthError(f"Unauthorized: {msg}")
+        return AuthError(f"Unauthorized: {msg}", detail=detail)
     if code == 403:
         if auth_ish:
-            return AuthError(f"Access denied: {msg}")
+            return AuthError(f"Access denied: {msg}", detail=detail)
         if budget_ish:
-            return BudgetError(f"Budget or quota rejected the request: {msg}")
-        return APIError(f"Access denied: {msg}", status_code=code)
+            return BudgetError(f"Budget or quota rejected the request: {msg}", detail=detail)
+        return APIError(f"Access denied: {msg}", status_code=code, detail=detail)
     if code == 404:
-        return NotFoundError(msg)
+        return NotFoundError(msg, detail=detail)
     if code == 400:
         # The API uses 400 for several distinct failures; classify by message so
         # exit codes are consistent: bad/missing key -> auth (3), missing job/file
         # -> not-found (4), otherwise a genuine validation error (5).
         if auth_ish:
-            return AuthError(f"Unauthorized: {msg}")
+            return AuthError(f"Unauthorized: {msg}", detail=detail)
         if notfound_ish:
-            return NotFoundError(msg)
-        return ValidationError(msg)
-    if code == 429:
-        return RateLimitError(f"Rate limited: {msg}")
-    if code == 422:
-        try:
-            detail: object | None = resp.json()
-        except ValueError:
-            detail = None
+            return NotFoundError(msg, detail=detail)
         return ValidationError(msg, detail=detail)
-    return APIError(msg, status_code=code)
+    if code == 429:
+        return RateLimitError(f"Rate limited: {msg}", detail=detail)
+    if code == 422:
+        return ValidationError(msg, detail=detail)
+    return APIError(msg, status_code=code, detail=detail)
 
 
-def _problem_code(resp: httpx.Response) -> str | None:
-    try:
-        body = resp.json()
-    except ValueError:
-        return None
+def _problem_code(body: object | None) -> str | None:
     value = body.get("code") if isinstance(body, dict) else None
     return str(value) if value else None
 

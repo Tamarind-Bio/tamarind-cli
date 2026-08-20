@@ -83,7 +83,7 @@ class SourceFile:
             raise CustomToolUploadError(f"Source file changed during inspection: {path}")
         if not stat.S_ISREG(metadata.st_mode):
             raise CustomToolUploadError(f"Source archives can contain only regular files: {path}")
-        return cls(
+        inspected = cls(
             relative=relative,
             path=path,
             root=root,
@@ -93,6 +93,9 @@ class SourceFile:
             modified_ns=metadata.st_mtime_ns,
             mode=metadata.st_mode,
         )
+        with inspected.open_verified():
+            pass
+        return inspected
 
     @contextmanager
     def open_verified(self) -> Iterator[BinaryIO]:
@@ -103,7 +106,7 @@ class SourceFile:
             descriptor = os.open(self.path, flags)
         except OSError as exc:
             raise CustomToolUploadError(
-                f"Source file changed after inspection: {self.path}"
+                f"Source file cannot be read or changed after inspection: {self.path}"
             ) from exc
 
         with os.fdopen(descriptor, "rb") as source:

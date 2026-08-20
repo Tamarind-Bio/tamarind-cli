@@ -9,7 +9,7 @@ import zipfile
 
 import pytest
 
-from tamarind.custom_tools import packaging
+from tamarind.custom_tools import packaging, validation
 from tamarind.custom_tools.packaging import build_archive
 from tamarind.custom_tools.validation import validate_folder
 from tamarind.errors import CustomToolUploadError
@@ -174,6 +174,26 @@ def test_validation_rejects_linked_descendants(tmp_path: Path) -> None:
     ]
 
 
+def test_validation_rejects_unreadable_retained_files(tmp_path: Path, monkeypatch) -> None:
+    _valid_source(tmp_path)
+    unreadable = tmp_path / "weights.bin"
+    unreadable.write_bytes(b"weights")
+    real_open = packaging.os.open
+
+    def guarded_open(path, flags, *args):
+        if Path(path) == unreadable:
+            raise PermissionError("unreadable")
+        return real_open(path, flags, *args)
+
+    monkeypatch.setattr(packaging.os, "open", guarded_open)
+
+    report = validate_folder(tmp_path)
+
+    assert [(problem.code, problem.path) for problem in report.errors] == [
+        ("invalid_source_tree", ".")
+    ]
+
+
 def test_validation_requires_exact_runtime_filename_casing(tmp_path: Path) -> None:
     _valid_source(tmp_path)
     for exact, alternate in (
@@ -283,6 +303,28 @@ def test_validation_rejects_non_object_config_json(tmp_path: Path) -> None:
 
     assert [(problem.code, problem.path) for problem in report.errors] == [
         ("invalid_config", "config.json")
+    ]
+
+
+def test_validation_bounds_config_json_before_parsing(tmp_path: Path, monkeypatch) -> None:
+    _valid_source(tmp_path)
+    monkeypatch.setattr(validation, "_MAX_CONFIG_BYTES", 16)
+
+    report = validate_folder(tmp_path)
+
+    assert [(problem.code, problem.path) for problem in report.errors] == [
+        ("config_too_large", "config.json")
+    ]
+
+
+def test_validation_translates_excessive_json_nesting(tmp_path: Path) -> None:
+    _valid_source(tmp_path)
+    (tmp_path / "config.json").write_text("[" * 2_000 + "0" + "]" * 2_000)
+
+    report = validate_folder(tmp_path)
+
+    assert [(problem.code, problem.path) for problem in report.errors] == [
+        ("invalid_json", "config.json")
     ]
 
 
