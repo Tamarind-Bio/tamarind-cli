@@ -55,9 +55,11 @@ class _MonitorDeadlineExceeded(Exception):
 class _MonitorRequestWorker:
     """Run blocking reads behind one wall-clock deadline boundary."""
 
-    def __init__(self) -> None:
+    def __init__(self, cancel_active_request: Callable[[], None]) -> None:
         self._requests: Queue[Callable[[], object] | None] = Queue()
         self._results: Queue[tuple[bool, object]] = Queue()
+        self._cancel_active_request = cancel_active_request
+        self._closed = False
         self._thread = Thread(target=self._run, name="tamarind-monitor-http", daemon=True)
         self._thread.start()
 
@@ -81,7 +83,15 @@ class _MonitorRequestWorker:
         raise cast(BaseException, value)
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        # The worker may be inside a synchronous HTTP read. Closing its
+        # dedicated transport interrupts that connection before shutdown is
+        # queued, instead of leaving a daemon request behind after timeout.
+        self._cancel_active_request()
         self._requests.put(None)
+        self._thread.join(timeout=1)
 
 
 class _Unset:
@@ -241,19 +251,37 @@ class Version:
     def refresh(self) -> "Version":
         return self._refresh(request_timeout=None)
 
-    def _refresh(self, *, request_timeout: float | None) -> "Version":
-        return self._collection._get_version(
+    def _refresh(
+        self,
+        *,
+        request_timeout: float | None,
+        transport: GeneratedCustomToolsTransport | None = None,
+    ) -> "Version":
+        active_transport = transport or self._collection._transport
+        wire = active_transport.get_custom_tool_version(
+            self.tool_name,
+            self.name,
+            timeout=request_timeout,
+        )
+        return _version_from_wire(
+            self._collection,
             self.tool_name,
             self.tool_generation,
-            self.name,
-            request_timeout=request_timeout,
+            wire,
         )
 
     def logs(self, *, cursor: str | None = None) -> BuildLogPage:
         return self._logs(cursor=cursor, request_timeout=None)
 
-    def _logs(self, *, cursor: str | None, request_timeout: float | None) -> BuildLogPage:
-        wire = self._collection._transport.list_custom_tool_build_logs(
+    def _logs(
+        self,
+        *,
+        cursor: str | None,
+        request_timeout: float | None,
+        transport: GeneratedCustomToolsTransport | None = None,
+    ) -> BuildLogPage:
+        active_transport = transport or self._collection._transport
+        wire = active_transport.list_custom_tool_build_logs(
             self.tool_name,
             self.name,
             cursor=cursor,
@@ -292,7 +320,12 @@ class Version:
     ) -> "Version":
         timeout, interval = _validate_monitor_options(timeout=timeout, interval=interval)
         deadline = None if timeout is None else time.monotonic() + timeout
-        request_worker = _MonitorRequestWorker() if deadline is not None else None
+        monitor_transport = self._collection._transport.fork() if deadline is not None else None
+        request_worker = (
+            _MonitorRequestWorker(monitor_transport.close)
+            if monitor_transport is not None
+            else None
+        )
         cursor: str | None = None
         delivered_for_cursor = 0
         current = self
@@ -311,7 +344,11 @@ class Version:
                 try:
 
                     def read_logs() -> BuildLogPage:
-                        return current._logs(cursor=cursor, request_timeout=remaining)
+                        return current._logs(
+                            cursor=cursor,
+                            request_timeout=remaining,
+                            transport=monitor_transport,
+                        )
 
                     page = (
                         read_logs()
@@ -358,7 +395,10 @@ class Version:
                     try:
 
                         def refresh() -> Version:
-                            return current._refresh(request_timeout=remaining)
+                            return current._refresh(
+                                request_timeout=remaining,
+                                transport=monitor_transport,
+                            )
 
                         refreshed = (
                             refresh()

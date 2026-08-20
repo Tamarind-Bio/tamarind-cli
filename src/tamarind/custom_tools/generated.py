@@ -144,6 +144,12 @@ class GeneratedCustomToolsTransport:
     def __init__(self, client: HTTPClient):
         self._client = client
 
+    def fork(self) -> GeneratedCustomToolsTransport:
+        return GeneratedCustomToolsTransport(self._client.fork())
+
+    def close(self) -> None:
+        self._client.close()
+
     def list_custom_tools(
         self,
         status: PublicCustomToolStatus | None = None,

@@ -287,6 +287,20 @@ def test_validation_preserves_integer_precision_for_numeric_bounds(tmp_path: Pat
     assert "invalid_number_bounds" in {problem.code for problem in report.errors}
 
 
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_validation_rejects_non_standard_json_constants(tmp_path: Path, constant: str) -> None:
+    _valid_source(tmp_path)
+    (tmp_path / "config.json").write_text(
+        '{"displayName":"Example","inputs":[],"extension":' + constant + "}"
+    )
+
+    report = validate_folder(tmp_path)
+
+    assert [(problem.code, problem.path) for problem in report.errors] == [
+        ("invalid_json", "config.json")
+    ]
+
+
 def test_validation_warns_when_run_script_is_missing(tmp_path: Path) -> None:
     _valid_source(tmp_path)
     (tmp_path / "run.sh").unlink()

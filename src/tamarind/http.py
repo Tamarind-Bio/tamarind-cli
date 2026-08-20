@@ -43,6 +43,7 @@ class HTTPClient:
     ):
         self.base_url = base_url
         self.api_key = api_key
+        self._timeout = timeout
         headers = {
             "Accept": "application/json",
             # Brotli is still decoded transparently by httpx; we just don't want
@@ -57,6 +58,10 @@ class HTTPClient:
     # -- lifecycle ---------------------------------------------------------
     def close(self) -> None:
         self._client.close()
+
+    def fork(self) -> "HTTPClient":
+        """Create an independently cancellable client with the same settings."""
+        return HTTPClient(self.base_url, self.api_key, timeout=self._timeout)
 
     def __enter__(self) -> "HTTPClient":
         return self

@@ -26,6 +26,14 @@ _NETWORK_PATTERN = re.compile(
 )
 
 
+class _InvalidJSONConstant(ValueError):
+    pass
+
+
+def _reject_json_constant(value: str) -> Any:
+    raise _InvalidJSONConstant(f"non-standard numeric constant {value!r}")
+
+
 @dataclass(frozen=True)
 class ValidationProblem:
     code: str
@@ -90,11 +98,14 @@ def validate_source_tree(tree: SourceTree) -> ValidationReport:
     config_file = files.get("config.json")
     if config_file is not None:
         try:
-            value = json.loads(config_file.read_text())
+            value = json.loads(
+                config_file.read_text(),
+                parse_constant=_reject_json_constant,
+            )
         except CustomToolUploadError as exc:
             error("invalid_source_tree", ".", str(exc))
             return ValidationReport(tuple(errors), tuple(warnings))
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        except (OSError, UnicodeError, json.JSONDecodeError, _InvalidJSONConstant) as exc:
             error("invalid_json", "config.json", f"config.json is not valid JSON: {exc}")
         else:
             if not isinstance(value, dict):

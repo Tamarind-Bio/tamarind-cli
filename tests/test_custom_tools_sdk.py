@@ -580,20 +580,26 @@ def test_monitor_wall_clock_deadline_bounds_a_blocked_http_phase() -> None:
         return_value=httpx.Response(200, json=_version())
     )
     release = Event()
+    cancelled = Event()
 
     with Tamarind(api_key="key", api_base=BASE) as client:
         version = client.custom_tools.get("example").get_version("v1")
-        client.custom_tools._transport.list_custom_tool_build_logs = lambda *_args, **_kwargs: (
-            release.wait(2)
-        )
+
+        class CancellableMonitorTransport:
+            def list_custom_tool_build_logs(self, *_args, **_kwargs):
+                release.wait(2)
+
+            def close(self) -> None:
+                cancelled.set()
+                release.set()
+
+        client.custom_tools._transport.fork = CancellableMonitorTransport
         started = time.monotonic()
-        try:
-            with pytest.raises(CustomToolBuildTimeoutError, match="did not return logs"):
-                version.monitor(timeout=0.05)
-        finally:
-            release.set()
+        with pytest.raises(CustomToolBuildTimeoutError, match="did not return logs"):
+            version.monitor(timeout=0.05)
 
     assert time.monotonic() - started < 1
+    assert cancelled.is_set()
 
 
 @respx.mock
