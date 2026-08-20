@@ -5,10 +5,9 @@ import json
 import subprocess
 import sys
 
-from scripts.extract_custom_tools_openapi import extract
 
-
-def test_openapi_extraction_uses_the_public_path_boundary() -> None:
+def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
     operation = {
         "operationId": "listCustomTools",
         "responses": {"200": {"description": "ok"}},
@@ -24,8 +23,20 @@ def test_openapi_extraction_uses_the_public_path_boundary() -> None:
         },
         "components": {"schemas": {}, "responses": {}, "securitySchemes": {}},
     }
+    source = tmp_path / "public.json"
+    sliced_path = tmp_path / "custom-tools.json"
+    source.write_text(json.dumps(spec))
 
-    sliced = extract(spec)
+    subprocess.run(
+        [
+            sys.executable,
+            str(root / "scripts/extract_custom_tools_openapi.py"),
+            str(source),
+            str(sliced_path),
+        ],
+        check=True,
+    )
+    sliced = json.loads(sliced_path.read_text())
 
     assert set(sliced["paths"]) == {"/custom-tools", "/custom-tools/{name}"}
 
