@@ -613,10 +613,18 @@ def test_monitor_translates_request_timeout_at_deadline(monkeypatch) -> None:
 
     with Tamarind(api_key="key", api_base=BASE) as client:
         version = client.custom_tools.get("example").get_version("v1")
+
+        class TimedOutMonitorTransport:
+            def list_custom_tool_build_logs(self, *_args, **_kwargs):
+                raise TamarindError("request timed out")
+
+            def close(self) -> None:
+                pass
+
         monkeypatch.setattr(
             client.custom_tools._transport,
-            "list_custom_tool_build_logs",
-            lambda *_args, **_kwargs: (_ for _ in ()).throw(TamarindError("request timed out")),
+            "fork",
+            TimedOutMonitorTransport,
         )
         with pytest.raises(CustomToolBuildTimeoutError):
             version.monitor(timeout=1)
@@ -645,14 +653,26 @@ def test_monitor_bounds_terminal_refresh_by_remaining_deadline(monkeypatch) -> N
     with Tamarind(api_key="key", api_base=BASE) as client:
         version = client.custom_tools.get("example").get_version("v1")
 
-        def terminal_refresh(*_args, **kwargs):
-            assert kwargs["timeout"] == pytest.approx(0.5)
-            raise TamarindError("request timed out")
+        class TerminalRefreshTimeoutTransport:
+            def list_custom_tool_build_logs(self, *_args, **_kwargs):
+                return {
+                    "status": "Complete",
+                    "items": [],
+                    "nextCursor": None,
+                    "error": None,
+                }
+
+            def get_custom_tool_version(self, *_args, **kwargs):
+                assert kwargs["timeout"] == pytest.approx(0.5)
+                raise TamarindError("request timed out")
+
+            def close(self) -> None:
+                pass
 
         monkeypatch.setattr(
             client.custom_tools._transport,
-            "get_custom_tool_version",
-            terminal_refresh,
+            "fork",
+            TerminalRefreshTimeoutTransport,
         )
         with pytest.raises(CustomToolBuildTimeoutError, match="terminal state"):
             version.monitor(timeout=1)
