@@ -41,9 +41,12 @@ detail that can change without any client change and without drift.
 
 Custom Tool creation, source upload, version builds, logs, cancellation, and
 publication are generated from the website backend's public OpenAPI artifact.
-The committed SDK slice is selected by the `/custom-tools` path boundary; it
-does not depend on optional documentation tags. CI regenerates the typed
-transport from that slice and rejects drift.
+The committed SDK input is the byte-identical Custom Tools artifact generated
+and reviewed in the website repository; this repository performs no independent
+route or schema extraction. `openapi/custom-tools-v1.provenance.json` pins the
+exact website commit, source path, and SHA-256 digest. CLI CI validates that
+metadata locally; website release verification fetches the pinned public CLI
+revision and compares both repositories byte-for-byte.
 
 The SDK owns archive-local concerns that only the client can decide safely:
 deterministic ZIP construction, symlink and junction rejection, upload limits,

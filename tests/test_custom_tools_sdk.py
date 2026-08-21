@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import time
 from typing import get_type_hints
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -71,6 +72,24 @@ def _version(*, status: str = "Running", terminal: bool = False, error: dict | N
     }
 
 
+def _build_request(
+    *,
+    status: str = "Queued",
+    terminal: bool = False,
+    version_name: str | None = None,
+    error: dict | None = None,
+) -> dict:
+    return {
+        "requestId": "a" * 64,
+        "status": status,
+        "createdAt": "2026-08-15T00:00:00Z",
+        "updatedAt": "2026-08-15T00:00:00Z",
+        "terminal": terminal,
+        "versionName": version_name,
+        "error": error,
+    }
+
+
 def _source(root: Path) -> None:
     (root / "config.json").write_text(json.dumps({"displayName": "Example", "inputs": []}))
     (root / "Dockerfile").write_text("FROM python:3.12-slim\n")
@@ -115,7 +134,7 @@ def test_collection_get_list_and_update_use_resource_generation() -> None:
 
 
 @respx.mock
-def test_build_uploads_exact_archive_then_creates_version(tmp_path: Path) -> None:
+def test_build_uploads_exact_archive_then_returns_build_request(tmp_path: Path) -> None:
     _source(tmp_path)
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
     upload_session_route = respx.post(f"{BASE}custom-tools/example/uploads").mock(
@@ -136,7 +155,7 @@ def test_build_uploads_exact_archive_then_creates_version(tmp_path: Path) -> Non
     )
     upload_route = respx.put(UPLOAD).mock(return_value=httpx.Response(200))
     build_route = respx.post(f"{BASE}custom-tools/example/versions").mock(
-        return_value=httpx.Response(202, json={"action": "build", "version": _version()})
+        return_value=httpx.Response(202, json={"action": "queued", "request": _build_request()})
     )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
@@ -151,9 +170,39 @@ def test_build_uploads_exact_archive_then_creates_version(tmp_path: Path) -> Non
     assert body["expectedSourceDigest"].startswith("sha256:")
     assert build_route.calls.last.request.headers["If-Match"] == "generation-1"
     assert uploaded.startswith(b"PK")
-    assert result.action == "build"
-    assert result.version.name == "v1"
-    assert result.version.tool_generation == "generation-1"
+    assert result.action == "queued"
+    assert result.request.request_id == "a" * 64
+    assert result.request.tool_generation == "generation-1"
+
+
+@respx.mock
+def test_build_request_monitor_polls_then_fetches_numbered_version(monkeypatch) -> None:
+    request_route = respx.get(f"{BASE}custom-tools/example/builds/{'a' * 64}").mock(
+        side_effect=[
+            httpx.Response(200, json=_build_request(status="Claimed")),
+            httpx.Response(
+                200, json=_build_request(status="Resolved", terminal=True, version_name="v1")
+            ),
+        ]
+    )
+    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+        return_value=httpx.Response(200, json=_version(status="Complete", terminal=True))
+    )
+    monkeypatch.setattr(resources, "_clock", lambda: 0.0)
+    monkeypatch.setattr(resources.asyncio, "sleep", AsyncMock())
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        request = resources._build_request_from_wire(
+            client.custom_tools,
+            "example",
+            "generation-1",
+            _build_request(),
+        )
+        version = request.monitor(timeout=10, interval=0.01)
+
+    assert request_route.call_count == 2
+    assert version.name == "v1"
+    assert version.tool_generation == "generation-1"
 
 
 @respx.mock

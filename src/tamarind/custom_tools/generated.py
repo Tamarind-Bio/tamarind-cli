@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from tamarind.http import HTTPClient
 
-OPENAPI_SHA256 = "9a149fac08039fbec69d685908c8e6a8591e1bd5fd0010da0781030b4ed05652"
+OPENAPI_SHA256 = "51217242e1f3c9a31fc4e68e76012e247d0f30322e89031e7233fe4cadb54d97"
 
 
 def _segment(value: str) -> str:
@@ -38,9 +38,19 @@ class PublicBuildLogPage(TypedDict):
     status: PublicVersionStatus
 
 
+class PublicBuildRequest(TypedDict):
+    createdAt: str
+    error: PublicBuildError | None
+    requestId: str
+    status: PublicBuildRequestStatus
+    terminal: bool
+    updatedAt: str
+    versionName: str | None
+
+
 class PublicBuildResult(TypedDict):
-    action: Literal["build", "reuse_image", "unchanged"]
-    version: PublicVersion
+    action: Literal["queued"]
+    request: PublicBuildRequest
 
 
 class PublicCreateCustomToolRequest(TypedDict):
@@ -142,8 +152,11 @@ class PublicVersionPage(TypedDict):
     nextCursor: str | None
 
 
+PublicBuildRequestStatus: TypeAlias = Literal[
+    "Queued", "Claimed", "Cancelled", "Resolved", "Failed"
+]
 PublicCustomToolStatus: TypeAlias = Literal["Draft", "Building", "Deployed"]
-PublicVersionStatus: TypeAlias = Literal["Queued", "Running", "Complete", "Stopped"]
+PublicVersionStatus: TypeAlias = Literal["Running", "Complete", "Stopped"]
 
 
 class GeneratedCustomToolsTransport:
@@ -203,6 +216,27 @@ class GeneratedCustomToolsTransport:
         )
         return cast(PublicCustomTool, response.json())
 
+    def get_custom_tool_build_request(
+        self, name: str, request_id: str, *, timeout: float | None = None
+    ) -> PublicBuildRequest:
+        response = self._client.request(
+            "GET",
+            f"custom-tools/{_segment(name)}/builds/{_segment(request_id)}",
+            timeout=timeout,
+        )
+        return cast(PublicBuildRequest, response.json())
+
+    def cancel_custom_tool_build_request(
+        self, name: str, request_id: str, if_match: str, *, timeout: float | None = None
+    ) -> PublicBuildRequest:
+        response = self._client.request(
+            "POST",
+            f"custom-tools/{_segment(name)}/builds/{_segment(request_id)}/cancel",
+            headers={"If-Match": if_match},
+            timeout=timeout,
+        )
+        return cast(PublicBuildRequest, response.json())
+
     def create_custom_tool_upload(
         self, name: str, if_match: str, *, timeout: float | None = None
     ) -> PublicUploadSession:
@@ -258,7 +292,7 @@ class GeneratedCustomToolsTransport:
         )
         return cast(PublicVersion, response.json())
 
-    def cancel_custom_tool_build(
+    def cancel_custom_tool_version_build(
         self, name: str, version_name: str, if_match: str, *, timeout: float | None = None
     ) -> PublicVersion:
         response = self._client.request(

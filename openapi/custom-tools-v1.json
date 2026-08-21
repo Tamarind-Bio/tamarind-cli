@@ -124,25 +124,89 @@
         "title": "PublicBuildLogPage",
         "type": "object"
       },
+      "PublicBuildRequest": {
+        "properties": {
+          "createdAt": {
+            "title": "Createdat",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicBuildError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requestId": {
+            "description": "Stable identifier for this admitted build request.",
+            "title": "Requestid",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PublicBuildRequestStatus"
+          },
+          "terminal": {
+            "title": "Terminal",
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "title": "Updatedat",
+            "type": "string"
+          },
+          "versionName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The resolved numbered Version handle, or null until the request resolves.",
+            "title": "Versionname"
+          }
+        },
+        "required": [
+          "requestId",
+          "status",
+          "createdAt",
+          "updatedAt",
+          "terminal",
+          "versionName",
+          "error"
+        ],
+        "title": "PublicBuildRequest",
+        "type": "object"
+      },
+      "PublicBuildRequestStatus": {
+        "enum": [
+          "Queued",
+          "Claimed",
+          "Cancelled",
+          "Resolved",
+          "Failed"
+        ],
+        "title": "PublicBuildRequestStatus",
+        "type": "string"
+      },
       "PublicBuildResult": {
         "properties": {
           "action": {
-            "description": "What happened: `build` started a new image build, `reuse_image` created a version from the current image, and `unchanged` returned the version already associated with this source.",
-            "enum": [
-              "build",
-              "reuse_image",
-              "unchanged"
-            ],
+            "const": "queued",
+            "description": "The source build was durably admitted for asynchronous processing.",
             "title": "Action",
             "type": "string"
           },
-          "version": {
-            "$ref": "#/components/schemas/PublicVersion"
+          "request": {
+            "$ref": "#/components/schemas/PublicBuildRequest"
           }
         },
         "required": [
           "action",
-          "version"
+          "request"
         ],
         "title": "PublicBuildResult",
         "type": "object"
@@ -752,7 +816,7 @@
             ]
           },
           "name": {
-            "description": "The version handle, such as `v3`, or `queued-<sha>` while a GitHub build waits.",
+            "description": "The immutable numbered version handle, such as `v3`.",
             "title": "Name",
             "type": "string"
           },
@@ -836,7 +900,6 @@
       },
       "PublicVersionStatus": {
         "enum": [
-          "Queued",
           "Running",
           "Complete",
           "Stopped"
@@ -1127,6 +1190,148 @@
         "x-doc-group": "Custom Tools"
       }
     },
+    "/custom-tools/{name}/builds/{request_id}": {
+      "get": {
+        "description": "Read durable source-preparation state and its resolved Version handle.",
+        "operationId": "getCustomToolBuildRequest",
+        "parameters": [
+          {
+            "description": "The custom tool name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The custom tool name.",
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The stable identifier returned by the build request.",
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "description": "The stable identifier returned by the build request.",
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicBuildRequest"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get a custom tool build request",
+        "tags": [
+          "custom-tools-public"
+        ],
+        "x-doc-group": "Custom Tools"
+      }
+    },
+    "/custom-tools/{name}/builds/{request_id}/cancel": {
+      "post": {
+        "description": "Cancel queued or claimed source preparation before it resolves.",
+        "operationId": "cancelCustomToolBuildRequest",
+        "parameters": [
+          {
+            "description": "The custom tool name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The custom tool name.",
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The stable identifier returned by the build request.",
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "description": "The stable identifier returned by the build request.",
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Request Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
+              "minLength": 1,
+              "title": "If-Match",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicBuildRequest"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Cancel a custom tool build request",
+        "tags": [
+          "custom-tools-public"
+        ],
+        "x-doc-group": "Custom Tools"
+      }
+    },
     "/custom-tools/{name}/uploads": {
       "post": {
         "description": "Create a temporary upload for a source archive.\n\nUpload the file to `uploadUrl` using `uploadMethod` and every value in `uploadHeaders`, then use\n`uploadId` to build a version.",
@@ -1292,7 +1497,7 @@
         "x-doc-group": "Custom Tools"
       },
       "post": {
-        "description": "Build a version from an uploaded source archive.\n\nReturns immediately with the numbered version and its current status.",
+        "description": "Build a version from an uploaded source archive.\n\nReturns after durable admission with a stable BuildRequest. Poll the\nrequest until it resolves to an immutable numbered version.",
         "operationId": "buildCustomToolVersion",
         "parameters": [
           {
@@ -1383,15 +1588,15 @@
             }
           },
           {
-            "description": "A numbered version handle such as `v3`, or a queued build handle such as `queued-a1b2c3d4`.",
+            "description": "A numbered version handle, such as `v3`.",
             "in": "path",
             "name": "version_name",
             "required": true,
             "schema": {
-              "description": "A numbered version handle such as `v3`, or a queued build handle such as `queued-a1b2c3d4`.",
+              "description": "A numbered version handle, such as `v3`.",
               "maxLength": 200,
               "minLength": 2,
-              "pattern": "^(?:v[1-9][0-9]*|queued-[a-f0-9]+)$",
+              "pattern": "^v[1-9][0-9]*$",
               "title": "Version Name",
               "type": "string"
             }
@@ -1430,8 +1635,8 @@
     },
     "/custom-tools/{name}/versions/{version_name}/cancel": {
       "post": {
-        "description": "Request cancellation of an active build.\n\nCompleted and stopped builds cannot be canceled.",
-        "operationId": "cancelCustomToolBuild",
+        "description": "Request cancellation of an active numbered Version build.",
+        "operationId": "cancelCustomToolVersionBuild",
         "parameters": [
           {
             "description": "The custom tool name.",
@@ -1525,15 +1730,15 @@
             }
           },
           {
-            "description": "A numbered version handle such as `v3`, or a queued build handle such as `queued-a1b2c3d4`.",
+            "description": "A numbered version handle, such as `v3`.",
             "in": "path",
             "name": "version_name",
             "required": true,
             "schema": {
-              "description": "A numbered version handle such as `v3`, or a queued build handle such as `queued-a1b2c3d4`.",
+              "description": "A numbered version handle, such as `v3`.",
               "maxLength": 200,
               "minLength": 2,
-              "pattern": "^(?:v[1-9][0-9]*|queued-[a-f0-9]+)$",
+              "pattern": "^v[1-9][0-9]*$",
               "title": "Version Name",
               "type": "string"
             }

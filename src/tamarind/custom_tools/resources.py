@@ -18,6 +18,8 @@ from tamarind.custom_tools.generated import (
     PublicBuildError,
     PublicBuildEvent,
     PublicBuildLogPage,
+    PublicBuildRequest,
+    PublicBuildRequestStatus,
     PublicCreateCustomToolRequest,
     PublicCustomTool,
     PublicCustomToolStatus,
@@ -47,7 +49,6 @@ from tamarind.http import DEFAULT_TIMEOUT
 
 
 T = TypeVar("T")
-BuildAction = Literal["build", "reuse_image", "unchanged"]
 EventCallback = Callable[["BuildEvent"], None]
 _clock = time.monotonic
 
@@ -87,8 +88,8 @@ class BuildLogPage:
 
 @dataclass(frozen=True)
 class BuildResult:
-    action: BuildAction
-    version: "Version"
+    action: Literal["queued"]
+    request: "BuildRequest"
 
 
 @dataclass(frozen=True)
@@ -271,7 +272,7 @@ class Version:
         return _log_page_from_wire(wire)
 
     def cancel(self) -> "Version":
-        wire = self._collection._transport.cancel_custom_tool_build(
+        wire = self._collection._transport.cancel_custom_tool_version_build(
             self.tool_name,
             self.name,
             self.tool_generation,
@@ -395,6 +396,103 @@ class Version:
             await asyncio.sleep(interval if remaining is None else min(interval, remaining))
 
 
+@dataclass(frozen=True)
+class BuildRequest:
+    request_id: str
+    status: PublicBuildRequestStatus
+    created_at: str
+    updated_at: str
+    terminal: bool
+    version_name: str | None
+    error: BuildError | None
+    tool_name: str
+    tool_generation: str
+    _collection: "CustomTools" = field(repr=False, compare=False)
+
+    def refresh(self) -> "BuildRequest":
+        wire = self._collection._transport.get_custom_tool_build_request(
+            self.tool_name,
+            self.request_id,
+        )
+        return _build_request_from_wire(
+            self._collection,
+            self.tool_name,
+            self.tool_generation,
+            wire,
+        )
+
+    async def _refresh_async(self, *, request_timeout: float | None) -> "BuildRequest":
+        wire = await asyncio.to_thread(
+            self._collection._transport.get_custom_tool_build_request,
+            self.tool_name,
+            self.request_id,
+            timeout=request_timeout,
+        )
+        return _build_request_from_wire(
+            self._collection,
+            self.tool_name,
+            self.tool_generation,
+            wire,
+        )
+
+    def cancel(self) -> "BuildRequest":
+        wire = self._collection._transport.cancel_custom_tool_build_request(
+            self.tool_name,
+            self.request_id,
+            self.tool_generation,
+        )
+        return _build_request_from_wire(
+            self._collection,
+            self.tool_name,
+            self.tool_generation,
+            wire,
+        )
+
+    def monitor(self, *, timeout: float | None, interval: float = 2.0) -> Version:
+        timeout, interval = _validate_monitor_options(timeout=timeout, interval=interval)
+        return asyncio.run(self._monitor_validated(timeout=timeout, interval=interval))
+
+    async def monitor_async(self, *, timeout: float | None, interval: float = 2.0) -> Version:
+        timeout, interval = _validate_monitor_options(timeout=timeout, interval=interval)
+        return await self._monitor_validated(timeout=timeout, interval=interval)
+
+    async def _monitor_validated(self, *, timeout: float | None, interval: float) -> Version:
+        deadline = None if timeout is None else _clock() + timeout
+        current = self
+        while True:
+            if current.status == "Resolved":
+                if not current.version_name:
+                    raise TamarindError("Resolved Custom Tool BuildRequest has no Version")
+                return self._collection._get_version(
+                    self.tool_name,
+                    self.tool_generation,
+                    current.version_name,
+                )
+            if current.status in ("Cancelled", "Failed"):
+                message = current.error.message if current.error else current.status.lower()
+                raise CustomToolBuildFailedError(
+                    f"Custom Tool BuildRequest {self.tool_name}/{self.request_id} failed: {message}",
+                    detail=current,
+                )
+            remaining = None if deadline is None else deadline - _clock()
+            if remaining is not None and remaining <= 0:
+                raise CustomToolBuildTimeoutError(
+                    f"Custom Tool BuildRequest {self.tool_name}/{self.request_id} was still "
+                    f"{current.status} after {timeout:g}s"
+                )
+            await asyncio.sleep(interval if remaining is None else min(interval, remaining))
+            remaining = None if deadline is None else deadline - _clock()
+            current = await _await_monitor_phase(
+                current._refresh_async(request_timeout=remaining),
+                remaining=remaining,
+                deadline=deadline,
+                timeout_message=(
+                    f"Custom Tool BuildRequest {self.tool_name}/{self.request_id} did not return "
+                    "before the monitor deadline"
+                ),
+            )
+
+
 async def _await_monitor_phase(
     awaitable: Awaitable[T],
     *,
@@ -503,7 +601,12 @@ class CustomTools:
         )
         return BuildResult(
             action=wire["action"],
-            version=_version_from_wire(self, tool.name, tool.generation, wire["version"]),
+            request=_build_request_from_wire(
+                self,
+                tool.name,
+                tool.generation,
+                wire["request"],
+            ),
         )
 
     def _versions(
@@ -618,6 +721,26 @@ def _version_from_wire(
         completed_at=wire["completedAt"],
         terminal=wire["terminal"],
         error=_build_error_from_wire(error),
+        tool_name=tool_name,
+        tool_generation=tool_generation,
+        _collection=collection,
+    )
+
+
+def _build_request_from_wire(
+    collection: CustomTools,
+    tool_name: str,
+    tool_generation: str,
+    wire: PublicBuildRequest,
+) -> BuildRequest:
+    return BuildRequest(
+        request_id=wire["requestId"],
+        status=wire["status"],
+        created_at=wire["createdAt"],
+        updated_at=wire["updatedAt"],
+        terminal=wire["terminal"],
+        version_name=wire["versionName"],
+        error=_build_error_from_wire(wire["error"]),
         tool_name=tool_name,
         tool_generation=tool_generation,
         _collection=collection,
