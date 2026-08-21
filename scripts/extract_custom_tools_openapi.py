@@ -61,11 +61,39 @@ def _reachable_components(
     return {name: deepcopy(components[name]) for name in sorted(reachable)}
 
 
+def _resolve_component(
+    value: dict[str, Any],
+    kind: str,
+    components: dict[str, Any],
+    seen: frozenset[str] = frozenset(),
+) -> dict[str, Any]:
+    ref = value.get("$ref")
+    if not isinstance(ref, str):
+        return value
+    prefix = f"#/components/{kind}/"
+    if not ref.startswith(prefix):
+        raise ValueError(f"Unsupported {kind} reference: {ref}")
+    if ref in seen:
+        raise ValueError(f"Cyclic {kind} reference: {ref}")
+    name = ref[len(prefix) :].replace("~1", "/").replace("~0", "~")
+    target = components.get(name)
+    if not isinstance(target, dict):
+        raise ValueError(f"Unresolved {kind} reference: {ref}")
+    return _resolve_component(target, kind, components, seen | {ref})
+
+
 def extract(spec: dict[str, Any]) -> dict[str, Any]:
+    components = spec.get("components", {})
+    path_items = components.get("pathItems", {})
+    custom_path_items = {
+        path: path_item
+        for path, path_item in spec.get("paths", {}).items()
+        if _is_custom_tools_path(path) and isinstance(path_item, dict)
+    }
+    retained_path_items = _reachable_components(custom_path_items, path_items, "pathItems")
     paths: dict[str, Any] = {}
-    for path, path_item in spec.get("paths", {}).items():
-        if not _is_custom_tools_path(path):
-            continue
+    for path, unresolved_path_item in custom_path_items.items():
+        path_item = _resolve_component(unresolved_path_item, "pathItems", retained_path_items)
         selected: dict[str, Any] = {
             method: operation
             for method, operation in path_item.items()
@@ -77,7 +105,6 @@ def extract(spec: dict[str, Any]) -> dict[str, Any]:
                 selected["parameters"] = path_parameters
             paths[path] = selected
 
-    components = spec.get("components", {})
     schemas = components.get("schemas", {})
     responses = components.get("responses", {})
     parameters = components.get("parameters", {})
@@ -107,6 +134,8 @@ def extract(spec: dict[str, Any]) -> dict[str, Any]:
         extracted_components["parameters"] = retained_parameters
     if retained_request_bodies:
         extracted_components["requestBodies"] = retained_request_bodies
+    if retained_path_items:
+        extracted_components["pathItems"] = retained_path_items
 
     return {
         "openapi": spec["openapi"],

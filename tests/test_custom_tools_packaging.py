@@ -107,6 +107,18 @@ def test_archive_rejects_file_replaced_by_symlink_after_inspection(
         build_archive(tmp_path)
 
 
+def test_archive_rejects_same_metadata_content_rewrite(tmp_path: Path) -> None:
+    _valid_source(tmp_path)
+    tree = packaging.inspect_source_tree(tmp_path)
+    main = tmp_path / "main.py"
+    metadata = main.stat()
+    main.write_text("print('no')\n")
+    os.utime(main, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+
+    with pytest.raises(CustomToolUploadError, match="contents changed"):
+        packaging.build_source_tree_archive(tree)
+
+
 def test_inspection_rejects_directory_traversal_errors(tmp_path: Path, monkeypatch) -> None:
     _valid_source(tmp_path)
 

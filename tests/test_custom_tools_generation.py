@@ -32,6 +32,11 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
                     "requestBody": {"$ref": "#/components/requestBodies/CreateBodyAlias"},
                     "responses": {"201": {"$ref": "#/components/responses/CreateSuccess"}},
                 },
+                "patch": {
+                    "operationId": "optionalCustomToolAction",
+                    "requestBody": {"$ref": "#/components/requestBodies/OptionalBody"},
+                    "responses": {"204": {"description": "done"}},
+                },
             },
             "/custom-tools/{name}": {
                 "parameters": [{"$ref": "#/components/parameters/ToolName"}],
@@ -41,6 +46,7 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
                     "parameters": [{"$ref": "#/components/parameters/CanonicalToolName"}],
                 },
             },
+            "/custom-tools/{name}/versions": {"$ref": "#/components/pathItems/ToolVersionsAlias"},
             "/custom-tools-preview": {"get": operation},
             "/molecules": {"get": operation},
         },
@@ -67,6 +73,24 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
                     },
                 },
                 "UnusedBody": {"content": {"application/json": {"schema": {"type": "string"}}}},
+                "OptionalBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {"$ref": "#/components/schemas/CreatePayload"}
+                        }
+                    }
+                },
+            },
+            "pathItems": {
+                "ToolVersionsAlias": {"$ref": "#/components/pathItems/ToolVersions"},
+                "ToolVersions": {
+                    "parameters": [{"$ref": "#/components/parameters/ToolName"}],
+                    "get": {
+                        "operationId": "listVersions",
+                        "responses": {"204": {"description": "empty"}},
+                    },
+                },
+                "UnusedPath": {"get": operation},
             },
             "parameters": {
                 "ToolName": {
@@ -140,12 +164,21 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     )
     sliced = json.loads(sliced_path.read_text())
 
-    assert set(sliced["paths"]) == {"/custom-tools", "/custom-tools/{name}"}
+    assert set(sliced["paths"]) == {
+        "/custom-tools",
+        "/custom-tools/{name}",
+        "/custom-tools/{name}/versions",
+    }
     assert sliced["paths"]["/custom-tools/{name}"]["parameters"] == [
         {"$ref": "#/components/parameters/ToolName"}
     ]
     assert set(sliced["components"]["parameters"]) == {"CanonicalToolName", "ToolName"}
-    assert set(sliced["components"]["requestBodies"]) == {"CreateBody", "CreateBodyAlias"}
+    assert set(sliced["components"]["requestBodies"]) == {
+        "CreateBody",
+        "CreateBodyAlias",
+        "OptionalBody",
+    }
+    assert set(sliced["components"]["pathItems"]) == {"ToolVersions", "ToolVersionsAlias"}
     assert set(sliced["components"]["schemas"]) == {
         "CreatePayload",
         "CreateResult",
@@ -171,6 +204,13 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     assert "def create_custom_tool(self, body: CreatePayload" in generated_text
     assert "json=body" in generated_text
     assert ") -> CreateResult:" in generated_text
+    assert (
+        "def optional_custom_tool_action(self, body: CreatePayload | None = None" in generated_text
+    )
+    assert "if body is None:" in generated_text
+    assert "def list_versions(self, name: str" in generated_text
+    assert ") -> None:" in generated_text
+    assert "return None" in generated_text
 
 
 def test_generated_transport_matches_committed_openapi(tmp_path: Path) -> None:

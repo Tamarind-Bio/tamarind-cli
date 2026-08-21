@@ -58,23 +58,51 @@ def _annotation(schema: dict[str, Any]) -> str:
     return "Any"
 
 
-def _response_type(operation: dict[str, Any], components: dict[str, Any]) -> str:
+def _response_type(operation: dict[str, Any], components: dict[str, Any]) -> tuple[str, bool]:
     responses = operation.get("responses", {})
     success: dict[str, Any] = next(
         (value for code, value in responses.items() if str(code).startswith("2")), {}
     )
     success = _resolve_component(success, "responses", components)
-    schema = success.get("content", {}).get("application/json", {}).get("schema", {})
-    return _annotation(schema)
+    json_content = success.get("content", {}).get("application/json")
+    if not isinstance(json_content, dict):
+        return "None", False
+    return _annotation(json_content.get("schema", {})), True
 
 
-def _body_type(operation: dict[str, Any], components: dict[str, Any]) -> str | None:
+def _body_type(operation: dict[str, Any], components: dict[str, Any]) -> tuple[str, bool] | None:
     request_body = operation.get("requestBody", {})
     if not isinstance(request_body, dict):
         return None
     request_body = _resolve_component(request_body, "requestBodies", components)
     schema = request_body.get("content", {}).get("application/json", {}).get("schema")
-    return _annotation(schema) if isinstance(schema, dict) else None
+    return (
+        (_annotation(schema), request_body.get("required") is True)
+        if isinstance(schema, dict)
+        else None
+    )
+
+
+def _request_lines(
+    call: list[str],
+    *,
+    async_method: bool,
+    optional_body: bool,
+) -> list[str]:
+    request = "await self._client.request_async" if async_method else "self._client.request"
+    if not optional_body:
+        return [f"        response = {request}(", *call, "        )"]
+    with_body = [*call[:-1], "            json=body,", call[-1]]
+    return [
+        "        if body is None:",
+        f"            response = {request}(",
+        *[f"    {line}" for line in call],
+        "            )",
+        "        else:",
+        f"            response = {request}(",
+        *[f"    {line}" for line in with_body],
+        "            )",
+    ]
 
 
 def _operation_parameters(
@@ -167,9 +195,16 @@ def generate(spec: dict[str, Any]) -> str:
                 ]
                 target.append((wire_name, py_name))
 
-            body_type = _body_type(operation, request_body_components)
-            if body_type:
-                required_params.append(f"body: {body_type}")
+            body = _body_type(operation, request_body_components)
+            if body is None:
+                body_type = None
+                body_required = False
+            else:
+                body_type, body_required = body
+                if body_required:
+                    required_params.append(f"body: {body_type}")
+                else:
+                    optional_params.append(f"body: {body_type} | None = None")
             signature = ", ".join(
                 ["self", *required_params, *optional_params, "*", "timeout: float | None = None"]
             )
@@ -180,7 +215,7 @@ def generate(spec: dict[str, Any]) -> str:
                 )
             query = "{" + ", ".join(f"{wire!r}: {py}" for wire, py in query_params) + "}"
             headers = "{" + ", ".join(f"{wire!r}: {py}" for wire, py in header_params) + "}"
-            result = _response_type(operation, response_components)
+            result, response_has_json = _response_type(operation, response_components)
             path_literal = (
                 f"f{rendered_path!r}" if "_segment(" in rendered_path else repr(rendered_path)
             )
@@ -189,18 +224,25 @@ def generate(spec: dict[str, Any]) -> str:
                 call.append(f"            params={query},")
             if header_params:
                 call.append(f"            headers={headers},")
-            if body_type:
+            if body_type and body_required:
                 call.append("            json=body,")
             call.append("            timeout=timeout,")
             method_name = _name(operation["operationId"])
+            return_line = (
+                f"        return cast({result}, response.json())"
+                if response_has_json
+                else "        return None"
+            )
             methods.append(
                 "\n".join(
                     [
                         f"    def {method_name}({signature}) -> {result}:",
-                        "        response = self._client.request(",
-                        *call,
-                        "        )",
-                        f"        return cast({result}, response.json())",
+                        *_request_lines(
+                            call,
+                            async_method=False,
+                            optional_body=bool(body_type and not body_required),
+                        ),
+                        return_line,
                     ]
                 )
             )
@@ -209,10 +251,12 @@ def generate(spec: dict[str, Any]) -> str:
                     "\n".join(
                         [
                             f"    async def {method_name}_async({signature}) -> {result}:",
-                            "        response = await self._client.request_async(",
-                            *call,
-                            "        )",
-                            f"        return cast({result}, response.json())",
+                            *_request_lines(
+                                call,
+                                async_method=True,
+                                optional_body=bool(body_type and not body_required),
+                            ),
+                            return_line,
                         ]
                     )
                 )

@@ -10,7 +10,7 @@ from io import BytesIO
 import os
 from pathlib import Path
 import stat
-from typing import BinaryIO
+from typing import BinaryIO, cast
 import zipfile
 
 from typing_extensions import Buffer
@@ -64,6 +64,23 @@ class SourceArchive:
         return len(self.data)
 
 
+class _ContentReader:
+    def __init__(self, source: BinaryIO) -> None:
+        self._source = source
+        self._digest = sha256()
+        self.bytes_read = 0
+
+    def read(self, size: int = -1) -> bytes:
+        data = self._source.read(size)
+        self._digest.update(data)
+        self.bytes_read += len(data)
+        return data
+
+    @property
+    def hexdigest(self) -> str:
+        return self._digest.hexdigest()
+
+
 @dataclass(frozen=True)
 class SourceFile:
     relative: str
@@ -74,6 +91,7 @@ class SourceFile:
     size: int
     modified_ns: int
     mode: int
+    content_sha256: str
 
     @classmethod
     def inspect(cls, relative: str, path: Path, root: Path) -> SourceFile:
@@ -84,6 +102,10 @@ class SourceFile:
             raise CustomToolUploadError(f"Source file changed during inspection: {path}")
         if not stat.S_ISREG(metadata.st_mode):
             raise CustomToolUploadError(f"Source archives can contain only regular files: {path}")
+        content_sha256 = _content_digest(path, metadata)
+        confirmed = _file_metadata(path)
+        if _identity(metadata) != _identity(confirmed):
+            raise CustomToolUploadError(f"Source file changed during inspection: {path}")
         inspected = cls(
             relative=relative,
             path=path,
@@ -93,9 +115,8 @@ class SourceFile:
             size=metadata.st_size,
             modified_ns=metadata.st_mtime_ns,
             mode=metadata.st_mode,
+            content_sha256=content_sha256,
         )
-        with inspected.open_verified():
-            pass
         return inspected
 
     @contextmanager
@@ -112,9 +133,18 @@ class SourceFile:
 
         with os.fdopen(descriptor, "rb") as source:
             self._verify(os.fstat(source.fileno()))
+            reader = _ContentReader(source)
+            completed = False
             try:
-                yield source
+                yield cast(BinaryIO, reader)
+                completed = True
             finally:
+                if completed and (
+                    reader.bytes_read != self.size or reader.hexdigest != self.content_sha256
+                ):
+                    raise CustomToolUploadError(
+                        f"Source file contents changed after inspection: {self.path}"
+                    )
                 self._verify(os.fstat(source.fileno()))
                 self._verify_path()
 
@@ -317,6 +347,25 @@ def _file_metadata(path: Path) -> os.stat_result:
         return path.lstat()
     except OSError as exc:
         raise CustomToolUploadError(f"Source file changed during inspection: {path}") from exc
+
+
+def _content_digest(path: Path, expected: os.stat_result) -> str:
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise CustomToolUploadError(
+            f"Source file cannot be read during inspection: {path}"
+        ) from exc
+    digest = sha256()
+    with os.fdopen(descriptor, "rb") as source:
+        if _identity(os.fstat(source.fileno())) != _identity(expected):
+            raise CustomToolUploadError(f"Source file changed during inspection: {path}")
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+        if _identity(os.fstat(source.fileno())) != _identity(expected):
+            raise CustomToolUploadError(f"Source file changed during inspection: {path}")
+    return digest.hexdigest()
 
 
 def _identity(metadata: os.stat_result) -> tuple[int, int, int, int, int]:
