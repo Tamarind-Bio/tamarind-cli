@@ -164,7 +164,7 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     )
     generated_text = generated.read_text()
     assert "GpuType: TypeAlias = Literal[" in generated_text
-    assert '"A100"' in generated_text
+    assert "'A100'" in generated_text
     assert "MemorySize: TypeAlias = Literal[" in generated_text
     assert "def get_custom_tool(self, name: Literal['canonical']" in generated_text
     assert "f'custom-tools/{_segment(name)}'" in generated_text
