@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -251,8 +252,7 @@ def test_terminal_failure_raises_typed_error() -> None:
             version.monitor(timeout=1)
 
 
-@pytest.mark.asyncio
-async def test_monitor_recomputes_the_deadline_after_log_poll(monkeypatch) -> None:
+def test_monitor_recomputes_the_deadline_after_log_poll(monkeypatch) -> None:
     ticks = iter((0.0, 0.1, 1.1))
     monkeypatch.setattr(resources, "_clock", lambda: next(ticks))
     refreshed = False
@@ -281,6 +281,6 @@ async def test_monitor_recomputes_the_deadline_after_log_poll(monkeypatch) -> No
     )
 
     with pytest.raises(resources.CustomToolBuildTimeoutError):
-        await version._monitor(timeout=1.0, interval=0.1, on_event=None)
+        asyncio.run(version._monitor(timeout=1.0, interval=0.1, on_event=None))
 
     assert refreshed is False
