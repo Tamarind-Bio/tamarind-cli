@@ -131,7 +131,12 @@ def test_archive_rejects_same_metadata_content_rewrite(tmp_path: Path) -> None:
         packaging.build_source_tree_archive(tree)
 
 
-def test_source_inspection_translates_unresolvable_home_paths() -> None:
+def test_source_inspection_translates_unresolvable_home_paths(monkeypatch) -> None:
+    def fail_expansion(_path: Path) -> Path:
+        raise RuntimeError("cannot determine home")
+
+    monkeypatch.setattr(Path, "expanduser", fail_expansion)
+
     with pytest.raises(CustomToolUploadError, match="Cannot resolve"):
         packaging.inspect_source_tree("~missing-tamarind-user/source")
 
