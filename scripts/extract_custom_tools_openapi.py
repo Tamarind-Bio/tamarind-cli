@@ -47,6 +47,22 @@ def _component_refs(node: object, kind: str) -> set[str]:
     return refs
 
 
+def _security_scheme_names(node: object) -> set[str]:
+    names: set[str] = set()
+    if isinstance(node, dict):
+        security = node.get("security")
+        if isinstance(security, list):
+            for requirement in security:
+                if isinstance(requirement, dict):
+                    names.update(str(name) for name in requirement)
+        for value in node.values():
+            names.update(_security_scheme_names(value))
+    elif isinstance(node, list):
+        for value in node:
+            names.update(_security_scheme_names(value))
+    return names
+
+
 def _reachable_components(
     roots: object,
     components: dict[str, Any],
@@ -132,9 +148,16 @@ def extract(spec: dict[str, Any]) -> dict[str, Any]:
             reachable.add(child)
             pending.append(child)
 
+    security_schemes = components.get("securitySchemes", {})
+    inherited_security = spec.get("security", [])
+    retained_security_names = _security_scheme_names(
+        {"security": inherited_security, "paths": paths}
+    )
     extracted_components = {
         "schemas": {name: deepcopy(schemas[name]) for name in sorted(reachable)},
-        "securitySchemes": deepcopy(components.get("securitySchemes", {})),
+        "securitySchemes": {
+            name: deepcopy(security_schemes[name]) for name in sorted(retained_security_names)
+        },
     }
     if retained_responses:
         extracted_components["responses"] = retained_responses

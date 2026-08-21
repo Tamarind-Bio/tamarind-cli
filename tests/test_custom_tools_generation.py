@@ -26,6 +26,7 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     spec = {
         "openapi": "3.1.0",
         "info": {"title": "test", "version": "1"},
+        "security": [{"ApiKey": []}],
         "paths": {
             "/custom-tools": {
                 "get": operation,
@@ -71,7 +72,10 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
                     },
                 },
             },
-            "securitySchemes": {},
+            "securitySchemes": {
+                "ApiKey": {"type": "apiKey", "in": "header", "name": "x-api-key"},
+                "UnrelatedAuth": {"type": "http", "scheme": "bearer"},
+            },
             "requestBodies": {
                 "CreateBodyAlias": {"$ref": "#/components/requestBodies/CreateBody"},
                 "CreateBody": {
@@ -207,6 +211,7 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
         "PublicCustomTool",
     }
     assert set(sliced["components"]["responses"]) == {"CreateSuccess"}
+    assert set(sliced["components"]["securitySchemes"]) == {"ApiKey"}
 
     generated = tmp_path / "generated.py"
     subprocess.run(
@@ -303,6 +308,24 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
         "allOf": [{"type": "string"}]
     }
     unsupported_contracts.append((all_of_model, "allOf schemas"))
+
+    inline_object_model = deepcopy(sliced)
+    inline_object_model["components"]["schemas"]["CreatePayload"]["properties"]["name"] = {
+        "type": "object",
+        "properties": {"value": {"type": "string"}},
+    }
+    unsupported_contracts.append((inline_object_model, "inline object schemas"))
+
+    required_nullable_parameter = deepcopy(sliced)
+    required_nullable_parameter["paths"]["/custom-tools"]["get"]["parameters"].append(
+        {
+            "in": "query",
+            "name": "nullable",
+            "required": True,
+            "schema": {"type": ["string", "null"]},
+        }
+    )
+    unsupported_contracts.append((required_nullable_parameter, "Required nullable wire parameter"))
 
     required_nullable_body = deepcopy(nullable_optional_body)
     required_nullable_body["components"]["requestBodies"]["OptionalBody"]["required"] = True

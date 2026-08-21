@@ -164,6 +164,11 @@ def test_content_reader_translates_midstream_source_read_failures(tmp_path: Path
         reader.read()
 
 
+def test_source_inspection_rejects_unencodable_archive_names(tmp_path: Path) -> None:
+    with pytest.raises(CustomToolUploadError, match="valid UTF-8"):
+        packaging.SourceFile.inspect("bad\udcff.py", tmp_path / "bad.py", tmp_path)
+
+
 def test_inspection_rejects_directory_traversal_errors(tmp_path: Path, monkeypatch) -> None:
     _valid_source(tmp_path)
 

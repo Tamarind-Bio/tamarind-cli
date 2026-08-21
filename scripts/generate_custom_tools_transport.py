@@ -53,6 +53,8 @@ def _annotation(schema: dict[str, Any]) -> str:
     if kind == "array":
         return f"list[{_annotation(schema.get('items', {}))}]"
     if kind == "object":
+        if schema.get("properties") or schema.get("additionalProperties") is False:
+            raise ValueError("inline object schemas are outside the generated SDK profile")
         additional = schema.get("additionalProperties")
         return (
             f"dict[str, {_annotation(additional)}]"
@@ -60,6 +62,27 @@ def _annotation(schema: dict[str, Any]) -> str:
             else "dict[str, Any]"
         )
     return "Any"
+
+
+def _parameter_annotation(schema: dict[str, Any]) -> str:
+    """Use None only as the SDK's omission marker for optional parameters."""
+    if isinstance(schema.get("type"), list):
+        kinds = [kind for kind in schema["type"] if kind != "null"]
+        return " | ".join(dict.fromkeys(_annotation({"type": kind}) for kind in kinds))
+    if isinstance(schema.get("enum"), list) and None in schema["enum"]:
+        values = [value for value in schema["enum"] if value is not None]
+        return _annotation({"enum": values})
+    alternatives = schema.get("anyOf", schema.get("oneOf"))
+    if isinstance(alternatives, list):
+        retained = [
+            alternative
+            for alternative in alternatives
+            if not isinstance(alternative, dict) or alternative.get("type") != "null"
+        ]
+        return " | ".join(
+            dict.fromkeys(_parameter_annotation(alternative) for alternative in retained)
+        )
+    return _annotation(schema)
 
 
 def _response_type(operation: dict[str, Any], components: dict[str, Any]) -> tuple[str, bool]:
@@ -147,6 +170,10 @@ def _validate_parameter_profile(parameter: dict[str, Any], schemas: dict[str, An
     schema = parameter.get("schema")
     if location not in {"path", "query", "header"} or not isinstance(schema, dict):
         raise ValueError(f"Unsupported parameter: {parameter.get('name')}")
+    if parameter.get("required") and _is_nullable(schema, schemas):
+        raise ValueError(
+            f"Required nullable wire parameter is outside the SDK profile: {parameter.get('name')}"
+        )
     if location == "query" and (
         parameter.get("style", "form") != "form" or _is_structured(schema, schemas)
     ):
@@ -257,7 +284,7 @@ def generate(spec: dict[str, Any]) -> str:
                 _validate_parameter_profile(parameter, schemas)
                 wire_name = parameter["name"]
                 py_name = _name(wire_name)
-                annotation = _annotation(parameter.get("schema", {}))
+                annotation = _parameter_annotation(parameter.get("schema", {}))
                 entry = f"{py_name}: {annotation}"
                 if parameter.get("required"):
                     required_params.append(entry)

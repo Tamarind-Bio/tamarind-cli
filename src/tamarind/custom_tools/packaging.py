@@ -102,6 +102,7 @@ class SourceFile:
 
     @classmethod
     def inspect(cls, relative: str, path: Path, root: Path) -> SourceFile:
+        _validate_archive_name(relative, path)
         metadata = _file_metadata(path)
         _assert_contained(root, path)
         confirmed = _file_metadata(path)
@@ -213,7 +214,9 @@ def inspect_source_tree(folder: str | Path) -> SourceTree:
             for path in kept_files
         )
         if current_path != root and not kept_directories and not kept_files:
-            empty_directories.append(current_path.relative_to(root).as_posix())
+            relative = current_path.relative_to(root).as_posix()
+            _validate_archive_name(relative, current_path)
+            empty_directories.append(relative)
 
     return SourceTree(
         files=tuple(files),
@@ -329,6 +332,13 @@ def _enforce_source_entry_limit(
         raise CustomToolUploadError(
             f"Source tree exceeds the {_MAX_SOURCE_ENTRIES}-entry inspection limit"
         )
+
+
+def _validate_archive_name(relative: str, path: Path) -> None:
+    try:
+        relative.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise CustomToolUploadError(f"Source archive path is not valid UTF-8: {path}") from exc
 
 
 def _metadata_is_link_like(metadata: os.stat_result) -> bool:
