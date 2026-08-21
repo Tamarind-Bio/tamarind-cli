@@ -1397,16 +1397,9 @@
             "name": "cursor",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 4096,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
+              "maxLength": 4096,
+              "title": "Cursor",
+              "type": "string"
             }
           }
         ],

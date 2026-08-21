@@ -322,9 +322,9 @@ def _validate_parameter_profile(parameter: dict[str, Any], schemas: dict[str, An
     schema = parameter.get("schema")
     if location not in {"path", "query", "header"} or not isinstance(schema, dict):
         raise ValueError(f"Unsupported parameter: {parameter.get('name')}")
-    if parameter.get("required") and _is_nullable(schema, schemas):
+    if _is_nullable(schema, schemas):
         raise ValueError(
-            f"Required nullable wire parameter is outside the SDK profile: {parameter.get('name')}"
+            f"Nullable wire parameter is outside the SDK profile: {parameter.get('name')}"
         )
     if _is_structured(schema, schemas):
         raise ValueError(
@@ -470,7 +470,7 @@ def _validate_request_object_profile(
         return
     resolved = _resolve_schema(schema, schemas)
     if resolved.get("type") == "object" and resolved.get("properties"):
-        if resolved.get("additionalProperties") is not False:
+        if resolved.get("additionalProperties") is not False or resolved.get("patternProperties"):
             raise ValueError(
                 f"{operation.get('operationId')} has an extension-bearing request object"
             )

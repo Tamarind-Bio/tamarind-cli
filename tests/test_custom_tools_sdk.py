@@ -254,6 +254,7 @@ def test_build_tracks_queued_deploy_by_source_ref(tmp_path: Path) -> None:
     versions = respx.get(f"{BASE}custom-tools/example/versions", params={"limit": "50"}).mock(
         side_effect=[
             httpx.Response(200, json={"items": []}),
+            httpx.Response(200, json={"items": []}),
             httpx.Response(200, json={"items": [_version()]}),
         ]
     )
@@ -262,7 +263,47 @@ def test_build_tracks_queued_deploy_by_source_ref(tmp_path: Path) -> None:
         version = client.custom_tools.get("example").build(tmp_path, poll_interval=0.001)
 
     assert version.name == "v1"
-    assert versions.call_count == 2
+    assert versions.call_count == 3
+
+
+@respx.mock
+def test_build_ignores_old_version_with_the_same_source_ref(tmp_path: Path) -> None:
+    _source(tmp_path)
+    source_hash = _archive_digest(tmp_path)
+    respx.get(f"{BASE}custom-tools/example").mock(
+        side_effect=[
+            httpx.Response(200, json=_tool()),
+            httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
+        ]
+    )
+    respx.post(f"{BASE}custom-tools/example/uploads").mock(
+        return_value=httpx.Response(
+            201, json={"uploadId": "upload-1", "uploadUrl": UPLOAD, "expiresIn": 900}
+        )
+    )
+    respx.put(UPLOAD).mock(return_value=httpx.Response(200))
+    respx.post(f"{BASE}custom-tools/example/uploads/upload-1/finalize").mock(
+        return_value=httpx.Response(202, json={"status": "processing"})
+    )
+    respx.post(f"{BASE}custom-tools/example/deploy").mock(
+        return_value=httpx.Response(
+            202, json={"versionName": None, "ref": "a" * 40, "path": "building"}
+        )
+    )
+    old = _version()
+    new = {**_version(), "versionName": "v2"}
+    respx.get(f"{BASE}custom-tools/example/versions", params={"limit": "50"}).mock(
+        side_effect=[
+            httpx.Response(200, json={"items": [old]}),
+            httpx.Response(200, json={"items": [old]}),
+            httpx.Response(200, json={"items": [new, old]}),
+        ]
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        version = client.custom_tools.get("example").build(tmp_path, poll_interval=0.001)
+
+    assert version.name == "v2"
 
 
 @respx.mock

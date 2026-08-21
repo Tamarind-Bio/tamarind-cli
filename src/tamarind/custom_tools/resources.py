@@ -388,6 +388,9 @@ class CustomTools:
             raise CustomToolUploadError(
                 "Source extraction finished without an immutable source revision"
             )
+        existing_version_names = {
+            version.name for version in self._versions(tool.name, limit=50).items
+        }
         deployed = self._transport.deploy_custom_tool(
             tool.name,
             cast(PublicDeployRequest, {"expectedSourceRef": uploaded.source_ref}),
@@ -399,6 +402,7 @@ class CustomTools:
             self,
             tool.name,
             deployed["ref"],
+            exclude_versions=existing_version_names,
             timeout=cast(float, timeout),
             interval=interval,
         )
@@ -445,6 +449,7 @@ def _wait_for_version_ref(
     tool_name: str,
     source_ref: str,
     *,
+    exclude_versions: set[str],
     timeout: float,
     interval: float,
 ) -> Version:
@@ -457,7 +462,7 @@ def _wait_for_version_ref(
                 f"within {timeout:g} seconds"
             )
         for version in collection._versions(tool_name, limit=50, request_timeout=remaining).items:
-            if version.source_revision == source_ref:
+            if version.source_revision == source_ref and version.name not in exclude_versions:
                 return version
         time.sleep(min(interval, max(0.0, deadline - _clock())))
 

@@ -532,16 +532,21 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     ] = True
     unsupported_contracts.append((directional_model, "Directional properties"))
 
-    required_nullable_parameter = deepcopy(sliced)
-    required_nullable_parameter["paths"]["/custom-tools"]["get"]["parameters"].append(
+    nullable_parameter = deepcopy(sliced)
+    nullable_parameter["paths"]["/custom-tools"]["get"]["parameters"].append(
         {
             "in": "query",
             "name": "nullable",
-            "required": True,
             "schema": {"type": ["string", "null"]},
         }
     )
-    unsupported_contracts.append((required_nullable_parameter, "Required nullable wire parameter"))
+    unsupported_contracts.append((nullable_parameter, "Nullable wire parameter"))
+
+    pattern_extension_request = deepcopy(sliced)
+    pattern_extension_request["components"]["schemas"]["CreatePayload"]["patternProperties"] = {
+        "^x-": {"type": "string"}
+    }
+    unsupported_contracts.append((pattern_extension_request, "extension-bearing request object"))
 
     required_nullable_body = deepcopy(nullable_optional_body)
     required_nullable_body["components"]["requestBodies"]["OptionalBody"]["required"] = True
