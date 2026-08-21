@@ -157,6 +157,9 @@ def test_build_composes_upload_finalize_poll_deploy_and_version(tmp_path: Path) 
             202, json={"versionName": "v1", "ref": "a" * 40, "path": "building"}
         )
     )
+    respx.get(f"{BASE}custom-tools/example/versions", params={"limit": "50"}).mock(
+        return_value=httpx.Response(200, json={"items": []})
+    )
     respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
         return_value=httpx.Response(200, json=_version())
     )
@@ -336,6 +339,9 @@ def test_build_fails_closed_when_selected_source_changes_before_deploy(tmp_path:
                 "detail": "refresh and retry",
             },
         )
+    )
+    respx.get(f"{BASE}custom-tools/example/versions", params={"limit": "50"}).mock(
+        return_value=httpx.Response(200, json={"items": []})
     )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
