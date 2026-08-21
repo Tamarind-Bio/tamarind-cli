@@ -242,7 +242,21 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
             {"type": "null"},
         ]
     }
-    unsupported_contracts.append((nullable_optional_body, "optional nullable request body"))
+    unsupported_contracts.append((nullable_optional_body, "nullable request body"))
+
+    required_nullable_body = deepcopy(nullable_optional_body)
+    required_nullable_body["components"]["requestBodies"]["OptionalBody"]["required"] = True
+    unsupported_contracts.append((required_nullable_body, "nullable request body"))
+
+    unsupported_request_media = deepcopy(sliced)
+    unsupported_request_media["components"]["requestBodies"]["OptionalBody"]["content"] = {
+        "text/plain": {"schema": {"type": "string"}}
+    }
+    unsupported_contracts.append((unsupported_request_media, "unsupported request content"))
+
+    unsupported_path_style = deepcopy(sliced)
+    unsupported_path_style["components"]["parameters"]["ToolName"]["style"] = "label"
+    unsupported_contracts.append((unsupported_path_style, "Unsupported path parameter style"))
 
     structured_query = deepcopy(sliced)
     structured_query["paths"]["/custom-tools"]["get"]["parameters"].append(
@@ -289,6 +303,46 @@ def test_generated_transport_matches_committed_openapi(tmp_path: Path) -> None:
     subprocess.run([sys.executable, "-m", "ruff", "format", str(generated)], check=True)
 
     assert generated.read_text() == (root / "src/tamarind/custom_tools/generated.py").read_text()
+
+
+def test_openapi_extraction_rejects_unsupported_custom_tools_operations(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    source = tmp_path / "public.json"
+    output = tmp_path / "custom-tools.json"
+    source.write_text(
+        json.dumps(
+            {
+                "openapi": "3.1.0",
+                "info": {"title": "test", "version": "1"},
+                "paths": {
+                    "/custom-tools": {
+                        "head": {
+                            "operationId": "inspectCustomTools",
+                            "responses": {"204": {"description": "ok"}},
+                        }
+                    }
+                },
+                "components": {},
+            }
+        )
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(root / "scripts/extract_custom_tools_openapi.py"),
+            str(source),
+            str(output),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "Unsupported Custom Tools HTTP methods" in result.stderr
 
 
 def test_openapi_slice_has_no_dangling_schema_references() -> None:

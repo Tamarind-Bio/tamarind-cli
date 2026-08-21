@@ -81,15 +81,17 @@ def _response_type(operation: dict[str, Any], components: dict[str, Any]) -> tup
 
 def _body_type(operation: dict[str, Any], components: dict[str, Any]) -> tuple[str, bool] | None:
     request_body = operation.get("requestBody", {})
-    if not isinstance(request_body, dict):
+    if not isinstance(request_body, dict) or not request_body:
         return None
     request_body = _resolve_component(request_body, "requestBodies", components)
-    schema = request_body.get("content", {}).get("application/json", {}).get("schema")
-    return (
-        (_annotation(schema), request_body.get("required") is True)
-        if isinstance(schema, dict)
-        else None
-    )
+    content = request_body.get("content")
+    if not isinstance(content, dict) or set(content) != {"application/json"}:
+        raise ValueError(f"{operation.get('operationId')} has unsupported request content")
+    media = content["application/json"]
+    schema = media.get("schema") if isinstance(media, dict) else None
+    if not isinstance(schema, dict):
+        raise ValueError(f"{operation.get('operationId')} has no JSON request schema")
+    return _annotation(schema), request_body.get("required") is True
 
 
 def _resolve_schema(
@@ -140,6 +142,8 @@ def _validate_parameter_profile(parameter: dict[str, Any], schemas: dict[str, An
         raise ValueError(
             f"Structured query parameter is outside the SDK profile: {parameter.get('name')}"
         )
+    if location == "path" and parameter.get("style", "simple") != "simple":
+        raise ValueError(f"Unsupported path parameter style: {parameter.get('name')}")
 
 
 def _request_lines(
@@ -261,15 +265,12 @@ def generate(spec: dict[str, Any]) -> str:
                 body_required = False
             else:
                 body_type, body_required = body
-                if not body_required:
-                    request_body = _resolve_component(
-                        operation["requestBody"], "requestBodies", request_body_components
-                    )
-                    body_schema = request_body["content"]["application/json"]["schema"]
-                    if _is_nullable(body_schema, schemas):
-                        raise ValueError(
-                            f"{operation.get('operationId')} has an optional nullable request body"
-                        )
+                request_body = _resolve_component(
+                    operation["requestBody"], "requestBodies", request_body_components
+                )
+                body_schema = request_body["content"]["application/json"]["schema"]
+                if _is_nullable(body_schema, schemas):
+                    raise ValueError(f"{operation.get('operationId')} has a nullable request body")
                 if body_required:
                     required_params.append(f"body: {body_type}")
                 else:

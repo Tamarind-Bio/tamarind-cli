@@ -11,6 +11,7 @@ from typing import Any
 
 CUSTOM_TOOLS_PATH = "/custom-tools"
 HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete"})
+OPENAPI_OPERATION_KEYS = HTTP_METHODS | {"head", "options", "trace"}
 
 
 def _is_custom_tools_path(path: str) -> bool:
@@ -94,6 +95,11 @@ def extract(spec: dict[str, Any]) -> dict[str, Any]:
     paths: dict[str, Any] = {}
     for path, unresolved_path_item in custom_path_items.items():
         path_item = _resolve_component(unresolved_path_item, "pathItems", retained_path_items)
+        unsupported = OPENAPI_OPERATION_KEYS.intersection(path_item) - HTTP_METHODS
+        if unsupported:
+            raise ValueError(
+                f"Unsupported Custom Tools HTTP methods at {path}: {sorted(unsupported)}"
+            )
         selected: dict[str, Any] = {
             method: operation
             for method, operation in path_item.items()
