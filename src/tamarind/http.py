@@ -208,6 +208,8 @@ def _map_error(resp: httpx.Response) -> TamarindError:
     msg = _extract_message(resp, body, is_json=is_json)
     code = resp.status_code
     problem_code = _problem_code(detail)
+    path_segments = tuple(segment for segment in resp.request.url.path.split("/") if segment)
+    not_found_error = CustomToolNotFoundError if "custom-tools" in path_segments else NotFoundError
     if problem_code == "custom_tool_not_found" or problem_code == "custom_tool_version_not_found":
         return CustomToolNotFoundError(msg, detail=detail)
     if problem_code == "custom_tool_name_taken":
@@ -218,7 +220,10 @@ def _map_error(resp: httpx.Response) -> TamarindError:
         return CustomToolValidationError(msg, detail=detail)
     if problem_code == "custom_tool_generation_mismatch":
         return StaleCustomToolError(msg, detail=detail)
-    if problem_code == "custom_tool_source_digest_mismatch" or problem_code == "custom_tool_upload_not_found":
+    if (
+        problem_code == "custom_tool_source_digest_mismatch"
+        or problem_code == "custom_tool_upload_not_found"
+    ):
         return CustomToolUploadError(msg, detail=detail)
     if problem_code == "custom_tool_build_in_progress":
         return CustomToolBuildInProgressError(msg, detail=detail)
@@ -250,7 +255,7 @@ def _map_error(resp: httpx.Response) -> TamarindError:
             return BudgetError(f"Budget or quota rejected the request: {msg}", detail=detail)
         return APIError(f"Access denied: {msg}", status_code=code, detail=detail)
     if code == 404:
-        return NotFoundError(msg, detail=detail)
+        return not_found_error(msg, detail=detail)
     if code == 400:
         # The API uses 400 for several distinct failures; classify by message so
         # exit codes are consistent: bad/missing key -> auth (3), missing job/file
@@ -258,7 +263,7 @@ def _map_error(resp: httpx.Response) -> TamarindError:
         if auth_ish:
             return AuthError(f"Unauthorized: {msg}", detail=detail)
         if notfound_ish:
-            return NotFoundError(msg, detail=detail)
+            return not_found_error(msg, detail=detail)
         return ValidationError(msg, detail=detail)
     if code == 429:
         return RateLimitError(f"Rate limited: {msg}", detail=detail)

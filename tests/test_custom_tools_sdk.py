@@ -11,7 +11,11 @@ import respx
 from tamarind import Tamarind
 from tamarind.custom_tools import resources
 from tamarind.custom_tools.packaging import build_source_tree_archive, inspect_source_tree
-from tamarind.errors import CustomToolBuildFailedError, CustomToolUploadError
+from tamarind.errors import (
+    CustomToolBuildFailedError,
+    CustomToolNotFoundError,
+    CustomToolUploadError,
+)
 
 BASE = "https://api.test/"
 UPLOAD = "https://uploads.test/source.zip"
@@ -85,6 +89,32 @@ def test_create_list_and_update_wrap_public_routes() -> None:
     assert json.loads(update.calls.last.request.content) == {"description": "updated"}
     assert "If-Match" not in update.calls.last.request.headers
     assert changed.description == "updated"
+
+
+@respx.mock
+def test_custom_tools_transport_owns_plain_404_classification() -> None:
+    respx.get(f"{BASE}custom-tools/missing").mock(
+        return_value=httpx.Response(404, json={"detail": "Not Found"})
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(CustomToolNotFoundError, match="Not Found"):
+            client.custom_tools.get("missing")
+
+
+@respx.mock
+def test_custom_tools_not_found_classification_ignores_api_mount_prefix() -> None:
+    prefixed_base = f"{BASE}api/"
+    respx.get(f"{prefixed_base}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool())
+    )
+    respx.get(f"{prefixed_base}custom-tools/example/versions/v1").mock(
+        return_value=httpx.Response(404, json={"detail": "Not Found"})
+    )
+
+    with Tamarind(api_key="key", api_base=prefixed_base) as client:
+        with pytest.raises(CustomToolNotFoundError, match="Not Found"):
+            client.custom_tools.get("example").get_version("v1")
 
 
 @respx.mock
@@ -284,3 +314,69 @@ def test_monitor_recomputes_the_deadline_after_log_poll(monkeypatch) -> None:
         asyncio.run(version._monitor(timeout=1.0, interval=0.1, on_event=None))
 
     assert refreshed is False
+
+
+def test_monitor_refreshes_version_after_empty_advancing_log_cursor(monkeypatch) -> None:
+    requested_cursors: list[str | None] = []
+
+    async def logs(_version, *, cursor, **_kwargs):
+        requested_cursors.append(cursor)
+        return resources.BuildLogPage(items=(), status="SUCCEEDED", next_cursor="advanced")
+
+    async def refresh(version, **_kwargs):
+        return resources.Version(
+            name=version.name,
+            source_revision=version.source_revision,
+            status="Complete",
+            origin=version.origin,
+            started_at=version.started_at,
+            completed_at="2026-08-15T00:01:00Z",
+            duration_seconds=60,
+            error=version.error,
+            tool_name=version.tool_name,
+            _collection=version._collection,
+        )
+
+    monkeypatch.setattr(resources.Version, "_logs_async", logs)
+    monkeypatch.setattr(resources.Version, "_refresh_async", refresh)
+    version = resources.Version(
+        name="v1",
+        source_revision="a" * 40,
+        status="Running",
+        origin="build",
+        started_at="2026-08-15T00:00:00Z",
+        completed_at=None,
+        duration_seconds=None,
+        error=None,
+        tool_name="example",
+        _collection=None,  # type: ignore[arg-type]
+    )
+
+    completed = asyncio.run(version._monitor(timeout=1.0, interval=0.1, on_event=None))
+
+    assert completed.status == "Complete"
+    assert requested_cursors == [None]
+
+
+def test_log_progress_deduplicates_cumulative_pages_without_a_cursor() -> None:
+    first = resources.BuildEvent("first", 1)
+    second = resources.BuildEvent("second", 2)
+    progress = resources._LogProgress()
+
+    assert progress.consume(resources.BuildLogPage(items=(first,), status="RUNNING")) == (first,)
+    assert progress.consume(resources.BuildLogPage(items=(first, second), status="RUNNING")) == (
+        second,
+    )
+
+
+def test_log_progress_treats_cursor_pages_as_incremental() -> None:
+    first = resources.BuildEvent("first", 1)
+    second = resources.BuildEvent("second", 2)
+    progress = resources._LogProgress()
+
+    assert progress.consume(
+        resources.BuildLogPage(items=(first,), status="RUNNING", next_cursor="cursor-1")
+    ) == (first,)
+    assert progress.consume(
+        resources.BuildLogPage(items=(second,), status="RUNNING", next_cursor="cursor-2")
+    ) == (second,)

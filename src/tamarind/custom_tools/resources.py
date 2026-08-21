@@ -82,6 +82,24 @@ class BuildLogPage:
     error: BuildError | None = None
 
 
+@dataclass
+class _LogProgress:
+    """Own log-resume state without letting it control Version polling."""
+
+    cursor: str | None = None
+    delivered_without_cursor: int = 0
+
+    def consume(self, page: BuildLogPage) -> tuple[BuildEvent, ...]:
+        requested_cursor = self.cursor
+        self.cursor = page.next_cursor
+        if requested_cursor is None and page.next_cursor is None:
+            events = page.items[self.delivered_without_cursor :]
+            self.delivered_without_cursor = max(self.delivered_without_cursor, len(page.items))
+            return events
+        self.delivered_without_cursor = 0
+        return page.items
+
+
 @dataclass(frozen=True)
 class CustomTool:
     name: str
@@ -247,7 +265,7 @@ class Version:
         self, *, timeout: float | None, interval: float, on_event: EventCallback | None
     ) -> "Version":
         deadline = None if timeout is None else _clock() + timeout
-        cursor: str | None = None
+        logs = _LogProgress()
         current = self
 
         def remaining_budget() -> float | None:
@@ -265,14 +283,11 @@ class Version:
                 return _require_success(current)
             remaining = remaining_budget()
             page = await _await_with_timeout(
-                current._logs_async(cursor=cursor, request_timeout=remaining), remaining
+                current._logs_async(cursor=logs.cursor, request_timeout=remaining), remaining
             )
             if on_event is not None:
-                for event in page.items:
+                for event in logs.consume(page):
                     on_event(event)
-            cursor = page.next_cursor
-            if cursor is not None:
-                continue
             remaining = remaining_budget()
             current = await _await_with_timeout(
                 current._refresh_async(request_timeout=remaining), remaining
