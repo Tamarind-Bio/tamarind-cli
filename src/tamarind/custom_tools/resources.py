@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 import math
 from pathlib import Path
 import time
-from typing import Awaitable, Callable, Generic, TypeVar, cast
+from typing import Awaitable, BinaryIO, Callable, Generic, TypeVar, cast
 
 import httpx
 
@@ -27,6 +27,7 @@ from tamarind.custom_tools.generated import (
     PublicVersionStatus,
 )
 from tamarind.custom_tools.packaging import (
+    MAX_TOOL_SOURCE_BYTES,
     SourceTree,
     build_source_tree_archive,
     inspect_source_tree,
@@ -125,7 +126,10 @@ class CustomTool:
     _collection: "CustomTools" = field(repr=False, compare=False)
 
     def refresh(self) -> "CustomTool":
-        return self._collection.get(self.name)
+        return self._refresh(request_timeout=None)
+
+    def _refresh(self, *, request_timeout: float | None) -> "CustomTool":
+        return self._collection._get(self.name, request_timeout=request_timeout)
 
     def update(
         self,
@@ -285,14 +289,23 @@ class Version:
             page = await _await_with_timeout(
                 current._logs_async(cursor=logs.cursor, request_timeout=remaining), remaining
             )
+            events = logs.consume(page)
             if on_event is not None:
-                for event in logs.consume(page):
+                for event in events:
                     on_event(event)
             remaining = remaining_budget()
             current = await _await_with_timeout(
                 current._refresh_async(request_timeout=remaining), remaining
             )
             if current.terminal:
+                remaining = remaining_budget()
+                page = await _await_with_timeout(
+                    current._logs_async(cursor=logs.cursor, request_timeout=remaining), remaining
+                )
+                events = logs.consume(page)
+                if on_event is not None:
+                    for event in events:
+                        on_event(event)
                 return _require_success(current)
             remaining = remaining_budget()
             await asyncio.sleep(interval if remaining is None else min(interval, remaining))
@@ -332,7 +345,10 @@ class CustomTools:
         )
 
     def get(self, name: str) -> CustomTool:
-        return _tool_from_wire(self, self._transport.get_custom_tool(name))
+        return self._get(name, request_timeout=None)
+
+    def _get(self, name: str, *, request_timeout: float | None) -> CustomTool:
+        return _tool_from_wire(self, self._transport.get_custom_tool(name, timeout=request_timeout))
 
     def list(self) -> Page[CustomTool]:
         wire = self._transport.list_custom_tools()
@@ -348,14 +364,17 @@ class CustomTools:
             timeout=source_timeout, interval=poll_interval
         )
         session = self._transport.create_custom_tool_upload(tool.name)
-        archive = build_source_tree_archive(tree)
-        _upload_archive(
-            session["uploadUrl"],
-            archive.data,
-            method=session.get("uploadMethod", "PUT"),
-            headers=session.get("uploadHeaders", {}),
-            timeout=self._upload_timeout,
-        )
+        archive = build_source_tree_archive(tree, max_bytes=MAX_TOOL_SOURCE_BYTES)
+        try:
+            _upload_archive(
+                session["uploadUrl"],
+                archive.content(),
+                method=session.get("uploadMethod", "PUT"),
+                headers=session.get("uploadHeaders", {}),
+                timeout=self._upload_timeout,
+            )
+        finally:
+            archive.close()
         self._transport.finalize_custom_tool_upload(tool.name, session["uploadId"])
         _wait_for_source(
             tool,
@@ -363,7 +382,17 @@ class CustomTools:
             timeout=cast(float, timeout),
             interval=interval,
         )
+        _require_source_hash(
+            tool,
+            archive.digest,
+            timeout=cast(float, timeout),
+        )
         deployed = self._transport.deploy_custom_tool(tool.name)
+        _require_source_hash(
+            tool,
+            archive.digest,
+            timeout=cast(float, timeout),
+        )
         version_name = deployed["versionName"]
         if version_name is not None:
             return self._get_version(tool.name, version_name)
@@ -375,8 +404,12 @@ class CustomTools:
             interval=interval,
         )
 
-    def _versions(self, tool_name: str, *, limit: int) -> Page[Version]:
-        wire = self._transport.list_custom_tool_versions(tool_name, limit=limit)
+    def _versions(
+        self, tool_name: str, *, limit: int, request_timeout: float | None = None
+    ) -> Page[Version]:
+        wire = self._transport.list_custom_tool_versions(
+            tool_name, limit=limit, timeout=request_timeout
+        )
         return Page(
             items=tuple(_version_from_wire(self, tool_name, item) for item in wire["items"])
         )
@@ -395,16 +428,26 @@ def _wait_for_source(
 ) -> CustomTool:
     deadline = _clock() + timeout
     while True:
-        current = tool.refresh()
+        remaining = deadline - _clock()
+        if remaining <= 0:
+            raise CustomToolUploadError(
+                f"Source extraction did not finish within {timeout:g} seconds"
+            )
+        current = tool._refresh(request_timeout=remaining)
         if current.source_hash == source_hash:
             return current
         if current.connection_error:
             raise CustomToolUploadError(f"Source extraction failed: {current.connection_error}")
-        if _clock() >= deadline:
-            raise CustomToolUploadError(
-                f"Source extraction did not finish within {timeout:g} seconds"
-            )
         time.sleep(min(interval, max(0.0, deadline - _clock())))
+
+
+def _require_source_hash(tool: CustomTool, source_hash: str, *, timeout: float) -> None:
+    current = tool._refresh(request_timeout=timeout)
+    if current.source_hash != source_hash:
+        raise CustomToolUploadError(
+            "Custom Tool source changed before deployment could be verified; "
+            "inspect Versions before retrying"
+        )
 
 
 def _wait_for_version_ref(
@@ -417,19 +460,20 @@ def _wait_for_version_ref(
 ) -> Version:
     deadline = _clock() + timeout
     while True:
-        for version in collection._versions(tool_name, limit=50).items:
-            if version.source_revision == source_ref:
-                return version
-        if _clock() >= deadline:
+        remaining = deadline - _clock()
+        if remaining <= 0:
             raise CustomToolBuildTimeoutError(
                 f"Custom Tool deploy {tool_name}@{source_ref[:12]} did not receive a numbered version "
                 f"within {timeout:g} seconds"
             )
+        for version in collection._versions(tool_name, limit=50, request_timeout=remaining).items:
+            if version.source_revision == source_ref:
+                return version
         time.sleep(min(interval, max(0.0, deadline - _clock())))
 
 
 def _upload_archive(
-    url: str, data: bytes, *, method: str, headers: dict[str, str], timeout: float
+    url: str, data: BinaryIO, *, method: str, headers: dict[str, str], timeout: float
 ) -> None:
     try:
         response = httpx.request(method, url, content=data, headers=headers, timeout=timeout)

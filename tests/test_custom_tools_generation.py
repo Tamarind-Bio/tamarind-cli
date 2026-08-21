@@ -210,6 +210,7 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
                     "required": ["name"],
                 },
                 "CreateResult": {
+                    "additionalProperties": False,
                     "type": "object",
                     "properties": {"id": {"type": "string"}},
                     "required": ["id"],
@@ -329,7 +330,75 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     assert ") -> None:" in generated_text
     assert "return None" in generated_text
 
+    extension_response = deepcopy(sliced)
+    extension_response["components"]["schemas"]["CreateResult"].pop("additionalProperties", None)
+    extension_response_path = tmp_path / "extension-response.json"
+    extension_response_output = tmp_path / "extension-response.py"
+    extension_response_path.write_text(json.dumps(extension_response))
+    subprocess.run(
+        [
+            sys.executable,
+            str(root / "scripts/generate_custom_tools_transport.py"),
+            str(extension_response_path),
+            str(extension_response_output),
+        ],
+        check=True,
+    )
+    extension_text = extension_response_output.read_text()
+    assert "class CreateResult(Protocol):" in extension_text
+    assert "def __getitem__(self, key: str) -> Any" in extension_text
+
+    alias_chain = deepcopy(sliced)
+    alias_chain["components"]["schemas"].update(
+        {
+            "AAlias": {"$ref": "#/components/schemas/ZAlias"},
+            "ZAlias": {"type": "string"},
+        }
+    )
+    alias_chain_path = tmp_path / "alias-chain.json"
+    alias_chain_output = tmp_path / "alias-chain.py"
+    alias_chain_path.write_text(json.dumps(alias_chain))
+    subprocess.run(
+        [
+            sys.executable,
+            str(root / "scripts/generate_custom_tools_transport.py"),
+            str(alias_chain_path),
+            str(alias_chain_output),
+        ],
+        check=True,
+    )
+    alias_text = alias_chain_output.read_text()
+    assert alias_text.index("ZAlias: TypeAlias = str") < alias_text.index(
+        "AAlias: TypeAlias = ZAlias"
+    )
+
     unsupported_contracts: list[tuple[dict[str, object], str]] = []
+
+    divergent_mutation_alias = deepcopy(sliced)
+    divergent_mutation_alias["components"]["schemas"].update(
+        {
+            "PublicCreateCustomToolRequest": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {"gpuType": {"enum": ["A100"], "type": "string"}},
+            },
+            "PublicUpdateCustomToolRequest": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "gpuType": {
+                        "anyOf": [
+                            {"enum": ["A100"], "type": "string"},
+                            {"type": "null"},
+                        ]
+                    }
+                },
+            },
+        }
+    )
+    unsupported_contracts.append(
+        (divergent_mutation_alias, "Public alias GpuType has divergent mutation schemas")
+    )
 
     path_servers = deepcopy(sliced)
     path_servers["paths"]["/custom-tools"]["servers"] = [{"url": "https://other.test"}]
@@ -342,6 +411,10 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     custom_dialect = deepcopy(sliced)
     custom_dialect["jsonSchemaDialect"] = "https://example.test/custom-dialect"
     unsupported_contracts.append((custom_dialect, "Custom JSON Schema dialects"))
+
+    openapi_30 = deepcopy(sliced)
+    openapi_30["openapi"] = "3.0.3"
+    unsupported_contracts.append((openapi_30, "Only OpenAPI 3.1"))
 
     unsupported_auth = deepcopy(sliced)
     unsupported_auth["components"]["securitySchemes"]["ApiKey"]["name"] = "Authorization"
@@ -441,6 +514,10 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     }
     unsupported_contracts.append((inline_object_model, "inline object schemas"))
 
+    extension_request = deepcopy(sliced)
+    extension_request["components"]["schemas"]["CreatePayload"].pop("additionalProperties", None)
+    unsupported_contracts.append((extension_request, "extension-bearing request object"))
+
     directional_model = deepcopy(sliced)
     directional_model["components"]["schemas"]["CreatePayload"]["properties"]["name"][
         "readOnly"
@@ -471,6 +548,14 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     unsupported_path_style = deepcopy(sliced)
     unsupported_path_style["components"]["parameters"]["ToolName"]["style"] = "label"
     unsupported_contracts.append((unsupported_path_style, "Unsupported path parameter style"))
+
+    integer_path = deepcopy(sliced)
+    integer_path["components"]["parameters"]["CanonicalToolName"]["schema"] = {"type": "integer"}
+    unsupported_contracts.append((integer_path, "Non-string path parameter"))
+
+    boolean_header = deepcopy(sliced)
+    boolean_header["components"]["parameters"]["OptionalTrace"]["schema"] = {"type": "boolean"}
+    unsupported_contracts.append((boolean_header, "Non-string header parameter"))
 
     allow_reserved_query = deepcopy(sliced)
     allow_reserved_query["paths"]["/custom-tools"]["get"]["parameters"].append(

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
-from io import BytesIO
 import os
 from pathlib import Path
 import stat
+from tempfile import SpooledTemporaryFile
 from typing import BinaryIO, cast
 import zipfile
 
@@ -39,13 +39,15 @@ _REGULAR_FILE_MODE = 0o100644
 _EXECUTABLE_FILE_MODE = 0o100755
 _DIRECTORY_MODE = 0o040755
 _MAX_SOURCE_ENTRIES = 25_000
+MAX_TOOL_SOURCE_BYTES = 5 * 1024 * 1024 * 1024
+_ARCHIVE_MEMORY_BYTES = 8 * 1024 * 1024
 
 
-class _CappedBytesIO(BytesIO):
+class _CappedArchive:
     """A seekable ZIP target whose retained content cannot exceed the service cap."""
 
     def __init__(self, max_bytes: int | None) -> None:
-        super().__init__()
+        self._stream = SpooledTemporaryFile(max_size=_ARCHIVE_MEMORY_BYTES, mode="w+b")
         self._max_bytes = max_bytes
 
     def write(self, data: Buffer) -> int:
@@ -54,17 +56,45 @@ class _CappedBytesIO(BytesIO):
             raise CustomToolUploadError(
                 f"Source archive exceeds the {self._max_bytes}-byte upload limit"
             )
-        return super().write(data)
+        return self._stream.write(data)
+
+    def read(self, size: int = -1) -> bytes:
+        return self._stream.read(size)
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        return self._stream.seek(offset, whence)
+
+    def tell(self) -> int:
+        return self._stream.tell()
+
+    def flush(self) -> None:
+        self._stream.flush()
+
+    def close(self) -> None:
+        self._stream.close()
 
 
 @dataclass(frozen=True)
 class SourceArchive:
-    data: bytes
     digest: str
+    size: int
+    _stream: _CappedArchive = field(repr=False, compare=False)
 
     @property
-    def size(self) -> int:
-        return len(self.data)
+    def data(self) -> bytes:
+        position = self._stream.tell()
+        try:
+            self._stream.seek(0)
+            return self._stream.read()
+        finally:
+            self._stream.seek(position)
+
+    def content(self) -> BinaryIO:
+        self._stream.seek(0)
+        return cast(BinaryIO, self._stream)
+
+    def close(self) -> None:
+        self._stream.close()
 
 
 class _ContentReader:
@@ -236,7 +266,7 @@ def build_source_tree_archive(
 ) -> SourceArchive:
     """Package one previously inspected source snapshot."""
     _enforce_source_entry_limit(len(tree.files) + len(tree.empty_directories))
-    output = _CappedBytesIO(max_bytes)
+    output = _CappedArchive(max_bytes)
     with zipfile.ZipFile(
         output,
         mode="w",
@@ -268,8 +298,14 @@ def build_source_tree_archive(
                     while chunk := source.read(1024 * 1024):
                         destination.write(chunk)
 
-    data = output.getvalue()
-    return SourceArchive(data=data, digest=f"sha256:{sha256(data).hexdigest()}")
+    output.seek(0)
+    digest = sha256()
+    size = 0
+    while chunk := output.read(1024 * 1024):
+        digest.update(chunk)
+        size += len(chunk)
+    output.seek(0)
+    return SourceArchive(digest=f"sha256:{digest.hexdigest()}", size=size, _stream=output)
 
 
 def is_link_like(path: Path) -> bool:

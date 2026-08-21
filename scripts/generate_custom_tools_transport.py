@@ -13,8 +13,16 @@ from typing import Any
 HTTP_METHODS = ("get", "post", "put", "patch", "delete")
 ASYNC_METHODS = frozenset({"get_custom_tool_version", "list_custom_tool_build_logs"})
 PUBLIC_PROPERTY_ALIASES = (
-    ("PublicCustomTool", "gpuType", "GpuType"),
-    ("PublicCustomTool", "memory", "MemorySize"),
+    (
+        ("PublicCustomTool", "PublicCreateCustomToolRequest", "PublicUpdateCustomToolRequest"),
+        "gpuType",
+        "GpuType",
+    ),
+    (
+        ("PublicCustomTool", "PublicCreateCustomToolRequest", "PublicUpdateCustomToolRequest"),
+        "memory",
+        "MemorySize",
+    ),
 )
 SUPPORTED_API_KEY_HEADER = "x-api-key"
 REFERENCE_ANNOTATION_SIBLINGS = frozenset(
@@ -32,6 +40,8 @@ REFERENCE_ANNOTATION_SIBLINGS = frozenset(
 
 
 def _validate_auth_contract(spec: dict[str, Any]) -> None:
+    if not str(spec.get("openapi", "")).startswith("3.1."):
+        raise ValueError("Only OpenAPI 3.1 documents are supported")
     if spec.get("jsonSchemaDialect") is not None:
         raise ValueError("Custom JSON Schema dialects are outside the generated SDK profile")
     schemes = spec.get("components", {}).get("securitySchemes", {})
@@ -286,6 +296,10 @@ def _validate_parameter_profile(parameter: dict[str, Any], schemas: dict[str, An
         raise ValueError(
             f"Structured {location} parameter is outside the SDK profile: {parameter.get('name')}"
         )
+    if location in {"path", "header"} and _parameter_annotation(schema) != "str":
+        raise ValueError(
+            f"Non-string {location} parameter is outside the SDK profile: {parameter.get('name')}"
+        )
     if location == "query" and parameter.get("style", "form") != "form":
         raise ValueError(f"Unsupported query parameter style: {parameter.get('name')}")
     if location == "query" and parameter.get("allowReserved") is True:
@@ -351,6 +365,74 @@ def _resolve_component(
     return _resolve_component(target, kind, components, seen | {ref})
 
 
+def _wire_schema(schema: dict[str, Any], schemas: dict[str, Any]) -> object:
+    """Normalize non-wire annotations before comparing shared public aliases."""
+    resolved = _resolve_schema(schema, schemas)
+    return {
+        key: value
+        for key, value in resolved.items()
+        if key not in REFERENCE_ANNOTATION_SIBLINGS and key != "default"
+    }
+
+
+def _validate_public_aliases(schemas: dict[str, Any]) -> list[str]:
+    aliases: list[str] = []
+    for models, field, alias in PUBLIC_PROPERTY_ALIASES:
+        field_schemas = [
+            schemas[model]["properties"][field]
+            for model in models
+            if model in schemas and field in schemas[model].get("properties", {})
+        ]
+        if not field_schemas:
+            raise ValueError(f"Public alias {alias} has no source schema")
+        normalized = [_wire_schema(schema, schemas) for schema in field_schemas]
+        mutation_values = [
+            value for value in normalized if value != {"anyOf": [normalized[0], {"type": "null"}]}
+        ]
+        if any(value != normalized[0] for value in mutation_values):
+            raise ValueError(f"Public alias {alias} has divergent mutation schemas")
+        aliases.append(f"{alias}: TypeAlias = {_annotation(field_schemas[0])}")
+    return aliases
+
+
+def _schema_alias_order(schemas: dict[str, Any], aliases: set[str]) -> list[str]:
+    ordered: list[str] = []
+    pending = set(aliases)
+    while pending:
+        ready = sorted(
+            name
+            for name in pending
+            if not (
+                set(re.findall(r"#/components/schemas/([^/]+)", json.dumps(schemas[name])))
+                & pending
+            )
+        )
+        if not ready:
+            raise ValueError("Cyclic schema aliases are outside the generated SDK profile")
+        ordered.extend(ready)
+        pending.difference_update(ready)
+    return ordered
+
+
+def _validate_request_object_profile(
+    operation: dict[str, Any], request_body_components: dict[str, Any], schemas: dict[str, Any]
+) -> None:
+    request_body = operation.get("requestBody")
+    if not isinstance(request_body, dict):
+        return
+    resolved_body = _resolve_component(request_body, "requestBodies", request_body_components)
+    media = resolved_body.get("content", {}).get("application/json", {})
+    schema = media.get("schema") if isinstance(media, dict) else None
+    if not isinstance(schema, dict):
+        return
+    resolved = _resolve_schema(schema, schemas)
+    if resolved.get("type") == "object" and resolved.get("properties"):
+        if resolved.get("additionalProperties") is not False:
+            raise ValueError(
+                f"{operation.get('operationId')} has an extension-bearing request object"
+            )
+
+
 def generate(spec: dict[str, Any]) -> str:
     _validate_auth_contract(spec)
     components = spec.get("components", {})
@@ -364,13 +446,15 @@ def generate(spec: dict[str, Any]) -> str:
     parameter_components = components.get("parameters", {})
     request_body_components = components.get("requestBodies", {})
     response_components = components.get("responses", {})
-    public_aliases = [
-        f"{alias}: TypeAlias = {_annotation(schemas[model]['properties'][field])}"
-        for model, field, alias in PUBLIC_PROPERTY_ALIASES
-    ]
+    public_aliases = _validate_public_aliases(schemas)
     schema_aliases: list[str] = []
     objects: list[str] = []
-    for name in sorted(schemas):
+    alias_names = {
+        name
+        for name, schema in schemas.items()
+        if schema.get("type") != "object" or not schema.get("properties")
+    }
+    for name in [*sorted(set(schemas) - alias_names), *_schema_alias_order(schemas, alias_names)]:
         schema = schemas[name]
         if any(
             isinstance(field_schema, dict)
@@ -384,12 +468,30 @@ def generate(spec: dict[str, Any]) -> str:
             schema_aliases.append(f"{name}: TypeAlias = {_annotation(schema)}")
             continue
         required = set(schema.get("required", []))
-        lines = [f"class {name}(TypedDict):"]
-        for field, field_schema in schema["properties"].items():
-            annotation = _annotation(field_schema)
-            if field not in required:
-                annotation = f"NotRequired[{annotation}]"
-            lines.append(f"    {field}: {annotation}")
+        if schema.get("additionalProperties") is False:
+            lines = [f"class {name}(TypedDict):"]
+            for field, field_schema in schema["properties"].items():
+                annotation = _annotation(field_schema)
+                if field not in required:
+                    annotation = f"NotRequired[{annotation}]"
+                lines.append(f"    {field}: {annotation}")
+        else:
+            lines = [f"class {name}(Protocol):"]
+            for field, field_schema in schema["properties"].items():
+                lines.extend(
+                    (
+                        "    @overload",
+                        f"    def __getitem__(self, key: Literal[{field!r}]) -> "
+                        f"{_annotation(field_schema)}: ...",
+                    )
+                )
+            lines.extend(
+                (
+                    "    @overload",
+                    "    def __getitem__(self, key: str) -> Any: ...",
+                    "    def get(self, key: str, default: Any = None) -> Any: ...",
+                )
+            )
         objects.append("\n".join(lines))
 
     methods: list[str] = []
@@ -424,6 +526,7 @@ def generate(spec: dict[str, Any]) -> str:
                 target.append((wire_name, py_name))
 
             body = _body_type(operation, request_body_components)
+            _validate_request_object_profile(operation, request_body_components, schemas)
             if body is None:
                 body_type = None
                 body_required = False
@@ -501,10 +604,15 @@ def generate(spec: dict[str, Any]) -> str:
     uses_any = any(
         "Any" in definition for definition in [*public_aliases, *objects, *schema_aliases, *methods]
     )
+    uses_protocol = any("(Protocol)" in definition for definition in objects)
     typing_names = (
-        "Any, Literal, TypeAlias, TypedDict, cast"
-        if uses_any
-        else "Literal, TypeAlias, TypedDict, cast"
+        "Any, Literal, Protocol, TypeAlias, TypedDict, cast, overload"
+        if uses_protocol
+        else (
+            "Any, Literal, TypeAlias, TypedDict, cast"
+            if uses_any
+            else "Literal, TypeAlias, TypedDict, cast"
+        )
     )
     return "\n".join(
         [

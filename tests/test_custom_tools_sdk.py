@@ -126,6 +126,8 @@ def test_build_composes_upload_finalize_poll_deploy_and_version(tmp_path: Path) 
             httpx.Response(200, json=_tool()),
             httpx.Response(200, json=_tool()),
             httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
+            httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
+            httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
         ]
     )
     respx.post(f"{BASE}custom-tools/example/uploads").mock(
@@ -156,7 +158,7 @@ def test_build_composes_upload_finalize_poll_deploy_and_version(tmp_path: Path) 
     with Tamarind(api_key="key", api_base=BASE) as client:
         version = client.custom_tools.get("example").build(tmp_path, poll_interval=0.001)
 
-    assert tool_reads.call_count == 3
+    assert tool_reads.call_count == 5
     assert upload.calls.last.request.content.startswith(b"PK")
     assert upload.calls.last.request.headers["Content-Type"] == "application/zip"
     assert finalize.called
@@ -190,6 +192,34 @@ def test_build_surfaces_background_extraction_error(tmp_path: Path) -> None:
             client.custom_tools.get("example").build(tmp_path, poll_interval=0.001)
 
 
+def test_build_caps_archive_at_the_server_source_limit(tmp_path: Path, monkeypatch) -> None:
+    _source(tmp_path)
+    observed_limit = None
+
+    class Transport:
+        def create_custom_tool_upload(self, _name):
+            return {"uploadUrl": UPLOAD, "uploadId": "upload-1"}
+
+    def capture_limit(_tree, *, max_bytes):
+        nonlocal observed_limit
+        observed_limit = max_bytes
+        raise CustomToolUploadError("stop after observing limit")
+
+    monkeypatch.setattr(resources, "build_source_tree_archive", capture_limit)
+    collection = resources.CustomTools(Transport())  # type: ignore[arg-type]
+    tool = type("Tool", (), {"name": "example"})()
+
+    with pytest.raises(CustomToolUploadError, match="observing limit"):
+        collection._build(  # type: ignore[arg-type]
+            tool,
+            resources.inspect_source_tree(tmp_path),
+            source_timeout=1,
+            poll_interval=0.1,
+        )
+
+    assert observed_limit == resources.MAX_TOOL_SOURCE_BYTES
+
+
 @respx.mock
 def test_build_tracks_queued_deploy_by_source_ref(tmp_path: Path) -> None:
     _source(tmp_path)
@@ -197,6 +227,8 @@ def test_build_tracks_queued_deploy_by_source_ref(tmp_path: Path) -> None:
     respx.get(f"{BASE}custom-tools/example").mock(
         side_effect=[
             httpx.Response(200, json=_tool()),
+            httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
+            httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
             httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
         ]
     )
@@ -227,6 +259,40 @@ def test_build_tracks_queued_deploy_by_source_ref(tmp_path: Path) -> None:
 
     assert version.name == "v1"
     assert versions.call_count == 2
+
+
+@respx.mock
+def test_build_fails_closed_when_source_changes_before_deploy(tmp_path: Path) -> None:
+    _source(tmp_path)
+    source_hash = _archive_digest(tmp_path)
+    changed_hash = "sha256:" + "f" * 64
+    respx.get(f"{BASE}custom-tools/example").mock(
+        side_effect=[
+            httpx.Response(200, json=_tool()),
+            httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
+            httpx.Response(200, json=_tool(source=True, source_hash=changed_hash)),
+        ]
+    )
+    respx.post(f"{BASE}custom-tools/example/uploads").mock(
+        return_value=httpx.Response(
+            201, json={"uploadId": "upload-1", "uploadUrl": UPLOAD, "expiresIn": 900}
+        )
+    )
+    respx.put(UPLOAD).mock(return_value=httpx.Response(200))
+    respx.post(f"{BASE}custom-tools/example/uploads/upload-1/finalize").mock(
+        return_value=httpx.Response(202, json={"status": "processing"})
+    )
+    deploy = respx.post(f"{BASE}custom-tools/example/deploy").mock(
+        return_value=httpx.Response(
+            202, json={"versionName": "v1", "ref": "a" * 40, "path": "building"}
+        )
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(CustomToolUploadError, match="source changed"):
+            client.custom_tools.get("example").build(tmp_path, poll_interval=0.001)
+
+    assert not deploy.called
 
 
 @respx.mock
@@ -355,7 +421,102 @@ def test_monitor_refreshes_version_after_empty_advancing_log_cursor(monkeypatch)
     completed = asyncio.run(version._monitor(timeout=1.0, interval=0.1, on_event=None))
 
     assert completed.status == "Complete"
-    assert requested_cursors == [None]
+    assert requested_cursors == [None, "advanced"]
+
+
+def test_monitor_advances_log_progress_without_an_event_callback(monkeypatch) -> None:
+    requested_cursors: list[str | None] = []
+    refreshes = 0
+
+    async def logs(_version, *, cursor, **_kwargs):
+        requested_cursors.append(cursor)
+        return resources.BuildLogPage(items=(), status="RUNNING", next_cursor="advanced")
+
+    async def refresh(version, **_kwargs):
+        nonlocal refreshes
+        refreshes += 1
+        status = "Complete" if refreshes == 2 else "Running"
+        return resources.Version(
+            name=version.name,
+            source_revision=version.source_revision,
+            status=status,
+            origin=version.origin,
+            started_at=version.started_at,
+            completed_at="2026-08-15T00:01:00Z" if status == "Complete" else None,
+            duration_seconds=60 if status == "Complete" else None,
+            error=version.error,
+            tool_name=version.tool_name,
+            _collection=version._collection,
+        )
+
+    monkeypatch.setattr(resources.Version, "_logs_async", logs)
+    monkeypatch.setattr(resources.Version, "_refresh_async", refresh)
+    version = resources.Version(
+        name="v1",
+        source_revision="a" * 40,
+        status="Running",
+        origin="build",
+        started_at="2026-08-15T00:00:00Z",
+        completed_at=None,
+        duration_seconds=None,
+        error=None,
+        tool_name="example",
+        _collection=None,  # type: ignore[arg-type]
+    )
+
+    completed = asyncio.run(version._monitor(timeout=1.0, interval=0.001, on_event=None))
+
+    assert completed.status == "Complete"
+    assert requested_cursors == [None, "advanced", "advanced"]
+
+
+def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> None:
+    first = resources.BuildEvent("building", 1)
+    final = resources.BuildEvent("complete", 2)
+    pages = iter(
+        (
+            resources.BuildLogPage(items=(first,), status="RUNNING", next_cursor="cursor-1"),
+            resources.BuildLogPage(items=(final,), status="SUCCEEDED", next_cursor="cursor-2"),
+        )
+    )
+
+    async def logs(*_args, **_kwargs):
+        return next(pages)
+
+    async def refresh(version, **_kwargs):
+        return resources.Version(
+            name=version.name,
+            source_revision=version.source_revision,
+            status="Complete",
+            origin=version.origin,
+            started_at=version.started_at,
+            completed_at="2026-08-15T00:01:00Z",
+            duration_seconds=60,
+            error=version.error,
+            tool_name=version.tool_name,
+            _collection=version._collection,
+        )
+
+    monkeypatch.setattr(resources.Version, "_logs_async", logs)
+    monkeypatch.setattr(resources.Version, "_refresh_async", refresh)
+    version = resources.Version(
+        name="v1",
+        source_revision="a" * 40,
+        status="Running",
+        origin="build",
+        started_at="2026-08-15T00:00:00Z",
+        completed_at=None,
+        duration_seconds=None,
+        error=None,
+        tool_name="example",
+        _collection=None,  # type: ignore[arg-type]
+    )
+    delivered: list[resources.BuildEvent] = []
+
+    completed = asyncio.run(version._monitor(timeout=1.0, interval=0.1, on_event=delivered.append))
+
+    assert completed.status == "Complete"
+    assert delivered == [first, final]
 
 
 def test_log_progress_deduplicates_cumulative_pages_without_a_cursor() -> None:
