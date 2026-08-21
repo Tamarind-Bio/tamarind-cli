@@ -18,14 +18,16 @@ def _is_custom_tools_path(path: str) -> bool:
     return path == CUSTOM_TOOLS_PATH or path.startswith(f"{CUSTOM_TOOLS_PATH}/")
 
 
-def _schema_refs(node: object) -> set[str]:
+def _schema_refs(node: object, *, opaque: bool = False) -> set[str]:
     refs: set[str] = set()
+    if opaque:
+        return refs
     if isinstance(node, dict):
         ref = node.get("$ref")
         if isinstance(ref, str) and ref.startswith("#/components/schemas/"):
             refs.add(ref.rsplit("/", 1)[-1])
-        for value in node.values():
-            refs.update(_schema_refs(value))
+        for key, value in node.items():
+            refs.update(_schema_refs(value, opaque=key in {"example", "examples"}))
     elif isinstance(node, list):
         for value in node:
             refs.update(_schema_refs(value))
@@ -47,19 +49,12 @@ def _component_refs(node: object, kind: str) -> set[str]:
     return refs
 
 
-def _security_scheme_names(node: object) -> set[str]:
+def _security_scheme_names(requirements: object) -> set[str]:
     names: set[str] = set()
-    if isinstance(node, dict):
-        security = node.get("security")
-        if isinstance(security, list):
-            for requirement in security:
-                if isinstance(requirement, dict):
-                    names.update(str(name) for name in requirement)
-        for value in node.values():
-            names.update(_security_scheme_names(value))
-    elif isinstance(node, list):
-        for value in node:
-            names.update(_security_scheme_names(value))
+    if isinstance(requirements, list):
+        for requirement in requirements:
+            if isinstance(requirement, dict):
+                names.update(str(name) for name in requirement)
     return names
 
 
@@ -150,9 +145,12 @@ def extract(spec: dict[str, Any]) -> dict[str, Any]:
 
     security_schemes = components.get("securitySchemes", {})
     inherited_security = spec.get("security", [])
-    retained_security_names = _security_scheme_names(
-        {"security": inherited_security, "paths": paths}
-    )
+    retained_security_names = _security_scheme_names(inherited_security)
+    for path_item in paths.values():
+        for method in HTTP_METHODS:
+            operation = path_item.get(method)
+            if isinstance(operation, dict) and "security" in operation:
+                retained_security_names.update(_security_scheme_names(operation["security"]))
     extracted_components = {
         "schemas": {name: deepcopy(schemas[name]) for name in sorted(reachable)},
         "securitySchemes": {
@@ -168,7 +166,7 @@ def extract(spec: dict[str, Any]) -> dict[str, Any]:
     if retained_path_items:
         extracted_components["pathItems"] = retained_path_items
 
-    return {
+    extracted = {
         "openapi": spec["openapi"],
         "info": deepcopy(spec["info"]),
         "servers": deepcopy(spec.get("servers", [])),
@@ -176,6 +174,10 @@ def extract(spec: dict[str, Any]) -> dict[str, Any]:
         "paths": deepcopy(paths),
         "components": extracted_components,
     }
+    dialect = spec.get("jsonSchemaDialect")
+    if dialect is not None:
+        extracted["jsonSchemaDialect"] = deepcopy(dialect)
+    return extracted
 
 
 def main() -> None:

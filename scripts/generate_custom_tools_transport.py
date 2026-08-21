@@ -16,6 +16,37 @@ PUBLIC_PROPERTY_ALIASES = (
     ("PublicCustomTool", "gpuType", "GpuType"),
     ("PublicCustomTool", "memory", "MemorySize"),
 )
+SUPPORTED_API_KEY_HEADER = "x-api-key"
+
+
+def _validate_auth_contract(spec: dict[str, Any]) -> None:
+    if spec.get("jsonSchemaDialect") is not None:
+        raise ValueError("Custom JSON Schema dialects are outside the generated SDK profile")
+    schemes = spec.get("components", {}).get("securitySchemes", {})
+    supported = {
+        name
+        for name, scheme in schemes.items()
+        if isinstance(scheme, dict)
+        and scheme.get("type") == "apiKey"
+        and scheme.get("in") == "header"
+        and str(scheme.get("name", "")).lower() == SUPPORTED_API_KEY_HEADER
+    }
+    global_security = spec.get("security", [])
+    for path_item in spec.get("paths", {}).values():
+        for method in HTTP_METHODS:
+            operation = path_item.get(method)
+            if not isinstance(operation, dict):
+                continue
+            requirements = operation.get("security", global_security)
+            if not isinstance(requirements, list) or not requirements:
+                raise ValueError(f"{operation.get('operationId')} has unsupported authentication")
+            if any(
+                not isinstance(requirement, dict)
+                or set(requirement) != supported
+                or any(scopes for scopes in requirement.values())
+                for requirement in requirements
+            ):
+                raise ValueError(f"{operation.get('operationId')} has unsupported authentication")
 
 
 def _name(value: str) -> str:
@@ -242,6 +273,7 @@ def _resolve_component(
 
 
 def generate(spec: dict[str, Any]) -> str:
+    _validate_auth_contract(spec)
     components = spec.get("components", {})
     schemas = components.get("schemas", {})
     parameter_components = components.get("parameters", {})

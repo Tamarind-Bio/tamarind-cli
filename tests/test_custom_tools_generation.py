@@ -17,7 +17,11 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
                 "description": "ok",
                 "content": {
                     "application/json": {
-                        "schema": {"$ref": "#/components/schemas/PublicCustomTool"}
+                        "schema": {"$ref": "#/components/schemas/PublicCustomTool"},
+                        "example": {
+                            "$ref": "#/components/schemas/NotASchema",
+                            "security": [{"mode": "strict"}],
+                        },
                     }
                 },
             }
@@ -246,6 +250,14 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     assert "return None" in generated_text
 
     unsupported_contracts: list[tuple[dict[str, object], str]] = []
+
+    custom_dialect = deepcopy(sliced)
+    custom_dialect["jsonSchemaDialect"] = "https://example.test/custom-dialect"
+    unsupported_contracts.append((custom_dialect, "Custom JSON Schema dialects"))
+
+    unsupported_auth = deepcopy(sliced)
+    unsupported_auth["components"]["securitySchemes"]["ApiKey"]["name"] = "Authorization"
+    unsupported_contracts.append((unsupported_auth, "unsupported authentication"))
 
     multiple_successes = deepcopy(sliced)
     multiple_successes["paths"]["/custom-tools"]["get"]["responses"]["204"] = {
