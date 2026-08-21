@@ -332,14 +332,14 @@ class CustomTools:
             headers=session.get("uploadHeaders", {}),
             timeout=self._upload_timeout,
         )
-        finalized = self._transport.finalize_custom_tool_upload(tool.name, session["uploadId"])
+        self._transport.finalize_custom_tool_upload(tool.name, session["uploadId"])
         _wait_for_source(
             tool,
-            finalized["sourceHash"],
+            archive.digest,
             timeout=cast(float, timeout),
             interval=interval,
         )
-        deployed = self._transport.deploy_custom_tool(tool.name, {})
+        deployed = self._transport.deploy_custom_tool(tool.name)
         version_name = deployed["versionName"]
         if version_name is not None:
             return self._get_version(tool.name, version_name)

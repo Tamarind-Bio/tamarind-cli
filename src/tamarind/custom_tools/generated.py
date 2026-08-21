@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from tamarind.http import HTTPClient
 
-OPENAPI_SHA256 = "48e522585dcf70e37b2ce2e58e8515a729885cc441ccbfed73910069f9f08666"
+OPENAPI_SHA256 = "45f0e6d06a6907590fab485df6295d3c82b211b0ce77ca245f9042f4f22a82ef"
 
 
 def _segment(value: str) -> str:
@@ -111,7 +111,6 @@ class PublicUpdateCustomToolRequest(TypedDict):
 
 
 class PublicUploadFinalized(TypedDict):
-    sourceHash: str
     status: Literal["processing"]
 
 
@@ -186,14 +185,21 @@ class GeneratedCustomToolsTransport:
         return cast(PublicCustomTool, response.json())
 
     def deploy_custom_tool(
-        self, name: str, body: PublicDeployRequest, *, timeout: float | None = None
+        self, name: str, body: PublicDeployRequest | None = None, *, timeout: float | None = None
     ) -> PublicDeployResult:
-        response = self._client.request(
-            "POST",
-            f"custom-tools/{_segment(name)}/deploy",
-            json=body,
-            timeout=timeout,
-        )
+        if body is None:
+            response = self._client.request(
+                "POST",
+                f"custom-tools/{_segment(name)}/deploy",
+                timeout=timeout,
+            )
+        else:
+            response = self._client.request(
+                "POST",
+                f"custom-tools/{_segment(name)}/deploy",
+                json=body,
+                timeout=timeout,
+            )
         return cast(PublicDeployResult, response.json())
 
     def create_custom_tool_upload(

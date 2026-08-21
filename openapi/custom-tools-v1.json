@@ -629,10 +629,6 @@
       },
       "PublicUploadFinalized": {
         "properties": {
-          "sourceHash": {
-            "title": "Sourcehash",
-            "type": "string"
-          },
           "status": {
             "const": "processing",
             "title": "Status",
@@ -640,8 +636,7 @@
           }
         },
         "required": [
-          "status",
-          "sourceHash"
+          "status"
         ],
         "title": "PublicUploadFinalized",
         "type": "object"
@@ -1004,11 +999,11 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PublicDeployRequest"
+                "$ref": "#/components/schemas/PublicDeployRequest",
+                "default": {}
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "202": {
@@ -1092,7 +1087,7 @@
     },
     "/custom-tools/{name}/uploads/{upload_id}/finalize": {
       "post": {
-        "description": "Start extraction. Poll until the tool's `sourceHash` equals the returned hash.",
+        "description": "Start extraction. Poll until the tool's source hash matches the uploaded archive.",
         "operationId": "finalizeCustomToolUpload",
         "parameters": [
           {

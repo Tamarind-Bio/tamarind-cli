@@ -8,6 +8,7 @@ import pytest
 import respx
 
 from tamarind import Tamarind
+from tamarind.custom_tools.packaging import build_source_tree_archive, inspect_source_tree
 from tamarind.errors import CustomToolBuildFailedError, CustomToolUploadError
 
 BASE = "https://api.test/"
@@ -58,6 +59,10 @@ def _source(root: Path) -> None:
     (root / "run.sh").write_text("#!/bin/sh\ntrue\n")
 
 
+def _archive_digest(root: Path) -> str:
+    return build_source_tree_archive(inspect_source_tree(root)).digest
+
+
 @respx.mock
 def test_create_list_and_update_wrap_public_routes() -> None:
     create = respx.post(f"{BASE}custom-tools").mock(return_value=httpx.Response(201, json=_tool()))
@@ -83,11 +88,12 @@ def test_create_list_and_update_wrap_public_routes() -> None:
 @respx.mock
 def test_build_composes_upload_finalize_poll_deploy_and_version(tmp_path: Path) -> None:
     _source(tmp_path)
+    source_hash = _archive_digest(tmp_path)
     tool_reads = respx.get(f"{BASE}custom-tools/example").mock(
         side_effect=[
             httpx.Response(200, json=_tool()),
             httpx.Response(200, json=_tool()),
-            httpx.Response(200, json=_tool(source=True, source_hash="sha256:new-source")),
+            httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
         ]
     )
     respx.post(f"{BASE}custom-tools/example/uploads").mock(
@@ -104,9 +110,7 @@ def test_build_composes_upload_finalize_poll_deploy_and_version(tmp_path: Path) 
     )
     upload = respx.put(UPLOAD).mock(return_value=httpx.Response(200))
     finalize = respx.post(f"{BASE}custom-tools/example/uploads/upload-1/finalize").mock(
-        return_value=httpx.Response(
-            202, json={"status": "processing", "sourceHash": "sha256:new-source"}
-        )
+        return_value=httpx.Response(202, json={"status": "processing"})
     )
     deploy = respx.post(f"{BASE}custom-tools/example/deploy").mock(
         return_value=httpx.Response(
@@ -124,7 +128,7 @@ def test_build_composes_upload_finalize_poll_deploy_and_version(tmp_path: Path) 
     assert upload.calls.last.request.content.startswith(b"PK")
     assert upload.calls.last.request.headers["Content-Type"] == "application/zip"
     assert finalize.called
-    assert json.loads(deploy.calls.last.request.content) == {}
+    assert deploy.calls.last.request.content == b""
     assert version.name == "v1"
     assert not respx.calls.last.request.url.path.endswith("/versions")
 
@@ -146,9 +150,7 @@ def test_build_surfaces_background_extraction_error(tmp_path: Path) -> None:
     )
     respx.put(UPLOAD).mock(return_value=httpx.Response(200))
     respx.post(f"{BASE}custom-tools/example/uploads/upload-1/finalize").mock(
-        return_value=httpx.Response(
-            202, json={"status": "processing", "sourceHash": "sha256:new-source"}
-        )
+        return_value=httpx.Response(202, json={"status": "processing"})
     )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
@@ -159,10 +161,11 @@ def test_build_surfaces_background_extraction_error(tmp_path: Path) -> None:
 @respx.mock
 def test_build_tracks_queued_deploy_by_source_ref(tmp_path: Path) -> None:
     _source(tmp_path)
+    source_hash = _archive_digest(tmp_path)
     respx.get(f"{BASE}custom-tools/example").mock(
         side_effect=[
             httpx.Response(200, json=_tool()),
-            httpx.Response(200, json=_tool(source=True, source_hash="sha256:new-source")),
+            httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
         ]
     )
     respx.post(f"{BASE}custom-tools/example/uploads").mock(
@@ -173,9 +176,7 @@ def test_build_tracks_queued_deploy_by_source_ref(tmp_path: Path) -> None:
     )
     respx.put(UPLOAD).mock(return_value=httpx.Response(200))
     respx.post(f"{BASE}custom-tools/example/uploads/upload-1/finalize").mock(
-        return_value=httpx.Response(
-            202, json={"status": "processing", "sourceHash": "sha256:new-source"}
-        )
+        return_value=httpx.Response(202, json={"status": "processing"})
     )
     respx.post(f"{BASE}custom-tools/example/deploy").mock(
         return_value=httpx.Response(
