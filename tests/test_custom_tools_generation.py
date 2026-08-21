@@ -26,7 +26,8 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
                         "x-example-data": {"$ref": "#/components/schemas/NotASchema"},
                     }
                 },
-            }
+            },
+            "default": {"$ref": "#/components/responses/Error"},
         },
     }
     spec = {
@@ -61,6 +62,14 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
         },
         "components": {
             "responses": {
+                "Error": {
+                    "description": "problem",
+                    "content": {
+                        "application/problem+json": {
+                            "schema": {"$ref": "#/components/schemas/PublicProblem"}
+                        }
+                    },
+                },
                 "CreateSuccess": {
                     "description": "created",
                     "content": {
@@ -177,6 +186,16 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
                     "required": ["gpuType", "memory"],
                 },
                 "CreateResultAlias": {"$ref": "#/components/schemas/CreateResult"},
+                "PublicProblem": {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string"},
+                        "title": {"type": "string"},
+                        "status": {"type": "integer"},
+                        "code": {"type": "string"},
+                    },
+                    "required": ["type", "title", "status", "code"],
+                },
                 "UnrelatedModel": {"type": "string"},
             },
         },
@@ -220,8 +239,9 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
         "CreateResult",
         "CreateResultAlias",
         "PublicCustomTool",
+        "PublicProblem",
     }
-    assert set(sliced["components"]["responses"]) == {"CreateSuccess"}
+    assert set(sliced["components"]["responses"]) == {"CreateSuccess", "Error"}
     assert set(sliced["components"]["securitySchemes"]) == {"ApiKey"}
 
     generated = tmp_path / "generated.py"
@@ -336,6 +356,24 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     }
     unsupported_contracts.append((all_of_model, "allOf schemas"))
 
+    unconstrained_model = deepcopy(sliced)
+    unconstrained_model["components"]["schemas"]["CreatePayload"]["properties"]["name"] = {}
+    unsupported_contracts.append((unconstrained_model, "Unconstrained schemas"))
+
+    ref_sibling_model = deepcopy(sliced)
+    ref_sibling_model["components"]["schemas"]["CreatePayload"]["properties"]["name"] = {
+        "$ref": "#/components/schemas/CreateResult",
+        "type": "string",
+    }
+    unsupported_contracts.append((ref_sibling_model, "Schema reference siblings"))
+
+    tuple_model = deepcopy(sliced)
+    tuple_model["components"]["schemas"]["CreatePayload"]["properties"]["name"] = {
+        "type": "array",
+        "prefixItems": [{"type": "string"}, {"type": "integer"}],
+    }
+    unsupported_contracts.append((tuple_model, "prefixItems schemas"))
+
     inline_object_model = deepcopy(sliced)
     inline_object_model["components"]["schemas"]["CreatePayload"]["properties"]["name"] = {
         "type": "object",
@@ -373,6 +411,29 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     unsupported_path_style = deepcopy(sliced)
     unsupported_path_style["components"]["parameters"]["ToolName"]["style"] = "label"
     unsupported_contracts.append((unsupported_path_style, "Unsupported path parameter style"))
+
+    allow_reserved_query = deepcopy(sliced)
+    allow_reserved_query["paths"]["/custom-tools"]["get"]["parameters"].append(
+        {
+            "in": "query",
+            "name": "raw",
+            "allowReserved": True,
+            "schema": {"type": "string"},
+        }
+    )
+    unsupported_contracts.append((allow_reserved_query, "Unsupported allowReserved"))
+
+    success_headers = deepcopy(sliced)
+    success_headers["paths"]["/custom-tools"]["get"]["responses"]["200"]["headers"] = {
+        "ETag": {"schema": {"type": "string"}}
+    }
+    unsupported_contracts.append((success_headers, "unsupported success headers"))
+
+    invalid_error_contract = deepcopy(sliced)
+    invalid_error_contract["components"]["responses"]["Error"]["content"][
+        "application/problem+json"
+    ]["schema"] = {"type": "object", "properties": {"detail": {"type": "string"}}}
+    unsupported_contracts.append((invalid_error_contract, "unsupported error response contract"))
 
     structured_query = deepcopy(sliced)
     structured_query["paths"]["/custom-tools"]["get"]["parameters"].append(

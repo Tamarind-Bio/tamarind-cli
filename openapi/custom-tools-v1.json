@@ -1,6 +1,16 @@
 {
   "components": {
     "responses": {
+      "Error": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/PublicProblem"
+            }
+          }
+        },
+        "description": "An error occurred (RFC 9457 problem+json). Switch on the stable `code`, not on prose."
+      },
       "NotFound": {
         "content": {
           "application/problem+json": {

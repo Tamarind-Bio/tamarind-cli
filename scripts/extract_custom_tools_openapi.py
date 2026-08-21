@@ -51,7 +51,10 @@ def _component_refs(node: object, kind: str, *, opaque: bool = False) -> set[str
                 _component_refs(
                     value,
                     kind,
-                    opaque=key in OPAQUE_VALUE_KEYS or key.startswith("x-"),
+                    # Unlike a Schema Object's `default` annotation, a Response
+                    # Object named `default` is live contract structure and may
+                    # reference a reusable response component.
+                    opaque=key in (OPAQUE_VALUE_KEYS - {"default"}) or key.startswith("x-"),
                 )
             )
     elif isinstance(node, list):

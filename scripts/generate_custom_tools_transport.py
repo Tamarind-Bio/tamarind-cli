@@ -17,6 +17,18 @@ PUBLIC_PROPERTY_ALIASES = (
     ("PublicCustomTool", "memory", "MemorySize"),
 )
 SUPPORTED_API_KEY_HEADER = "x-api-key"
+REFERENCE_ANNOTATION_SIBLINGS = frozenset(
+    {
+        "title",
+        "description",
+        "default",
+        "examples",
+        "deprecated",
+        "readOnly",
+        "writeOnly",
+        "$comment",
+    }
+)
 
 
 def _validate_auth_contract(spec: dict[str, Any]) -> None:
@@ -63,7 +75,15 @@ def _name(value: str) -> str:
 def _annotation(schema: dict[str, Any]) -> str:
     if "allOf" in schema:
         raise ValueError("allOf schemas are outside the generated SDK profile")
+    if "prefixItems" in schema:
+        raise ValueError("prefixItems schemas are outside the generated SDK profile")
     if "$ref" in schema:
+        unsupported_siblings = set(schema) - {"$ref"} - REFERENCE_ANNOTATION_SIBLINGS
+        if unsupported_siblings:
+            raise ValueError(
+                "Schema reference siblings are outside the generated SDK profile: "
+                f"{sorted(unsupported_siblings)}"
+            )
         return schema["$ref"].rsplit("/", 1)[-1]
     if "anyOf" in schema:
         parts = [_annotation(part) for part in schema["anyOf"]]
@@ -88,7 +108,10 @@ def _annotation(schema: dict[str, Any]) -> str:
     if kind == "boolean":
         return "bool"
     if kind == "array":
-        return f"list[{_annotation(schema.get('items', {}))}]"
+        items = schema.get("items")
+        if not isinstance(items, dict):
+            raise ValueError("Array schemas without items are outside the generated SDK profile")
+        return f"list[{_annotation(items)}]"
     if kind == "object":
         if schema.get("properties") or schema.get("additionalProperties") is False:
             raise ValueError("inline object schemas are outside the generated SDK profile")
@@ -98,7 +121,7 @@ def _annotation(schema: dict[str, Any]) -> str:
             if isinstance(additional, dict)
             else "dict[str, Any]"
         )
-    return "Any"
+    raise ValueError("Unconstrained schemas are outside the generated SDK profile")
 
 
 def _parameter_annotation(schema: dict[str, Any]) -> str:
@@ -131,6 +154,8 @@ def _response_type(operation: dict[str, Any], components: dict[str, Any]) -> tup
             f"{operation.get('operationId')} must declare exactly one successful response"
         )
     success = _resolve_component(successes[0], "responses", components)
+    if success.get("headers"):
+        raise ValueError(f"{operation.get('operationId')} has unsupported success headers")
     content = success.get("content", {})
     if not isinstance(content, dict) or set(content) - {"application/json"}:
         raise ValueError(f"{operation.get('operationId')} has unsupported success content")
@@ -141,6 +166,45 @@ def _response_type(operation: dict[str, Any], components: dict[str, Any]) -> tup
     if not isinstance(schema, dict):
         raise ValueError(f"{operation.get('operationId')} has no JSON success schema")
     return _annotation(schema), True
+
+
+def _validate_error_contract(
+    operation: dict[str, Any],
+    response_components: dict[str, Any],
+    schemas: dict[str, Any],
+) -> None:
+    """Every generated operation uses HTTPClient's RFC problem mapper."""
+    for code, unresolved in operation.get("responses", {}).items():
+        if str(code).startswith("2"):
+            continue
+        if not isinstance(unresolved, dict):
+            raise ValueError(f"{operation.get('operationId')} has an invalid error response")
+        response = _resolve_component(unresolved, "responses", response_components)
+        content = response.get("content")
+        if not isinstance(content, dict) or set(content) != {"application/problem+json"}:
+            raise ValueError(
+                f"{operation.get('operationId')} has an unsupported error response contract"
+            )
+        media = content["application/problem+json"]
+        schema = media.get("schema") if isinstance(media, dict) else None
+        if not isinstance(schema, dict):
+            raise ValueError(
+                f"{operation.get('operationId')} has an unsupported error response contract"
+            )
+        problem = _resolve_schema(schema, schemas)
+        required = set(problem.get("required", []))
+        properties = problem.get("properties", {})
+        code_schema = properties.get("code") if isinstance(properties, dict) else None
+        if (
+            problem.get("type") != "object"
+            or not {"type", "title", "status", "code"}.issubset(required)
+            or not isinstance(properties, dict)
+            or not isinstance(code_schema, dict)
+            or code_schema.get("type") != "string"
+        ):
+            raise ValueError(
+                f"{operation.get('operationId')} has an unsupported error response contract"
+            )
 
 
 def _body_type(operation: dict[str, Any], components: dict[str, Any]) -> tuple[str, bool] | None:
@@ -222,6 +286,8 @@ def _validate_parameter_profile(parameter: dict[str, Any], schemas: dict[str, An
         )
     if location == "query" and parameter.get("style", "form") != "form":
         raise ValueError(f"Unsupported query parameter style: {parameter.get('name')}")
+    if location == "query" and parameter.get("allowReserved") is True:
+        raise ValueError(f"Unsupported allowReserved query parameter: {parameter.get('name')}")
     if location == "path" and parameter.get("style", "simple") != "simple":
         raise ValueError(f"Unsupported path parameter style: {parameter.get('name')}")
 
@@ -376,6 +442,7 @@ def generate(spec: dict[str, Any]) -> str:
             query = "{" + ", ".join(f"{wire!r}: {py}" for wire, py in query_params) + "}"
             headers = "{" + ", ".join(f"{wire!r}: {py}" for wire, py in header_params) + "}"
             result, response_has_json = _response_type(operation, response_components)
+            _validate_error_contract(operation, response_components, schemas)
             path_literal = (
                 f"f{rendered_path!r}" if "_segment(" in rendered_path else repr(rendered_path)
             )
