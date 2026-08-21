@@ -14,9 +14,7 @@ BASE = "https://api.test/"
 UPLOAD = "https://uploads.test/source.zip"
 
 
-def _tool(
-    *, updated: str = "2026-08-15T00:00:00Z", source: bool = False, error: str | None = None
-) -> dict:
+def _tool(*, source_hash: str = "", source: bool = False, error: str | None = None) -> dict:
     return {
         "name": "example",
         "displayName": "Example",
@@ -29,12 +27,13 @@ def _tool(
         "homeDiskGi": 20,
         "maxRuntimeSeconds": None,
         "hasSource": source,
+        "sourceHash": source_hash,
         "connectionError": error,
         "published": False,
         "autoPublish": False,
         "defaultVersion": None,
         "createdAt": "2026-08-15T00:00:00Z",
-        "updatedAt": updated,
+        "updatedAt": "2026-08-15T00:00:00Z",
         "canEdit": True,
         "canDeploy": True,
     }
@@ -88,7 +87,7 @@ def test_build_composes_upload_finalize_poll_deploy_and_version(tmp_path: Path) 
         side_effect=[
             httpx.Response(200, json=_tool()),
             httpx.Response(200, json=_tool()),
-            httpx.Response(200, json=_tool(updated="2026-08-15T00:00:01Z", source=True)),
+            httpx.Response(200, json=_tool(source=True, source_hash="sha256:new-source")),
         ]
     )
     respx.post(f"{BASE}custom-tools/example/uploads").mock(
@@ -105,10 +104,14 @@ def test_build_composes_upload_finalize_poll_deploy_and_version(tmp_path: Path) 
     )
     upload = respx.put(UPLOAD).mock(return_value=httpx.Response(200))
     finalize = respx.post(f"{BASE}custom-tools/example/uploads/upload-1/finalize").mock(
-        return_value=httpx.Response(202, json={"status": "processing"})
+        return_value=httpx.Response(
+            202, json={"status": "processing", "sourceHash": "sha256:new-source"}
+        )
     )
     deploy = respx.post(f"{BASE}custom-tools/example/deploy").mock(
-        return_value=httpx.Response(202, json={"versionName": "v1", "path": "building"})
+        return_value=httpx.Response(
+            202, json={"versionName": "v1", "ref": "a" * 40, "path": "building"}
+        )
     )
     respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
         return_value=httpx.Response(200, json=_version())
@@ -143,12 +146,54 @@ def test_build_surfaces_background_extraction_error(tmp_path: Path) -> None:
     )
     respx.put(UPLOAD).mock(return_value=httpx.Response(200))
     respx.post(f"{BASE}custom-tools/example/uploads/upload-1/finalize").mock(
-        return_value=httpx.Response(202, json={"status": "processing"})
+        return_value=httpx.Response(
+            202, json={"status": "processing", "sourceHash": "sha256:new-source"}
+        )
     )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
         with pytest.raises(CustomToolUploadError, match="bad archive"):
             client.custom_tools.get("example").build(tmp_path, poll_interval=0.001)
+
+
+@respx.mock
+def test_build_tracks_queued_deploy_by_source_ref(tmp_path: Path) -> None:
+    _source(tmp_path)
+    respx.get(f"{BASE}custom-tools/example").mock(
+        side_effect=[
+            httpx.Response(200, json=_tool()),
+            httpx.Response(200, json=_tool(source=True, source_hash="sha256:new-source")),
+        ]
+    )
+    respx.post(f"{BASE}custom-tools/example/uploads").mock(
+        return_value=httpx.Response(
+            201,
+            json={"uploadId": "upload-1", "uploadUrl": UPLOAD, "expiresIn": 900},
+        )
+    )
+    respx.put(UPLOAD).mock(return_value=httpx.Response(200))
+    respx.post(f"{BASE}custom-tools/example/uploads/upload-1/finalize").mock(
+        return_value=httpx.Response(
+            202, json={"status": "processing", "sourceHash": "sha256:new-source"}
+        )
+    )
+    respx.post(f"{BASE}custom-tools/example/deploy").mock(
+        return_value=httpx.Response(
+            202, json={"versionName": None, "ref": "a" * 40, "path": "noop"}
+        )
+    )
+    versions = respx.get(f"{BASE}custom-tools/example/versions", params={"limit": "50"}).mock(
+        side_effect=[
+            httpx.Response(200, json={"items": []}),
+            httpx.Response(200, json={"items": [_version()]}),
+        ]
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        version = client.custom_tools.get("example").build(tmp_path, poll_interval=0.001)
+
+    assert version.name == "v1"
+    assert versions.call_count == 2
 
 
 @respx.mock

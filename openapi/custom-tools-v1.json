@@ -272,6 +272,10 @@
             "title": "Published",
             "type": "boolean"
           },
+          "sourceHash": {
+            "title": "Sourcehash",
+            "type": "string"
+          },
           "status": {
             "$ref": "#/components/schemas/PublicToolStatus"
           },
@@ -292,6 +296,7 @@
           "homeDiskGi",
           "maxRuntimeSeconds",
           "hasSource",
+          "sourceHash",
           "connectionError",
           "published",
           "autoPublish",
@@ -349,13 +354,25 @@
             "title": "Path",
             "type": "string"
           },
-          "versionName": {
-            "title": "Versionname",
+          "ref": {
+            "title": "Ref",
             "type": "string"
+          },
+          "versionName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Versionname"
           }
         },
         "required": [
           "versionName",
+          "ref",
           "path"
         ],
         "title": "PublicDeployResult",
@@ -612,6 +629,10 @@
       },
       "PublicUploadFinalized": {
         "properties": {
+          "sourceHash": {
+            "title": "Sourcehash",
+            "type": "string"
+          },
           "status": {
             "const": "processing",
             "title": "Status",
@@ -619,7 +640,8 @@
           }
         },
         "required": [
-          "status"
+          "status",
+          "sourceHash"
         ],
         "title": "PublicUploadFinalized",
         "type": "object"
@@ -1070,7 +1092,7 @@
     },
     "/custom-tools/{name}/uploads/{upload_id}/finalize": {
       "post": {
-        "description": "Start extraction. Poll the tool until `hasSource` or `connectionError` is set.",
+        "description": "Start extraction. Poll until the tool's `sourceHash` equals the returned hash.",
         "operationId": "finalizeCustomToolUpload",
         "parameters": [
           {

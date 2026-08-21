@@ -95,6 +95,7 @@ class CustomTool:
     home_disk_gi: int
     max_runtime_seconds: int | None
     has_source: bool
+    source_hash: str
     connection_error: str | None
     published: bool
     auto_publish: bool
@@ -322,7 +323,6 @@ class CustomTools:
         timeout, interval = _validate_monitor_options(
             timeout=source_timeout, interval=poll_interval
         )
-        baseline = tool.refresh()
         session = self._transport.create_custom_tool_upload(tool.name)
         archive = build_source_tree_archive(tree)
         _upload_archive(
@@ -332,10 +332,24 @@ class CustomTools:
             headers=session.get("uploadHeaders", {}),
             timeout=self._upload_timeout,
         )
-        self._transport.finalize_custom_tool_upload(tool.name, session["uploadId"])
-        _wait_for_source(baseline, timeout=cast(float, timeout), interval=interval)
+        finalized = self._transport.finalize_custom_tool_upload(tool.name, session["uploadId"])
+        _wait_for_source(
+            tool,
+            finalized["sourceHash"],
+            timeout=cast(float, timeout),
+            interval=interval,
+        )
         deployed = self._transport.deploy_custom_tool(tool.name, {})
-        return self._get_version(tool.name, deployed["versionName"])
+        version_name = deployed["versionName"]
+        if version_name is not None:
+            return self._get_version(tool.name, version_name)
+        return _wait_for_version_ref(
+            self,
+            tool.name,
+            deployed["ref"],
+            timeout=cast(float, timeout),
+            interval=interval,
+        )
 
     def _versions(self, tool_name: str, *, limit: int) -> Page[Version]:
         wire = self._transport.list_custom_tool_versions(tool_name, limit=limit)
@@ -352,17 +366,40 @@ class CustomTools:
         return _version_from_wire(self, tool_name, wire)
 
 
-def _wait_for_source(baseline: CustomTool, *, timeout: float, interval: float) -> CustomTool:
+def _wait_for_source(
+    tool: CustomTool, source_hash: str, *, timeout: float, interval: float
+) -> CustomTool:
     deadline = _clock() + timeout
     while True:
-        current = baseline.refresh()
+        current = tool.refresh()
+        if current.source_hash == source_hash:
+            return current
         if current.connection_error:
             raise CustomToolUploadError(f"Source extraction failed: {current.connection_error}")
-        if current.has_source and current.updated_at != baseline.updated_at:
-            return current
         if _clock() >= deadline:
             raise CustomToolUploadError(
                 f"Source extraction did not finish within {timeout:g} seconds"
+            )
+        time.sleep(min(interval, max(0.0, deadline - _clock())))
+
+
+def _wait_for_version_ref(
+    collection: CustomTools,
+    tool_name: str,
+    source_ref: str,
+    *,
+    timeout: float,
+    interval: float,
+) -> Version:
+    deadline = _clock() + timeout
+    while True:
+        for version in collection._versions(tool_name, limit=50).items:
+            if version.source_revision == source_ref:
+                return version
+        if _clock() >= deadline:
+            raise CustomToolBuildTimeoutError(
+                f"Custom Tool deploy {tool_name}@{source_ref[:12]} did not receive a numbered version "
+                f"within {timeout:g} seconds"
             )
         time.sleep(min(interval, max(0.0, deadline - _clock())))
 
@@ -396,6 +433,7 @@ def _tool_from_wire(collection: CustomTools, wire: PublicCustomTool) -> CustomTo
         home_disk_gi=wire["homeDiskGi"],
         max_runtime_seconds=wire["maxRuntimeSeconds"],
         has_source=wire["hasSource"],
+        source_hash=wire["sourceHash"],
         connection_error=wire["connectionError"],
         published=wire["published"],
         auto_publish=wire["autoPublish"],

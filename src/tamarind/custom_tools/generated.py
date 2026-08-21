@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from tamarind.http import HTTPClient
 
-OPENAPI_SHA256 = "a3fd07069700215cc67f77f3e6cd2e65a869fc808740dd8782c0ae0fea4c0a35"
+OPENAPI_SHA256 = "48e522585dcf70e37b2ce2e58e8515a729885cc441ccbfed73910069f9f08666"
 
 
 def _segment(value: str) -> str:
@@ -62,6 +62,7 @@ class PublicCustomTool(TypedDict):
     memory: Literal["8Gi", "12Gi", "24Gi", "32Gi", "48Gi", "64Gi", "90Gi", "96Gi", "180Gi"]
     name: str
     published: bool
+    sourceHash: str
     status: PublicToolStatus
     updatedAt: str
 
@@ -76,7 +77,8 @@ class PublicDeployRequest(TypedDict):
 
 class PublicDeployResult(TypedDict):
     path: Literal["noop", "saved", "building"]
-    versionName: str
+    ref: str
+    versionName: str | None
 
 
 class PublicProblem(TypedDict):
@@ -109,6 +111,7 @@ class PublicUpdateCustomToolRequest(TypedDict):
 
 
 class PublicUploadFinalized(TypedDict):
+    sourceHash: str
     status: Literal["processing"]
 
 
