@@ -289,6 +289,12 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     )
     assert "name: str | None" in type_array_output.read_text()
 
+    all_of_model = deepcopy(sliced)
+    all_of_model["components"]["schemas"]["CreatePayload"]["properties"]["name"] = {
+        "allOf": [{"type": "string"}]
+    }
+    unsupported_contracts.append((all_of_model, "allOf schemas"))
+
     required_nullable_body = deepcopy(nullable_optional_body)
     required_nullable_body["components"]["requestBodies"]["OptionalBody"]["required"] = True
     unsupported_contracts.append((required_nullable_body, "nullable request body"))

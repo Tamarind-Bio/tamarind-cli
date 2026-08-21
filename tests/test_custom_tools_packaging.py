@@ -141,6 +141,19 @@ def test_source_inspection_translates_unresolvable_home_paths(monkeypatch) -> No
         packaging.inspect_source_tree("~missing-tamarind-user/source")
 
 
+def test_validation_reports_home_expansion_failures(monkeypatch) -> None:
+    def fail_expansion(_path: Path) -> Path:
+        raise RuntimeError("cannot determine home")
+
+    monkeypatch.setattr(Path, "expanduser", fail_expansion)
+
+    report = validate_folder("~/source")
+
+    assert not report.valid
+    assert report.errors[0].code == "invalid_source_tree"
+    assert "Cannot resolve" in report.errors[0].message
+
+
 def test_content_reader_translates_midstream_source_read_failures(tmp_path: Path) -> None:
     class FailingSource:
         def read(self, size: int = -1) -> bytes:

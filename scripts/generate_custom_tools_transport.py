@@ -24,6 +24,8 @@ def _name(value: str) -> str:
 
 
 def _annotation(schema: dict[str, Any]) -> str:
+    if "allOf" in schema:
+        raise ValueError("allOf schemas are outside the generated SDK profile")
     if "$ref" in schema:
         return schema["$ref"].rsplit("/", 1)[-1]
     if "anyOf" in schema:

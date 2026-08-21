@@ -59,19 +59,8 @@ class ValidationReport:
 
 
 def validate_folder(folder: str | Path) -> ValidationReport:
-    root = Path(folder).expanduser()
-    if not root.is_dir():
-        return ValidationReport(
-            errors=(
-                ValidationProblem(
-                    code="folder_not_found",
-                    path=".",
-                    message=f"Source folder does not exist: {root}",
-                ),
-            )
-        )
     try:
-        tree = inspect_source_tree(root)
+        tree = inspect_source_tree(folder)
     except CustomToolUploadError as exc:
         return ValidationReport(
             errors=(ValidationProblem(code="invalid_source_tree", path=".", message=str(exc)),)
