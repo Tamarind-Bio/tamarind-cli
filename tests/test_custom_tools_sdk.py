@@ -378,7 +378,7 @@ def test_build_uses_configured_timeout_for_source_upload(tmp_path: Path) -> None
     )
     upload_route = respx.put(UPLOAD).mock(return_value=httpx.Response(200))
     respx.post(f"{BASE}custom-tools/example/versions").mock(
-        return_value=httpx.Response(202, json={"action": "build", "version": _version()})
+        return_value=httpx.Response(202, json={"action": "queued", "request": _build_request()})
     )
 
     with Tamarind(api_key="key", api_base=BASE, timeout=0.25) as client:

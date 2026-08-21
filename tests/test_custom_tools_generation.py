@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
 import hashlib
 import json
+from pathlib import Path
 import subprocess
 import sys
 
@@ -32,7 +32,10 @@ def test_openapi_artifact_matches_pinned_provenance() -> None:
     assert provenance["repository"] == "Tamarind-Bio/tamarind-website"
     assert len(provenance["revision"]) == 40
     assert provenance["path"] == "backend/app/public_api/openapi/custom-tools-v1.generated.json"
-    assert hashlib.sha256(artifact.read_bytes()).hexdigest() == provenance["sha256"]
+    # Git may check text files out with platform-native line endings. The
+    # provenance digest is over the canonical LF bytes stored in Git.
+    canonical = artifact.read_text().replace("\r\n", "\n").encode()
+    assert hashlib.sha256(canonical).hexdigest() == provenance["sha256"]
 
 
 def test_openapi_slice_has_no_dangling_schema_references() -> None:
