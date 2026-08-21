@@ -56,7 +56,9 @@ def _annotation(schema: dict[str, Any]) -> str:
 
 def _response_type(operation: dict[str, Any]) -> str:
     responses = operation.get("responses", {})
-    success = next((value for code, value in responses.items() if str(code).startswith("2")), {})
+    success: dict[str, Any] = next(
+        (value for code, value in responses.items() if str(code).startswith("2")), {}
+    )
     schema = success.get("content", {}).get("application/json", {}).get("schema", {})
     return _annotation(schema)
 
@@ -74,17 +76,41 @@ def _body_type(operation: dict[str, Any]) -> str | None:
 def _operation_parameters(
     path_item: dict[str, Any],
     operation: dict[str, Any],
+    parameter_components: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Merge path parameters with operation overrides by OpenAPI identity."""
     merged: dict[tuple[object, object], dict[str, Any]] = {}
     for parameter in [*path_item.get("parameters", []), *operation.get("parameters", [])]:
         if isinstance(parameter, dict):
-            merged[(parameter.get("in"), parameter.get("name"))] = parameter
+            resolved = _resolve_parameter(parameter, parameter_components)
+            merged[(resolved.get("in"), resolved.get("name"))] = resolved
     return list(merged.values())
 
 
+def _resolve_parameter(
+    parameter: dict[str, Any],
+    components: dict[str, Any],
+    seen: frozenset[str] = frozenset(),
+) -> dict[str, Any]:
+    ref = parameter.get("$ref")
+    if not isinstance(ref, str):
+        return parameter
+    prefix = "#/components/parameters/"
+    if not ref.startswith(prefix):
+        raise ValueError(f"Unsupported parameter reference: {ref}")
+    if ref in seen:
+        raise ValueError(f"Cyclic parameter reference: {ref}")
+    name = ref[len(prefix) :].replace("~1", "/").replace("~0", "~")
+    target = components.get(name)
+    if not isinstance(target, dict):
+        raise ValueError(f"Unresolved parameter reference: {ref}")
+    return _resolve_parameter(target, components, seen | {ref})
+
+
 def generate(spec: dict[str, Any]) -> str:
-    schemas = spec.get("components", {}).get("schemas", {})
+    components = spec.get("components", {})
+    schemas = components.get("schemas", {})
+    parameter_components = components.get("parameters", {})
     aliases: list[str] = []
     objects: list[str] = []
     for name in sorted(schemas):
@@ -108,7 +134,7 @@ def generate(spec: dict[str, Any]) -> str:
             operation = path_item.get(method)
             if not operation:
                 continue
-            parameters = _operation_parameters(path_item, operation)
+            parameters = _operation_parameters(path_item, operation, parameter_components)
             required_params: list[str] = []
             optional_params: list[str] = []
             path_params: list[tuple[str, str]] = []

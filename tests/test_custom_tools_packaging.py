@@ -310,6 +310,19 @@ def test_validation_rejects_non_standard_json_constants(
     ]
 
 
+def test_validation_rejects_duplicate_json_object_members(tmp_path: Path) -> None:
+    _valid_source(tmp_path)
+    (tmp_path / "config.json").write_text(
+        '{"inputs": [], "nested": {"value": "first", "value": "second"}}'
+    )
+
+    report = validate_folder(tmp_path)
+
+    assert [(problem.code, problem.path) for problem in report.errors] == [
+        ("invalid_json", "config.json")
+    ]
+
+
 def test_validation_rejects_non_object_config_json(tmp_path: Path) -> None:
     _valid_source(tmp_path)
     (tmp_path / "config.json").write_text("[]")

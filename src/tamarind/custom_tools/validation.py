@@ -24,6 +24,23 @@ def _reject_json_constant(value: str) -> NoReturn:
     raise ValueError(f"non-standard JSON constant {value!r}")
 
 
+def _object_without_duplicate_members(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for name, member in pairs:
+        if name in value:
+            raise ValueError(f"duplicate JSON object member {name!r}")
+        value[name] = member
+    return value
+
+
+def _load_strict_json(raw: str) -> object:
+    return json.loads(
+        raw,
+        parse_constant=_reject_json_constant,
+        object_pairs_hook=_object_without_duplicate_members,
+    )
+
+
 @dataclass(frozen=True)
 class ValidationProblem:
     code: str
@@ -94,10 +111,7 @@ def validate_source_tree(tree: SourceTree) -> ValidationReport:
             )
         else:
             try:
-                value = json.loads(
-                    config_file.read_text(),
-                    parse_constant=_reject_json_constant,
-                )
+                value = _load_strict_json(config_file.read_text())
             except CustomToolUploadError as exc:
                 error("invalid_source_tree", ".", str(exc))
                 return ValidationReport(tuple(errors), tuple(warnings))

@@ -18,20 +18,40 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
         "paths": {
             "/custom-tools": {"get": operation},
             "/custom-tools/{name}": {
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "name",
-                        "required": True,
-                        "schema": {"type": "string"},
-                    }
-                ],
-                "get": {**operation, "operationId": "getCustomTool"},
+                "parameters": [{"$ref": "#/components/parameters/ToolName"}],
+                "get": {
+                    **operation,
+                    "operationId": "getCustomTool",
+                    "parameters": [{"$ref": "#/components/parameters/CanonicalToolName"}],
+                },
             },
             "/custom-tools-preview": {"get": operation},
             "/molecules": {"get": operation},
         },
-        "components": {"schemas": {}, "responses": {}, "securitySchemes": {}},
+        "components": {
+            "schemas": {},
+            "responses": {},
+            "securitySchemes": {},
+            "parameters": {
+                "ToolName": {
+                    "in": "path",
+                    "name": "name",
+                    "required": True,
+                    "schema": {"type": "string"},
+                },
+                "CanonicalToolName": {
+                    "in": "path",
+                    "name": "name",
+                    "required": True,
+                    "schema": {"enum": ["canonical"]},
+                },
+                "Unused": {
+                    "in": "query",
+                    "name": "unused",
+                    "schema": {"type": "string"},
+                },
+            },
+        },
     }
     source = tmp_path / "public.json"
     sliced_path = tmp_path / "custom-tools.json"
@@ -49,7 +69,10 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     sliced = json.loads(sliced_path.read_text())
 
     assert set(sliced["paths"]) == {"/custom-tools", "/custom-tools/{name}"}
-    assert sliced["paths"]["/custom-tools/{name}"]["parameters"][0]["name"] == "name"
+    assert sliced["paths"]["/custom-tools/{name}"]["parameters"] == [
+        {"$ref": "#/components/parameters/ToolName"}
+    ]
+    assert set(sliced["components"]["parameters"]) == {"CanonicalToolName", "ToolName"}
 
     generated = tmp_path / "generated.py"
     subprocess.run(
@@ -62,7 +85,7 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
         check=True,
     )
     generated_text = generated.read_text()
-    assert "def get_custom_tool(self, name: str" in generated_text
+    assert "def get_custom_tool(self, name: Literal['canonical']" in generated_text
     assert "f'custom-tools/{_segment(name)}'" in generated_text
 
 
