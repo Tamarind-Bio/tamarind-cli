@@ -131,6 +131,21 @@ def test_archive_rejects_same_metadata_content_rewrite(tmp_path: Path) -> None:
         packaging.build_source_tree_archive(tree)
 
 
+def test_source_inspection_translates_unresolvable_home_paths() -> None:
+    with pytest.raises(CustomToolUploadError, match="Cannot resolve"):
+        packaging.inspect_source_tree("~missing-tamarind-user/source")
+
+
+def test_content_reader_translates_midstream_source_read_failures(tmp_path: Path) -> None:
+    class FailingSource:
+        def read(self, size: int = -1) -> bytes:
+            raise OSError("simulated I/O failure")
+
+    reader = packaging._ContentReader(FailingSource(), tmp_path / "source.py")  # type: ignore[arg-type]
+    with pytest.raises(CustomToolUploadError, match="cannot be read"):
+        reader.read()
+
+
 def test_inspection_rejects_directory_traversal_errors(tmp_path: Path, monkeypatch) -> None:
     _valid_source(tmp_path)
 

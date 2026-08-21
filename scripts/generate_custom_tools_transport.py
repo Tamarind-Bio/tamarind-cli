@@ -36,6 +36,8 @@ def _annotation(schema: dict[str, Any]) -> str:
     if "enum" in schema:
         return "Literal[" + ", ".join(repr(value) for value in schema["enum"]) + "]"
     kind = schema.get("type")
+    if isinstance(kind, list):
+        return " | ".join(dict.fromkeys(_annotation({"type": item}) for item in kind))
     if kind == "null":
         return "None"
     if kind == "string":

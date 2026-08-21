@@ -68,13 +68,17 @@ class SourceArchive:
 
 
 class _ContentReader:
-    def __init__(self, source: BinaryIO) -> None:
+    def __init__(self, source: BinaryIO, path: Path) -> None:
         self._source = source
+        self._path = path
         self._digest = sha256()
         self.bytes_read = 0
 
     def read(self, size: int = -1) -> bytes:
-        data = self._source.read(size)
+        try:
+            data = self._source.read(size)
+        except OSError as exc:
+            raise CustomToolUploadError(f"Source file cannot be read: {self._path}") from exc
         self._digest.update(data)
         self.bytes_read += len(data)
         return data
@@ -136,7 +140,7 @@ class SourceFile:
 
         with os.fdopen(descriptor, "rb") as source:
             self._verify(os.fstat(source.fileno()))
-            reader = _ContentReader(source)
+            reader = _ContentReader(source, self.path)
             completed = False
             try:
                 yield cast(BinaryIO, reader)
@@ -174,7 +178,10 @@ class SourceTree:
 
 def inspect_source_tree(folder: str | Path) -> SourceTree:
     """Collect the exact retained tree while enforcing archive link policy."""
-    root = Path(folder).expanduser()
+    try:
+        root = Path(folder).expanduser()
+    except (OSError, RuntimeError) as exc:
+        raise CustomToolUploadError(f"Cannot resolve Custom Tool source folder: {folder}") from exc
     try:
         root_metadata = root.lstat()
     except OSError as exc:
@@ -369,8 +376,13 @@ def _content_digest(path: Path, expected: os.stat_result) -> str:
     with os.fdopen(descriptor, "rb") as source:
         if _identity(os.fstat(source.fileno())) != _identity(expected):
             raise CustomToolUploadError(f"Source file changed during inspection: {path}")
-        while chunk := source.read(1024 * 1024):
-            digest.update(chunk)
+        try:
+            while chunk := source.read(1024 * 1024):
+                digest.update(chunk)
+        except OSError as exc:
+            raise CustomToolUploadError(
+                f"Source file cannot be read during inspection: {path}"
+            ) from exc
         if _identity(os.fstat(source.fileno())) != _identity(expected):
             raise CustomToolUploadError(f"Source file changed during inspection: {path}")
     return digest.hexdigest()
