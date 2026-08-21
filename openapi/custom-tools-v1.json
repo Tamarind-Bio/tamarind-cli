@@ -362,14 +362,18 @@
             "title": "Carryforwardfromversion"
           },
           "expectedSourceRef": {
-            "pattern": "^[a-f0-9]{40}$",
-            "title": "Expectedsourceref",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{40}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedsourceref"
           }
         },
-        "required": [
-          "expectedSourceRef"
-        ],
         "title": "PublicDeployRequest",
         "type": "object"
       },
@@ -1029,11 +1033,11 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PublicDeployRequest"
+                "$ref": "#/components/schemas/PublicDeployRequest",
+                "default": {}
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "202": {
