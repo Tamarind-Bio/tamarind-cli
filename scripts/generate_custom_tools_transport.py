@@ -54,22 +54,22 @@ def _annotation(schema: dict[str, Any]) -> str:
     return "Any"
 
 
-def _response_type(operation: dict[str, Any]) -> str:
+def _response_type(operation: dict[str, Any], components: dict[str, Any]) -> str:
     responses = operation.get("responses", {})
     success: dict[str, Any] = next(
         (value for code, value in responses.items() if str(code).startswith("2")), {}
     )
+    success = _resolve_component(success, "responses", components)
     schema = success.get("content", {}).get("application/json", {}).get("schema", {})
     return _annotation(schema)
 
 
-def _body_type(operation: dict[str, Any]) -> str | None:
-    schema = (
-        operation.get("requestBody", {})
-        .get("content", {})
-        .get("application/json", {})
-        .get("schema")
-    )
+def _body_type(operation: dict[str, Any], components: dict[str, Any]) -> str | None:
+    request_body = operation.get("requestBody", {})
+    if not isinstance(request_body, dict):
+        return None
+    request_body = _resolve_component(request_body, "requestBodies", components)
+    schema = request_body.get("content", {}).get("application/json", {}).get("schema")
     return _annotation(schema) if isinstance(schema, dict) else None
 
 
@@ -82,35 +82,38 @@ def _operation_parameters(
     merged: dict[tuple[object, object], dict[str, Any]] = {}
     for parameter in [*path_item.get("parameters", []), *operation.get("parameters", [])]:
         if isinstance(parameter, dict):
-            resolved = _resolve_parameter(parameter, parameter_components)
+            resolved = _resolve_component(parameter, "parameters", parameter_components)
             merged[(resolved.get("in"), resolved.get("name"))] = resolved
     return list(merged.values())
 
 
-def _resolve_parameter(
-    parameter: dict[str, Any],
+def _resolve_component(
+    value: dict[str, Any],
+    kind: str,
     components: dict[str, Any],
     seen: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
-    ref = parameter.get("$ref")
+    ref = value.get("$ref")
     if not isinstance(ref, str):
-        return parameter
-    prefix = "#/components/parameters/"
+        return value
+    prefix = f"#/components/{kind}/"
     if not ref.startswith(prefix):
-        raise ValueError(f"Unsupported parameter reference: {ref}")
+        raise ValueError(f"Unsupported {kind} reference: {ref}")
     if ref in seen:
-        raise ValueError(f"Cyclic parameter reference: {ref}")
+        raise ValueError(f"Cyclic {kind} reference: {ref}")
     name = ref[len(prefix) :].replace("~1", "/").replace("~0", "~")
     target = components.get(name)
     if not isinstance(target, dict):
-        raise ValueError(f"Unresolved parameter reference: {ref}")
-    return _resolve_parameter(target, components, seen | {ref})
+        raise ValueError(f"Unresolved {kind} reference: {ref}")
+    return _resolve_component(target, kind, components, seen | {ref})
 
 
 def generate(spec: dict[str, Any]) -> str:
     components = spec.get("components", {})
     schemas = components.get("schemas", {})
     parameter_components = components.get("parameters", {})
+    request_body_components = components.get("requestBodies", {})
+    response_components = components.get("responses", {})
     aliases: list[str] = []
     objects: list[str] = []
     for name in sorted(schemas):
@@ -157,7 +160,7 @@ def generate(spec: dict[str, Any]) -> str:
                 ]
                 target.append((wire_name, py_name))
 
-            body_type = _body_type(operation)
+            body_type = _body_type(operation, request_body_components)
             if body_type:
                 required_params.append(f"body: {body_type}")
             signature = ", ".join(
@@ -170,7 +173,7 @@ def generate(spec: dict[str, Any]) -> str:
                 )
             query = "{" + ", ".join(f"{wire!r}: {py}" for wire, py in query_params) + "}"
             headers = "{" + ", ".join(f"{wire!r}: {py}" for wire, py in header_params) + "}"
-            result = _response_type(operation)
+            result = _response_type(operation, response_components)
             path_literal = (
                 f"f{rendered_path!r}" if "_segment(" in rendered_path else repr(rendered_path)
             )

@@ -16,7 +16,14 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
         "openapi": "3.1.0",
         "info": {"title": "test", "version": "1"},
         "paths": {
-            "/custom-tools": {"get": operation},
+            "/custom-tools": {
+                "get": operation,
+                "post": {
+                    "operationId": "createCustomTool",
+                    "requestBody": {"$ref": "#/components/requestBodies/CreateBodyAlias"},
+                    "responses": {"201": {"$ref": "#/components/responses/CreateSuccess"}},
+                },
+            },
             "/custom-tools/{name}": {
                 "parameters": [{"$ref": "#/components/parameters/ToolName"}],
                 "get": {
@@ -29,9 +36,29 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
             "/molecules": {"get": operation},
         },
         "components": {
-            "schemas": {},
-            "responses": {},
+            "responses": {
+                "CreateSuccess": {
+                    "description": "created",
+                    "content": {
+                        "application/json": {
+                            "schema": {"$ref": "#/components/schemas/CreateResult"}
+                        }
+                    },
+                }
+            },
             "securitySchemes": {},
+            "requestBodies": {
+                "CreateBodyAlias": {"$ref": "#/components/requestBodies/CreateBody"},
+                "CreateBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {"$ref": "#/components/schemas/CreatePayload"}
+                        }
+                    },
+                },
+                "UnusedBody": {"content": {"application/json": {"schema": {"type": "string"}}}},
+            },
             "parameters": {
                 "ToolName": {
                     "in": "path",
@@ -49,6 +76,18 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
                     "in": "query",
                     "name": "unused",
                     "schema": {"type": "string"},
+                },
+            },
+            "schemas": {
+                "CreatePayload": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                    "required": ["name"],
+                },
+                "CreateResult": {
+                    "type": "object",
+                    "properties": {"id": {"type": "string"}},
+                    "required": ["id"],
                 },
             },
         },
@@ -73,6 +112,8 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
         {"$ref": "#/components/parameters/ToolName"}
     ]
     assert set(sliced["components"]["parameters"]) == {"CanonicalToolName", "ToolName"}
+    assert set(sliced["components"]["requestBodies"]) == {"CreateBody", "CreateBodyAlias"}
+    assert set(sliced["components"]["schemas"]) == {"CreatePayload", "CreateResult"}
 
     generated = tmp_path / "generated.py"
     subprocess.run(
@@ -87,6 +128,9 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     generated_text = generated.read_text()
     assert "def get_custom_tool(self, name: Literal['canonical']" in generated_text
     assert "f'custom-tools/{_segment(name)}'" in generated_text
+    assert "def create_custom_tool(self, body: CreatePayload" in generated_text
+    assert "json=body" in generated_text
+    assert ") -> CreateResult:" in generated_text
 
 
 def test_generated_transport_matches_committed_openapi(tmp_path: Path) -> None:

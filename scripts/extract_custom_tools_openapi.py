@@ -11,7 +11,6 @@ from typing import Any
 
 CUSTOM_TOOLS_PATH = "/custom-tools"
 HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete"})
-PARAMETER_REF_PREFIX = "#/components/parameters/"
 
 
 def _is_custom_tools_path(path: str) -> bool:
@@ -32,18 +31,34 @@ def _schema_refs(node: object) -> set[str]:
     return refs
 
 
-def _parameter_refs(node: object) -> set[str]:
+def _component_refs(node: object, kind: str) -> set[str]:
     refs: set[str] = set()
+    prefix = f"#/components/{kind}/"
     if isinstance(node, dict):
         ref = node.get("$ref")
-        if isinstance(ref, str) and ref.startswith(PARAMETER_REF_PREFIX):
-            refs.add(ref[len(PARAMETER_REF_PREFIX) :].replace("~1", "/").replace("~0", "~"))
+        if isinstance(ref, str) and ref.startswith(prefix):
+            refs.add(ref[len(prefix) :].replace("~1", "/").replace("~0", "~"))
         for value in node.values():
-            refs.update(_parameter_refs(value))
+            refs.update(_component_refs(value, kind))
     elif isinstance(node, list):
         for value in node:
-            refs.update(_parameter_refs(value))
+            refs.update(_component_refs(value, kind))
     return refs
+
+
+def _reachable_components(
+    roots: object,
+    components: dict[str, Any],
+    kind: str,
+) -> dict[str, Any]:
+    reachable = _component_refs(roots, kind)
+    pending = list(reachable)
+    while pending:
+        name = pending.pop()
+        for child in _component_refs(components.get(name, {}), kind) - reachable:
+            reachable.add(child)
+            pending.append(child)
+    return {name: deepcopy(components[name]) for name in sorted(reachable)}
 
 
 def extract(spec: dict[str, Any]) -> dict[str, Any]:
@@ -66,18 +81,16 @@ def extract(spec: dict[str, Any]) -> dict[str, Any]:
     schemas = components.get("schemas", {})
     responses = components.get("responses", {})
     parameters = components.get("parameters", {})
-    reachable_parameters = _parameter_refs(paths)
-    pending_parameters = list(reachable_parameters)
-    while pending_parameters:
-        name = pending_parameters.pop()
-        for child in _parameter_refs(parameters.get(name, {})) - reachable_parameters:
-            reachable_parameters.add(child)
-            pending_parameters.append(child)
-    retained_parameters = {
-        name: deepcopy(parameters[name]) for name in sorted(reachable_parameters)
-    }
+    request_bodies = components.get("requestBodies", {})
+    retained_parameters = _reachable_components(paths, parameters, "parameters")
+    retained_request_bodies = _reachable_components(paths, request_bodies, "requestBodies")
 
-    reachable = _schema_refs(paths) | _schema_refs(responses) | _schema_refs(retained_parameters)
+    reachable = (
+        _schema_refs(paths)
+        | _schema_refs(responses)
+        | _schema_refs(retained_parameters)
+        | _schema_refs(retained_request_bodies)
+    )
     pending = list(reachable)
     while pending:
         name = pending.pop()
@@ -92,6 +105,8 @@ def extract(spec: dict[str, Any]) -> dict[str, Any]:
     }
     if retained_parameters:
         extracted_components["parameters"] = retained_parameters
+    if retained_request_bodies:
+        extracted_components["requestBodies"] = retained_request_bodies
 
     return {
         "openapi": spec["openapi"],
