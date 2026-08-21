@@ -7,6 +7,55 @@ import subprocess
 import sys
 
 
+def test_openapi_extraction_decodes_schema_reference_tokens(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    source = tmp_path / "public.json"
+    output = tmp_path / "custom-tools.json"
+    source.write_text(
+        json.dumps(
+            {
+                "openapi": "3.1.0",
+                "info": {"title": "test", "version": "1"},
+                "paths": {
+                    "/custom-tools": {
+                        "get": {
+                            "operationId": "listCustomTools",
+                            "responses": {
+                                "200": {
+                                    "description": "ok",
+                                    "content": {
+                                        "application/json": {
+                                            "schema": {
+                                                "$ref": "#/components/schemas/Escaped~1Schema"
+                                            }
+                                        }
+                                    },
+                                }
+                            },
+                        }
+                    }
+                },
+                "components": {
+                    "schemas": {"Escaped/Schema": {"type": "string"}},
+                    "securitySchemes": {},
+                },
+            }
+        )
+    )
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(root / "scripts/extract_custom_tools_openapi.py"),
+            str(source),
+            str(output),
+        ],
+        check=True,
+    )
+
+    assert set(json.loads(output.read_text())["components"]["schemas"]) == {"Escaped/Schema"}
+
+
 def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     operation = {
@@ -142,7 +191,10 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
                 "OptionalTrace": {
                     "in": "header",
                     "name": "X-Trace",
-                    "schema": {"type": "string"},
+                    "schema": {
+                        "type": "string",
+                        "default": {"$ref": "#/components/responses/NotAComponent"},
+                    },
                 },
             },
             "schemas": {
@@ -152,6 +204,7 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
                         "name": {
                             "type": "string",
                             "default": {"$ref": "#/components/schemas/NotASchema"},
+                            "example": {"$ref": "#/components/responses/NotAComponent"},
                         }
                     },
                     "required": ["name"],
@@ -349,6 +402,13 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
         check=True,
     )
     assert "name: str | None" in type_array_output.read_text()
+
+    nullable_inline_object = deepcopy(sliced)
+    nullable_inline_object["components"]["schemas"]["CreatePayload"]["properties"]["name"] = {
+        "type": ["object", "null"],
+        "properties": {"value": {"type": "string"}},
+    }
+    unsupported_contracts.append((nullable_inline_object, "inline object schemas"))
 
     all_of_model = deepcopy(sliced)
     all_of_model["components"]["schemas"]["CreatePayload"]["properties"]["name"] = {

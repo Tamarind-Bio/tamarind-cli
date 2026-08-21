@@ -8,6 +8,7 @@ import pytest
 import respx
 
 from tamarind import Tamarind
+from tamarind.custom_tools import resources
 from tamarind.custom_tools.packaging import build_source_tree_archive, inspect_source_tree
 from tamarind.errors import CustomToolBuildFailedError, CustomToolUploadError
 
@@ -248,3 +249,38 @@ def test_terminal_failure_raises_typed_error() -> None:
         version = client.custom_tools.get("example").get_version("v1")
         with pytest.raises(CustomToolBuildFailedError, match="Docker build failed"):
             version.monitor(timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_monitor_recomputes_the_deadline_after_log_poll(monkeypatch) -> None:
+    ticks = iter((0.0, 0.1, 1.1))
+    monkeypatch.setattr(resources, "_clock", lambda: next(ticks))
+    refreshed = False
+
+    async def logs(*_args, **_kwargs):
+        return resources.BuildLogPage(items=(), status="RUNNING")
+
+    async def refresh(*_args, **_kwargs):
+        nonlocal refreshed
+        refreshed = True
+        raise AssertionError("refresh must not start after the deadline")
+
+    monkeypatch.setattr(resources.Version, "_logs_async", logs)
+    monkeypatch.setattr(resources.Version, "_refresh_async", refresh)
+    version = resources.Version(
+        name="v1",
+        source_revision="a" * 40,
+        status="Running",
+        origin="build",
+        started_at="2026-08-15T00:00:00Z",
+        completed_at=None,
+        duration_seconds=None,
+        error=None,
+        tool_name="example",
+        _collection=None,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(resources.CustomToolBuildTimeoutError):
+        await version._monitor(timeout=1.0, interval=0.1, on_event=None)
+
+    assert refreshed is False

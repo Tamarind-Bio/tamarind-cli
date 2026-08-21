@@ -26,7 +26,8 @@ def _schema_refs(node: object, *, opaque: bool = False) -> set[str]:
     if isinstance(node, dict):
         ref = node.get("$ref")
         if isinstance(ref, str) and ref.startswith("#/components/schemas/"):
-            refs.add(ref.rsplit("/", 1)[-1])
+            token = ref[len("#/components/schemas/") :]
+            refs.add(token.replace("~1", "/").replace("~0", "~"))
         for key, value in node.items():
             refs.update(
                 _schema_refs(value, opaque=key in OPAQUE_VALUE_KEYS or key.startswith("x-"))
@@ -51,10 +52,7 @@ def _component_refs(node: object, kind: str, *, opaque: bool = False) -> set[str
                 _component_refs(
                     value,
                     kind,
-                    # Unlike a Schema Object's `default` annotation, a Response
-                    # Object named `default` is live contract structure and may
-                    # reference a reusable response component.
-                    opaque=key in (OPAQUE_VALUE_KEYS - {"default"}) or key.startswith("x-"),
+                    opaque=key in OPAQUE_VALUE_KEYS or key.startswith("x-"),
                 )
             )
     elif isinstance(node, list):
@@ -144,7 +142,17 @@ def extract(spec: dict[str, Any]) -> dict[str, Any]:
     request_bodies = components.get("requestBodies", {})
     retained_parameters = _reachable_components(paths, parameters, "parameters")
     retained_request_bodies = _reachable_components(paths, request_bodies, "requestBodies")
-    retained_responses = _reachable_components(paths, responses, "responses")
+    # Response-map keys such as `default` are structural, while Schema Object
+    # `default` values are opaque literal data. Start the reachability walk from
+    # each response value so those two meanings never share traversal rules.
+    response_roots = [
+        response
+        for path_item in paths.values()
+        for method in HTTP_METHODS
+        if isinstance((operation := path_item.get(method)), dict)
+        for response in operation.get("responses", {}).values()
+    ]
+    retained_responses = _reachable_components(response_roots, responses, "responses")
 
     reachable = (
         _schema_refs(paths)

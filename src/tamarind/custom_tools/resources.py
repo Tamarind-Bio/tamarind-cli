@@ -249,14 +249,21 @@ class Version:
         deadline = None if timeout is None else _clock() + timeout
         cursor: str | None = None
         current = self
-        while True:
-            if current.terminal:
-                return _require_success(current)
-            remaining = None if deadline is None else deadline - _clock()
-            if remaining is not None and remaining <= 0:
+
+        def remaining_budget() -> float | None:
+            if deadline is None:
+                return None
+            remaining = deadline - _clock()
+            if remaining <= 0:
                 raise CustomToolBuildTimeoutError(
                     f"Custom Tool Version {self.tool_name}/{self.name} is still {current.status}"
                 )
+            return remaining
+
+        while True:
+            if current.terminal:
+                return _require_success(current)
+            remaining = remaining_budget()
             page = await _await_with_timeout(
                 current._logs_async(cursor=cursor, request_timeout=remaining), remaining
             )
@@ -266,11 +273,13 @@ class Version:
             cursor = page.next_cursor
             if cursor is not None:
                 continue
+            remaining = remaining_budget()
             current = await _await_with_timeout(
                 current._refresh_async(request_timeout=remaining), remaining
             )
             if current.terminal:
                 return _require_success(current)
+            remaining = remaining_budget()
             await asyncio.sleep(interval if remaining is None else min(interval, remaining))
 
 

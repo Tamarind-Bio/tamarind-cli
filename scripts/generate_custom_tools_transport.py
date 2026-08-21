@@ -96,7 +96,8 @@ def _annotation(schema: dict[str, Any]) -> str:
         return "Literal[" + ", ".join(repr(value) for value in schema["enum"]) + "]"
     kind = schema.get("type")
     if isinstance(kind, list):
-        return " | ".join(dict.fromkeys(_annotation({"type": item}) for item in kind))
+        siblings = {key: value for key, value in schema.items() if key != "type"}
+        return " | ".join(dict.fromkeys(_annotation({**siblings, "type": item}) for item in kind))
     if kind == "null":
         return "None"
     if kind == "string":
@@ -128,7 +129,8 @@ def _parameter_annotation(schema: dict[str, Any]) -> str:
     """Use None only as the SDK's omission marker for optional parameters."""
     if isinstance(schema.get("type"), list):
         kinds = [kind for kind in schema["type"] if kind != "null"]
-        return " | ".join(dict.fromkeys(_annotation({"type": kind}) for kind in kinds))
+        siblings = {key: value for key, value in schema.items() if key != "type"}
+        return " | ".join(dict.fromkeys(_annotation({**siblings, "type": kind}) for kind in kinds))
     if isinstance(schema.get("enum"), list) and None in schema["enum"]:
         values = [value for value in schema["enum"] if value is not None]
         return _annotation({"enum": values})
@@ -353,6 +355,12 @@ def generate(spec: dict[str, Any]) -> str:
     _validate_auth_contract(spec)
     components = spec.get("components", {})
     schemas = components.get("schemas", {})
+    unsupported_schema_names = [name for name in schemas if not str(name).isidentifier()]
+    if unsupported_schema_names:
+        raise ValueError(
+            "Schema component names are outside the generated SDK profile: "
+            f"{sorted(unsupported_schema_names)}"
+        )
     parameter_components = components.get("parameters", {})
     request_body_components = components.get("requestBodies", {})
     response_components = components.get("responses", {})
