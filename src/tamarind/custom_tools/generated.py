@@ -15,6 +15,10 @@ def _segment(value: str) -> str:
     return quote(value, safe="")
 
 
+GpuType: TypeAlias = Literal["None", "T4", "L4", "L40S", "A10", "A100"]
+MemorySize: TypeAlias = Literal[
+    "8Gi", "12Gi", "24Gi", "32Gi", "48Gi", "64Gi", "90Gi", "96Gi", "180Gi"
+]
 PublicCustomToolStatus: TypeAlias = Literal["Draft", "Building", "Deployed"]
 PublicVersionStatus: TypeAlias = Literal["Queued", "Running", "Complete", "Stopped"]
 

@@ -13,6 +13,8 @@ import httpx
 
 from tamarind.custom_tools.generated import (
     GeneratedCustomToolsTransport,
+    GpuType,
+    MemorySize,
     PublicBuildError,
     PublicBuildEvent,
     PublicBuildLogPage,
@@ -97,8 +99,8 @@ class CustomTool:
     description: str
     functions: tuple[str, ...]
     status: PublicCustomToolStatus
-    gpu_type: str
-    memory: str
+    gpu_type: GpuType
+    memory: MemorySize
     cpu: int
     home_disk_gi: int
     max_runtime_seconds: int | None
@@ -125,8 +127,8 @@ class CustomTool:
         display_name: str | None | _Unset = _UNSET,
         description: str | None | _Unset = _UNSET,
         functions: list[str] | None | _Unset = _UNSET,
-        gpu_type: str | None | _Unset = _UNSET,
-        memory: str | None | _Unset = _UNSET,
+        gpu_type: GpuType | None | _Unset = _UNSET,
+        memory: MemorySize | None | _Unset = _UNSET,
         cpu: int | None | _Unset = _UNSET,
         home_disk_gi: int | None | _Unset = _UNSET,
         auto_publish: bool | None | _Unset = _UNSET,
@@ -433,8 +435,8 @@ class CustomTools:
         *,
         display_name: str = "",
         description: str = "",
-        gpu_type: str = "None",
-        memory: str = "8Gi",
+        gpu_type: GpuType = "None",
+        memory: MemorySize = "8Gi",
         cpu: int = 1,
     ) -> CustomTool:
         body = cast(

@@ -10,7 +10,16 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     root = Path(__file__).resolve().parents[1]
     operation = {
         "operationId": "listCustomTools",
-        "responses": {"200": {"description": "ok"}},
+        "responses": {
+            "200": {
+                "description": "ok",
+                "content": {
+                    "application/json": {
+                        "schema": {"$ref": "#/components/schemas/PublicCustomTool"}
+                    }
+                },
+            }
+        },
     }
     spec = {
         "openapi": "3.1.0",
@@ -89,6 +98,30 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
                     "properties": {"id": {"type": "string"}},
                     "required": ["id"],
                 },
+                "PublicCustomTool": {
+                    "type": "object",
+                    "properties": {
+                        "gpuType": {
+                            "type": "string",
+                            "enum": ["None", "T4", "L4", "L40S", "A10", "A100"],
+                        },
+                        "memory": {
+                            "type": "string",
+                            "enum": [
+                                "8Gi",
+                                "12Gi",
+                                "24Gi",
+                                "32Gi",
+                                "48Gi",
+                                "64Gi",
+                                "90Gi",
+                                "96Gi",
+                                "180Gi",
+                            ],
+                        },
+                    },
+                    "required": ["gpuType", "memory"],
+                },
             },
         },
     }
@@ -113,7 +146,11 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     ]
     assert set(sliced["components"]["parameters"]) == {"CanonicalToolName", "ToolName"}
     assert set(sliced["components"]["requestBodies"]) == {"CreateBody", "CreateBodyAlias"}
-    assert set(sliced["components"]["schemas"]) == {"CreatePayload", "CreateResult"}
+    assert set(sliced["components"]["schemas"]) == {
+        "CreatePayload",
+        "CreateResult",
+        "PublicCustomTool",
+    }
 
     generated = tmp_path / "generated.py"
     subprocess.run(
@@ -126,6 +163,10 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
         check=True,
     )
     generated_text = generated.read_text()
+    assert (
+        'GpuType: TypeAlias = Literal["None", "T4", "L4", "L40S", "A10", "A100"]' in generated_text
+    )
+    assert "MemorySize: TypeAlias = Literal[" in generated_text
     assert "def get_custom_tool(self, name: Literal['canonical']" in generated_text
     assert "f'custom-tools/{_segment(name)}'" in generated_text
     assert "def create_custom_tool(self, body: CreatePayload" in generated_text

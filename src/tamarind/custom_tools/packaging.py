@@ -35,6 +35,7 @@ _ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 _REGULAR_FILE_MODE = 0o100644
 _EXECUTABLE_FILE_MODE = 0o100755
 _DIRECTORY_MODE = 0o040755
+_MAX_SOURCE_ENTRIES = 25_000
 
 
 class _CappedBytesIO(BytesIO):
@@ -154,47 +155,22 @@ def inspect_source_tree(folder: str | Path) -> SourceTree:
     except OSError as exc:
         raise CustomToolUploadError(f"Cannot resolve Custom Tool source folder: {root}") from exc
 
-    def traversal_error(exc: OSError) -> None:
-        raise CustomToolUploadError(f"Cannot traverse Custom Tool source folder: {exc}") from exc
-
     files: list[SourceFile] = []
     empty_directories: list[str] = []
-    for current, directories, filenames in os.walk(
-        root,
-        followlinks=False,
-        onerror=traversal_error,
-    ):
-        current_path = Path(current)
+    retained_entries = 0
+    pending = [root]
+    while pending:
+        current_path = pending.pop()
         _verify_directory(resolved_root, current_path)
-        kept_directories: list[str] = []
-        for name in sorted(directories):
-            path = current_path / name
-            if name in EXCLUDED_DIRECTORIES:
-                continue
-            if is_link_like(path):
-                raise CustomToolUploadError(
-                    f"Source archives cannot contain symlinks or junctions: {path}"
-                )
-            kept_directories.append(name)
-        directories[:] = kept_directories
-
-        kept_files: list[tuple[str, Path]] = []
-        for name in sorted(filenames):
-            path = current_path / name
-            if (
-                name in EXCLUDED_DIRECTORIES
-                or name in EXCLUDED_FILES
-                or path.suffix in EXCLUDED_SUFFIXES
-            ):
-                continue
-            if is_link_like(path):
-                raise CustomToolUploadError(
-                    f"Source archives cannot contain symlinks or junctions: {path}"
-                )
-            relative = path.relative_to(root).as_posix()
-            kept_files.append((relative, path))
+        kept_directories, kept_files = _scan_directory(
+            current_path,
+            max_entries=_MAX_SOURCE_ENTRIES - retained_entries,
+        )
+        retained_entries += len(kept_directories) + len(kept_files)
+        pending.extend(reversed(kept_directories))
         files.extend(
-            SourceFile.inspect(relative, path, resolved_root) for relative, path in kept_files
+            SourceFile.inspect(path.relative_to(root).as_posix(), path, resolved_root)
+            for path in kept_files
         )
         if current_path != root and not kept_directories and not kept_files:
             empty_directories.append(current_path.relative_to(root).as_posix())
@@ -216,6 +192,7 @@ def build_source_tree_archive(
     max_bytes: int | None = None,
 ) -> SourceArchive:
     """Package one previously inspected source snapshot."""
+    _enforce_source_entry_limit(len(tree.files) + len(tree.empty_directories))
     output = _CappedBytesIO(max_bytes)
     with zipfile.ZipFile(
         output,
@@ -255,6 +232,58 @@ def build_source_tree_archive(
 def is_link_like(path: Path) -> bool:
     """Reject POSIX links and Windows reparse points such as junctions."""
     return _metadata_is_link_like(_file_metadata(path))
+
+
+def _scan_directory(path: Path, *, max_entries: int) -> tuple[list[Path], list[Path]]:
+    directories: list[Path] = []
+    files: list[Path] = []
+    try:
+        entries = os.scandir(path)
+        with entries:
+            for entry in entries:
+                child = path / entry.name
+                metadata = _file_metadata(child)
+                if stat.S_ISDIR(metadata.st_mode):
+                    if entry.name in EXCLUDED_DIRECTORIES:
+                        continue
+                    if _metadata_is_link_like(metadata):
+                        raise CustomToolUploadError(
+                            f"Source archives cannot contain symlinks or junctions: {child}"
+                        )
+                    directories.append(child)
+                else:
+                    if (
+                        entry.name in EXCLUDED_DIRECTORIES
+                        or entry.name in EXCLUDED_FILES
+                        or child.suffix in EXCLUDED_SUFFIXES
+                    ):
+                        continue
+                    if _metadata_is_link_like(metadata):
+                        raise CustomToolUploadError(
+                            f"Source archives cannot contain symlinks or junctions: {child}"
+                        )
+                    files.append(child)
+                _enforce_source_entry_limit(len(directories) + len(files), maximum=max_entries)
+    except CustomToolUploadError:
+        raise
+    except (OSError, RecursionError) as exc:
+        raise CustomToolUploadError(f"Cannot traverse Custom Tool source folder: {exc}") from exc
+    return sorted(directories, key=lambda child: child.name), sorted(
+        files, key=lambda child: child.name
+    )
+
+
+def _enforce_source_entry_limit(
+    count: int,
+    *,
+    maximum: int | None = None,
+) -> None:
+    if maximum is None:
+        maximum = _MAX_SOURCE_ENTRIES
+    if count > maximum:
+        raise CustomToolUploadError(
+            f"Source tree exceeds the {_MAX_SOURCE_ENTRIES}-entry inspection limit"
+        )
 
 
 def _metadata_is_link_like(metadata: os.stat_result) -> bool:

@@ -12,6 +12,10 @@ from typing import Any
 
 HTTP_METHODS = ("get", "post", "put", "patch", "delete")
 ASYNC_METHODS = frozenset({"get_custom_tool_version", "list_custom_tool_build_logs"})
+PUBLIC_PROPERTY_ALIASES = (
+    ("PublicCustomTool", "gpuType", "GpuType"),
+    ("PublicCustomTool", "memory", "MemorySize"),
+)
 
 
 def _name(value: str) -> str:
@@ -114,7 +118,10 @@ def generate(spec: dict[str, Any]) -> str:
     parameter_components = components.get("parameters", {})
     request_body_components = components.get("requestBodies", {})
     response_components = components.get("responses", {})
-    aliases: list[str] = []
+    aliases = [
+        f"{alias}: TypeAlias = {_annotation(schemas[model]['properties'][field])}"
+        for model, field, alias in PUBLIC_PROPERTY_ALIASES
+    ]
     objects: list[str] = []
     for name in sorted(schemas):
         schema = schemas[name]

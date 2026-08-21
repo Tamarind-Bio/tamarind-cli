@@ -1,5 +1,6 @@
 """Custom Tools Python SDK."""
 
+from tamarind.custom_tools.generated import GpuType, MemorySize
 from tamarind.custom_tools.resources import (
     BuildError,
     BuildEvent,
@@ -19,6 +20,8 @@ __all__ = [
     "BuildResult",
     "CustomTool",
     "CustomTools",
+    "GpuType",
+    "MemorySize",
     "Page",
     "ValidationProblem",
     "ValidationReport",

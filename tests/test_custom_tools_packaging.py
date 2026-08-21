@@ -110,12 +110,10 @@ def test_archive_rejects_file_replaced_by_symlink_after_inspection(
 def test_inspection_rejects_directory_traversal_errors(tmp_path: Path, monkeypatch) -> None:
     _valid_source(tmp_path)
 
-    def failing_walk(_root, *, followlinks, onerror):
-        assert followlinks is False
-        onerror(PermissionError("directory is unreadable"))
-        return ()
+    def failing_scan(_root):
+        raise PermissionError("directory is unreadable")
 
-    monkeypatch.setattr(packaging.os, "walk", failing_walk)
+    monkeypatch.setattr(packaging.os, "scandir", failing_scan)
 
     with pytest.raises(CustomToolUploadError, match="Cannot traverse"):
         packaging.inspect_source_tree(tmp_path)
@@ -132,19 +130,52 @@ def test_inspection_rejects_directory_replaced_by_link_during_descent(
     outside.mkdir()
     (outside / "secret.txt").write_text("secret")
 
-    def replaced_walk(root, *, followlinks, onerror):
-        assert followlinks is False
-        assert onerror is not None
-        filenames = [path.name for path in Path(root).iterdir() if path.is_file()]
-        yield str(root), ["nested"], filenames
-        nested.rmdir()
-        nested.symlink_to(outside, target_is_directory=True)
-        yield str(nested), [], ["secret.txt"]
+    real_scan = packaging._scan_directory
 
-    monkeypatch.setattr(packaging.os, "walk", replaced_walk)
+    def replaced_scan(path: Path, *, max_entries: int):
+        result = real_scan(path, max_entries=max_entries)
+        if path == tmp_path:
+            nested.rmdir()
+            nested.symlink_to(outside, target_is_directory=True)
+        return result
+
+    monkeypatch.setattr(packaging, "_scan_directory", replaced_scan)
 
     with pytest.raises(CustomToolUploadError, match="symlinks or junctions"):
         packaging.inspect_source_tree(tmp_path)
+
+
+def test_inspection_bounds_retained_manifest_entries(tmp_path: Path, monkeypatch) -> None:
+    _valid_source(tmp_path)
+    monkeypatch.setattr(packaging, "_MAX_SOURCE_ENTRIES", 3)
+
+    with pytest.raises(CustomToolUploadError, match="3-entry inspection limit"):
+        packaging.inspect_source_tree(tmp_path)
+
+
+def test_archive_rechecks_manifest_entry_budget(tmp_path: Path, monkeypatch) -> None:
+    _valid_source(tmp_path)
+    tree = packaging.inspect_source_tree(tmp_path)
+    monkeypatch.setattr(packaging, "_MAX_SOURCE_ENTRIES", 3)
+
+    with pytest.raises(CustomToolUploadError, match="3-entry inspection limit"):
+        packaging.build_source_tree_archive(tree)
+
+
+def test_inspection_traverses_deep_trees_iteratively(tmp_path: Path, monkeypatch) -> None:
+    depth = 1_500
+
+    def simulated_scan(path: Path, *, max_entries: int):
+        assert max_entries > 0
+        current_depth = len(path.parts) - len(tmp_path.parts)
+        return ([path / "d"], []) if current_depth < depth else ([], [])
+
+    monkeypatch.setattr(packaging, "_scan_directory", simulated_scan)
+    monkeypatch.setattr(packaging, "_verify_directory", lambda _root, _path: None)
+
+    tree = packaging.inspect_source_tree(tmp_path)
+
+    assert len(tree.empty_directories[0].split("/")) == depth
 
 
 def test_validation_rejects_symlinked_source_root(tmp_path: Path) -> None:

@@ -5,13 +5,14 @@ import json
 import os
 from pathlib import Path
 import time
+from typing import get_type_hints
 
 import httpx
 import pytest
 import respx
 
 from tamarind import Tamarind
-from tamarind.custom_tools import BuildEvent
+from tamarind.custom_tools import BuildEvent, CustomTool, CustomTools, GpuType, MemorySize
 from tamarind.custom_tools import resources
 from tamarind.errors import (
     CustomToolBuildFailedError,
@@ -74,6 +75,16 @@ def _source(root: Path) -> None:
     (root / "config.json").write_text(json.dumps({"displayName": "Example", "inputs": []}))
     (root / "Dockerfile").write_text("FROM python:3.12-slim\n")
     (root / "run.sh").write_text("#!/bin/sh\ntrue\n")
+
+
+def test_public_mutation_api_preserves_generated_enum_types() -> None:
+    create_hints = get_type_hints(CustomTools.create)
+    update_hints = get_type_hints(CustomTool.update)
+
+    assert create_hints["gpu_type"] == GpuType
+    assert create_hints["memory"] == MemorySize
+    assert GpuType in update_hints["gpu_type"].__args__
+    assert MemorySize in update_hints["memory"].__args__
 
 
 @respx.mock
