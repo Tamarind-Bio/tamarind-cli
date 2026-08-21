@@ -21,6 +21,7 @@ from tamarind.custom_tools.generated import (
     PublicBuildLogPage,
     PublicCreateCustomToolRequest,
     PublicCustomTool,
+    PublicDeployRequest,
     PublicToolStatus,
     PublicUpdateCustomToolRequest,
     PublicVersion,
@@ -115,6 +116,7 @@ class CustomTool:
     max_runtime_seconds: int | None
     has_source: bool
     source_hash: str
+    source_ref: str | None
     connection_error: str | None
     published: bool
     auto_publish: bool
@@ -376,22 +378,19 @@ class CustomTools:
         finally:
             archive.close()
         self._transport.finalize_custom_tool_upload(tool.name, session["uploadId"])
-        _wait_for_source(
+        uploaded = _wait_for_source(
             tool,
             archive.digest,
             timeout=cast(float, timeout),
             interval=interval,
         )
-        _require_source_hash(
-            tool,
-            archive.digest,
-            timeout=cast(float, timeout),
-        )
-        deployed = self._transport.deploy_custom_tool(tool.name)
-        _require_source_hash(
-            tool,
-            archive.digest,
-            timeout=cast(float, timeout),
+        if uploaded.source_ref is None:
+            raise CustomToolUploadError(
+                "Source extraction finished without an immutable source revision"
+            )
+        deployed = self._transport.deploy_custom_tool(
+            tool.name,
+            cast(PublicDeployRequest, {"expectedSourceRef": uploaded.source_ref}),
         )
         version_name = deployed["versionName"]
         if version_name is not None:
@@ -439,15 +438,6 @@ def _wait_for_source(
         if current.connection_error:
             raise CustomToolUploadError(f"Source extraction failed: {current.connection_error}")
         time.sleep(min(interval, max(0.0, deadline - _clock())))
-
-
-def _require_source_hash(tool: CustomTool, source_hash: str, *, timeout: float) -> None:
-    current = tool._refresh(request_timeout=timeout)
-    if current.source_hash != source_hash:
-        raise CustomToolUploadError(
-            "Custom Tool source changed before deployment could be verified; "
-            "inspect Versions before retrying"
-        )
 
 
 def _wait_for_version_ref(
@@ -502,6 +492,7 @@ def _tool_from_wire(collection: CustomTools, wire: PublicCustomTool) -> CustomTo
         max_runtime_seconds=wire["maxRuntimeSeconds"],
         has_source=wire["hasSource"],
         source_hash=wire["sourceHash"],
+        source_ref=wire["sourceRef"],
         connection_error=wire["connectionError"],
         published=wire["published"],
         auto_publish=wire["autoPublish"],

@@ -286,6 +286,17 @@
             "title": "Sourcehash",
             "type": "string"
           },
+          "sourceRef": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceref"
+          },
           "status": {
             "$ref": "#/components/schemas/PublicToolStatus"
           },
@@ -307,6 +318,7 @@
           "maxRuntimeSeconds",
           "hasSource",
           "sourceHash",
+          "sourceRef",
           "connectionError",
           "published",
           "autoPublish",
@@ -348,8 +360,16 @@
               }
             ],
             "title": "Carryforwardfromversion"
+          },
+          "expectedSourceRef": {
+            "pattern": "^[a-f0-9]{40}$",
+            "title": "Expectedsourceref",
+            "type": "string"
           }
         },
+        "required": [
+          "expectedSourceRef"
+        ],
         "title": "PublicDeployRequest",
         "type": "object"
       },
@@ -803,7 +823,7 @@
   },
   "info": {
     "description": "The Tamarind public API. Code-first: this spec is GENERATED from the backend `Public*` request/response models (the single source of truth) and committed as an artifact; a freshness gate asserts it matches the running server, and a contract test asserts the served routes match it. v1 is frozen for external users. Authenticate with an API key in the `x-api-key` header.",
-    "summary": "The Tamarind public API \u2014 jobs, pipelines, molecules, and tool recommendations.",
+    "summary": "The Tamarind public API \u2014 jobs, pipelines, molecules, and model routing.",
     "title": "Tamarind Public API",
     "version": "1.0"
   },
@@ -1009,11 +1029,11 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PublicDeployRequest",
-                "default": {}
+                "$ref": "#/components/schemas/PublicDeployRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "202": {
@@ -1486,7 +1506,7 @@
   ],
   "servers": [
     {
-      "description": "The Tamarind public API. Product-shaped Jobs, Molecules, Pipelines, and tool recommendations.",
+      "description": "The Tamarind public API. Product-shaped Jobs, Molecules, Pipelines, and model routing.",
       "url": "https://app.tamarind.bio/api"
     }
   ]

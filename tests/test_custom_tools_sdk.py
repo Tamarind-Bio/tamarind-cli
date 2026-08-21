@@ -15,13 +15,20 @@ from tamarind.errors import (
     CustomToolBuildFailedError,
     CustomToolNotFoundError,
     CustomToolUploadError,
+    StaleCustomToolError,
 )
 
 BASE = "https://api.test/"
 UPLOAD = "https://uploads.test/source.zip"
 
 
-def _tool(*, source_hash: str = "", source: bool = False, error: str | None = None) -> dict:
+def _tool(
+    *,
+    source_hash: str = "",
+    source_ref: str | None = None,
+    source: bool = False,
+    error: str | None = None,
+) -> dict:
     return {
         "name": "example",
         "displayName": "Example",
@@ -35,6 +42,7 @@ def _tool(*, source_hash: str = "", source: bool = False, error: str | None = No
         "maxRuntimeSeconds": None,
         "hasSource": source,
         "sourceHash": source_hash,
+        "sourceRef": source_ref if source_ref is not None else "a" * 40 if source else None,
         "connectionError": error,
         "published": False,
         "autoPublish": False,
@@ -126,8 +134,6 @@ def test_build_composes_upload_finalize_poll_deploy_and_version(tmp_path: Path) 
             httpx.Response(200, json=_tool()),
             httpx.Response(200, json=_tool()),
             httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
-            httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
-            httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
         ]
     )
     respx.post(f"{BASE}custom-tools/example/uploads").mock(
@@ -158,11 +164,11 @@ def test_build_composes_upload_finalize_poll_deploy_and_version(tmp_path: Path) 
     with Tamarind(api_key="key", api_base=BASE) as client:
         version = client.custom_tools.get("example").build(tmp_path, poll_interval=0.001)
 
-    assert tool_reads.call_count == 5
+    assert tool_reads.call_count == 3
     assert upload.calls.last.request.content.startswith(b"PK")
     assert upload.calls.last.request.headers["Content-Type"] == "application/zip"
     assert finalize.called
-    assert deploy.calls.last.request.content == b""
+    assert json.loads(deploy.calls.last.request.content) == {"expectedSourceRef": "a" * 40}
     assert version.name == "v1"
     assert not respx.calls.last.request.url.path.endswith("/versions")
 
@@ -228,8 +234,6 @@ def test_build_tracks_queued_deploy_by_source_ref(tmp_path: Path) -> None:
         side_effect=[
             httpx.Response(200, json=_tool()),
             httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
-            httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
-            httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
         ]
     )
     respx.post(f"{BASE}custom-tools/example/uploads").mock(
@@ -262,15 +266,13 @@ def test_build_tracks_queued_deploy_by_source_ref(tmp_path: Path) -> None:
 
 
 @respx.mock
-def test_build_fails_closed_when_source_changes_before_deploy(tmp_path: Path) -> None:
+def test_build_fails_closed_when_selected_source_changes_before_deploy(tmp_path: Path) -> None:
     _source(tmp_path)
     source_hash = _archive_digest(tmp_path)
-    changed_hash = "sha256:" + "f" * 64
     respx.get(f"{BASE}custom-tools/example").mock(
         side_effect=[
             httpx.Response(200, json=_tool()),
             httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
-            httpx.Response(200, json=_tool(source=True, source_hash=changed_hash)),
         ]
     )
     respx.post(f"{BASE}custom-tools/example/uploads").mock(
@@ -284,15 +286,22 @@ def test_build_fails_closed_when_source_changes_before_deploy(tmp_path: Path) ->
     )
     deploy = respx.post(f"{BASE}custom-tools/example/deploy").mock(
         return_value=httpx.Response(
-            202, json={"versionName": "v1", "ref": "a" * 40, "path": "building"}
+            409,
+            json={
+                "type": "https://app.tamarind.bio/errors/custom_tool_source_changed",
+                "title": "Custom Tool source changed",
+                "status": 409,
+                "code": "custom_tool_source_changed",
+                "detail": "refresh and retry",
+            },
         )
     )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
-        with pytest.raises(CustomToolUploadError, match="source changed"):
+        with pytest.raises(StaleCustomToolError, match="refresh and retry"):
             client.custom_tools.get("example").build(tmp_path, poll_interval=0.001)
 
-    assert not deploy.called
+    assert json.loads(deploy.calls.last.request.content) == {"expectedSourceRef": "a" * 40}
 
 
 @respx.mock

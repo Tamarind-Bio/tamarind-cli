@@ -218,7 +218,7 @@ def _map_error(resp: httpx.Response) -> TamarindError:
         return CustomToolNotDeployableError(msg, detail=detail)
     if problem_code == "invalid_custom_tool_config" or problem_code == "invalid_custom_tool_source":
         return CustomToolValidationError(msg, detail=detail)
-    if problem_code == "custom_tool_generation_mismatch":
+    if problem_code in {"custom_tool_generation_mismatch", "custom_tool_source_changed"}:
         return StaleCustomToolError(msg, detail=detail)
     if (
         problem_code == "custom_tool_source_digest_mismatch"

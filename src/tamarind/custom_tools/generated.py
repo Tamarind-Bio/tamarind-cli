@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from tamarind.http import HTTPClient
 
-OPENAPI_SHA256 = "95b3da45cb3b31953a54571640ec0938d273d2b7e23baa7a4061eb9942587953"
+OPENAPI_SHA256 = "ce681076c3a0d740f90dcfcb4533ee2906b220f89dce3f505975841580afaca6"
 
 
 def _segment(value: str) -> str:
@@ -98,6 +98,8 @@ class PublicCustomTool(Protocol):
     @overload
     def __getitem__(self, key: Literal["sourceHash"]) -> str: ...
     @overload
+    def __getitem__(self, key: Literal["sourceRef"]) -> str | None: ...
+    @overload
     def __getitem__(self, key: Literal["status"]) -> PublicToolStatus: ...
     @overload
     def __getitem__(self, key: Literal["updatedAt"]) -> str: ...
@@ -116,6 +118,7 @@ class PublicCustomToolPage(Protocol):
 
 class PublicDeployRequest(TypedDict):
     carryForwardFromVersion: NotRequired[str | None]
+    expectedSourceRef: str
 
 
 class PublicDeployResult(Protocol):
@@ -274,21 +277,14 @@ class GeneratedCustomToolsTransport:
         return cast(PublicCustomTool, response.json())
 
     def deploy_custom_tool(
-        self, name: str, body: PublicDeployRequest | None = None, *, timeout: float | None = None
+        self, name: str, body: PublicDeployRequest, *, timeout: float | None = None
     ) -> PublicDeployResult:
-        if body is None:
-            response = self._client.request(
-                "POST",
-                f"custom-tools/{_segment(name)}/deploy",
-                timeout=timeout,
-            )
-        else:
-            response = self._client.request(
-                "POST",
-                f"custom-tools/{_segment(name)}/deploy",
-                json=body,
-                timeout=timeout,
-            )
+        response = self._client.request(
+            "POST",
+            f"custom-tools/{_segment(name)}/deploy",
+            json=body,
+            timeout=timeout,
+        )
         return cast(PublicDeployResult, response.json())
 
     def create_custom_tool_upload(

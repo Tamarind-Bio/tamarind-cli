@@ -96,9 +96,21 @@ def _annotation(schema: dict[str, Any]) -> str:
             )
         return schema["$ref"].rsplit("/", 1)[-1]
     if "anyOf" in schema:
+        unsupported_siblings = set(schema) - {"anyOf"} - REFERENCE_ANNOTATION_SIBLINGS
+        if unsupported_siblings:
+            raise ValueError(
+                "anyOf schema siblings are outside the generated SDK profile: "
+                f"{sorted(unsupported_siblings)}"
+            )
         parts = [_annotation(part) for part in schema["anyOf"]]
         return " | ".join(dict.fromkeys(parts))
     if "oneOf" in schema:
+        unsupported_siblings = set(schema) - {"oneOf"} - REFERENCE_ANNOTATION_SIBLINGS
+        if unsupported_siblings:
+            raise ValueError(
+                "oneOf schema siblings are outside the generated SDK profile: "
+                f"{sorted(unsupported_siblings)}"
+            )
         return " | ".join(dict.fromkeys(_annotation(part) for part in schema["oneOf"]))
     if "const" in schema:
         return f"Literal[{schema['const']!r}]"
@@ -283,6 +295,28 @@ def _is_structured(schema: dict[str, Any], schemas: dict[str, Any]) -> bool:
     )
 
 
+def _has_only_string_values(schema: dict[str, Any], schemas: dict[str, Any]) -> bool:
+    """Whether every non-null value admitted by a scalar schema is a string."""
+    schema = _resolve_schema(schema, schemas)
+    if schema.get("type") == "null" or schema.get("const") is None and "const" in schema:
+        return True
+    if "const" in schema:
+        return isinstance(schema["const"], str)
+    enum = schema.get("enum")
+    if isinstance(enum, list):
+        return all(value is None or isinstance(value, str) for value in enum)
+    kind = schema.get("type")
+    if isinstance(kind, list):
+        return all(item in {"string", "null"} for item in kind)
+    alternatives = schema.get("anyOf", schema.get("oneOf"))
+    if isinstance(alternatives, list):
+        return all(
+            isinstance(alternative, dict) and _has_only_string_values(alternative, schemas)
+            for alternative in alternatives
+        )
+    return kind == "string"
+
+
 def _validate_parameter_profile(parameter: dict[str, Any], schemas: dict[str, Any]) -> None:
     location = parameter.get("in")
     schema = parameter.get("schema")
@@ -296,7 +330,7 @@ def _validate_parameter_profile(parameter: dict[str, Any], schemas: dict[str, An
         raise ValueError(
             f"Structured {location} parameter is outside the SDK profile: {parameter.get('name')}"
         )
-    if location in {"path", "header"} and _parameter_annotation(schema) != "str":
+    if location in {"path", "header"} and not _has_only_string_values(schema, schemas):
         raise ValueError(
             f"Non-string {location} parameter is outside the SDK profile: {parameter.get('name')}"
         )
@@ -396,17 +430,26 @@ def _validate_public_aliases(schemas: dict[str, Any]) -> list[str]:
 
 
 def _schema_alias_order(schemas: dict[str, Any], aliases: set[str]) -> list[str]:
+    def dependencies(value: object) -> set[str]:
+        if isinstance(value, dict):
+            ref = value.get("$ref")
+            found: set[str] = set()
+            if isinstance(ref, str) and ref.startswith("#/components/schemas/"):
+                found.add(ref.rsplit("/", 1)[-1])
+            for child in value.values():
+                found.update(dependencies(child))
+            return found
+        if isinstance(value, list):
+            found: set[str] = set()
+            for child in value:
+                found.update(dependencies(child))
+            return found
+        return set()
+
     ordered: list[str] = []
     pending = set(aliases)
     while pending:
-        ready = sorted(
-            name
-            for name in pending
-            if not (
-                set(re.findall(r"#/components/schemas/([^/]+)", json.dumps(schemas[name])))
-                & pending
-            )
-        )
+        ready = sorted(name for name in pending if not (dependencies(schemas[name]) & pending))
         if not ready:
             raise ValueError("Cyclic schema aliases are outside the generated SDK profile")
         ordered.extend(ready)

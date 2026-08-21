@@ -200,6 +200,7 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
             "schemas": {
                 "CreatePayload": {
                     "type": "object",
+                    "additionalProperties": False,
                     "properties": {
                         "name": {
                             "type": "string",
@@ -488,6 +489,13 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
         "allOf": [{"type": "string"}]
     }
     unsupported_contracts.append((all_of_model, "allOf schemas"))
+
+    combinator_sibling_model = deepcopy(sliced)
+    combinator_sibling_model["components"]["schemas"]["CreatePayload"]["properties"]["name"] = {
+        "anyOf": [{"type": "string"}, {"type": "null"}],
+        "type": "string",
+    }
+    unsupported_contracts.append((combinator_sibling_model, "anyOf schema siblings"))
 
     unconstrained_model = deepcopy(sliced)
     unconstrained_model["components"]["schemas"]["CreatePayload"]["properties"]["name"] = {}

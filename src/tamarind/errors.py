@@ -102,7 +102,7 @@ class CustomToolNotDeployableError(CustomToolValidationError):
 
 
 class StaleCustomToolError(CustomToolError):
-    """A resource handle refers to a deleted-and-recreated Tool generation."""
+    """A selected Tool generation or source revision is no longer current."""
 
 
 class CustomToolUploadError(CustomToolError):

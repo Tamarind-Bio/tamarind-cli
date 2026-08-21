@@ -61,6 +61,15 @@ class _CappedArchive:
     def read(self, size: int = -1) -> bytes:
         return self._stream.read(size)
 
+    def __iter__(self) -> "_CappedArchive":
+        return self
+
+    def __next__(self) -> bytes:
+        chunk = self.read(1024 * 1024)
+        if not chunk:
+            raise StopIteration
+        return chunk
+
     def seek(self, offset: int, whence: int = 0) -> int:
         return self._stream.seek(offset, whence)
 
