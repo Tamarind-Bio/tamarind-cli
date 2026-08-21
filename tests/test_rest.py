@@ -9,8 +9,16 @@ from tamarind.errors import (
     APIError,
     AuthError,
     BudgetError,
+    CustomToolBuildInProgressError,
+    CustomToolBuildNotInProgressError,
+    CustomToolExistsError,
+    CustomToolNotFoundError,
+    CustomToolNotDeployableError,
+    CustomToolUploadError,
+    CustomToolValidationError,
     NotFoundError,
     RateLimitError,
+    StaleCustomToolError,
     ValidationError,
 )
 from tamarind.http import HTTPClient
@@ -74,6 +82,21 @@ def test_get_jobs_param_handling():
 
 
 @respx.mock
+def test_http_client_omits_absent_optional_headers():
+    route = respx.get(f"{BASE}headers").mock(return_value=httpx.Response(200, json={}))
+
+    client().request(
+        "GET",
+        "headers",
+        headers={"X-Required": "present", "X-Optional": None},
+    )
+
+    headers = route.calls.last.request.headers
+    assert headers["X-Required"] == "present"
+    assert "X-Optional" not in headers
+
+
+@respx.mock
 def test_validate_job_returns_body():
     respx.post(f"{BASE}validate-job").mock(
         return_value=httpx.Response(200, json={"valid": False, "error": "missing sequence"})
@@ -115,6 +138,73 @@ def test_error_mapping(status, exc):
     respx.get(f"{BASE}jobs").mock(return_value=httpx.Response(status, json={"error": "boom"}))
     with pytest.raises(exc):
         rest.get_jobs(client())
+
+
+@respx.mock
+def test_422_preserves_structured_validation_problem() -> None:
+    problem = {
+        "code": "validation_error",
+        "message": "Request validation failed",
+        "errors": [{"field": "name", "message": "invalid"}],
+    }
+    respx.get(f"{BASE}custom-tools").mock(return_value=httpx.Response(422, json=problem))
+
+    with pytest.raises(ValidationError) as raised:
+        client().get_json("custom-tools")
+
+    assert raised.value.detail == problem
+
+
+@respx.mock
+def test_422_uses_problem_title_when_detail_is_absent() -> None:
+    problem = {
+        "type": "about:blank",
+        "title": "Request validation failed",
+        "status": 422,
+        "detail": None,
+    }
+    respx.get(f"{BASE}custom-tools").mock(return_value=httpx.Response(422, json=problem))
+
+    with pytest.raises(ValidationError, match="Request validation failed") as raised:
+        client().get_json("custom-tools")
+
+    assert raised.value.detail == problem
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "code,exc",
+    [
+        ("custom_tool_not_found", CustomToolNotFoundError),
+        ("custom_tool_version_not_found", CustomToolNotFoundError),
+        ("custom_tool_name_taken", CustomToolExistsError),
+        ("custom_tool_not_deployable", CustomToolNotDeployableError),
+        ("invalid_custom_tool_config", CustomToolValidationError),
+        ("invalid_custom_tool_source", CustomToolValidationError),
+        ("custom_tool_generation_mismatch", StaleCustomToolError),
+        ("custom_tool_source_digest_mismatch", CustomToolUploadError),
+        ("custom_tool_upload_not_found", CustomToolUploadError),
+        ("custom_tool_build_in_progress", CustomToolBuildInProgressError),
+        ("custom_tool_build_not_cancellable", CustomToolBuildNotInProgressError),
+    ],
+)
+def test_custom_tool_problem_codes_have_stable_error_types(code, exc) -> None:
+    problem = {
+        "type": f"https://app.tamarind.bio/errors/{code}",
+        "title": "Custom Tool request failed",
+        "status": 409,
+        "code": code,
+        "detail": "actionable detail",
+        "errors": [{"field": "config.json", "message": "specific diagnosis"}],
+    }
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(409, json=problem)
+    )
+
+    with pytest.raises(exc, match="actionable detail") as raised:
+        client().get_json("custom-tools/example")
+
+    assert raised.value.detail == problem
 
 
 @respx.mock
