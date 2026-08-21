@@ -82,6 +82,21 @@ def test_get_jobs_param_handling():
 
 
 @respx.mock
+def test_http_client_omits_absent_optional_headers():
+    route = respx.get(f"{BASE}headers").mock(return_value=httpx.Response(200, json={}))
+
+    client().request(
+        "GET",
+        "headers",
+        headers={"X-Required": "present", "X-Optional": None},
+    )
+
+    headers = route.calls.last.request.headers
+    assert headers["X-Required"] == "present"
+    assert "X-Optional" not in headers
+
+
+@respx.mock
 def test_validate_job_returns_body():
     respx.post(f"{BASE}validate-job").mock(
         return_value=httpx.Response(200, json={"valid": False, "error": "missing sequence"})

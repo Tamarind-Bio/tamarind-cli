@@ -10,6 +10,7 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     root = Path(__file__).resolve().parents[1]
     operation = {
         "operationId": "listCustomTools",
+        "parameters": [{"$ref": "#/components/parameters/OptionalTrace"}],
         "responses": {
             "200": {
                 "description": "ok",
@@ -110,6 +111,11 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
                     "name": "unused",
                     "schema": {"type": "string"},
                 },
+                "OptionalTrace": {
+                    "in": "header",
+                    "name": "X-Trace",
+                    "schema": {"type": "string"},
+                },
             },
             "schemas": {
                 "CreatePayload": {
@@ -172,7 +178,11 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     assert sliced["paths"]["/custom-tools/{name}"]["parameters"] == [
         {"$ref": "#/components/parameters/ToolName"}
     ]
-    assert set(sliced["components"]["parameters"]) == {"CanonicalToolName", "ToolName"}
+    assert set(sliced["components"]["parameters"]) == {
+        "CanonicalToolName",
+        "OptionalTrace",
+        "ToolName",
+    }
     assert set(sliced["components"]["requestBodies"]) == {
         "CreateBody",
         "CreateBodyAlias",
@@ -200,6 +210,8 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     assert "'A100'" in generated_text
     assert "MemorySize: TypeAlias = Literal[" in generated_text
     assert "def get_custom_tool(self, name: Literal['canonical']" in generated_text
+    assert "x_trace: str | None = None" in generated_text
+    assert "headers={'X-Trace': x_trace}" in generated_text
     assert "f'custom-tools/{_segment(name)}'" in generated_text
     assert "def create_custom_tool(self, body: CreatePayload" in generated_text
     assert "json=body" in generated_text

@@ -76,7 +76,7 @@ class HTTPClient:
         path: str,
         *,
         params: dict[str, Any] | None = None,
-        headers: dict[str, str] | None = None,
+        headers: dict[str, str | None] | None = None,
         json: Any | None = None,
         timeout: float | None = None,
     ) -> httpx.Response:
@@ -85,14 +85,14 @@ class HTTPClient:
                 "No API key configured. Set TAMARIND_API_KEY, pass --api-key, "
                 "or run `tamarind auth login`."
             )
-        # Drop None-valued query params so we don't send `?x=None`.
-        clean_params = {k: v for k, v in params.items() if v is not None} if params else None
+        clean_params = _without_none_values(params)
+        clean_headers = _without_none_values(headers)
         try:
             resp = self._client.request(
                 method,
                 path.lstrip("/"),
                 params=clean_params,
-                headers=headers,
+                headers=clean_headers,
                 json=json,
                 timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
             )
@@ -109,7 +109,7 @@ class HTTPClient:
         path: str,
         *,
         params: dict[str, Any] | None = None,
-        headers: dict[str, str] | None = None,
+        headers: dict[str, str | None] | None = None,
         json: Any | None = None,
         timeout: float | None = None,
     ) -> httpx.Response:
@@ -123,7 +123,8 @@ class HTTPClient:
                 "No API key configured. Set TAMARIND_API_KEY, pass --api-key, "
                 "or run `tamarind auth login`."
             )
-        clean_params = {k: v for k, v in params.items() if v is not None} if params else None
+        clean_params = _without_none_values(params)
+        clean_headers = _without_none_values(headers)
         try:
             async with httpx.AsyncClient(
                 base_url=self.base_url,
@@ -134,7 +135,7 @@ class HTTPClient:
                     method,
                     path.lstrip("/"),
                     params=clean_params,
-                    headers=headers,
+                    headers=clean_headers,
                     json=json,
                     timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
                 )
@@ -172,6 +173,14 @@ def _parse_json(resp: httpx.Response) -> Any:
     except ValueError:
         # Some endpoints (e.g. /result) return a bare presigned URL string.
         return text
+
+
+def _without_none_values(values: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Omit absent optional wire values before handing them to HTTPX."""
+    if not values:
+        return None
+    retained = {key: value for key, value in values.items() if value is not None}
+    return retained or None
 
 
 def _error_body(resp: httpx.Response) -> tuple[object | None, bool]:

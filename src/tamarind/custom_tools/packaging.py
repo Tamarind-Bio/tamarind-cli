@@ -31,6 +31,9 @@ EXCLUDED_DIRECTORIES = frozenset(
 )
 EXCLUDED_FILES = frozenset({".DS_Store"})
 EXCLUDED_SUFFIXES = frozenset({".pyc", ".pyo"})
+_EXCLUDED_DIRECTORY_NAMES = frozenset(name.casefold() for name in EXCLUDED_DIRECTORIES)
+_EXCLUDED_FILE_NAMES = frozenset(name.casefold() for name in EXCLUDED_FILES)
+_EXCLUDED_FILE_SUFFIXES = frozenset(suffix.casefold() for suffix in EXCLUDED_SUFFIXES)
 _ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 _REGULAR_FILE_MODE = 0o100644
 _EXECUTABLE_FILE_MODE = 0o100755
@@ -273,21 +276,16 @@ def _scan_directory(path: Path, *, max_entries: int) -> tuple[list[Path], list[P
             for entry in entries:
                 child = path / entry.name
                 metadata = _file_metadata(child)
-                if stat.S_ISDIR(metadata.st_mode):
-                    if entry.name in EXCLUDED_DIRECTORIES:
-                        continue
+                is_directory = stat.S_ISDIR(metadata.st_mode)
+                if _is_excluded_entry(entry.name, is_directory=is_directory):
+                    continue
+                if is_directory:
                     if _metadata_is_link_like(metadata):
                         raise CustomToolUploadError(
                             f"Source archives cannot contain symlinks or junctions: {child}"
                         )
                     directories.append(child)
                 else:
-                    if (
-                        entry.name in EXCLUDED_DIRECTORIES
-                        or entry.name in EXCLUDED_FILES
-                        or child.suffix in EXCLUDED_SUFFIXES
-                    ):
-                        continue
                     if _metadata_is_link_like(metadata):
                         raise CustomToolUploadError(
                             f"Source archives cannot contain symlinks or junctions: {child}"
@@ -301,6 +299,16 @@ def _scan_directory(path: Path, *, max_entries: int) -> tuple[list[Path], list[P
     return sorted(directories, key=lambda child: child.name), sorted(
         files, key=lambda child: child.name
     )
+
+
+def _is_excluded_entry(name: str, *, is_directory: bool) -> bool:
+    """Apply archive exclusions with filesystem-independent name semantics."""
+    normalized = name.casefold()
+    if normalized in _EXCLUDED_DIRECTORY_NAMES:
+        return True
+    if is_directory:
+        return False
+    return normalized in _EXCLUDED_FILE_NAMES or Path(normalized).suffix in _EXCLUDED_FILE_SUFFIXES
 
 
 def _enforce_source_entry_limit(

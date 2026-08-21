@@ -48,13 +48,25 @@ def test_archive_is_deterministic_and_excludes_local_artifacts(tmp_path: Path) -
         assert all(info.date_time == (1980, 1, 1, 0, 0, 0) for info in archive.infolist())
 
 
-@pytest.mark.parametrize("metadata_name", [".git", ".hg", ".svn"])
-def test_archive_excludes_file_form_vcs_metadata(tmp_path: Path, metadata_name: str) -> None:
+@pytest.mark.parametrize("metadata_name", [".git", ".GIT", ".Hg", ".sVn"])
+@pytest.mark.parametrize("is_directory", [False, True])
+def test_archive_excludes_vcs_metadata_independent_of_case_and_form(
+    tmp_path: Path,
+    metadata_name: str,
+    is_directory: bool,
+) -> None:
     _valid_source(tmp_path)
-    (tmp_path / metadata_name).write_text("gitdir: ../metadata\n")
+    metadata = tmp_path / metadata_name
+    if is_directory:
+        metadata.mkdir()
+        (metadata / "config").write_text("secret")
+    else:
+        metadata.write_text("gitdir: ../metadata\n")
 
     with zipfile.ZipFile(BytesIO(build_archive(tmp_path).data)) as archive:
-        assert metadata_name not in archive.namelist()
+        assert not any(
+            name.casefold().startswith(metadata_name.casefold()) for name in archive.namelist()
+        )
 
 
 def test_archive_preserves_explicit_build_inputs_and_empty_directories(tmp_path: Path) -> None:
