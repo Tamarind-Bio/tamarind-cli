@@ -271,6 +271,15 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     ]["schema"] = {"enum": ["value", None]}
     unsupported_contracts.append((enum_nullable_body, "nullable request body"))
 
+    ref_sibling_nullable_body = deepcopy(sliced)
+    ref_sibling_nullable_body["components"]["requestBodies"]["OptionalBody"]["content"][
+        "application/json"
+    ]["schema"] = {
+        "$ref": "#/components/schemas/CreatePayload",
+        "type": ["object", "null"],
+    }
+    unsupported_contracts.append((ref_sibling_nullable_body, "nullable request body"))
+
     type_array_model = deepcopy(sliced)
     type_array_model["components"]["schemas"]["CreatePayload"]["properties"]["name"] = {
         "type": ["string", "null"]

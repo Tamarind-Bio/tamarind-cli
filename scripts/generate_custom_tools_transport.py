@@ -110,7 +110,8 @@ def _resolve_schema(
     target = schemas.get(ref[len(prefix) :])
     if not isinstance(target, dict):
         raise ValueError(f"Unresolved schema reference: {ref}")
-    return _resolve_schema(target, schemas, seen | {ref})
+    resolved = _resolve_schema(target, schemas, seen | {ref})
+    return {**resolved, **{key: value for key, value in schema.items() if key != "$ref"}}
 
 
 def _is_nullable(schema: dict[str, Any], schemas: dict[str, Any]) -> bool:
