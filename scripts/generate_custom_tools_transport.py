@@ -59,15 +59,24 @@ def _annotation(schema: dict[str, Any]) -> str:
 
 
 def _response_type(operation: dict[str, Any], components: dict[str, Any]) -> tuple[str, bool]:
-    responses = operation.get("responses", {})
-    success: dict[str, Any] = next(
-        (value for code, value in responses.items() if str(code).startswith("2")), {}
-    )
-    success = _resolve_component(success, "responses", components)
-    json_content = success.get("content", {}).get("application/json")
+    successes = [
+        value for code, value in operation.get("responses", {}).items() if str(code).startswith("2")
+    ]
+    if len(successes) != 1:
+        raise ValueError(
+            f"{operation.get('operationId')} must declare exactly one successful response"
+        )
+    success = _resolve_component(successes[0], "responses", components)
+    content = success.get("content", {})
+    if not isinstance(content, dict) or set(content) - {"application/json"}:
+        raise ValueError(f"{operation.get('operationId')} has unsupported success content")
+    json_content = content.get("application/json")
     if not isinstance(json_content, dict):
         return "None", False
-    return _annotation(json_content.get("schema", {})), True
+    schema = json_content.get("schema")
+    if not isinstance(schema, dict):
+        raise ValueError(f"{operation.get('operationId')} has no JSON success schema")
+    return _annotation(schema), True
 
 
 def _body_type(operation: dict[str, Any], components: dict[str, Any]) -> tuple[str, bool] | None:
@@ -81,6 +90,56 @@ def _body_type(operation: dict[str, Any], components: dict[str, Any]) -> tuple[s
         if isinstance(schema, dict)
         else None
     )
+
+
+def _resolve_schema(
+    schema: dict[str, Any], schemas: dict[str, Any], seen: frozenset[str] = frozenset()
+) -> dict[str, Any]:
+    ref = schema.get("$ref")
+    if not isinstance(ref, str):
+        return schema
+    prefix = "#/components/schemas/"
+    if not ref.startswith(prefix) or ref in seen:
+        raise ValueError(f"Unsupported or cyclic schema reference: {ref}")
+    target = schemas.get(ref[len(prefix) :])
+    if not isinstance(target, dict):
+        raise ValueError(f"Unresolved schema reference: {ref}")
+    return _resolve_schema(target, schemas, seen | {ref})
+
+
+def _is_nullable(schema: dict[str, Any], schemas: dict[str, Any]) -> bool:
+    schema = _resolve_schema(schema, schemas)
+    if schema.get("type") == "null":
+        return True
+    alternatives = schema.get("anyOf", schema.get("oneOf", []))
+    return isinstance(alternatives, list) and any(
+        isinstance(alternative, dict) and _is_nullable(alternative, schemas)
+        for alternative in alternatives
+    )
+
+
+def _is_structured(schema: dict[str, Any], schemas: dict[str, Any]) -> bool:
+    schema = _resolve_schema(schema, schemas)
+    if schema.get("type") in {"array", "object"}:
+        return True
+    alternatives = schema.get("anyOf", schema.get("oneOf", []))
+    return isinstance(alternatives, list) and any(
+        isinstance(alternative, dict) and _is_structured(alternative, schemas)
+        for alternative in alternatives
+    )
+
+
+def _validate_parameter_profile(parameter: dict[str, Any], schemas: dict[str, Any]) -> None:
+    location = parameter.get("in")
+    schema = parameter.get("schema")
+    if location not in {"path", "query", "header"} or not isinstance(schema, dict):
+        raise ValueError(f"Unsupported parameter: {parameter.get('name')}")
+    if location == "query" and (
+        parameter.get("style", "form") != "form" or _is_structured(schema, schemas)
+    ):
+        raise ValueError(
+            f"Structured query parameter is outside the SDK profile: {parameter.get('name')}"
+        )
 
 
 def _request_lines(
@@ -179,6 +238,7 @@ def generate(spec: dict[str, Any]) -> str:
             query_params: list[tuple[str, str]] = []
             header_params: list[tuple[str, str]] = []
             for parameter in parameters:
+                _validate_parameter_profile(parameter, schemas)
                 wire_name = parameter["name"]
                 py_name = _name(wire_name)
                 annotation = _annotation(parameter.get("schema", {}))
@@ -201,6 +261,15 @@ def generate(spec: dict[str, Any]) -> str:
                 body_required = False
             else:
                 body_type, body_required = body
+                if not body_required:
+                    request_body = _resolve_component(
+                        operation["requestBody"], "requestBodies", request_body_components
+                    )
+                    body_schema = request_body["content"]["application/json"]["schema"]
+                    if _is_nullable(body_schema, schemas):
+                        raise ValueError(
+                            f"{operation.get('operationId')} has an optional nullable request body"
+                        )
                 if body_required:
                     required_params.append(f"body: {body_type}")
                 else:

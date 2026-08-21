@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 import json
 import subprocess
@@ -223,6 +224,54 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     assert "def list_versions(self, name: str" in generated_text
     assert ") -> None:" in generated_text
     assert "return None" in generated_text
+
+    unsupported_contracts: list[tuple[dict[str, object], str]] = []
+
+    multiple_successes = deepcopy(sliced)
+    multiple_successes["paths"]["/custom-tools"]["get"]["responses"]["204"] = {
+        "description": "empty"
+    }
+    unsupported_contracts.append((multiple_successes, "exactly one successful response"))
+
+    nullable_optional_body = deepcopy(sliced)
+    nullable_optional_body["components"]["requestBodies"]["OptionalBody"]["content"][
+        "application/json"
+    ]["schema"] = {
+        "anyOf": [
+            {"$ref": "#/components/schemas/CreatePayload"},
+            {"type": "null"},
+        ]
+    }
+    unsupported_contracts.append((nullable_optional_body, "optional nullable request body"))
+
+    structured_query = deepcopy(sliced)
+    structured_query["paths"]["/custom-tools"]["get"]["parameters"].append(
+        {
+            "in": "query",
+            "name": "filter",
+            "style": "deepObject",
+            "explode": True,
+            "schema": {"type": "object"},
+        }
+    )
+    unsupported_contracts.append((structured_query, "Structured query parameter"))
+
+    for index, (unsupported, expected_error) in enumerate(unsupported_contracts):
+        unsupported_path = tmp_path / f"unsupported-{index}.json"
+        unsupported_path.write_text(json.dumps(unsupported))
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(root / "scripts/generate_custom_tools_transport.py"),
+                str(unsupported_path),
+                str(tmp_path / f"unsupported-{index}.py"),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert expected_error in result.stderr
 
 
 def test_generated_transport_matches_committed_openapi(tmp_path: Path) -> None:
