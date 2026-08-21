@@ -507,8 +507,9 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     unsupported_contracts.append((unconstrained_model, "Unconstrained schemas"))
 
     opaque_alias_annotation = deepcopy(sliced)
-    opaque_alias_annotation["components"]["schemas"]["GpuType"]["x-data"] = {
-        "$ref": "#/components/schemas/GpuType"
+    opaque_alias_annotation["components"]["schemas"]["OpaqueAlias"] = {
+        "type": "string",
+        "x-data": {"$ref": "#/components/schemas/OpaqueAlias"},
     }
     opaque_alias_path = tmp_path / "opaque-alias.json"
     opaque_alias_output = tmp_path / "opaque-alias.py"
