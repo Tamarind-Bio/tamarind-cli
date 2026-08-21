@@ -419,7 +419,12 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
 
     unsupported_auth = deepcopy(sliced)
     unsupported_auth["components"]["securitySchemes"]["ApiKey"]["name"] = "Authorization"
-    unsupported_contracts.append((unsupported_auth, "unsupported authentication"))
+    unsupported_contracts.append((unsupported_auth, "Exactly one x-api-key"))
+
+    anonymous_auth = deepcopy(sliced)
+    anonymous_auth["components"]["securitySchemes"] = {}
+    anonymous_auth["security"] = [{}]
+    unsupported_contracts.append((anonymous_auth, "Exactly one x-api-key"))
 
     multiple_successes = deepcopy(sliced)
     multiple_successes["paths"]["/custom-tools"]["get"]["responses"]["204"] = {
@@ -501,6 +506,23 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     unconstrained_model["components"]["schemas"]["CreatePayload"]["properties"]["name"] = {}
     unsupported_contracts.append((unconstrained_model, "Unconstrained schemas"))
 
+    opaque_alias_annotation = deepcopy(sliced)
+    opaque_alias_annotation["components"]["schemas"]["GpuType"]["x-data"] = {
+        "$ref": "#/components/schemas/GpuType"
+    }
+    opaque_alias_path = tmp_path / "opaque-alias.json"
+    opaque_alias_output = tmp_path / "opaque-alias.py"
+    opaque_alias_path.write_text(json.dumps(opaque_alias_annotation))
+    subprocess.run(
+        [
+            sys.executable,
+            str(root / "scripts/generate_custom_tools_transport.py"),
+            str(opaque_alias_path),
+            str(opaque_alias_output),
+        ],
+        check=True,
+    )
+
     ref_sibling_model = deepcopy(sliced)
     ref_sibling_model["components"]["schemas"]["CreatePayload"]["properties"]["name"] = {
         "$ref": "#/components/schemas/CreateResult",
@@ -525,6 +547,18 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     extension_request = deepcopy(sliced)
     extension_request["components"]["schemas"]["CreatePayload"].pop("additionalProperties", None)
     unsupported_contracts.append((extension_request, "extension-bearing request object"))
+
+    invalid_closed_field = deepcopy(sliced)
+    invalid_closed_field["components"]["schemas"]["CreatePayload"]["properties"]["foo-bar"] = {
+        "type": "string"
+    }
+    unsupported_contracts.append((invalid_closed_field, "Closed object property names"))
+
+    keyword_closed_field = deepcopy(sliced)
+    keyword_closed_field["components"]["schemas"]["CreatePayload"]["properties"]["from"] = {
+        "type": "string"
+    }
+    unsupported_contracts.append((keyword_closed_field, "Closed object property names"))
 
     directional_model = deepcopy(sliced)
     directional_model["components"]["schemas"]["CreatePayload"]["properties"]["name"][

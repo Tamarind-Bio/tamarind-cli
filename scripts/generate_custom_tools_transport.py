@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from hashlib import sha256
 import json
+import keyword
 from pathlib import Path
 import re
 from typing import Any
@@ -53,6 +54,9 @@ def _validate_auth_contract(spec: dict[str, Any]) -> None:
         and scheme.get("in") == "header"
         and str(scheme.get("name", "")).lower() == SUPPORTED_API_KEY_HEADER
     }
+    if len(supported) != 1:
+        raise ValueError("Exactly one x-api-key authentication scheme is required")
+    supported_requirement = {next(iter(supported)): []}
     global_security = spec.get("security", [])
     for path_item in spec.get("paths", {}).values():
         if "servers" in path_item:
@@ -69,9 +73,7 @@ def _validate_auth_contract(spec: dict[str, Any]) -> None:
             if not isinstance(requirements, list) or not requirements:
                 raise ValueError(f"{operation.get('operationId')} has unsupported authentication")
             if any(
-                not isinstance(requirement, dict)
-                or set(requirement) != supported
-                or any(scopes for scopes in requirement.values())
+                not isinstance(requirement, dict) or requirement != supported_requirement
                 for requirement in requirements
             ):
                 raise ValueError(f"{operation.get('operationId')} has unsupported authentication")
@@ -430,21 +432,24 @@ def _validate_public_aliases(schemas: dict[str, Any]) -> list[str]:
 
 
 def _schema_alias_order(schemas: dict[str, Any], aliases: set[str]) -> list[str]:
-    def dependencies(value: object) -> set[str]:
-        if isinstance(value, dict):
-            ref = value.get("$ref")
-            found: set[str] = set()
-            if isinstance(ref, str) and ref.startswith("#/components/schemas/"):
-                found.add(ref.rsplit("/", 1)[-1])
-            for child in value.values():
+    def dependencies(schema: dict[str, Any]) -> set[str]:
+        ref = schema.get("$ref")
+        found = (
+            {ref.rsplit("/", 1)[-1]}
+            if isinstance(ref, str) and ref.startswith("#/components/schemas/")
+            else set()
+        )
+        for key in ("items", "additionalProperties"):
+            child = schema.get(key)
+            if isinstance(child, dict):
                 found.update(dependencies(child))
-            return found
-        if isinstance(value, list):
-            found: set[str] = set()
-            for child in value:
-                found.update(dependencies(child))
-            return found
-        return set()
+        for key in ("anyOf", "oneOf"):
+            children = schema.get(key)
+            if isinstance(children, list):
+                for child in children:
+                    if isinstance(child, dict):
+                        found.update(dependencies(child))
+        return found
 
     ordered: list[str] = []
     pending = set(aliases)
@@ -512,6 +517,16 @@ def generate(spec: dict[str, Any]) -> str:
             continue
         required = set(schema.get("required", []))
         if schema.get("additionalProperties") is False:
+            unsupported_fields = [
+                field
+                for field in schema["properties"]
+                if not field.isidentifier() or keyword.iskeyword(field)
+            ]
+            if unsupported_fields:
+                raise ValueError(
+                    f"Closed object property names are outside the generated SDK profile: "
+                    f"{name} {sorted(unsupported_fields)}"
+                )
             lines = [f"class {name}(TypedDict):"]
             for field, field_schema in schema["properties"].items():
                 annotation = _annotation(field_schema)

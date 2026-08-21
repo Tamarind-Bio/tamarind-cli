@@ -597,3 +597,16 @@ def test_log_progress_treats_cursor_pages_as_incremental() -> None:
     assert progress.consume(
         resources.BuildLogPage(items=(second,), status="RUNNING", next_cursor="cursor-2")
     ) == (second,)
+
+
+def test_log_progress_retains_and_deduplicates_a_terminal_cursor() -> None:
+    first = resources.BuildEvent("first", 1)
+    final = resources.BuildEvent("final", 2)
+    progress = resources._LogProgress()
+
+    assert progress.consume(
+        resources.BuildLogPage(items=(first,), status="RUNNING", next_cursor="cursor-1")
+    ) == (first,)
+    assert progress.consume(resources.BuildLogPage(items=(final,), status="RUNNING")) == (final,)
+    assert progress.cursor == "cursor-1"
+    assert progress.consume(resources.BuildLogPage(items=(final,), status="RUNNING")) == ()

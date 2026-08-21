@@ -89,17 +89,24 @@ class _LogProgress:
     """Own log-resume state without letting it control Version polling."""
 
     cursor: str | None = None
-    delivered_without_cursor: int = 0
+    delivered_cursor: str | None = None
+    delivered_at_cursor: int = 0
 
     def consume(self, page: BuildLogPage) -> tuple[BuildEvent, ...]:
         requested_cursor = self.cursor
-        self.cursor = page.next_cursor
-        if requested_cursor is None and page.next_cursor is None:
-            events = page.items[self.delivered_without_cursor :]
-            self.delivered_without_cursor = max(self.delivered_without_cursor, len(page.items))
-            return events
-        self.delivered_without_cursor = 0
-        return page.items
+        if requested_cursor == self.delivered_cursor:
+            events = page.items[self.delivered_at_cursor :]
+        else:
+            events = page.items
+        next_cursor = page.next_cursor if page.next_cursor is not None else requested_cursor
+        if next_cursor == requested_cursor:
+            self.delivered_cursor = requested_cursor
+            self.delivered_at_cursor = max(self.delivered_at_cursor, len(page.items))
+        else:
+            self.delivered_cursor = None
+            self.delivered_at_cursor = 0
+        self.cursor = next_cursor
+        return events
 
 
 @dataclass(frozen=True)
