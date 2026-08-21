@@ -117,10 +117,11 @@ def extract(spec: dict[str, Any]) -> dict[str, Any]:
     request_bodies = components.get("requestBodies", {})
     retained_parameters = _reachable_components(paths, parameters, "parameters")
     retained_request_bodies = _reachable_components(paths, request_bodies, "requestBodies")
+    retained_responses = _reachable_components(paths, responses, "responses")
 
     reachable = (
         _schema_refs(paths)
-        | _schema_refs(responses)
+        | _schema_refs(retained_responses)
         | _schema_refs(retained_parameters)
         | _schema_refs(retained_request_bodies)
     )
@@ -134,8 +135,9 @@ def extract(spec: dict[str, Any]) -> dict[str, Any]:
     extracted_components = {
         "schemas": {name: deepcopy(schemas[name]) for name in sorted(reachable)},
         "securitySchemes": deepcopy(components.get("securitySchemes", {})),
-        "responses": deepcopy(responses),
     }
+    if retained_responses:
+        extracted_components["responses"] = retained_responses
     if retained_parameters:
         extracted_components["parameters"] = retained_parameters
     if retained_request_bodies:

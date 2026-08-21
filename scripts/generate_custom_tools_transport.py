@@ -111,7 +111,13 @@ def _resolve_schema(
 
 def _is_nullable(schema: dict[str, Any], schemas: dict[str, Any]) -> bool:
     schema = _resolve_schema(schema, schemas)
-    if schema.get("type") == "null":
+    kind = schema.get("type")
+    if kind == "null" or isinstance(kind, list) and "null" in kind:
+        return True
+    if "const" in schema and schema["const"] is None:
+        return True
+    enum = schema.get("enum")
+    if isinstance(enum, list) and None in enum:
         return True
     alternatives = schema.get("anyOf", schema.get("oneOf", []))
     return isinstance(alternatives, list) and any(
@@ -209,15 +215,16 @@ def generate(spec: dict[str, Any]) -> str:
     parameter_components = components.get("parameters", {})
     request_body_components = components.get("requestBodies", {})
     response_components = components.get("responses", {})
-    aliases = [
+    public_aliases = [
         f"{alias}: TypeAlias = {_annotation(schemas[model]['properties'][field])}"
         for model, field, alias in PUBLIC_PROPERTY_ALIASES
     ]
+    schema_aliases: list[str] = []
     objects: list[str] = []
     for name in sorted(schemas):
         schema = schemas[name]
         if schema.get("type") != "object" or not schema.get("properties"):
-            aliases.append(f"{name}: TypeAlias = {_annotation(schema)}")
+            schema_aliases.append(f"{name}: TypeAlias = {_annotation(schema)}")
             continue
         required = set(schema.get("required", []))
         lines = [f"class {name}(TypedDict):"]
@@ -333,7 +340,9 @@ def generate(spec: dict[str, Any]) -> str:
 
     canonical_spec = json.dumps(spec, sort_keys=True, separators=(",", ":")).encode()
     digest = sha256(canonical_spec).hexdigest()
-    uses_any = any("Any" in definition for definition in [*aliases, *objects, *methods])
+    uses_any = any(
+        "Any" in definition for definition in [*public_aliases, *objects, *schema_aliases, *methods]
+    )
     typing_names = (
         "Any, Literal, TypeAlias, TypedDict, cast"
         if uses_any
@@ -356,9 +365,11 @@ def generate(spec: dict[str, Any]) -> str:
             "def _segment(value: str) -> str:",
             "    return quote(value, safe='')",
             "",
-            *aliases,
+            *public_aliases,
             "",
             *objects,
+            "",
+            *schema_aliases,
             "",
             "class GeneratedCustomToolsTransport:",
             "    def __init__(self, client: HTTPClient):",

@@ -58,10 +58,18 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
                     "description": "created",
                     "content": {
                         "application/json": {
-                            "schema": {"$ref": "#/components/schemas/CreateResult"}
+                            "schema": {"$ref": "#/components/schemas/CreateResultAlias"}
                         }
                     },
-                }
+                },
+                "UnrelatedSuccess": {
+                    "description": "unrelated",
+                    "content": {
+                        "application/json": {
+                            "schema": {"$ref": "#/components/schemas/UnrelatedModel"}
+                        }
+                    },
+                },
             },
             "securitySchemes": {},
             "requestBodies": {
@@ -153,6 +161,8 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
                     },
                     "required": ["gpuType", "memory"],
                 },
+                "CreateResultAlias": {"$ref": "#/components/schemas/CreateResult"},
+                "UnrelatedModel": {"type": "string"},
             },
         },
     }
@@ -193,8 +203,10 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     assert set(sliced["components"]["schemas"]) == {
         "CreatePayload",
         "CreateResult",
+        "CreateResultAlias",
         "PublicCustomTool",
     }
+    assert set(sliced["components"]["responses"]) == {"CreateSuccess"}
 
     generated = tmp_path / "generated.py"
     subprocess.run(
@@ -216,7 +228,10 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     assert "f'custom-tools/{_segment(name)}'" in generated_text
     assert "def create_custom_tool(self, body: CreatePayload" in generated_text
     assert "json=body" in generated_text
-    assert ") -> CreateResult:" in generated_text
+    assert ") -> CreateResultAlias:" in generated_text
+    assert generated_text.index("class CreateResult(TypedDict):") < generated_text.index(
+        "CreateResultAlias: TypeAlias = CreateResult"
+    )
     assert (
         "def optional_custom_tool_action(self, body: CreatePayload | None = None" in generated_text
     )
@@ -243,6 +258,18 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
         ]
     }
     unsupported_contracts.append((nullable_optional_body, "nullable request body"))
+
+    type_array_nullable_body = deepcopy(sliced)
+    type_array_nullable_body["components"]["requestBodies"]["OptionalBody"]["content"][
+        "application/json"
+    ]["schema"] = {"type": ["object", "null"]}
+    unsupported_contracts.append((type_array_nullable_body, "nullable request body"))
+
+    enum_nullable_body = deepcopy(sliced)
+    enum_nullable_body["components"]["requestBodies"]["OptionalBody"]["content"][
+        "application/json"
+    ]["schema"] = {"enum": ["value", None]}
+    unsupported_contracts.append((enum_nullable_body, "nullable request body"))
 
     required_nullable_body = deepcopy(nullable_optional_body)
     required_nullable_body["components"]["requestBodies"]["OptionalBody"]["required"] = True
