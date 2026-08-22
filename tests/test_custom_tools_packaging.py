@@ -171,7 +171,18 @@ def test_source_inspection_rejects_unencodable_archive_names(tmp_path: Path) -> 
 
 @pytest.mark.parametrize(
     "relative",
-    [r"dir\file.py", r"..\file.py", "/absolute.py", "dir/../file.py", "bad:name.py", "NUL"],
+    [
+        r"dir\file.py",
+        r"..\file.py",
+        "/absolute.py",
+        "dir/../file.py",
+        "bad:name.py",
+        "NUL",
+        "CONIN$",
+        "CONOUT$.txt",
+        "COM¹",
+        "LPT².log",
+    ],
 )
 def test_source_inspection_rejects_nonportable_archive_names(tmp_path: Path, relative: str) -> None:
     with pytest.raises(CustomToolUploadError, match="path is not portable"):

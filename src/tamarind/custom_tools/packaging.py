@@ -41,9 +41,8 @@ _EXECUTABLE_FILE_MODE = 0o100755
 _DIRECTORY_MODE = 0o040755
 _WINDOWS_INVALID_NAME_CHARACTERS = frozenset('<>:"\\|?*')
 _WINDOWS_RESERVED_NAMES = frozenset(
-    {"aux", "con", "nul", "prn"}
-    | {f"com{index}" for index in range(1, 10)}
-    | {f"lpt{index}" for index in range(1, 10)}
+    {"aux", "con", "conin$", "conout$", "nul", "prn"}
+    | {f"{prefix}{suffix}" for prefix in ("com", "lpt") for suffix in "123456789¹²³"}
 )
 _MAX_SOURCE_ENTRIES = 25_000
 MAX_TOOL_SOURCE_BYTES = 5 * 1024 * 1024 * 1024
