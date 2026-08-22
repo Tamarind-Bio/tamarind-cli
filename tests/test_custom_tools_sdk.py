@@ -247,6 +247,22 @@ def test_version_pages_preserve_and_accept_cursors() -> None:
     }
 
 
+@respx.mock
+def test_version_preserves_duration_and_stable_error_code() -> None:
+    failed = _version(status="Stopped", error="Docker build failed")
+    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+        return_value=httpx.Response(200, json=failed)
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        version = client.custom_tools.get("example").get_version("v1")
+
+    assert version.duration_seconds == 60
+    assert version.error is not None
+    assert version.error.code == "build_failed"
+    assert version.error.message == "Docker build failed"
+
+
 def test_build_caps_archive_at_the_server_source_limit(tmp_path: Path, monkeypatch) -> None:
     _source(tmp_path)
     observed_limit = None
@@ -269,7 +285,6 @@ def test_build_caps_archive_at_the_server_source_limit(tmp_path: Path, monkeypat
             tool,
             resources.inspect_source_tree(tmp_path),
             source_timeout=1,
-            poll_interval=0.1,
         )
 
     assert observed_limit == resources.MAX_TOOL_SOURCE_BYTES
@@ -309,7 +324,6 @@ def test_build_constructs_archive_before_creating_upload_session(
             tool,
             resources.inspect_source_tree(tmp_path),
             source_timeout=1,
-            poll_interval=0.1,
         )
 
     assert events == ["archive", "session", "close"]

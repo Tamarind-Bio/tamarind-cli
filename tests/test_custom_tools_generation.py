@@ -50,6 +50,35 @@ def test_projection_rejects_unsupported_path_item_references() -> None:
         project_custom_tools(document)
 
 
+def test_generated_property_aliases_follow_referenced_components(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    document = json.loads((root / "openapi/public-v1.json").read_text())
+    custom_tool = document["components"]["schemas"]["PublicCustomTool"]
+    create_tool = document["components"]["schemas"]["PublicCreateCustomToolRequest"]
+    update_tool = document["components"]["schemas"]["PublicUpdateCustomToolRequest"]
+    gpu_schema = custom_tool["properties"]["gpuType"]
+    document["components"]["schemas"]["SharedGpuType"] = gpu_schema
+    for model in (custom_tool, create_tool, update_tool):
+        model["properties"]["gpuType"] = {"$ref": "#/components/schemas/SharedGpuType"}
+    spec = tmp_path / "referenced-alias.json"
+    generated = tmp_path / "generated_referenced_alias.py"
+    spec.write_text(json.dumps(document), encoding="utf-8")
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(root / "scripts/generate_custom_tools_transport.py"),
+            str(spec),
+            str(generated),
+        ],
+        check=True,
+    )
+    source = generated.read_text(encoding="utf-8")
+
+    assert source.index("SharedGpuType: TypeAlias") < source.index("GpuType: TypeAlias")
+    subprocess.run([sys.executable, str(generated)], check=True)
+
+
 def test_property_aliases_ignore_documentation_metadata(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     document = json.loads((root / "openapi/public-v1.json").read_text())

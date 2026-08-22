@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import datetime
 import math
 from pathlib import Path
 import time
@@ -68,6 +69,7 @@ class Page(Generic[T]):
 
 @dataclass(frozen=True)
 class BuildError:
+    code: str
     message: str
 
 
@@ -184,7 +186,6 @@ class CustomTool:
         folder: str | Path,
         *,
         source_timeout: float = 180.0,
-        poll_interval: float = 1.0,
     ) -> "Version":
         """Upload the deterministic archive and start its server-owned build Version."""
         try:
@@ -197,9 +198,7 @@ class CustomTool:
         report = validate_source_tree(tree)
         if not report.valid:
             raise ValidationError("Custom Tool source validation failed", detail=report)
-        return self._collection._build(
-            self, tree, source_timeout=source_timeout, poll_interval=poll_interval
-        )
+        return self._collection._build(self, tree, source_timeout=source_timeout)
 
     def get_version(self, name: str) -> "Version":
         return self._collection._get_version(self.name, name)
@@ -401,10 +400,8 @@ class CustomTools:
     ) -> CustomTool:
         return _tool_from_wire(self, self._transport.update_custom_tool(name, generation, body))
 
-    def _build(
-        self, tool: CustomTool, tree: SourceTree, *, source_timeout: float, poll_interval: float
-    ) -> Version:
-        timeout, _ = _validate_monitor_options(timeout=source_timeout, interval=poll_interval)
+    def _build(self, tool: CustomTool, tree: SourceTree, *, source_timeout: float) -> Version:
+        timeout, _ = _validate_monitor_options(timeout=source_timeout, interval=1.0)
         archive = build_source_tree_archive(tree, max_bytes=MAX_TOOL_SOURCE_BYTES)
         try:
             session = self._transport.create_custom_tool_upload(tool.name, tool.generation)
@@ -513,6 +510,12 @@ def _tool_from_wire(collection: CustomTools, wire: PublicCustomTool) -> CustomTo
 
 def _version_from_wire(collection: CustomTools, tool_name: str, wire: PublicVersion) -> Version:
     error = wire["error"]
+    completed_at = wire["completedAt"]
+    duration_seconds = None
+    if completed_at is not None:
+        started = datetime.fromisoformat(wire["startedAt"].replace("Z", "+00:00"))
+        completed = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+        duration_seconds = max(0, int((completed - started).total_seconds()))
     return Version(
         name=wire["name"],
         source_revision=wire["sourceRevision"],
@@ -520,9 +523,9 @@ def _version_from_wire(collection: CustomTools, tool_name: str, wire: PublicVers
         status=wire["status"],
         origin=wire["origin"],
         started_at=wire["startedAt"],
-        completed_at=wire["completedAt"],
-        duration_seconds=None,
-        error=BuildError(error["message"]) if error else None,
+        completed_at=completed_at,
+        duration_seconds=duration_seconds,
+        error=BuildError(error["code"], error["message"]) if error else None,
         tool_name=tool_name,
         _collection=collection,
     )
@@ -534,7 +537,7 @@ def _log_page_from_wire(wire: PublicBuildLogPage) -> BuildLogPage:
         items=tuple(BuildEvent(item["message"], item["timestamp"]) for item in wire["items"]),
         next_cursor=wire["nextCursor"],
         status=wire["status"],
-        error=BuildError(error["message"]) if error else None,
+        error=BuildError(error["code"], error["message"]) if error else None,
     )
 
 

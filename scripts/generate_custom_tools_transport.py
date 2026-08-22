@@ -122,6 +122,34 @@ def _property_aliases(api: Api) -> list[str]:
     return lines
 
 
+def _property_alias_dependencies(api: Api) -> set[str]:
+    """Component definitions that property aliases must evaluate against."""
+    by_name = {definition.name: definition.schema for definition in api.schemas}
+    dependencies: set[str] = set()
+    pending: list[str] = []
+    for wire_name in PROPERTY_ALIASES:
+        for model_name in (
+            "PublicCustomTool",
+            "PublicCreateCustomToolRequest",
+            "PublicUpdateCustomToolRequest",
+        ):
+            model = by_name.get(model_name)
+            if model is None:
+                continue
+            field = next((item for item in model.fields if item.wire_name == wire_name), None)
+            if field is not None:
+                pending.extend(_schema_references(field.schema))
+    while pending:
+        name = pending.pop()
+        if name in dependencies:
+            continue
+        dependencies.add(name)
+        schema = by_name.get(name)
+        if schema is not None:
+            pending.extend(_schema_references(schema))
+    return dependencies
+
+
 def _model(definition: SchemaDefinition) -> str:
     name = _component_name(definition.name)
     schema = definition.schema
@@ -300,7 +328,14 @@ def _method(operation: Operation, *, async_method: bool) -> tuple[str, str]:
 def emit_python(api: Api) -> str:
     """Render Python using only the normalized representation."""
 
-    models = [_model(definition) for definition in _ordered_schema_definitions(api)]
+    ordered = _ordered_schema_definitions(api)
+    alias_dependencies = _property_alias_dependencies(api)
+    models_before_aliases = [
+        _model(definition) for definition in ordered if definition.name in alias_dependencies
+    ]
+    models_after_aliases = [
+        _model(definition) for definition in ordered if definition.name not in alias_dependencies
+    ]
     aliases = _property_aliases(api)
     methods: list[str] = []
     emitted_names: set[str] = set()
@@ -337,9 +372,11 @@ def emit_python(api: Api) -> str:
             "def _segment(value: str) -> str:",
             "    return quote(value, safe='')",
             "",
+            *models_before_aliases,
+            "",
             *aliases,
             "",
-            *models,
+            *models_after_aliases,
             "",
             "class GeneratedCustomToolsTransport:",
             "    def __init__(self, client: HTTPClient):",
