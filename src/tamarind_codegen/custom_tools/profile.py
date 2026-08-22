@@ -268,6 +268,25 @@ def _validate_schema(
             raise ProfileViolation(f"{location}.{key}", "must be a number")
 
 
+def _parameter_schema_shape(
+    document: Mapping[str, Any], value: object, location: str
+) -> tuple[str, bool]:
+    schema = _mapping(value, location)
+    ref = schema.get("$ref")
+    if isinstance(ref, str):
+        return _parameter_schema_shape(document, _component(document, ref, location), location)
+    if "anyOf" in schema:
+        alternatives = _sequence(schema["anyOf"], f"{location}.anyOf")
+        non_null = next(
+            part
+            for part in alternatives
+            if not (isinstance(part, Mapping) and part.get("type") == "null")
+        )
+        kind, _ = _parameter_schema_shape(document, non_null, location)
+        return kind, True
+    return str(schema["type"]), False
+
+
 def _validate_parameter(document: Mapping[str, Any], value: object, location: str) -> None:
     parameter = _dereference(document, value, location, "parameters")
     _reject_unsupported_fields(parameter, PARAMETER_FIELDS, location, "parameter")
@@ -290,6 +309,11 @@ def _validate_parameter(document: Mapping[str, Any], value: object, location: st
     if parameter.get("allowReserved", False) is not False:
         raise ProfileViolation(location, "allowReserved parameters are not supported")
     _validate_schema(document, parameter["schema"], f"{location}.schema")
+    kind, nullable = _parameter_schema_shape(document, parameter["schema"], f"{location}.schema")
+    if nullable or kind not in {"boolean", "integer", "number", "string"}:
+        raise ProfileViolation(location, "parameters must use non-null scalar schemas")
+    if parameter_location == "path" and kind != "string":
+        raise ProfileViolation(location, "path parameters must use string schemas")
 
 
 def _validate_server_and_auth(document: Mapping[str, Any]) -> None:

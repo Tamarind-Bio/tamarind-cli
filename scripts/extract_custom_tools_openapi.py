@@ -187,9 +187,6 @@ def extract(spec: dict[str, Any]) -> dict[str, Any]:
         extracted_components["parameters"] = retained_parameters
     if retained_request_bodies:
         extracted_components["requestBodies"] = retained_request_bodies
-    if retained_path_items:
-        extracted_components["pathItems"] = retained_path_items
-
     extracted = {
         "openapi": spec["openapi"],
         "info": deepcopy(spec["info"]),

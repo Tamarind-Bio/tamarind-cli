@@ -88,6 +88,72 @@ def test_openapi_extraction_keeps_only_the_custom_tools_dependency_closure(
     assert set(sliced["components"]["securitySchemes"]) == {"ApiKey"}
 
 
+def test_openapi_extraction_consumes_path_item_components(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    source = tmp_path / "public.json"
+    output = tmp_path / "custom-tools.json"
+    source.write_text(
+        json.dumps(
+            {
+                "openapi": "3.1.0",
+                "info": {"title": "test", "version": "1"},
+                "servers": [{"url": "https://app.tamarind.bio/api"}],
+                "security": [{"ApiKey": []}],
+                "paths": {"/custom-tools": {"$ref": "#/components/pathItems/CustomTools"}},
+                "components": {
+                    "pathItems": {
+                        "CustomTools": {
+                            "get": {
+                                "operationId": "listCustomTools",
+                                "responses": {"200": {"description": "ok"}},
+                            }
+                        }
+                    },
+                    "securitySchemes": {
+                        "ApiKey": {"type": "apiKey", "in": "header", "name": "x-api-key"}
+                    },
+                },
+            }
+        )
+    )
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(root / "scripts/extract_custom_tools_openapi.py"),
+            str(source),
+            str(output),
+        ],
+        check=True,
+    )
+
+    sliced = json.loads(output.read_text())
+    assert "pathItems" not in sliced["components"]
+    assert normalize(sliced).operations[0].operation_id == "listCustomTools"
+
+
+def test_property_aliases_ignore_documentation_metadata(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    document = json.loads((root / "openapi/custom-tools-v1.json").read_text())
+    custom_tool = document["components"]["schemas"]["PublicCustomTool"]
+    custom_tool["properties"]["gpuType"]["description"] = "GPU requested by the tool"
+    spec = tmp_path / "documented_alias.json"
+    generated = tmp_path / "generated_documented_alias.py"
+    spec.write_text(json.dumps(document))
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(root / "scripts/generate_custom_tools_transport.py"),
+            str(spec),
+            str(generated),
+        ],
+        check=True,
+    )
+
+    assert "GpuType: TypeAlias = Literal[" in generated.read_text()
+
+
 def test_current_openapi_normalizes_to_the_expected_surface() -> None:
     root = Path(__file__).resolve().parents[1]
     api = normalize(json.loads((root / "openapi/custom-tools-v1.json").read_text()))

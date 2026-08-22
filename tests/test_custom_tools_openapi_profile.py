@@ -148,6 +148,38 @@ def test_normalize_produces_an_openapi_free_ir() -> None:
             "only path and query parameters are supported",
         ),
         (
+            lambda document: document["paths"]["/custom-tools/{name}"]["get"]["parameters"].append(
+                {"name": "empty", "in": "query", "required": True, "schema": {"type": "null"}}
+            ),
+            "parameters must use non-null scalar schemas",
+        ),
+        (
+            lambda document: document["paths"]["/custom-tools/{name}"]["get"]["parameters"].append(
+                {
+                    "name": "maybe",
+                    "in": "query",
+                    "schema": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                }
+            ),
+            "parameters must use non-null scalar schemas",
+        ),
+        (
+            lambda document: document["paths"]["/custom-tools/{name}"]["get"]["parameters"].append(
+                {
+                    "name": "many",
+                    "in": "query",
+                    "schema": {"type": "array", "items": {"type": "string"}},
+                }
+            ),
+            "parameters must use non-null scalar schemas",
+        ),
+        (
+            lambda document: document["paths"]["/custom-tools/{name}"]["parameters"][0].update(
+                {"schema": {"type": "integer"}}
+            ),
+            "path parameters must use string schemas",
+        ),
+        (
             lambda document: document.update({"webhooks": {}}),
             "document fields are not supported",
         ),

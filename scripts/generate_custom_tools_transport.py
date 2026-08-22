@@ -97,7 +97,7 @@ def _property_aliases(api: Api) -> list[str]:
     by_name = {definition.name: definition.schema for definition in api.schemas}
     lines: list[str] = []
     for wire_name, alias in PROPERTY_ALIASES.items():
-        candidates: list[Schema] = []
+        candidates: list[str] = []
         for model_name in (
             "PublicCustomTool",
             "PublicCreateCustomToolRequest",
@@ -108,12 +108,10 @@ def _property_aliases(api: Api) -> list[str]:
                 continue
             field = next((item for item in model.fields if item.wire_name == wire_name), None)
             if field is not None:
-                candidates.append(
-                    replace(field.schema, nullable=False, has_default=False, default=None)
-                )
+                candidates.append(_annotation(replace(field.schema, nullable=False)))
         if not candidates or any(candidate != candidates[0] for candidate in candidates[1:]):
             raise ValueError(f"Public property alias {alias} is missing or inconsistent")
-        lines.append(f"{alias}: TypeAlias = {_annotation(candidates[0])}")
+        lines.append(f"{alias}: TypeAlias = {candidates[0]}")
     return lines
 
 

@@ -22,7 +22,7 @@ than the entire OpenAPI specification.
 - OpenAPI 3.1 documents.
 - One concrete global HTTPS server and one global `x-api-key` header security scheme.
 - HTTP `GET`, `POST`, `PUT`, `PATCH`, and `DELETE` operations with unique `operationId`s.
-- Path and query parameters. Path parameters must be required.
+- Non-null scalar path and query parameters. Path parameters must be required strings.
 - Only default OpenAPI parameter serialization: simple/non-exploded paths and
   form/exploded queries, without `allowReserved`.
 - Optional or required `application/json` request bodies.
