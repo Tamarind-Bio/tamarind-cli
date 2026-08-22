@@ -16,131 +16,156 @@ def _segment(value: str) -> str:
     return quote(value, safe="")
 
 
-class PublicBuildEvent(TypedDict):
-    message: str
-    timestamp: int
-
-
-class PublicBuildLogPage(TypedDict):
-    buildStatus: str
-    errorMessage: NotRequired[str | None]
-    logs: list[PublicBuildEvent]
-    nextCursor: NotRequired[str | None]
-
-
-class PublicCreateCustomToolRequest(TypedDict):
-    cpu: NotRequired[int]
-    description: NotRequired[str]
-    displayName: NotRequired[str]
-    gpuType: NotRequired[GpuType]
-    memory: NotRequired[MemorySize]
-    name: str
-
-
-PublicToolStatus: TypeAlias = Literal["Draft", "Building", "Deployed"]
-
-
-class PublicCustomTool(TypedDict):
-    autoPublish: bool
-    canDeploy: bool
-    canEdit: bool
-    connectionError: str | None
-    cpu: int
-    createdAt: str
-    defaultVersion: str | None
-    description: str
-    displayName: str
-    functions: list[str]
-    gpuType: GpuType
-    hasSource: bool
-    homeDiskGi: int
-    maxRuntimeSeconds: int | None
-    memory: MemorySize
-    name: str
-    published: bool
-    sourceHash: str
-    sourceRef: str | None
-    status: PublicToolStatus
-    updatedAt: str
-
-
-class PublicCustomToolPage(TypedDict):
-    items: list[PublicCustomTool]
-
-
-class PublicDeployRequest(TypedDict):
-    carryForwardFromVersion: NotRequired[str | None]
-    expectedSourceRef: NotRequired[str | None]
-
-
-class PublicDeployResult(TypedDict):
-    path: Literal["noop", "saved", "building"]
-    ref: str
-    versionName: str | None
-
-
-class PublicProblem(TypedDict):
-    code: str
-    detail: NotRequired[str | None]
-    errors: NotRequired[list[dict[str, Any]] | None]
-    status: int
-    title: str
-    type: str
-
-
-class PublicStatus(TypedDict):
-    status: str
-
-
-class PublicUpdateCustomToolRequest(TypedDict):
-    autoPublish: NotRequired[bool | None]
-    cpu: NotRequired[int | None]
-    description: NotRequired[str | None]
-    displayName: NotRequired[str | None]
-    estTime: NotRequired[str | None]
-    functions: NotRequired[list[str] | None]
-    gpuType: NotRequired[GpuType | None]
-    homeDiskGi: NotRequired[int | None]
-    memory: NotRequired[MemorySize | None]
-    paperUrl: NotRequired[str | None]
-    tags: NotRequired[list[str] | None]
-
-
-class PublicUploadFinalized(TypedDict):
-    status: Literal["processing"]
-
-
-class PublicUploadSession(TypedDict):
-    expiresIn: int
-    uploadHeaders: NotRequired[dict[str, str]]
-    uploadId: str
-    uploadMethod: NotRequired[Literal["PUT"]]
-    uploadUrl: str
-
-
-PublicVersionOrigin: TypeAlias = Literal["tamarind", "build", "save", "github", "rollback"]
-PublicVersionStatus: TypeAlias = Literal["Queued", "Running", "Complete", "Stopped"]
-
-
-class PublicVersion(TypedDict):
-    buildCompletedAt: str | None
-    buildDurationSeconds: int | None
-    buildStartedAt: str
-    errorMessage: str | None
-    origin: PublicVersionOrigin
-    ref: str
-    status: PublicVersionStatus
-    versionName: str
-
-
-class PublicVersionPage(TypedDict):
-    items: list[PublicVersion]
-
-
 GpuType: TypeAlias = Literal["None", "T4", "L4", "L40S", "A10", "A100"]
 MemorySize: TypeAlias = Literal[
     "8Gi", "12Gi", "24Gi", "32Gi", "48Gi", "64Gi", "90Gi", "96Gi", "180Gi"
 ]
+
+PublicBuildEvent = TypedDict(
+    "PublicBuildEvent",
+    {
+        "message": str,
+        "timestamp": int,
+    },
+)
+PublicBuildLogPage = TypedDict(
+    "PublicBuildLogPage",
+    {
+        "buildStatus": str,
+        "errorMessage": NotRequired[str | None],
+        "logs": list[PublicBuildEvent],
+        "nextCursor": NotRequired[str | None],
+    },
+)
+PublicCreateCustomToolRequest = TypedDict(
+    "PublicCreateCustomToolRequest",
+    {
+        "cpu": NotRequired[int],
+        "description": NotRequired[str],
+        "displayName": NotRequired[str],
+        "gpuType": NotRequired[GpuType],
+        "memory": NotRequired[MemorySize],
+        "name": str,
+    },
+)
+PublicToolStatus: TypeAlias = Literal["Draft", "Building", "Deployed"]
+PublicCustomTool = TypedDict(
+    "PublicCustomTool",
+    {
+        "autoPublish": bool,
+        "canDeploy": bool,
+        "canEdit": bool,
+        "connectionError": str | None,
+        "cpu": int,
+        "createdAt": str,
+        "defaultVersion": str | None,
+        "description": str,
+        "displayName": str,
+        "functions": list[str],
+        "gpuType": GpuType,
+        "hasSource": bool,
+        "homeDiskGi": int,
+        "maxRuntimeSeconds": int | None,
+        "memory": MemorySize,
+        "name": str,
+        "published": bool,
+        "sourceHash": str,
+        "sourceRef": str | None,
+        "status": PublicToolStatus,
+        "updatedAt": str,
+    },
+)
+PublicCustomToolPage = TypedDict(
+    "PublicCustomToolPage",
+    {
+        "items": list[PublicCustomTool],
+    },
+)
+PublicDeployRequest = TypedDict(
+    "PublicDeployRequest",
+    {
+        "carryForwardFromVersion": NotRequired[str | None],
+        "expectedSourceRef": NotRequired[str | None],
+    },
+)
+PublicDeployResult = TypedDict(
+    "PublicDeployResult",
+    {
+        "path": Literal["noop", "saved", "building"],
+        "ref": str,
+        "versionName": str | None,
+    },
+)
+PublicProblem = TypedDict(
+    "PublicProblem",
+    {
+        "code": str,
+        "detail": NotRequired[str | None],
+        "errors": NotRequired[list[dict[str, Any]] | None],
+        "status": int,
+        "title": str,
+        "type": str,
+    },
+)
+PublicStatus = TypedDict(
+    "PublicStatus",
+    {
+        "status": str,
+    },
+)
+PublicUpdateCustomToolRequest = TypedDict(
+    "PublicUpdateCustomToolRequest",
+    {
+        "autoPublish": NotRequired[bool | None],
+        "cpu": NotRequired[int | None],
+        "description": NotRequired[str | None],
+        "displayName": NotRequired[str | None],
+        "estTime": NotRequired[str | None],
+        "functions": NotRequired[list[str] | None],
+        "gpuType": NotRequired[GpuType | None],
+        "homeDiskGi": NotRequired[int | None],
+        "memory": NotRequired[MemorySize | None],
+        "paperUrl": NotRequired[str | None],
+        "tags": NotRequired[list[str] | None],
+    },
+)
+PublicUploadFinalized = TypedDict(
+    "PublicUploadFinalized",
+    {
+        "status": Literal["processing"],
+    },
+)
+PublicUploadSession = TypedDict(
+    "PublicUploadSession",
+    {
+        "expiresIn": int,
+        "uploadHeaders": NotRequired[dict[str, str]],
+        "uploadId": str,
+        "uploadMethod": NotRequired[Literal["PUT"]],
+        "uploadUrl": str,
+    },
+)
+PublicVersionOrigin: TypeAlias = Literal["tamarind", "build", "save", "github", "rollback"]
+PublicVersionStatus: TypeAlias = Literal["Queued", "Running", "Complete", "Stopped"]
+PublicVersion = TypedDict(
+    "PublicVersion",
+    {
+        "buildCompletedAt": str | None,
+        "buildDurationSeconds": int | None,
+        "buildStartedAt": str,
+        "errorMessage": str | None,
+        "origin": PublicVersionOrigin,
+        "ref": str,
+        "status": PublicVersionStatus,
+        "versionName": str,
+    },
+)
+PublicVersionPage = TypedDict(
+    "PublicVersionPage",
+    {
+        "items": list[PublicVersion],
+    },
+)
 
 
 class GeneratedCustomToolsTransport:

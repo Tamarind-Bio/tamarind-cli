@@ -230,6 +230,49 @@ def test_property_aliases_ignore_documentation_metadata(tmp_path: Path) -> None:
     assert "GpuType: TypeAlias = Literal[" in generated.read_text()
 
 
+def test_generated_models_preserve_non_identifier_wire_keys(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    document = json.loads((root / "openapi/custom-tools-v1.json").read_text())
+    model = document["components"]["schemas"]["PublicCreateCustomToolRequest"]
+    model["properties"]["K"] = {"type": "string"}
+    spec = tmp_path / "unicode-property.json"
+    generated = tmp_path / "generated_unicode_property.py"
+    spec.write_text(json.dumps(document))
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(root / "scripts/generate_custom_tools_transport.py"),
+            str(spec),
+            str(generated),
+        ],
+        check=True,
+    )
+
+    assert "'K': NotRequired[str]" in generated.read_text()
+
+
+def test_generated_models_reject_nfkc_ambiguous_schema_names(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    document = json.loads((root / "openapi/custom-tools-v1.json").read_text())
+    document["components"]["schemas"]["K"] = {"type": "string"}
+    spec = tmp_path / "unicode-schema.json"
+    generated = tmp_path / "generated_unicode_schema.py"
+    spec.write_text(json.dumps(document))
+
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.run(
+            [
+                sys.executable,
+                str(root / "scripts/generate_custom_tools_transport.py"),
+                str(spec),
+                str(generated),
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+
 def test_current_openapi_normalizes_to_the_expected_surface() -> None:
     root = Path(__file__).resolve().parents[1]
     api = normalize(json.loads((root / "openapi/custom-tools-v1.json").read_text()))

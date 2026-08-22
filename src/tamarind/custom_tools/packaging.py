@@ -434,7 +434,7 @@ def _validate_archive_name(relative: str, path: Path) -> str:
                 ord(character) < 32 or character in _WINDOWS_INVALID_NAME_CHARACTERS
                 for character in part
             )
-            or part.split(".", 1)[0].casefold() in _WINDOWS_RESERVED_NAMES
+            or part.split(".", 1)[0].rstrip(" ").casefold() in _WINDOWS_RESERVED_NAMES
             for part in parts
         )
     )

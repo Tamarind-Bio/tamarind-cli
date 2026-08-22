@@ -182,6 +182,9 @@ def test_source_inspection_rejects_unencodable_archive_names(tmp_path: Path) -> 
         "CONOUT$.txt",
         "COM¹",
         "LPT².log",
+        "CON .txt",
+        "AUX .py",
+        "COM1 .log",
     ],
 )
 def test_source_inspection_rejects_nonportable_archive_names(tmp_path: Path, relative: str) -> None:

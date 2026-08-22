@@ -8,6 +8,7 @@ import json
 import keyword
 from pathlib import Path
 import re
+import unicodedata
 
 from tamarind_codegen.custom_tools import Api, Operation, Parameter, RequestBody, Response, Schema
 from tamarind_codegen.custom_tools.ir import Field, SchemaDefinition
@@ -40,7 +41,12 @@ def _python_name(value: str, *, label: str) -> str:
 
 
 def _component_name(value: str) -> str:
-    if not value.isidentifier() or keyword.iskeyword(value) or value in RESERVED_NAMES:
+    if (
+        unicodedata.normalize("NFKC", value) != value
+        or not value.isidentifier()
+        or keyword.iskeyword(value)
+        or value in RESERVED_NAMES
+    ):
         raise ValueError(f"Schema name cannot be represented safely in Python: {value!r}")
     return value
 
@@ -120,18 +126,13 @@ def _model(definition: SchemaDefinition) -> str:
     schema = definition.schema
     if schema.kind != "object" or not schema.fields:
         return f"{name}: TypeAlias = {_annotation(schema)}"
-    lines = [f"class {name}(TypedDict):"]
+    fields: list[str] = []
     for field in schema.fields:
-        if not field.wire_name.isidentifier() or keyword.iskeyword(field.wire_name):
-            raise ValueError(
-                "Property name cannot be represented in a class-based TypedDict: "
-                f"{definition.name}.{field.wire_name}"
-            )
         annotation = _field_annotation(definition.name, field)
         if not field.required:
             annotation = f"NotRequired[{annotation}]"
-        lines.append(f"    {field.wire_name}: {annotation}")
-    return "\n".join(lines)
+        fields.append(f"        {field.wire_name!r}: {annotation},")
+    return "\n".join([f"{name} = TypedDict(", f"    {name!r},", "    {", *fields, "    },", ")"])
 
 
 def _schema_references(schema: Schema) -> set[str]:
@@ -327,9 +328,9 @@ def emit_python(api: Api) -> str:
             "def _segment(value: str) -> str:",
             "    return quote(value, safe='')",
             "",
-            *models,
-            "",
             *aliases,
+            "",
+            *models,
             "",
             "class GeneratedCustomToolsTransport:",
             "    def __init__(self, client: HTTPClient):",
