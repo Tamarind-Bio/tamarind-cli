@@ -9,11 +9,28 @@ import sys
 import pytest
 
 from tamarind_codegen.custom_tools import normalize
+from tamarind_codegen.custom_tools.project import project_custom_tools
+
+
+def test_cli_projects_custom_tools_from_the_complete_public_spec() -> None:
+    root = Path(__file__).resolve().parents[1]
+    document = json.loads((root / "openapi/public-v1.json").read_text())
+    projected = project_custom_tools(document)
+
+    assert len(projected["paths"]) < len(document["paths"])
+    assert all(
+        "custom-tools" in operation["tags"]
+        for path_item in projected["paths"].values()
+        for method, operation in path_item.items()
+        if method in {"delete", "get", "patch", "post", "put"}
+    )
+    assert "PublicCustomTool" in projected["components"]["schemas"]
+    assert "PublicPipeline" not in projected["components"]["schemas"]
 
 
 def test_property_aliases_ignore_documentation_metadata(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
-    document = json.loads((root / "openapi/custom-tools-v1.json").read_text())
+    document = json.loads((root / "openapi/public-v1.json").read_text())
     custom_tool = document["components"]["schemas"]["PublicCustomTool"]
     custom_tool["properties"]["gpuType"]["description"] = "GPU requested by the tool"
     spec = tmp_path / "documented_alias.json"
@@ -35,7 +52,7 @@ def test_property_aliases_ignore_documentation_metadata(tmp_path: Path) -> None:
 
 def test_generated_models_preserve_non_identifier_wire_keys(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
-    document = json.loads((root / "openapi/custom-tools-v1.json").read_text(encoding="utf-8"))
+    document = json.loads((root / "openapi/public-v1.json").read_text(encoding="utf-8"))
     model = document["components"]["schemas"]["PublicCreateCustomToolRequest"]
     model["properties"]["K"] = {"type": "string"}
     spec = tmp_path / "unicode-property.json"
@@ -57,8 +74,11 @@ def test_generated_models_preserve_non_identifier_wire_keys(tmp_path: Path) -> N
 
 def test_generated_models_reject_nfkc_ambiguous_schema_names(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
-    document = json.loads((root / "openapi/custom-tools-v1.json").read_text(encoding="utf-8"))
+    document = json.loads((root / "openapi/public-v1.json").read_text(encoding="utf-8"))
     document["components"]["schemas"]["K"] = {"type": "string"}
+    document["components"]["schemas"]["PublicCustomTool"]["properties"]["ambiguous"] = {
+        "$ref": "#/components/schemas/K"
+    }
     spec = tmp_path / "unicode-schema.json"
     generated = tmp_path / "generated_unicode_schema.py"
     spec.write_text(json.dumps(document), encoding="utf-8")
@@ -78,7 +98,7 @@ def test_generated_models_reject_nfkc_ambiguous_schema_names(tmp_path: Path) -> 
 
 def test_current_openapi_normalizes_to_the_expected_surface() -> None:
     root = Path(__file__).resolve().parents[1]
-    api = normalize(json.loads((root / "openapi/custom-tools-v1.json").read_text()))
+    api = normalize(project_custom_tools(json.loads((root / "openapi/public-v1.json").read_text())))
 
     assert len(api.schemas) == 15
     assert {operation.operation_id for operation in api.operations} == {
@@ -103,7 +123,7 @@ def test_generated_transport_matches_committed_openapi(tmp_path: Path) -> None:
         [
             sys.executable,
             str(root / "scripts/generate_custom_tools_transport.py"),
-            str(root / "openapi/custom-tools-v1.json"),
+            str(root / "openapi/public-v1.json"),
             str(generated),
         ],
         check=True,
@@ -120,7 +140,7 @@ def test_generated_transport_is_importable(tmp_path: Path) -> None:
         [
             sys.executable,
             str(root / "scripts/generate_custom_tools_transport.py"),
-            str(root / "openapi/custom-tools-v1.json"),
+            str(root / "openapi/public-v1.json"),
             str(generated),
         ],
         check=True,
@@ -146,7 +166,7 @@ def test_generated_optional_fields_have_runtime_typed_dict_metadata() -> None:
 
 def test_generated_aliases_follow_schema_dependency_order(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
-    document = json.loads((root / "openapi/custom-tools-v1.json").read_text())
+    document = json.loads((root / "openapi/public-v1.json").read_text())
     schemas = document["components"]["schemas"]
     document["components"]["schemas"] = {
         "PublicVersionList": {
@@ -155,6 +175,9 @@ def test_generated_aliases_follow_schema_dependency_order(tmp_path: Path) -> Non
         },
         **schemas,
     }
+    build_result = document["components"]["schemas"]["PublicBuildResult"]
+    build_result["properties"]["versions"] = {"$ref": "#/components/schemas/PublicVersionList"}
+    build_result["required"].append("versions")
     spec = tmp_path / "forward_alias.json"
     generated = tmp_path / "generated_forward_alias.py"
     spec.write_text(json.dumps(document))
@@ -178,7 +201,7 @@ def test_generated_aliases_follow_schema_dependency_order(tmp_path: Path) -> Non
 
 def test_version_routes_use_numbered_version_handles() -> None:
     root = Path(__file__).resolve().parents[1]
-    document = json.loads((root / "openapi/custom-tools-v1.json").read_text())
+    document = json.loads((root / "openapi/public-v1.json").read_text())
     for path in (
         "/custom-tools/{name}/versions/{version_name}",
         "/custom-tools/{name}/versions/{version_name}/logs",

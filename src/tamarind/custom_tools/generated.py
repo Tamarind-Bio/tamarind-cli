@@ -1,4 +1,4 @@
-"""Generated from openapi/custom-tools-v1.json. Do not edit by hand."""
+"""Generated from the Custom Tools projection of openapi/public-v1.json. Do not edit by hand."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from urllib.parse import quote
 from tamarind.http import HTTPClient
 
 OPENAPI_SERVER_URL = "https://app.tamarind.bio/api/"
-OPENAPI_SHA256 = "2adc6229b50b8e9fc4812275cb852d2d4ea1a7d93acefa80e3de50dbf111f917"
+OPENAPI_SHA256 = "3ecc8be9f803bdda4157c49f41e27334d5e9487d53051ad0841a80b87dbb0356"
 
 
 def _segment(value: str) -> str:

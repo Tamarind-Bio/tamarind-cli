@@ -19,10 +19,10 @@ jobs:
       - name: Verify backend provenance and supported OpenAPI profile
         run: |
           uv run --extra dev python scripts/check_custom_tools_provenance.py
-          uv run --extra dev python scripts/validate_custom_tools_openapi.py openapi/custom-tools-v1.json
+          uv run --extra dev python scripts/validate_custom_tools_openapi.py openapi/public-v1.json
       - name: Regenerate Custom Tools transport
         run: |
-          uv run --extra dev python scripts/generate_custom_tools_transport.py openapi/custom-tools-v1.json src/tamarind/custom_tools/generated.py
+          uv run --extra dev python scripts/generate_custom_tools_transport.py openapi/public-v1.json src/tamarind/custom_tools/generated.py
           uv run --extra dev ruff format src/tamarind/custom_tools/generated.py
           git diff --exit-code -- src/tamarind/custom_tools/generated.py
 

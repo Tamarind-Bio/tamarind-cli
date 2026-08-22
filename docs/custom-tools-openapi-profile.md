@@ -3,16 +3,17 @@
 The Custom Tools Python SDK is generated through an explicit compiler boundary:
 
 ```text
-backend-generated Custom Tools OpenAPI slice
+complete backend-generated public OpenAPI
+    -> project operations tagged `custom-tools`
     -> validate this profile
     -> normalize to the language-neutral IR
     -> generate the Python transport
     -> format, type-check, and contract-test the generated package
 ```
 
-The generator must not interpret raw OpenAPI. All OpenAPI-specific decisions belong to
-the profile validator and normalizer. The generator consumes only the normalized IR in
-`tamarind_codegen.custom_tools.ir`.
+The Python emitter must not interpret raw OpenAPI. Selection belongs to the projector;
+remaining OpenAPI-specific decisions belong to the profile validator and normalizer.
+The emitter consumes only the normalized IR in `tamarind_codegen.custom_tools.ir`.
 
 ## Supported profile
 
@@ -74,7 +75,7 @@ than an invitation for the emitter to guess.
 | Formatting and type correctness | CI |
 | Runtime upload, build, and polling behavior | Hand-written SDK layer |
 
-The backend owns extraction from the complete public OpenAPI and commits the resulting
-slice. The CLI vendors that artifact verbatim, records its source repository, full commit,
-path, and SHA-256 in `openapi/custom-tools-v1.lock.json`, and generates only from that
-version-pinned input.
+The backend commits one complete public OpenAPI artifact. The CLI vendors it verbatim,
+records its source repository, full commit, path, and SHA-256 in
+`openapi/public-v1.lock.json`, then deterministically projects operations tagged
+`custom-tools` before profile validation and generation.

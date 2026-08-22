@@ -13,6 +13,7 @@ import unicodedata
 from tamarind_codegen.custom_tools import Api, Operation, Parameter, RequestBody, Response, Schema
 from tamarind_codegen.custom_tools.ir import Field, SchemaDefinition
 from tamarind_codegen.custom_tools.normalize import normalize
+from tamarind_codegen.custom_tools.project import project_custom_tools
 
 ASYNC_OPERATIONS = frozenset({"getCustomToolVersion", "listCustomToolBuildLogs"})
 HTTP_METHODS = frozenset({"DELETE", "GET", "PATCH", "POST", "PUT"})
@@ -320,7 +321,7 @@ def emit_python(api: Api) -> str:
 
     return "\n".join(
         [
-            '"""Generated from openapi/custom-tools-v1.json. Do not edit by hand."""',
+            '"""Generated from the Custom Tools projection of openapi/public-v1.json. Do not edit by hand."""',
             "",
             "from __future__ import annotations",
             "",
@@ -351,7 +352,7 @@ def emit_python(api: Api) -> str:
 
 
 def generate(document: dict[str, object]) -> str:
-    return emit_python(normalize(document))
+    return emit_python(normalize(project_custom_tools(document)))
 
 
 def main() -> None:

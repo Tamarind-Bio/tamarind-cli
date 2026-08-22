@@ -11,6 +11,7 @@ import shutil
 
 from generate_custom_tools_transport import generate
 from tamarind_codegen.custom_tools.profile import validate_profile
+from tamarind_codegen.custom_tools.project import project_custom_tools
 
 
 def main() -> None:
@@ -20,17 +21,17 @@ def main() -> None:
     parser.add_argument("--source-commit", required=True)
     parser.add_argument(
         "--source-path",
-        default="backend/app/public_api/openapi/custom-tools-v1.generated.json",
+        default="backend/app/public_api/openapi/public-v1.generated.json",
     )
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     args = parser.parse_args()
 
     raw = args.source.read_bytes()
     document = json.loads(raw)
-    validate_profile(document)
+    validate_profile(project_custom_tools(document))
 
-    spec_path = args.root / "openapi" / "custom-tools-v1.json"
-    lock_path = args.root / "openapi" / "custom-tools-v1.lock.json"
+    spec_path = args.root / "openapi" / "public-v1.json"
+    lock_path = args.root / "openapi" / "public-v1.lock.json"
     generated_path = args.root / "src" / "tamarind" / "custom_tools" / "generated.py"
     spec_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(args.source, spec_path)
