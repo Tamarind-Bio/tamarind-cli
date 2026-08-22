@@ -37,6 +37,21 @@ Because the logic lives in one module, *where* discovery is hosted (the MCP host
 today; potentially the main API or a dedicated service later) is a deployment
 detail that can change without any client change and without drift.
 
+## Custom Tools SDK compiler boundary
+
+The Custom Tools SDK is being added as a third surface. Its transport will be
+generated from the website's public OpenAPI contract through a deliberately
+small compiler pipeline:
+
+```text
+OpenAPI -> Tamarind profile validation -> normalized IR -> Python transport
+```
+
+The profile and ownership boundaries are documented in
+[`custom-tools-openapi-profile.md`](custom-tools-openapi-profile.md). The
+language-neutral IR prevents the Python emitter from accumulating OpenAPI
+parsing, reference-resolution, and compatibility policy.
+
 ## Why not a single binary that re-encodes the API?
 
 A from-scratch client in another language would re-encode the request shapes and
