@@ -276,45 +276,49 @@ def build_source_tree_archive(
     """Package one previously inspected source snapshot."""
     _enforce_source_entry_limit(len(tree.files) + len(tree.empty_directories))
     output = _CappedArchive(max_bytes)
-    with zipfile.ZipFile(
-        output,
-        mode="w",
-        compression=zipfile.ZIP_DEFLATED,
-        compresslevel=9,
-        strict_timestamps=True,
-    ) as archive:
-        entries: list[tuple[str, SourceFile | None, int]] = []
-        for relative in tree.empty_directories:
-            entries.append((f"{relative}/", None, _DIRECTORY_MODE))
-            # Git cannot persist an empty tree. The marker keeps the directory
-            # present when the backend commits the uploaded archive to Gitea.
-            entries.append((f"{relative}/.gitkeep", None, _REGULAR_FILE_MODE))
-        for source_file in tree.files:
-            executable = source_file.relative == "run.sh" or bool(source_file.mode & 0o111)
-            mode = _EXECUTABLE_FILE_MODE if executable else _REGULAR_FILE_MODE
-            entries.append((source_file.relative, source_file, mode))
+    try:
+        with zipfile.ZipFile(
+            output,
+            mode="w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=9,
+            strict_timestamps=True,
+        ) as archive:
+            entries: list[tuple[str, SourceFile | None, int]] = []
+            for relative in tree.empty_directories:
+                entries.append((f"{relative}/", None, _DIRECTORY_MODE))
+                # Git cannot persist an empty tree. The marker keeps the directory
+                # present when the backend commits the uploaded archive to Gitea.
+                entries.append((f"{relative}/.gitkeep", None, _REGULAR_FILE_MODE))
+            for source_file in tree.files:
+                executable = source_file.relative == "run.sh" or bool(source_file.mode & 0o111)
+                mode = _EXECUTABLE_FILE_MODE if executable else _REGULAR_FILE_MODE
+                entries.append((source_file.relative, source_file, mode))
 
-        for relative, entry_path, mode in sorted(entries, key=lambda item: item[0]):
-            info = zipfile.ZipInfo(relative, date_time=_ZIP_TIMESTAMP)
-            info.compress_type = zipfile.ZIP_DEFLATED
-            info.create_system = 3
-            info.external_attr = mode << 16
-            if entry_path is None:
-                archive.writestr(info, b"", compresslevel=9)
-                continue
-            with entry_path.open_verified() as source:
-                with archive.open(info, "w", force_zip64=True) as destination:
-                    while chunk := source.read(1024 * 1024):
-                        destination.write(chunk)
+            for relative, entry_path, mode in sorted(entries, key=lambda item: item[0]):
+                info = zipfile.ZipInfo(relative, date_time=_ZIP_TIMESTAMP)
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.create_system = 3
+                info.external_attr = mode << 16
+                if entry_path is None:
+                    archive.writestr(info, b"", compresslevel=9)
+                    continue
+                with entry_path.open_verified() as source:
+                    with archive.open(info, "w", force_zip64=True) as destination:
+                        while chunk := source.read(1024 * 1024):
+                            destination.write(chunk)
 
-    output.seek(0)
-    digest = sha256()
-    size = 0
-    while chunk := output.read(1024 * 1024):
-        digest.update(chunk)
-        size += len(chunk)
-    output.seek(0)
-    return SourceArchive(digest=f"sha256:{digest.hexdigest()}", size=size, _stream=output)
+        output.seek(0)
+        digest = sha256()
+        size = 0
+        while chunk := output.read(1024 * 1024):
+            digest.update(chunk)
+            size += len(chunk)
+        output.seek(0)
+        return SourceArchive(digest=f"sha256:{digest.hexdigest()}", size=size, _stream=output)
+    except BaseException:
+        output.close()
+        raise
 
 
 def is_link_like(path: Path) -> bool:

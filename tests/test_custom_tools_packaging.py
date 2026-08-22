@@ -332,6 +332,26 @@ def test_archive_aborts_while_compressed_output_crosses_upload_limit(tmp_path: P
         build_archive(tmp_path, max_bytes=1024)
 
 
+def test_archive_closes_spool_when_construction_fails(tmp_path: Path, monkeypatch) -> None:
+    _valid_source(tmp_path)
+    (tmp_path / "weights.bin").write_bytes(os.urandom(64 * 1024))
+    created: list[packaging._CappedArchive] = []
+    real_archive = packaging._CappedArchive
+
+    class TrackingArchive(real_archive):
+        def __init__(self, max_bytes: int | None) -> None:
+            super().__init__(max_bytes)
+            created.append(self)
+
+    monkeypatch.setattr(packaging, "_CappedArchive", TrackingArchive)
+
+    with pytest.raises(CustomToolUploadError, match="1024-byte upload limit"):
+        build_archive(tmp_path, max_bytes=1024)
+
+    assert len(created) == 1
+    assert created[0]._stream.closed
+
+
 @pytest.mark.skipif(os.name != "nt", reason="NTFS junctions are Windows-specific")
 def test_archive_rejects_windows_junctions(tmp_path: Path) -> None:
     _valid_source(tmp_path)

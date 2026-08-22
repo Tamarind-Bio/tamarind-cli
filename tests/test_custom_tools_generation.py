@@ -82,6 +82,7 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     spec = {
         "openapi": "3.1.0",
         "info": {"title": "test", "version": "1"},
+        "servers": [{"url": "https://app.tamarind.bio/api"}],
         "security": [{"ApiKey": []}],
         "paths": {
             "/custom-tools": {
@@ -310,6 +311,7 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
         check=True,
     )
     generated_text = generated.read_text()
+    assert "OPENAPI_SERVER_URL = 'https://app.tamarind.bio/api/'" in generated_text
     assert "GpuType: TypeAlias = Literal[" in generated_text
     assert "'A100'" in generated_text
     assert "MemorySize: TypeAlias = Literal[" in generated_text
@@ -408,6 +410,19 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     operation_servers = deepcopy(sliced)
     operation_servers["paths"]["/custom-tools"]["get"]["servers"] = [{"url": "https://other.test"}]
     unsupported_contracts.append((operation_servers, "operation-level servers"))
+
+    missing_server = deepcopy(sliced)
+    missing_server["servers"] = []
+    unsupported_contracts.append((missing_server, "Exactly one global OpenAPI server"))
+
+    variable_server = deepcopy(sliced)
+    variable_server["servers"] = [
+        {
+            "url": "https://{region}.tamarind.bio/api",
+            "variables": {"region": {"default": "app"}},
+        }
+    ]
+    unsupported_contracts.append((variable_server, "server variables and extensions"))
 
     custom_dialect = deepcopy(sliced)
     custom_dialect["jsonSchemaDialect"] = "https://example.test/custom-dialect"
@@ -561,6 +576,10 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     }
     unsupported_contracts.append((keyword_closed_field, "Closed object property names"))
 
+    keyword_schema = deepcopy(sliced)
+    keyword_schema["components"]["schemas"]["class"] = {"type": "string"}
+    unsupported_contracts.append((keyword_schema, "Schema component names"))
+
     directional_model = deepcopy(sliced)
     directional_model["components"]["schemas"]["CreatePayload"]["properties"]["name"][
         "readOnly"
@@ -582,6 +601,37 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
         "^x-": {"type": "string"}
     }
     unsupported_contracts.append((pattern_extension_request, "extension-bearing request object"))
+
+    nested_pattern_request = deepcopy(sliced)
+    nested_pattern_request["components"]["schemas"]["CreatePayload"]["properties"]["nested"] = {
+        "$ref": "#/components/schemas/NestedPayload"
+    }
+    nested_pattern_request["components"]["schemas"]["NestedPayload"] = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {"name": {"type": "string"}},
+        "patternProperties": {"^x-": {"type": "string"}},
+    }
+    unsupported_contracts.append((nested_pattern_request, "extension-bearing request object"))
+
+    keyword_parameter = deepcopy(sliced)
+    keyword_parameter["paths"]["/custom-tools"]["get"]["parameters"].append(
+        {"in": "query", "name": "from", "schema": {"type": "string"}}
+    )
+    unsupported_contracts.append((keyword_parameter, "parameter name"))
+
+    colliding_parameters = deepcopy(sliced)
+    colliding_parameters["paths"]["/custom-tools"]["get"]["parameters"].extend(
+        [
+            {"in": "query", "name": "foo-bar", "schema": {"type": "string"}},
+            {"in": "header", "name": "foo_bar", "schema": {"type": "string"}},
+        ]
+    )
+    unsupported_contracts.append((colliding_parameters, "colliding parameter names"))
+
+    invalid_operation_name = deepcopy(sliced)
+    invalid_operation_name["paths"]["/custom-tools"]["get"]["operationId"] = "123"
+    unsupported_contracts.append((invalid_operation_name, "Operation name"))
 
     required_nullable_body = deepcopy(nullable_optional_body)
     required_nullable_body["components"]["requestBodies"]["OptionalBody"]["required"] = True

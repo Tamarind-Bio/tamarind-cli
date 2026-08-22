@@ -9,6 +9,7 @@ import keyword
 from pathlib import Path
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
 
 HTTP_METHODS = ("get", "post", "put", "patch", "delete")
@@ -26,6 +27,23 @@ PUBLIC_PROPERTY_ALIASES = (
     ),
 )
 SUPPORTED_API_KEY_HEADER = "x-api-key"
+GENERATED_MODULE_NAMES = frozenset(
+    {
+        "Any",
+        "GeneratedCustomToolsTransport",
+        "HTTPClient",
+        "Literal",
+        "NotRequired",
+        "OPENAPI_SERVER_URL",
+        "OPENAPI_SHA256",
+        "Protocol",
+        "TypeAlias",
+        "TypedDict",
+        "_segment",
+        "cast",
+        "overload",
+    }
+)
 REFERENCE_ANNOTATION_SIBLINGS = frozenset(
     {
         "title",
@@ -38,6 +56,29 @@ REFERENCE_ANNOTATION_SIBLINGS = frozenset(
         "$comment",
     }
 )
+
+
+def _validate_server_contract(spec: dict[str, Any]) -> str:
+    servers = spec.get("servers")
+    if not isinstance(servers, list) or len(servers) != 1 or not isinstance(servers[0], dict):
+        raise ValueError("Exactly one global OpenAPI server is required")
+    server = servers[0]
+    if set(server) - {"url", "description"}:
+        raise ValueError("OpenAPI server variables and extensions are outside the SDK profile")
+    url = server.get("url")
+    if not isinstance(url, str) or "{" in url or "}" in url:
+        raise ValueError("A concrete global OpenAPI server URL is required")
+    parsed = urlsplit(url)
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("The global OpenAPI server URL is outside the SDK profile")
+    return url.rstrip("/") + "/"
 
 
 def _validate_auth_contract(spec: dict[str, Any]) -> None:
@@ -82,6 +123,15 @@ def _validate_auth_contract(spec: dict[str, Any]) -> None:
 def _name(value: str) -> str:
     value = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value)
     return re.sub(r"[^a-zA-Z0-9]+", "_", value).strip("_").lower()
+
+
+def _validated_python_name(value: object, *, label: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} is outside the generated SDK profile: {value}")
+    name = _name(value)
+    if not name.isidentifier() or keyword.iskeyword(name):
+        raise ValueError(f"{label} is outside the generated SDK profile: {value}")
+    return name
 
 
 def _annotation(schema: dict[str, Any]) -> str:
@@ -473,19 +523,68 @@ def _validate_request_object_profile(
     schema = media.get("schema") if isinstance(media, dict) else None
     if not isinstance(schema, dict):
         return
-    resolved = _resolve_schema(schema, schemas)
-    if resolved.get("type") == "object" and resolved.get("properties"):
-        if resolved.get("additionalProperties") is not False or resolved.get("patternProperties"):
+
+    def visit(current: dict[str, Any], seen_refs: frozenset[str] = frozenset()) -> None:
+        ref = current.get("$ref")
+        if isinstance(ref, str):
+            prefix = "#/components/schemas/"
+            if not ref.startswith(prefix):
+                raise ValueError(f"Unsupported schema reference: {ref}")
+            if ref in seen_refs:
+                return
+            target = schemas.get(ref[len(prefix) :])
+            if not isinstance(target, dict):
+                raise ValueError(f"Unresolved schema reference: {ref}")
+            visit(
+                {**target, **{key: value for key, value in current.items() if key != "$ref"}},
+                seen_refs | {ref},
+            )
+            return
+        if current.get("patternProperties") or "unevaluatedProperties" in current:
             raise ValueError(
                 f"{operation.get('operationId')} has an extension-bearing request object"
             )
+        if (
+            current.get("type") == "object"
+            and current.get("properties")
+            and current.get("additionalProperties") is not False
+        ):
+            raise ValueError(
+                f"{operation.get('operationId')} has an extension-bearing request object"
+            )
+        properties = current.get("properties")
+        if isinstance(properties, dict):
+            for child in properties.values():
+                if isinstance(child, dict):
+                    visit(child, seen_refs)
+        for key in ("items", "additionalProperties"):
+            child = current.get(key)
+            if isinstance(child, dict):
+                visit(child, seen_refs)
+        for key in ("anyOf", "oneOf"):
+            children = current.get(key)
+            if isinstance(children, list):
+                for child in children:
+                    if isinstance(child, dict):
+                        visit(child, seen_refs)
+
+    visit(schema)
 
 
 def generate(spec: dict[str, Any]) -> str:
+    server_url = _validate_server_contract(spec)
     _validate_auth_contract(spec)
     components = spec.get("components", {})
     schemas = components.get("schemas", {})
-    unsupported_schema_names = [name for name in schemas if not str(name).isidentifier()]
+    public_alias_names = {alias for _, _, alias in PUBLIC_PROPERTY_ALIASES}
+    unsupported_schema_names = [
+        name
+        for name in schemas
+        if not str(name).isidentifier()
+        or keyword.iskeyword(str(name))
+        or name in GENERATED_MODULE_NAMES
+        or name in public_alias_names
+    ]
     if unsupported_schema_names:
         raise ValueError(
             "Schema component names are outside the generated SDK profile: "
@@ -554,6 +653,7 @@ def generate(spec: dict[str, Any]) -> str:
 
     methods: list[str] = []
     async_methods: list[str] = []
+    method_names: set[str] = set()
     for path, path_item in sorted(spec.get("paths", {}).items()):
         for method in HTTP_METHODS:
             operation = path_item.get(method)
@@ -565,10 +665,19 @@ def generate(spec: dict[str, Any]) -> str:
             path_params: list[tuple[str, str]] = []
             query_params: list[tuple[str, str]] = []
             header_params: list[tuple[str, str]] = []
+            parameter_names = {"body", "self", "timeout"}
             for parameter in parameters:
                 _validate_parameter_profile(parameter, schemas)
                 wire_name = parameter["name"]
-                py_name = _name(wire_name)
+                py_name = _validated_python_name(
+                    wire_name,
+                    label=f"{operation.get('operationId')} parameter name",
+                )
+                if py_name in parameter_names:
+                    raise ValueError(
+                        f"{operation.get('operationId')} has colliding parameter names: {py_name}"
+                    )
+                parameter_names.add(py_name)
                 annotation = _parameter_annotation(parameter.get("schema", {}))
                 entry = f"{py_name}: {annotation}"
                 if parameter.get("required"):
@@ -623,7 +732,18 @@ def generate(spec: dict[str, Any]) -> str:
             if body_type and body_required:
                 call.append("            json=body,")
             call.append("            timeout=timeout,")
-            method_name = _name(operation["operationId"])
+            method_name = _validated_python_name(
+                operation["operationId"],
+                label="Operation name",
+            )
+            emitted_method_names = {
+                method_name,
+                *({f"{method_name}_async"} if method_name in ASYNC_METHODS else set()),
+            }
+            collisions = emitted_method_names & method_names
+            if collisions:
+                raise ValueError(f"Operations have colliding generated names: {sorted(collisions)}")
+            method_names.update(emitted_method_names)
             return_line = (
                 f"        return cast({result}, response.json())"
                 if response_has_json
@@ -684,6 +804,7 @@ def generate(spec: dict[str, Any]) -> str:
             "",
             "from tamarind.http import HTTPClient",
             "",
+            f"OPENAPI_SERVER_URL = {server_url!r}",
             f"OPENAPI_SHA256 = {digest!r}",
             "",
             "def _segment(value: str) -> str:",

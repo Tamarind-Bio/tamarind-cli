@@ -20,7 +20,9 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_API_BASE = "https://app.tamarind.bio/api/"
+from tamarind.custom_tools.generated import OPENAPI_SERVER_URL
+
+DEFAULT_API_BASE = OPENAPI_SERVER_URL
 # Discovery (tools/schema/modalities/functions) is served by the catalog
 # service. It is a separate host from the job API because the catalog runs
 # behind per-org visibility logic; see the package docstring.
@@ -101,10 +103,7 @@ def load_config(
 
     resolved_key = api_key or os.environ.get("TAMARIND_API_KEY") or prof.get("api_key")
     resolved_api_base = (
-        api_base
-        or os.environ.get("TAMARIND_API_BASE")
-        or prof.get("api_base")
-        or DEFAULT_API_BASE
+        api_base or os.environ.get("TAMARIND_API_BASE") or prof.get("api_base") or DEFAULT_API_BASE
     )
     resolved_catalog_base = (
         catalog_base
