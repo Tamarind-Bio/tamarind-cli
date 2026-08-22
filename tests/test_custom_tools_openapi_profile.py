@@ -242,11 +242,20 @@ def test_normalize_produces_an_openapi_free_ir() -> None:
             ),
             "structured object schemas must be named components",
         ),
+        *(
+            (
+                lambda document, additional=additional: document["components"]["schemas"][
+                    "CustomTool"
+                ].__setitem__("additionalProperties", additional),
+                "object schemas with properties must set additionalProperties to false",
+            )
+            for additional in (True, {"type": "string"})
+        ),
         (
-            lambda document: document["components"]["schemas"]["CustomTool"].update(
-                {"additionalProperties": {"type": "string"}}
+            lambda document: document["components"]["schemas"]["CustomTool"].pop(
+                "additionalProperties"
             ),
-            "cannot mix properties with typed additionalProperties",
+            "object schemas with properties must set additionalProperties to false",
         ),
         (
             lambda document: document["components"]["schemas"].update(

@@ -44,6 +44,7 @@
     },
     "schemas": {
       "PublicBuildEvent": {
+        "additionalProperties": false,
         "properties": {
           "message": {
             "title": "Message",
@@ -62,6 +63,7 @@
         "type": "object"
       },
       "PublicBuildLogPage": {
+        "additionalProperties": false,
         "properties": {
           "buildStatus": {
             "title": "Buildstatus",
@@ -170,6 +172,7 @@
         "type": "object"
       },
       "PublicCustomTool": {
+        "additionalProperties": false,
         "properties": {
           "autoPublish": {
             "title": "Autopublish",
@@ -332,6 +335,7 @@
         "type": "object"
       },
       "PublicCustomToolPage": {
+        "additionalProperties": false,
         "properties": {
           "items": {
             "items": {
@@ -378,6 +382,7 @@
         "type": "object"
       },
       "PublicDeployResult": {
+        "additionalProperties": false,
         "properties": {
           "path": {
             "enum": [
@@ -413,6 +418,7 @@
         "type": "object"
       },
       "PublicProblem": {
+        "additionalProperties": false,
         "description": "RFC 9457 problem detail. Serialized as `application/problem+json` on every public error.",
         "properties": {
           "code": {
@@ -476,6 +482,7 @@
         "type": "object"
       },
       "PublicStatus": {
+        "additionalProperties": false,
         "properties": {
           "status": {
             "title": "Status",
@@ -662,6 +669,7 @@
         "type": "object"
       },
       "PublicUploadFinalized": {
+        "additionalProperties": false,
         "properties": {
           "status": {
             "const": "processing",
@@ -676,6 +684,7 @@
         "type": "object"
       },
       "PublicUploadSession": {
+        "additionalProperties": false,
         "properties": {
           "expiresIn": {
             "title": "Expiresin",
@@ -712,6 +721,7 @@
         "type": "object"
       },
       "PublicVersion": {
+        "additionalProperties": false,
         "properties": {
           "buildCompletedAt": {
             "anyOf": [
@@ -790,6 +800,7 @@
         "type": "string"
       },
       "PublicVersionPage": {
+        "additionalProperties": false,
         "properties": {
           "items": {
             "items": {

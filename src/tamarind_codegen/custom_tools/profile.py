@@ -278,9 +278,10 @@ def _validate_schema(
         for name, child in properties.items():
             _validate_schema(document, child, f"{location}.properties.{name}", stack)
         additional = schema.get("additionalProperties")
-        if properties and isinstance(additional, Mapping):
+        if properties and additional is not False:
             raise ProfileViolation(
-                location, "object schemas cannot mix properties with typed additionalProperties"
+                location,
+                "object schemas with properties must set additionalProperties to false",
             )
         if not properties and additional is False:
             raise ProfileViolation(location, "closed empty object schemas are not supported")
