@@ -58,11 +58,16 @@ def _tool(
     }
 
 
-def _version(*, status: str = "Running", error: str | None = None) -> dict:
+def _version(
+    *,
+    status: str = "Running",
+    error: str | None = None,
+    source_digest: str = "sha256:" + "a" * 64,
+) -> dict:
     return {
         "name": "v1",
         "sourceRevision": "a" * 40,
-        "sourceDigest": "sha256:" + "a" * 64,
+        "sourceDigest": source_digest,
         "status": status,
         "origin": "build",
         "createdAt": "2026-08-15T00:00:00Z",
@@ -169,7 +174,10 @@ def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> 
     )
     upload = respx.put(UPLOAD).mock(return_value=httpx.Response(200))
     build = respx.post(f"{BASE}custom-tools/example/versions").mock(
-        return_value=httpx.Response(202, json={"action": "build", "version": _version()})
+        return_value=httpx.Response(
+            202,
+            json={"action": "build", "version": _version(source_digest=digest)},
+        )
     )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
