@@ -75,6 +75,7 @@ def test_openapi_extraction_keeps_only_the_custom_tools_dependency_closure(
                     "schemas": {
                         "Tool": {
                             "type": "object",
+                            "additionalProperties": False,
                             "properties": {
                                 "name": {"type": "string"},
                                 "default": {"$ref": "#/components/schemas/Nested"},
