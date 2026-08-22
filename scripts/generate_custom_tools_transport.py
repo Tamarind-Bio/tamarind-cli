@@ -351,9 +351,9 @@ def main() -> None:
     parser.add_argument("spec", type=Path)
     parser.add_argument("output", type=Path)
     args = parser.parse_args()
-    document = json.loads(args.spec.read_text())
+    document = json.loads(args.spec.read_text(encoding="utf-8"))
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(generate(document))
+    args.output.write_text(generate(document), encoding="utf-8")
 
 
 if __name__ == "__main__":

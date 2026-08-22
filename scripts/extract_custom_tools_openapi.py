@@ -203,9 +203,11 @@ def main() -> None:
     parser.add_argument("source", type=Path)
     parser.add_argument("output", type=Path)
     args = parser.parse_args()
-    spec = json.loads(args.source.read_text())
+    spec = json.loads(args.source.read_text(encoding="utf-8"))
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(extract(spec), indent=2, sort_keys=True) + "\n")
+    args.output.write_text(
+        json.dumps(extract(spec), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 if __name__ == "__main__":
