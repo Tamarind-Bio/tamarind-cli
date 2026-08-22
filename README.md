@@ -81,8 +81,8 @@ tamarind submit boltz \
 ## Python SDK
 
 The package also exposes a typed Custom Tools SDK. It checks archive-local
-safety, packages a folder, uploads it directly to object storage, finalizes the
-existing source-import flow, and calls the existing deploy endpoint. The server
+safety, packages a folder, uploads it directly to object storage, and submits the
+digest-checked build request. The server
 remains authoritative for source readiness, Versions, logs, and the evolving
 `config.json` contract.
 
@@ -99,11 +99,10 @@ with Tamarind() as client:
     version = tool.build("./my-esmfold")
     if not version.terminal:
         version = version.monitor(timeout=1800, on_event=print)
-    tool = version.publish()
 ```
 
 `build()` is convenience orchestration, not a durable request object. If the
-connection is lost during the deploy response, fetch the tool's versions before
+connection is lost during the build response, fetch the tool's versions before
 retrying. Interrupting `monitor()` stops local monitoring; it does not cancel the
 remote build.
 

@@ -143,25 +143,15 @@ def test_normalize_produces_an_openapi_free_ir() -> None:
         ),
         (
             lambda document: document["paths"]["/custom-tools/{name}"]["get"]["parameters"].append(
-                {"name": "trace", "in": "header", "schema": {"type": "string"}}
+                {"name": "trace", "in": "cookie", "schema": {"type": "string"}}
             ),
-            "only path and query parameters are supported",
+            "only header, path and query parameters are supported",
         ),
         (
             lambda document: document["paths"]["/custom-tools/{name}"]["get"]["parameters"].append(
                 {"name": "empty", "in": "query", "required": True, "schema": {"type": "null"}}
             ),
-            "parameters must use non-null scalar schemas",
-        ),
-        (
-            lambda document: document["paths"]["/custom-tools/{name}"]["get"]["parameters"].append(
-                {
-                    "name": "maybe",
-                    "in": "query",
-                    "schema": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-                }
-            ),
-            "parameters must use non-null scalar schemas",
+            "parameters must use scalar schemas",
         ),
         (
             lambda document: document["paths"]["/custom-tools/{name}"]["get"]["parameters"].append(
@@ -171,7 +161,7 @@ def test_normalize_produces_an_openapi_free_ir() -> None:
                     "schema": {"type": "array", "items": {"type": "string"}},
                 }
             ),
-            "parameters must use non-null scalar schemas",
+            "parameters must use scalar schemas",
         ),
         (
             lambda document: document["paths"]["/custom-tools/{name}"]["parameters"][0].update(
@@ -333,7 +323,7 @@ def test_normalize_produces_an_openapi_free_ir() -> None:
         ),
         (
             lambda document: document["components"]["schemas"]["CustomTool"]["properties"].update(
-                {"tags": {"type": "array", "items": {"type": "string"}, "minItems": 1}}
+                {"tags": {"type": "array", "items": {"type": "string"}, "uniqueItems": True}}
             ),
             "schema keywords are not supported",
         ),

@@ -25,7 +25,15 @@ SchemaKind = Literal[
 
 @dataclass(frozen=True)
 class Constraint:
-    name: Literal["maxLength", "maximum", "minLength", "minimum", "pattern"]
+    name: Literal[
+        "maxItems",
+        "maxLength",
+        "maximum",
+        "minItems",
+        "minLength",
+        "minimum",
+        "pattern",
+    ]
     value: str | int | float
 
 
@@ -76,7 +84,7 @@ class SchemaDefinition:
 @dataclass(frozen=True)
 class Parameter:
     wire_name: str
-    location: Literal["path", "query"]
+    location: Literal["header", "path", "query"]
     required: bool
     schema: Schema
     description: str | None = None

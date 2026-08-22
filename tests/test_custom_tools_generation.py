@@ -11,204 +11,6 @@ import pytest
 from tamarind_codegen.custom_tools import normalize
 
 
-def test_openapi_extraction_keeps_only_the_custom_tools_dependency_closure(
-    tmp_path: Path,
-) -> None:
-    root = Path(__file__).resolve().parents[1]
-    source = tmp_path / "public.json"
-    output = tmp_path / "custom-tools.json"
-    source.write_text(
-        json.dumps(
-            {
-                "openapi": "3.1.0",
-                "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
-                "info": {"title": "test", "version": "1"},
-                "servers": [{"url": "https://app.tamarind.bio/api"}],
-                "security": [{"ApiKey": []}],
-                "paths": {
-                    "/custom-tools": {
-                        "get": {
-                            "operationId": "listCustomTools",
-                            "responses": {
-                                "200": {"$ref": "#/components/responses/ToolResponse"},
-                                "default": {"$ref": "#/components/responses/Error"},
-                            },
-                        }
-                    },
-                    "/custom-tools-preview": {
-                        "get": {
-                            "operationId": "previewCustomTools",
-                            "responses": {"200": {"description": "preview"}},
-                        }
-                    },
-                    "/jobs": {
-                        "get": {
-                            "operationId": "listJobs",
-                            "responses": {"200": {"description": "jobs"}},
-                        }
-                    },
-                },
-                "components": {
-                    "securitySchemes": {
-                        "ApiKey": {"type": "apiKey", "in": "header", "name": "x-api-key"},
-                        "Unused": {"type": "http", "scheme": "bearer"},
-                    },
-                    "responses": {
-                        "ToolResponse": {
-                            "description": "ok",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Tool"}
-                                }
-                            },
-                        },
-                        "Error": {
-                            "description": "error",
-                            "content": {
-                                "application/problem+json": {
-                                    "schema": {"$ref": "#/components/schemas/Nested"}
-                                }
-                            },
-                        },
-                        "Unused": {"description": "unused"},
-                    },
-                    "schemas": {
-                        "Tool": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "name": {"type": "string"},
-                                "default": {"$ref": "#/components/schemas/Nested"},
-                            },
-                            "required": ["name", "default"],
-                        },
-                        "Nested": {"type": "string"},
-                        "Unused": {"type": "string"},
-                    },
-                },
-            }
-        )
-    )
-
-    subprocess.run(
-        [
-            sys.executable,
-            str(root / "scripts/extract_custom_tools_openapi.py"),
-            str(source),
-            str(output),
-        ],
-        check=True,
-    )
-
-    sliced = json.loads(output.read_text())
-    assert set(sliced["paths"]) == {"/custom-tools"}
-    assert sliced["jsonSchemaDialect"] == "https://json-schema.org/draft/2020-12/schema"
-    assert set(sliced["components"]["responses"]) == {"Error", "ToolResponse"}
-    assert set(sliced["components"]["schemas"]) == {"Nested", "Tool"}
-    assert set(sliced["components"]["securitySchemes"]) == {"ApiKey"}
-    assert normalize(sliced).operations[0].operation_id == "listCustomTools"
-
-
-def test_openapi_extraction_consumes_and_merges_path_item_components(tmp_path: Path) -> None:
-    root = Path(__file__).resolve().parents[1]
-    source = tmp_path / "public.json"
-    output = tmp_path / "custom-tools.json"
-    source.write_text(
-        json.dumps(
-            {
-                "openapi": "3.1.0",
-                "info": {"title": "test", "version": "1"},
-                "servers": [{"url": "https://app.tamarind.bio/api"}],
-                "security": [{"ApiKey": []}],
-                "paths": {
-                    "/custom-tools": {
-                        "$ref": "#/components/pathItems/CustomTools",
-                        "post": {
-                            "operationId": "createCustomTool",
-                            "responses": {"201": {"description": "created"}},
-                        },
-                    }
-                },
-                "components": {
-                    "pathItems": {
-                        "CustomTools": {
-                            "get": {
-                                "operationId": "listCustomTools",
-                                "responses": {"200": {"description": "ok"}},
-                            }
-                        }
-                    },
-                    "securitySchemes": {
-                        "ApiKey": {"type": "apiKey", "in": "header", "name": "x-api-key"}
-                    },
-                },
-            }
-        )
-    )
-
-    subprocess.run(
-        [
-            sys.executable,
-            str(root / "scripts/extract_custom_tools_openapi.py"),
-            str(source),
-            str(output),
-        ],
-        check=True,
-    )
-
-    sliced = json.loads(output.read_text())
-    assert "pathItems" not in sliced["components"]
-    assert {operation.operation_id for operation in normalize(sliced).operations} == {
-        "createCustomTool",
-        "listCustomTools",
-    }
-
-
-def test_openapi_extraction_rejects_conflicting_path_item_siblings(tmp_path: Path) -> None:
-    root = Path(__file__).resolve().parents[1]
-    source = tmp_path / "public.json"
-    output = tmp_path / "custom-tools.json"
-    source.write_text(
-        json.dumps(
-            {
-                "openapi": "3.1.0",
-                "info": {"title": "test", "version": "1"},
-                "paths": {
-                    "/custom-tools": {
-                        "$ref": "#/components/pathItems/CustomTools",
-                        "get": {
-                            "operationId": "replacement",
-                            "responses": {"200": {"description": "replacement"}},
-                        },
-                    }
-                },
-                "components": {
-                    "pathItems": {
-                        "CustomTools": {
-                            "get": {
-                                "operationId": "listCustomTools",
-                                "responses": {"200": {"description": "ok"}},
-                            }
-                        }
-                    }
-                },
-            }
-        )
-    )
-
-    with pytest.raises(subprocess.CalledProcessError):
-        subprocess.run(
-            [
-                sys.executable,
-                str(root / "scripts/extract_custom_tools_openapi.py"),
-                str(source),
-                str(output),
-            ],
-            check=True,
-            capture_output=True,
-        )
-
-
 def test_property_aliases_ignore_documentation_metadata(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     document = json.loads((root / "openapi/custom-tools-v1.json").read_text())
@@ -278,13 +80,12 @@ def test_current_openapi_normalizes_to_the_expected_surface() -> None:
     root = Path(__file__).resolve().parents[1]
     api = normalize(json.loads((root / "openapi/custom-tools-v1.json").read_text()))
 
-    assert len(api.schemas) == 17
+    assert len(api.schemas) == 15
     assert {operation.operation_id for operation in api.operations} == {
         "cancelCustomToolBuild",
         "createCustomTool",
         "createCustomToolUpload",
-        "deployCustomTool",
-        "finalizeCustomToolUpload",
+        "buildCustomToolVersion",
         "getCustomTool",
         "getCustomToolVersion",
         "listCustomToolBuildLogs",
@@ -330,7 +131,7 @@ def test_generated_transport_is_importable(tmp_path: Path) -> None:
     module_spec.loader.exec_module(module)
 
     assert module.OPENAPI_SERVER_URL == "https://app.tamarind.bio/api/"
-    assert hasattr(module.GeneratedCustomToolsTransport, "deploy_custom_tool")
+    assert hasattr(module.GeneratedCustomToolsTransport, "build_custom_tool_version")
     assert hasattr(module.GeneratedCustomToolsTransport, "get_custom_tool_version_async")
 
 

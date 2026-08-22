@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 HTTP_METHODS = {"delete", "get", "patch", "post", "put"}
-PARAMETER_LOCATIONS = {"path", "query"}
+PARAMETER_LOCATIONS = {"header", "path", "query"}
 SCHEMA_TYPES = {"array", "boolean", "integer", "null", "number", "object", "string"}
 JSON_SCHEMA_DIALECTS = {
     "https://json-schema.org/draft/2020-12/schema",
@@ -41,6 +41,7 @@ OPERATION_FIELDS = {
     "summary",
     "tags",
     "x-doc-group",
+    "x-tamarind-group",
 }
 PARAMETER_FIELDS = {
     "allowReserved",
@@ -57,11 +58,19 @@ RESPONSE_FIELDS = {"content", "description"}
 MEDIA_TYPE_FIELDS = {"schema"}
 SECURITY_SCHEME_FIELDS = {"description", "in", "name", "type"}
 COMPOSITION_KEYS = {"allOf", "not", "oneOf"}
-CONSTRAINT_KEYS = {"maxLength", "maximum", "minLength", "minimum", "pattern"}
+CONSTRAINT_KEYS = {
+    "maxItems",
+    "maxLength",
+    "maximum",
+    "minItems",
+    "minLength",
+    "minimum",
+    "pattern",
+}
 SCHEMA_ANNOTATIONS = {"default", "description", "title"}
 SCHEMA_COMMON_KEYS = SCHEMA_ANNOTATIONS | {"const", "enum", "type"}
 SCHEMA_KEYS_BY_TYPE = {
-    "array": {"items"},
+    "array": {"items", "maxItems", "minItems"},
     "boolean": set(),
     "integer": {"maximum", "minimum"},
     "null": set(),
@@ -326,14 +335,16 @@ def _validate_parameter(
         raise ProfileViolation(f"{location}.name", "must be a non-empty string")
     parameter_location = parameter.get("in")
     if parameter_location not in PARAMETER_LOCATIONS:
-        raise ProfileViolation(f"{location}.in", "only path and query parameters are supported")
+        raise ProfileViolation(
+            f"{location}.in", "only header, path and query parameters are supported"
+        )
     if "required" in parameter and not isinstance(parameter["required"], bool):
         raise ProfileViolation(f"{location}.required", "must be a boolean")
     if parameter_location == "path" and parameter.get("required") is not True:
         raise ProfileViolation(location, "path parameters must be required")
     if "schema" not in parameter:
         raise ProfileViolation(location, "parameters must declare a schema")
-    expected_style = "simple" if parameter_location == "path" else "form"
+    expected_style = "form" if parameter_location == "query" else "simple"
     expected_explode = parameter_location == "query"
     if parameter.get("style", expected_style) != expected_style:
         raise ProfileViolation(location, "non-default parameter style is not supported")
@@ -343,8 +354,10 @@ def _validate_parameter(
         raise ProfileViolation(location, "allowReserved parameters are not supported")
     _validate_schema(document, parameter["schema"], f"{location}.schema")
     kind, nullable = _schema_shape(document, parameter["schema"], f"{location}.schema")
-    if nullable or kind not in {"boolean", "integer", "number", "string"}:
-        raise ProfileViolation(location, "parameters must use non-null scalar schemas")
+    if kind not in {"boolean", "integer", "number", "string"}:
+        raise ProfileViolation(location, "parameters must use scalar schemas")
+    if nullable and (parameter_location != "query" or parameter.get("required") is True):
+        raise ProfileViolation(location, "required parameters cannot be nullable")
     if parameter_location == "path" and kind != "string":
         raise ProfileViolation(location, "path parameters must use string schemas")
     return name, parameter_location

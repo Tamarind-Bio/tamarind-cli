@@ -226,6 +226,7 @@ def _method(operation: Operation, *, async_method: bool) -> tuple[str, str]:
     optional: list[str] = []
     path_parameters: list[tuple[str, str]] = []
     query_parameters: list[tuple[str, str]] = []
+    header_parameters: list[tuple[str, str]] = []
     used_names = {"body", "self", "timeout"}
     for parameter in operation.parameters:
         py_name = _python_name(parameter.wire_name, label=f"{operation.operation_id} parameter")
@@ -237,7 +238,11 @@ def _method(operation: Operation, *, async_method: bool) -> tuple[str, str]:
             required.append(f"{py_name}: {annotation}")
         else:
             optional.append(f"{py_name}: {annotation} | None = None")
-        target = path_parameters if parameter.location == "path" else query_parameters
+        target = {
+            "header": header_parameters,
+            "path": path_parameters,
+            "query": query_parameters,
+        }[parameter.location]
         target.append((parameter.wire_name, py_name))
 
     if operation.request_body is not None:
@@ -263,6 +268,9 @@ def _method(operation: Operation, *, async_method: bool) -> tuple[str, str]:
     if query_parameters:
         query = "{" + ", ".join(f"{wire!r}: {py}" for wire, py in query_parameters) + "}"
         call.append(f"            params={query},")
+    if header_parameters:
+        headers = "{" + ", ".join(f"{wire!r}: {py}" for wire, py in header_parameters) + "}"
+        call.append(f"            headers={headers},")
     if operation.request_body is not None and operation.request_body.required:
         call.append("            json=body,")
     call.append("            timeout=timeout,")

@@ -61,7 +61,15 @@ def _schema(value: Mapping[str, Any]) -> Schema:
     kind = cast(SchemaKind, value["type"])
     constraints = tuple(
         Constraint(cast(Any, key), value[key])
-        for key in ("minLength", "maxLength", "pattern", "minimum", "maximum")
+        for key in (
+            "minLength",
+            "maxLength",
+            "pattern",
+            "minimum",
+            "maximum",
+            "minItems",
+            "maxItems",
+        )
         if key in value
     )
     description = cast(str | None, value.get("description"))
@@ -126,11 +134,14 @@ def _schema(value: Mapping[str, Any]) -> Schema:
 
 def _parameter(document: Mapping[str, Any], value: object) -> Parameter:
     raw = _dereference(document, value, "parameter", "parameters")
+    schema = _schema(raw["schema"])
     return Parameter(
         wire_name=raw["name"],
         location=raw["in"],
         required=raw.get("required", False),
-        schema=_schema(raw["schema"]),
+        # FastAPI models absent optional query values as JSON Schema null. The
+        # transport models absence in the Python signature, not in the wire value.
+        schema=replace(schema, nullable=False) if not raw.get("required", False) else schema,
         description=raw.get("description"),
     )
 

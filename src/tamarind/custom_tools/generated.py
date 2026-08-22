@@ -9,7 +9,7 @@ from urllib.parse import quote
 from tamarind.http import HTTPClient
 
 OPENAPI_SERVER_URL = "https://app.tamarind.bio/api/"
-OPENAPI_SHA256 = "bc9b2d6ea1a6395a82150692295cb6db0fea7126d9284303b468ba9b19a955b5"
+OPENAPI_SHA256 = "2adc6229b50b8e9fc4812275cb852d2d4ea1a7d93acefa80e3de50dbf111f917"
 
 
 def _segment(value: str) -> str:
@@ -21,6 +21,13 @@ MemorySize: TypeAlias = Literal[
     "8Gi", "12Gi", "24Gi", "32Gi", "48Gi", "64Gi", "90Gi", "96Gi", "180Gi"
 ]
 
+PublicBuildError = TypedDict(
+    "PublicBuildError",
+    {
+        "code": str,
+        "message": str,
+    },
+)
 PublicBuildEvent = TypedDict(
     "PublicBuildEvent",
     {
@@ -28,13 +35,36 @@ PublicBuildEvent = TypedDict(
         "timestamp": int,
     },
 )
+PublicVersionStatus: TypeAlias = Literal["Queued", "Running", "Complete", "Stopped"]
 PublicBuildLogPage = TypedDict(
     "PublicBuildLogPage",
     {
-        "buildStatus": str,
-        "errorMessage": NotRequired[str | None],
-        "logs": list[PublicBuildEvent],
-        "nextCursor": NotRequired[str | None],
+        "error": PublicBuildError | None,
+        "items": list[PublicBuildEvent],
+        "nextCursor": str | None,
+        "status": PublicVersionStatus,
+    },
+)
+PublicVersion = TypedDict(
+    "PublicVersion",
+    {
+        "completedAt": str | None,
+        "createdAt": str,
+        "error": PublicBuildError | None,
+        "name": str,
+        "origin": str,
+        "sourceDigest": str | None,
+        "sourceRevision": str,
+        "startedAt": str,
+        "status": PublicVersionStatus,
+        "terminal": bool,
+    },
+)
+PublicBuildResult = TypedDict(
+    "PublicBuildResult",
+    {
+        "action": Literal["build", "reuse_image", "unchanged"],
+        "version": PublicVersion,
     },
 )
 PublicCreateCustomToolRequest = TypedDict(
@@ -48,30 +78,39 @@ PublicCreateCustomToolRequest = TypedDict(
         "name": str,
     },
 )
-PublicToolStatus: TypeAlias = Literal["Draft", "Building", "Deployed"]
+PublicCreateVersionRequest = TypedDict(
+    "PublicCreateVersionRequest",
+    {
+        "expectedSourceDigest": str,
+        "uploadId": str,
+    },
+)
+PublicCustomToolStatus: TypeAlias = Literal["Draft", "Building", "Deployed"]
 PublicCustomTool = TypedDict(
     "PublicCustomTool",
     {
         "autoPublish": bool,
-        "canDeploy": bool,
+        "canBuild": bool,
         "canEdit": bool,
-        "connectionError": str | None,
         "cpu": int,
         "createdAt": str,
         "defaultVersion": str | None,
         "description": str,
         "displayName": str,
+        "estTime": str,
         "functions": list[str],
+        "generation": str,
         "gpuType": GpuType,
         "hasSource": bool,
         "homeDiskGi": int,
         "maxRuntimeSeconds": int | None,
         "memory": MemorySize,
         "name": str,
+        "paperUrl": str,
         "published": bool,
-        "sourceHash": str,
-        "sourceRef": str | None,
-        "status": PublicToolStatus,
+        "sourceDigest": str | None,
+        "status": PublicCustomToolStatus,
+        "tags": list[str],
         "updatedAt": str,
     },
 )
@@ -79,21 +118,7 @@ PublicCustomToolPage = TypedDict(
     "PublicCustomToolPage",
     {
         "items": list[PublicCustomTool],
-    },
-)
-PublicDeployRequest = TypedDict(
-    "PublicDeployRequest",
-    {
-        "carryForwardFromVersion": NotRequired[str | None],
-        "expectedSourceRef": NotRequired[str | None],
-    },
-)
-PublicDeployResult = TypedDict(
-    "PublicDeployResult",
-    {
-        "path": Literal["noop", "saved", "building"],
-        "ref": str,
-        "versionName": str | None,
+        "nextCursor": str | None,
     },
 )
 PublicProblem = TypedDict(
@@ -105,12 +130,6 @@ PublicProblem = TypedDict(
         "status": int,
         "title": str,
         "type": str,
-    },
-)
-PublicStatus = TypedDict(
-    "PublicStatus",
-    {
-        "status": str,
     },
 )
 PublicUpdateCustomToolRequest = TypedDict(
@@ -129,41 +148,22 @@ PublicUpdateCustomToolRequest = TypedDict(
         "tags": NotRequired[list[str] | None],
     },
 )
-PublicUploadFinalized = TypedDict(
-    "PublicUploadFinalized",
-    {
-        "status": Literal["processing"],
-    },
-)
 PublicUploadSession = TypedDict(
     "PublicUploadSession",
     {
-        "expiresIn": int,
-        "uploadHeaders": NotRequired[dict[str, str]],
+        "expiresAt": str,
+        "maxBytes": int,
+        "uploadHeaders": dict[str, str],
         "uploadId": str,
-        "uploadMethod": NotRequired[Literal["PUT"]],
+        "uploadMethod": Literal["PUT"],
         "uploadUrl": str,
-    },
-)
-PublicVersionOrigin: TypeAlias = Literal["tamarind", "build", "save", "github", "rollback"]
-PublicVersionStatus: TypeAlias = Literal["Queued", "Running", "Complete", "Stopped"]
-PublicVersion = TypedDict(
-    "PublicVersion",
-    {
-        "buildCompletedAt": str | None,
-        "buildDurationSeconds": int | None,
-        "buildStartedAt": str,
-        "errorMessage": str | None,
-        "origin": PublicVersionOrigin,
-        "ref": str,
-        "status": PublicVersionStatus,
-        "versionName": str,
     },
 )
 PublicVersionPage = TypedDict(
     "PublicVersionPage",
     {
         "items": list[PublicVersion],
+        "nextCursor": str | None,
     },
 )
 
@@ -172,10 +172,19 @@ class GeneratedCustomToolsTransport:
     def __init__(self, client: HTTPClient):
         self._client = client
 
-    def list_custom_tools(self, *, timeout: float | None = None) -> PublicCustomToolPage:
+    def list_custom_tools(
+        self,
+        status: PublicCustomToolStatus | None = None,
+        published: bool | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        *,
+        timeout: float | None = None,
+    ) -> PublicCustomToolPage:
         response = self._client.request(
             "GET",
             "custom-tools",
+            params={"status": status, "published": published, "limit": limit, "cursor": cursor},
             timeout=timeout,
         )
         return cast(PublicCustomToolPage, response.json())
@@ -200,64 +209,66 @@ class GeneratedCustomToolsTransport:
         return cast(PublicCustomTool, response.json())
 
     def update_custom_tool(
-        self, name: str, body: PublicUpdateCustomToolRequest, *, timeout: float | None = None
+        self,
+        name: str,
+        if_match: str,
+        body: PublicUpdateCustomToolRequest,
+        *,
+        timeout: float | None = None,
     ) -> PublicCustomTool:
         response = self._client.request(
             "PATCH",
             f"custom-tools/{_segment(name)}",
+            headers={"If-Match": if_match},
             json=body,
             timeout=timeout,
         )
         return cast(PublicCustomTool, response.json())
 
-    def deploy_custom_tool(
-        self, name: str, body: PublicDeployRequest | None = None, *, timeout: float | None = None
-    ) -> PublicDeployResult:
-        if body is None:
-            response = self._client.request(
-                "POST",
-                f"custom-tools/{_segment(name)}/deploy",
-                timeout=timeout,
-            )
-        else:
-            response = self._client.request(
-                "POST",
-                f"custom-tools/{_segment(name)}/deploy",
-                json=body,
-                timeout=timeout,
-            )
-        return cast(PublicDeployResult, response.json())
-
     def create_custom_tool_upload(
-        self, name: str, *, timeout: float | None = None
+        self, name: str, if_match: str, *, timeout: float | None = None
     ) -> PublicUploadSession:
         response = self._client.request(
             "POST",
             f"custom-tools/{_segment(name)}/uploads",
+            headers={"If-Match": if_match},
             timeout=timeout,
         )
         return cast(PublicUploadSession, response.json())
 
-    def finalize_custom_tool_upload(
-        self, name: str, upload_id: str, *, timeout: float | None = None
-    ) -> PublicUploadFinalized:
-        response = self._client.request(
-            "POST",
-            f"custom-tools/{_segment(name)}/uploads/{_segment(upload_id)}/finalize",
-            timeout=timeout,
-        )
-        return cast(PublicUploadFinalized, response.json())
-
     def list_custom_tool_versions(
-        self, name: str, limit: int | None = None, *, timeout: float | None = None
+        self,
+        name: str,
+        status: PublicVersionStatus | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        *,
+        timeout: float | None = None,
     ) -> PublicVersionPage:
         response = self._client.request(
             "GET",
             f"custom-tools/{_segment(name)}/versions",
-            params={"limit": limit},
+            params={"status": status, "limit": limit, "cursor": cursor},
             timeout=timeout,
         )
         return cast(PublicVersionPage, response.json())
+
+    def build_custom_tool_version(
+        self,
+        name: str,
+        if_match: str,
+        body: PublicCreateVersionRequest,
+        *,
+        timeout: float | None = None,
+    ) -> PublicBuildResult:
+        response = self._client.request(
+            "POST",
+            f"custom-tools/{_segment(name)}/versions",
+            headers={"If-Match": if_match},
+            json=body,
+            timeout=timeout,
+        )
+        return cast(PublicBuildResult, response.json())
 
     def get_custom_tool_version(
         self, name: str, version_name: str, *, timeout: float | None = None
@@ -270,14 +281,15 @@ class GeneratedCustomToolsTransport:
         return cast(PublicVersion, response.json())
 
     def cancel_custom_tool_build(
-        self, name: str, version_name: str, *, timeout: float | None = None
-    ) -> PublicStatus:
+        self, name: str, version_name: str, if_match: str, *, timeout: float | None = None
+    ) -> PublicVersion:
         response = self._client.request(
             "POST",
             f"custom-tools/{_segment(name)}/versions/{_segment(version_name)}/cancel",
+            headers={"If-Match": if_match},
             timeout=timeout,
         )
-        return cast(PublicStatus, response.json())
+        return cast(PublicVersion, response.json())
 
     def list_custom_tool_build_logs(
         self,
@@ -296,11 +308,12 @@ class GeneratedCustomToolsTransport:
         return cast(PublicBuildLogPage, response.json())
 
     def publish_custom_tool_version(
-        self, name: str, version_name: str, *, timeout: float | None = None
+        self, name: str, version_name: str, if_match: str, *, timeout: float | None = None
     ) -> PublicCustomTool:
         response = self._client.request(
             "POST",
             f"custom-tools/{_segment(name)}/versions/{_segment(version_name)}/publish",
+            headers={"If-Match": if_match},
             timeout=timeout,
         )
         return cast(PublicCustomTool, response.json())

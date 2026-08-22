@@ -39,12 +39,12 @@ detail that can change without any client change and without drift.
 
 ### 3. Custom Tools surface — source of truth: the public OpenAPI artifact
 
-Custom Tool creation, source upload/finalization, deploy, Versions, logs,
-cancellation, and publication are generated from the website backend's public
+Custom Tool creation, source upload, build, Versions, logs, and cancellation
+are generated from the website backend's public
 OpenAPI artifact through a deliberately small compiler pipeline:
 
 ```text
-OpenAPI -> Tamarind profile validation -> normalized IR -> Python transport
+backend-owned OpenAPI slice -> Tamarind profile validation -> normalized IR -> Python transport
 ```
 
 The profile and ownership boundaries are documented in
@@ -63,9 +63,9 @@ runtime. The backend owns the evolving `config.json` business contract and
 validates it before accepting a build. The SDK deliberately does not maintain a
 second list of configuration fields, enums, or cross-field rules.
 
-`CustomTool.build()` composes the existing requests: create upload, PUT archive,
-finalize, poll source readiness, deploy, fetch Version. It adds no server-side
-BuildRequest, queue, lease, claim, or repair state. An ambiguous deploy response
+`CustomTool.build()` composes the existing requests: create upload, PUT the archive,
+submit the digest-checked build request, and return its Version. It adds no server-side
+BuildRequest, queue, lease, claim, or repair state. An ambiguous build response
 is therefore handled honestly by listing Versions before a manual retry.
 
 ## Why not a single binary that re-encodes the API?

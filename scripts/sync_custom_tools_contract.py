@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""Vendor a backend-produced contract, record provenance, and regenerate transport code."""
+
+from __future__ import annotations
+
+import argparse
+from hashlib import sha256
+import json
+from pathlib import Path
+import shutil
+
+from generate_custom_tools_transport import generate
+from tamarind_codegen.custom_tools.profile import validate_profile
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("source", type=Path)
+    parser.add_argument("--source-repository", required=True)
+    parser.add_argument("--source-commit", required=True)
+    parser.add_argument(
+        "--source-path",
+        default="backend/app/public_api/openapi/custom-tools-v1.generated.json",
+    )
+    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    args = parser.parse_args()
+
+    raw = args.source.read_bytes()
+    document = json.loads(raw)
+    validate_profile(document)
+
+    spec_path = args.root / "openapi" / "custom-tools-v1.json"
+    lock_path = args.root / "openapi" / "custom-tools-v1.lock.json"
+    generated_path = args.root / "src" / "tamarind" / "custom_tools" / "generated.py"
+    spec_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(args.source, spec_path)
+    lock_path.write_text(
+        json.dumps(
+            {
+                "artifactSha256": sha256(raw).hexdigest(),
+                "schemaVersion": 1,
+                "sourceCommit": args.source_commit,
+                "sourcePath": args.source_path,
+                "sourceRepository": args.source_repository,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    generated_path.write_text(generate(document), encoding="utf-8")
+
+
+if __name__ == "__main__":
+    main()

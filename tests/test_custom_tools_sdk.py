@@ -13,7 +13,6 @@ from tamarind.custom_tools import resources
 from tamarind.custom_tools.packaging import build_source_tree_archive, inspect_source_tree
 from tamarind.errors import (
     CustomToolBuildFailedError,
-    CustomToolBuildTimeoutError,
     CustomToolNotFoundError,
     CustomToolUploadError,
     StaleCustomToolError,
@@ -25,13 +24,12 @@ UPLOAD = "https://uploads.test/source.zip"
 
 def _tool(
     *,
-    source_hash: str = "",
-    source_ref: str | None = None,
+    source_digest: str | None = None,
     source: bool = False,
-    error: str | None = None,
 ) -> dict:
     return {
         "name": "example",
+        "generation": "generation-1",
         "displayName": "Example",
         "description": "",
         "functions": [],
@@ -42,29 +40,36 @@ def _tool(
         "homeDiskGi": 20,
         "maxRuntimeSeconds": None,
         "hasSource": source,
-        "sourceHash": source_hash,
-        "sourceRef": source_ref if source_ref is not None else "a" * 40 if source else None,
-        "connectionError": error,
+        "sourceDigest": source_digest
+        if source_digest is not None
+        else "sha256:" + "a" * 64
+        if source
+        else None,
         "published": False,
         "autoPublish": False,
+        "estTime": "",
+        "paperUrl": "",
+        "tags": [],
         "defaultVersion": None,
         "createdAt": "2026-08-15T00:00:00Z",
         "updatedAt": "2026-08-15T00:00:00Z",
         "canEdit": True,
-        "canDeploy": True,
+        "canBuild": True,
     }
 
 
 def _version(*, status: str = "Running", error: str | None = None) -> dict:
     return {
-        "versionName": "v1",
-        "ref": "a" * 40,
+        "name": "v1",
+        "sourceRevision": "a" * 40,
+        "sourceDigest": "sha256:" + "a" * 64,
         "status": status,
         "origin": "build",
-        "buildStartedAt": "2026-08-15T00:00:00Z",
-        "buildCompletedAt": "2026-08-15T00:01:00Z" if status in {"Complete", "Stopped"} else None,
-        "buildDurationSeconds": 60 if status in {"Complete", "Stopped"} else None,
-        "errorMessage": error,
+        "createdAt": "2026-08-15T00:00:00Z",
+        "startedAt": "2026-08-15T00:00:00Z",
+        "completedAt": "2026-08-15T00:01:00Z" if status in {"Complete", "Stopped"} else None,
+        "terminal": status in {"Complete", "Stopped"},
+        "error": {"code": "build_failed", "message": error} if error else None,
     }
 
 
@@ -96,7 +101,7 @@ def test_create_list_and_update_wrap_public_routes() -> None:
     assert json.loads(create.calls.last.request.content) == {"name": "example"}
     assert listed[0].name == "example"
     assert json.loads(update.calls.last.request.content) == {"description": "updated"}
-    assert "If-Match" not in update.calls.last.request.headers
+    assert update.calls.last.request.headers["If-Match"] == "generation-1"
     assert changed.description == "updated"
 
 
@@ -142,17 +147,11 @@ def test_non_custom_tool_route_with_matching_segment_keeps_generic_404() -> None
 
 
 @respx.mock
-def test_build_composes_upload_finalize_poll_deploy_and_version(tmp_path: Path) -> None:
+def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> None:
     _source(tmp_path)
-    source_hash = _archive_digest(tmp_path)
-    tool_reads = respx.get(f"{BASE}custom-tools/example").mock(
-        side_effect=[
-            httpx.Response(200, json=_tool()),
-            httpx.Response(200, json=_tool()),
-            httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
-        ]
-    )
-    respx.post(f"{BASE}custom-tools/example/uploads").mock(
+    digest = _archive_digest(tmp_path)
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    create_upload = respx.post(f"{BASE}custom-tools/example/uploads").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -160,61 +159,28 @@ def test_build_composes_upload_finalize_poll_deploy_and_version(tmp_path: Path) 
                 "uploadUrl": UPLOAD,
                 "uploadMethod": "PUT",
                 "uploadHeaders": {"Content-Type": "application/zip"},
-                "expiresIn": 900,
+                "expiresAt": "2026-08-15T00:15:00Z",
+                "maxBytes": 1024,
             },
         )
     )
     upload = respx.put(UPLOAD).mock(return_value=httpx.Response(200))
-    finalize = respx.post(f"{BASE}custom-tools/example/uploads/upload-1/finalize").mock(
-        return_value=httpx.Response(202, json={"status": "processing"})
-    )
-    deploy = respx.post(f"{BASE}custom-tools/example/deploy").mock(
-        return_value=httpx.Response(
-            202, json={"versionName": "v1", "ref": "a" * 40, "path": "building"}
-        )
-    )
-    respx.get(f"{BASE}custom-tools/example/versions", params={"limit": "50"}).mock(
-        return_value=httpx.Response(200, json={"items": []})
-    )
-    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
-        return_value=httpx.Response(200, json=_version())
+    build = respx.post(f"{BASE}custom-tools/example/versions").mock(
+        return_value=httpx.Response(202, json={"action": "build", "version": _version()})
     )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
-        version = client.custom_tools.get("example").build(tmp_path, poll_interval=0.001)
+        version = client.custom_tools.get("example").build(tmp_path)
 
-    assert tool_reads.call_count == 3
     assert upload.calls.last.request.content.startswith(b"PK")
     assert upload.calls.last.request.headers["Content-Type"] == "application/zip"
-    assert finalize.called
-    assert json.loads(deploy.calls.last.request.content) == {"expectedSourceRef": "a" * 40}
+    assert create_upload.calls.last.request.headers["If-Match"] == "generation-1"
+    assert build.calls.last.request.headers["If-Match"] == "generation-1"
+    assert json.loads(build.calls.last.request.content) == {
+        "uploadId": "upload-1",
+        "expectedSourceDigest": digest,
+    }
     assert version.name == "v1"
-    assert not respx.calls.last.request.url.path.endswith("/versions")
-
-
-@respx.mock
-def test_build_surfaces_background_extraction_error(tmp_path: Path) -> None:
-    _source(tmp_path)
-    respx.get(f"{BASE}custom-tools/example").mock(
-        side_effect=[
-            httpx.Response(200, json=_tool()),
-            httpx.Response(200, json=_tool()),
-            httpx.Response(200, json=_tool(error="bad archive")),
-        ]
-    )
-    respx.post(f"{BASE}custom-tools/example/uploads").mock(
-        return_value=httpx.Response(
-            201, json={"uploadId": "upload-1", "uploadUrl": UPLOAD, "expiresIn": 900}
-        )
-    )
-    respx.put(UPLOAD).mock(return_value=httpx.Response(200))
-    respx.post(f"{BASE}custom-tools/example/uploads/upload-1/finalize").mock(
-        return_value=httpx.Response(202, json={"status": "processing"})
-    )
-
-    with Tamarind(api_key="key", api_base=BASE) as client:
-        with pytest.raises(CustomToolUploadError, match="bad archive"):
-            client.custom_tools.get("example").build(tmp_path, poll_interval=0.001)
 
 
 def test_build_caps_archive_at_the_server_source_limit(tmp_path: Path, monkeypatch) -> None:
@@ -222,7 +188,7 @@ def test_build_caps_archive_at_the_server_source_limit(tmp_path: Path, monkeypat
     observed_limit = None
 
     class Transport:
-        def create_custom_tool_upload(self, _name):
+        def create_custom_tool_upload(self, _name, _generation):
             return {"uploadUrl": UPLOAD, "uploadId": "upload-1"}
 
     def capture_limit(_tree, *, max_bytes):
@@ -232,7 +198,7 @@ def test_build_caps_archive_at_the_server_source_limit(tmp_path: Path, monkeypat
 
     monkeypatch.setattr(resources, "build_source_tree_archive", capture_limit)
     collection = resources.CustomTools(Transport())  # type: ignore[arg-type]
-    tool = type("Tool", (), {"name": "example"})()
+    tool = type("Tool", (), {"name": "example", "generation": "generation-1"})()
 
     with pytest.raises(CustomToolUploadError, match="observing limit"):
         collection._build(  # type: ignore[arg-type]
@@ -261,7 +227,7 @@ def test_build_constructs_archive_before_creating_upload_session(
             events.append("close")
 
     class Transport:
-        def create_custom_tool_upload(self, _name):
+        def create_custom_tool_upload(self, _name, _generation):
             events.append("session")
             raise RuntimeError("session failed")
 
@@ -272,7 +238,7 @@ def test_build_constructs_archive_before_creating_upload_session(
 
     monkeypatch.setattr(resources, "build_source_tree_archive", build_archive)
     collection = resources.CustomTools(Transport())  # type: ignore[arg-type]
-    tool = type("Tool", (), {"name": "example"})()
+    tool = type("Tool", (), {"name": "example", "generation": "generation-1"})()
 
     with pytest.raises(RuntimeError, match="session failed"):
         collection._build(  # type: ignore[arg-type]
@@ -285,206 +251,25 @@ def test_build_constructs_archive_before_creating_upload_session(
     assert events == ["archive", "session", "close"]
 
 
-def test_source_poll_request_timeout_maps_to_upload_deadline(monkeypatch) -> None:
-    from tamarind.errors import TamarindError
-
-    timeout = TamarindError("network timeout")
-    timeout.__cause__ = httpx.ReadTimeout("slow")
-    tool = type(
-        "Tool",
-        (),
-        {"_refresh": lambda self, **_kwargs: (_ for _ in ()).throw(timeout)},
-    )()
-
-    with pytest.raises(CustomToolUploadError, match="did not finish within 1 seconds"):
-        resources._wait_for_source_ref(  # type: ignore[arg-type]
-            tool,
-            "sha256:test",
-            timeout=1,
-            interval=0.1,
-        )
-
-
-def test_source_poll_rejects_error_before_matching_digest() -> None:
-    current = type(
-        "Current",
-        (),
-        {
-            "connection_error": "archive could not be extracted",
-            "source_hash": "sha256:new",
-            "source_ref": "old-ref",
-        },
-    )()
-    tool = type("Tool", (), {"_refresh": lambda self, **_kwargs: current})()
-
-    with pytest.raises(CustomToolUploadError, match="archive could not be extracted"):
-        resources._wait_for_source_ref(  # type: ignore[arg-type]
-            tool,
-            "sha256:new",
-            timeout=1,
-            interval=0.1,
-        )
-
-
-def test_source_poll_rechecks_deadline_after_successful_response(monkeypatch) -> None:
-    ticks = iter((0.0, 0.1, 1.1))
-    monkeypatch.setattr(resources, "_clock", lambda: next(ticks))
-    current = type(
-        "Current",
-        (),
-        {"connection_error": None, "source_hash": "sha256:new", "source_ref": "source-ref"},
-    )()
-    tool = type("Tool", (), {"_refresh": lambda self, **_kwargs: current})()
-
-    with pytest.raises(CustomToolUploadError, match="did not finish within 1 seconds"):
-        resources._wait_for_source_ref(  # type: ignore[arg-type]
-            tool,
-            "sha256:new",
-            timeout=1,
-            interval=0.1,
-        )
-
-
-def test_version_poll_request_timeout_maps_to_build_deadline() -> None:
-    from tamarind.errors import TamarindError
-
-    timeout = TamarindError("network timeout")
-    timeout.__cause__ = httpx.ReadTimeout("slow")
-    collection = type(
-        "Collection",
-        (),
-        {"_versions": lambda self, *_args, **_kwargs: (_ for _ in ()).throw(timeout)},
-    )()
-
-    with pytest.raises(CustomToolBuildTimeoutError, match="did not receive a numbered version"):
-        resources._wait_for_version_ref(  # type: ignore[arg-type]
-            collection,
-            "example",
-            "a" * 40,
-            exclude_versions=set(),
-            timeout=1,
-            interval=0.1,
-        )
-
-
-def test_version_poll_rechecks_deadline_after_successful_response(monkeypatch) -> None:
-    ticks = iter((0.0, 0.1, 1.1))
-    monkeypatch.setattr(resources, "_clock", lambda: next(ticks))
-    version = type("Version", (), {"source_revision": "a" * 40, "name": "v1"})()
-    page = type("Page", (), {"items": (version,)})()
-    collection = type("Collection", (), {"_versions": lambda self, *_args, **_kwargs: page})()
-
-    with pytest.raises(CustomToolBuildTimeoutError, match="did not receive a numbered version"):
-        resources._wait_for_version_ref(  # type: ignore[arg-type]
-            collection,
-            "example",
-            "a" * 40,
-            exclude_versions=set(),
-            timeout=1,
-            interval=0.1,
-        )
-
-
 @respx.mock
-def test_build_tracks_queued_deploy_by_source_ref(tmp_path: Path) -> None:
+def test_build_fails_closed_when_generation_changes(tmp_path: Path) -> None:
     _source(tmp_path)
-    source_hash = _archive_digest(tmp_path)
-    respx.get(f"{BASE}custom-tools/example").mock(
-        side_effect=[
-            httpx.Response(200, json=_tool()),
-            httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
-        ]
-    )
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
     respx.post(f"{BASE}custom-tools/example/uploads").mock(
         return_value=httpx.Response(
             201,
-            json={"uploadId": "upload-1", "uploadUrl": UPLOAD, "expiresIn": 900},
+            json={
+                "uploadId": "upload-1",
+                "uploadUrl": UPLOAD,
+                "uploadMethod": "PUT",
+                "uploadHeaders": {},
+                "expiresAt": "2026-08-15T00:15:00Z",
+                "maxBytes": 1024,
+            },
         )
     )
     respx.put(UPLOAD).mock(return_value=httpx.Response(200))
-    respx.post(f"{BASE}custom-tools/example/uploads/upload-1/finalize").mock(
-        return_value=httpx.Response(202, json={"status": "processing"})
-    )
-    respx.post(f"{BASE}custom-tools/example/deploy").mock(
-        return_value=httpx.Response(
-            202, json={"versionName": None, "ref": "a" * 40, "path": "noop"}
-        )
-    )
-    versions = respx.get(f"{BASE}custom-tools/example/versions", params={"limit": "50"}).mock(
-        side_effect=[
-            httpx.Response(200, json={"items": []}),
-            httpx.Response(200, json={"items": []}),
-            httpx.Response(200, json={"items": [_version()]}),
-        ]
-    )
-
-    with Tamarind(api_key="key", api_base=BASE) as client:
-        version = client.custom_tools.get("example").build(tmp_path, poll_interval=0.001)
-
-    assert version.name == "v1"
-    assert versions.call_count == 3
-
-
-@respx.mock
-def test_build_ignores_old_version_with_the_same_source_ref(tmp_path: Path) -> None:
-    _source(tmp_path)
-    source_hash = _archive_digest(tmp_path)
-    respx.get(f"{BASE}custom-tools/example").mock(
-        side_effect=[
-            httpx.Response(200, json=_tool()),
-            httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
-        ]
-    )
-    respx.post(f"{BASE}custom-tools/example/uploads").mock(
-        return_value=httpx.Response(
-            201, json={"uploadId": "upload-1", "uploadUrl": UPLOAD, "expiresIn": 900}
-        )
-    )
-    respx.put(UPLOAD).mock(return_value=httpx.Response(200))
-    respx.post(f"{BASE}custom-tools/example/uploads/upload-1/finalize").mock(
-        return_value=httpx.Response(202, json={"status": "processing"})
-    )
-    respx.post(f"{BASE}custom-tools/example/deploy").mock(
-        return_value=httpx.Response(
-            202, json={"versionName": None, "ref": "a" * 40, "path": "building"}
-        )
-    )
-    old = _version()
-    new = {**_version(), "versionName": "v2"}
-    respx.get(f"{BASE}custom-tools/example/versions", params={"limit": "50"}).mock(
-        side_effect=[
-            httpx.Response(200, json={"items": [old]}),
-            httpx.Response(200, json={"items": [old]}),
-            httpx.Response(200, json={"items": [new, old]}),
-        ]
-    )
-
-    with Tamarind(api_key="key", api_base=BASE) as client:
-        version = client.custom_tools.get("example").build(tmp_path, poll_interval=0.001)
-
-    assert version.name == "v2"
-
-
-@respx.mock
-def test_build_fails_closed_when_selected_source_changes_before_deploy(tmp_path: Path) -> None:
-    _source(tmp_path)
-    source_hash = _archive_digest(tmp_path)
-    respx.get(f"{BASE}custom-tools/example").mock(
-        side_effect=[
-            httpx.Response(200, json=_tool()),
-            httpx.Response(200, json=_tool(source=True, source_hash=source_hash)),
-        ]
-    )
-    respx.post(f"{BASE}custom-tools/example/uploads").mock(
-        return_value=httpx.Response(
-            201, json={"uploadId": "upload-1", "uploadUrl": UPLOAD, "expiresIn": 900}
-        )
-    )
-    respx.put(UPLOAD).mock(return_value=httpx.Response(200))
-    respx.post(f"{BASE}custom-tools/example/uploads/upload-1/finalize").mock(
-        return_value=httpx.Response(202, json={"status": "processing"})
-    )
-    deploy = respx.post(f"{BASE}custom-tools/example/deploy").mock(
+    build = respx.post(f"{BASE}custom-tools/example/versions").mock(
         return_value=httpx.Response(
             409,
             json={
@@ -496,39 +281,32 @@ def test_build_fails_closed_when_selected_source_changes_before_deploy(tmp_path:
             },
         )
     )
-    respx.get(f"{BASE}custom-tools/example/versions", params={"limit": "50"}).mock(
-        return_value=httpx.Response(200, json={"items": []})
-    )
-
     with Tamarind(api_key="key", api_base=BASE) as client:
         with pytest.raises(StaleCustomToolError, match="refresh and retry"):
-            client.custom_tools.get("example").build(tmp_path, poll_interval=0.001)
+            client.custom_tools.get("example").build(tmp_path)
 
-    assert json.loads(deploy.calls.last.request.content) == {"expectedSourceRef": "a" * 40}
+    assert build.calls.last.request.headers["If-Match"] == "generation-1"
 
 
 @respx.mock
 def test_version_logs_cancel_and_publish_use_version_routes() -> None:
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
     respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
-        side_effect=[
-            httpx.Response(200, json=_version()),
-            httpx.Response(200, json=_version(status="Stopped", error="cancelled by user")),
-        ]
+        return_value=httpx.Response(200, json=_version())
     )
     respx.get(f"{BASE}custom-tools/example/versions/v1/logs").mock(
         return_value=httpx.Response(
             200,
             json={
-                "buildStatus": "Running",
-                "logs": [{"message": "building", "timestamp": 1}],
+                "status": "Running",
+                "items": [{"message": "building", "timestamp": 1}],
                 "nextCursor": None,
-                "errorMessage": None,
+                "error": None,
             },
         )
     )
     cancel = respx.post(f"{BASE}custom-tools/example/versions/v1/cancel").mock(
-        return_value=httpx.Response(200, json={"status": "cancelled"})
+        return_value=httpx.Response(200, json=_version(status="Stopped", error="cancelled by user"))
     )
     publish = respx.post(f"{BASE}custom-tools/example/versions/v1/publish").mock(
         return_value=httpx.Response(
@@ -542,7 +320,8 @@ def test_version_logs_cancel_and_publish_use_version_routes() -> None:
         assert version.cancel().status == "Stopped"
         assert version.publish().default_version == "v1"
 
-    assert cancel.called and publish.called
+    assert cancel.calls.last.request.headers["If-Match"] == "generation-1"
+    assert publish.calls.last.request.headers["If-Match"] == "generation-1"
 
 
 @respx.mock
