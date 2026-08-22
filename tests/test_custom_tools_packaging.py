@@ -211,7 +211,7 @@ def test_inspection_bounds_retained_manifest_entries(tmp_path: Path, monkeypatch
     _valid_source(tmp_path)
     monkeypatch.setattr(packaging, "_MAX_SOURCE_ENTRIES", 3)
 
-    with pytest.raises(CustomToolUploadError, match="3-entry inspection limit"):
+    with pytest.raises(CustomToolUploadError, match="3-entry limit"):
         packaging.inspect_source_tree(tmp_path)
 
 
@@ -220,7 +220,15 @@ def test_archive_rechecks_manifest_entry_budget(tmp_path: Path, monkeypatch) -> 
     tree = packaging.inspect_source_tree(tmp_path)
     monkeypatch.setattr(packaging, "_MAX_SOURCE_ENTRIES", 3)
 
-    with pytest.raises(CustomToolUploadError, match="3-entry inspection limit"):
+    with pytest.raises(CustomToolUploadError, match="3-entry limit"):
+        packaging.build_source_tree_archive(tree)
+
+
+def test_archive_counts_synthetic_empty_directory_entries(monkeypatch) -> None:
+    tree = packaging.SourceTree(files=(), empty_directories=("first", "second"))
+    monkeypatch.setattr(packaging, "_MAX_SOURCE_ENTRIES", 3)
+
+    with pytest.raises(CustomToolUploadError, match="3-entry limit"):
         packaging.build_source_tree_archive(tree)
 
 

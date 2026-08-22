@@ -274,7 +274,18 @@ def build_source_tree_archive(
     max_bytes: int | None = None,
 ) -> SourceArchive:
     """Package one previously inspected source snapshot."""
-    _enforce_source_entry_limit(len(tree.files) + len(tree.empty_directories))
+    entries: list[tuple[str, SourceFile | None, int]] = []
+    for relative in tree.empty_directories:
+        entries.append((f"{relative}/", None, _DIRECTORY_MODE))
+        # Git cannot persist an empty tree. The marker keeps the directory
+        # present when the backend commits the uploaded archive to Gitea.
+        entries.append((f"{relative}/.gitkeep", None, _REGULAR_FILE_MODE))
+    for source_file in tree.files:
+        executable = source_file.relative == "run.sh" or bool(source_file.mode & 0o111)
+        mode = _EXECUTABLE_FILE_MODE if executable else _REGULAR_FILE_MODE
+        entries.append((source_file.relative, source_file, mode))
+    _enforce_source_entry_limit(len(entries))
+
     output = _CappedArchive(max_bytes)
     try:
         with zipfile.ZipFile(
@@ -284,17 +295,6 @@ def build_source_tree_archive(
             compresslevel=9,
             strict_timestamps=True,
         ) as archive:
-            entries: list[tuple[str, SourceFile | None, int]] = []
-            for relative in tree.empty_directories:
-                entries.append((f"{relative}/", None, _DIRECTORY_MODE))
-                # Git cannot persist an empty tree. The marker keeps the directory
-                # present when the backend commits the uploaded archive to Gitea.
-                entries.append((f"{relative}/.gitkeep", None, _REGULAR_FILE_MODE))
-            for source_file in tree.files:
-                executable = source_file.relative == "run.sh" or bool(source_file.mode & 0o111)
-                mode = _EXECUTABLE_FILE_MODE if executable else _REGULAR_FILE_MODE
-                entries.append((source_file.relative, source_file, mode))
-
             for relative, entry_path, mode in sorted(entries, key=lambda item: item[0]):
                 info = zipfile.ZipInfo(relative, date_time=_ZIP_TIMESTAMP)
                 info.compress_type = zipfile.ZIP_DEFLATED
@@ -379,7 +379,7 @@ def _enforce_source_entry_limit(
         maximum = _MAX_SOURCE_ENTRIES
     if count > maximum:
         raise CustomToolUploadError(
-            f"Source tree exceeds the {_MAX_SOURCE_ENTRIES}-entry inspection limit"
+            f"Custom Tool source exceeds the {_MAX_SOURCE_ENTRIES}-entry limit"
         )
 
 
