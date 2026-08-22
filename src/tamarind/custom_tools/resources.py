@@ -443,7 +443,12 @@ def _wait_for_source(
             raise CustomToolUploadError(
                 f"Source extraction did not finish within {timeout:g} seconds"
             )
-        current = tool._refresh(request_timeout=remaining)
+        try:
+            current = tool._refresh(request_timeout=remaining)
+        except httpx.TimeoutException:
+            raise CustomToolUploadError(
+                f"Source extraction did not finish within {timeout:g} seconds"
+            ) from None
         if current.source_hash == source_hash:
             return current
         if current.connection_error:
@@ -468,7 +473,14 @@ def _wait_for_version_ref(
                 f"Custom Tool deploy {tool_name}@{source_ref[:12]} did not receive a numbered version "
                 f"within {timeout:g} seconds"
             )
-        for version in collection._versions(tool_name, limit=50, request_timeout=remaining).items:
+        try:
+            versions = collection._versions(tool_name, limit=50, request_timeout=remaining).items
+        except httpx.TimeoutException:
+            raise CustomToolBuildTimeoutError(
+                f"Custom Tool deploy {tool_name}@{source_ref[:12]} did not receive a numbered version "
+                f"within {timeout:g} seconds"
+            ) from None
+        for version in versions:
             if version.source_revision == source_ref and version.name not in exclude_versions:
                 return version
         time.sleep(min(interval, max(0.0, deadline - _clock())))

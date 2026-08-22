@@ -96,12 +96,14 @@ class HTTPClient:
                 json=json,
                 timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
             )
+        except httpx.TimeoutException:
+            raise
         except httpx.HTTPError as exc:
             raise TamarindError(f"Network error talking to {self.base_url}: {exc}") from exc
 
         if resp.is_success:
             return resp
-        raise _map_error(resp)
+        raise _map_error(resp, request_path=path)
 
     async def request_async(
         self,
@@ -139,12 +141,14 @@ class HTTPClient:
                     json=json,
                     timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
                 )
+        except httpx.TimeoutException:
+            raise
         except httpx.HTTPError as exc:
             raise TamarindError(f"Network error talking to {self.base_url}: {exc}") from exc
 
         if resp.is_success:
             return resp
-        raise _map_error(resp)
+        raise _map_error(resp, request_path=path)
 
     def get_json(
         self,
@@ -202,14 +206,18 @@ def _extract_message(resp: httpx.Response, body: object | None, *, is_json: bool
     return resp.reason_phrase or f"HTTP {resp.status_code}"
 
 
-def _map_error(resp: httpx.Response) -> TamarindError:
+def _map_error(resp: httpx.Response, *, request_path: str) -> TamarindError:
     body, is_json = _error_body(resp)
     detail = body if is_json else None
     msg = _extract_message(resp, body, is_json=is_json)
     code = resp.status_code
     problem_code = _problem_code(detail)
-    path_segments = tuple(segment for segment in resp.request.url.path.split("/") if segment)
-    not_found_error = CustomToolNotFoundError if "custom-tools" in path_segments else NotFoundError
+    relative_path = "/" + request_path.lstrip("/")
+    not_found_error = (
+        CustomToolNotFoundError
+        if relative_path == "/custom-tools" or relative_path.startswith("/custom-tools/")
+        else NotFoundError
+    )
     if problem_code == "custom_tool_not_found" or problem_code == "custom_tool_version_not_found":
         return CustomToolNotFoundError(msg, detail=detail)
     if problem_code == "custom_tool_name_taken":

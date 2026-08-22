@@ -13,6 +13,7 @@ from tamarind.custom_tools import resources
 from tamarind.custom_tools.packaging import build_source_tree_archive, inspect_source_tree
 from tamarind.errors import (
     CustomToolBuildFailedError,
+    CustomToolBuildTimeoutError,
     CustomToolNotFoundError,
     CustomToolUploadError,
     StaleCustomToolError,
@@ -123,6 +124,21 @@ def test_custom_tools_not_found_classification_ignores_api_mount_prefix() -> Non
     with Tamarind(api_key="key", api_base=prefixed_base) as client:
         with pytest.raises(CustomToolNotFoundError, match="Not Found"):
             client.custom_tools.get("example").get_version("v1")
+
+
+@respx.mock
+def test_non_custom_tool_route_with_matching_segment_keeps_generic_404() -> None:
+    from tamarind.errors import NotFoundError
+
+    respx.get(f"{BASE}catalog/tools/custom-tools/schema").mock(
+        return_value=httpx.Response(404, json={"detail": "Not Found"})
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(NotFoundError) as raised:
+            client._http.get_json("catalog/tools/custom-tools/schema")
+
+    assert not isinstance(raised.value, CustomToolNotFoundError)
 
 
 @respx.mock
@@ -267,6 +283,44 @@ def test_build_constructs_archive_before_creating_upload_session(
         )
 
     assert events == ["archive", "session", "close"]
+
+
+def test_source_poll_request_timeout_maps_to_upload_deadline(monkeypatch) -> None:
+    tool = type(
+        "Tool",
+        (),
+        {"_refresh": lambda self, **_kwargs: (_ for _ in ()).throw(httpx.ReadTimeout("slow"))},
+    )()
+
+    with pytest.raises(CustomToolUploadError, match="did not finish within 1 seconds"):
+        resources._wait_for_source(  # type: ignore[arg-type]
+            tool,
+            "sha256:test",
+            timeout=1,
+            interval=0.1,
+        )
+
+
+def test_version_poll_request_timeout_maps_to_build_deadline() -> None:
+    collection = type(
+        "Collection",
+        (),
+        {
+            "_versions": lambda self, *_args, **_kwargs: (_ for _ in ()).throw(
+                httpx.ReadTimeout("slow")
+            )
+        },
+    )()
+
+    with pytest.raises(CustomToolBuildTimeoutError, match="did not receive a numbered version"):
+        resources._wait_for_version_ref(  # type: ignore[arg-type]
+            collection,
+            "example",
+            "a" * 40,
+            exclude_versions=set(),
+            timeout=1,
+            interval=0.1,
+        )
 
 
 @respx.mock
