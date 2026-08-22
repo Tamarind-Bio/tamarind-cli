@@ -147,7 +147,32 @@ def test_normalize_produces_an_openapi_free_ir() -> None:
             ),
             "only path and query parameters are supported",
         ),
-        (lambda document: document.update({"webhooks": {}}), "webhooks are not supported"),
+        (
+            lambda document: document.update({"webhooks": {}}),
+            "document fields are not supported",
+        ),
+        (
+            lambda document: document["info"].update({"contact": {"name": "Support"}}),
+            "info fields are not supported",
+        ),
+        (
+            lambda document: document["servers"][0].update({"variables": {}}),
+            "server fields are not supported",
+        ),
+        (
+            lambda document: document["components"].update({"callbacks": {}}),
+            "components fields are not supported",
+        ),
+        (
+            lambda document: document["components"]["securitySchemes"]["ApiKeyAuth"].update(
+                {"scheme": "bearer"}
+            ),
+            "security scheme fields are not supported",
+        ),
+        (
+            lambda document: document["paths"]["/custom-tools/{name}"].update({"trace": {}}),
+            "path item fields are not supported",
+        ),
         (
             lambda document: document["paths"]["/custom-tools/{name}"]["get"]["parameters"][
                 0
@@ -176,7 +201,25 @@ def test_normalize_produces_an_openapi_free_ir() -> None:
             lambda document: document["paths"]["/custom-tools/{name}"]["get"].update(
                 {"servers": [{"url": "https://other.example/api"}]}
             ),
-            "server overrides are not supported",
+            "operation fields are not supported",
+        ),
+        (
+            lambda document: document["paths"]["/custom-tools/{name}"]["patch"][
+                "requestBody"
+            ].update({"encoding": {}}),
+            "request body fields are not supported",
+        ),
+        (
+            lambda document: document["components"]["responses"]["CustomToolResponse"].update(
+                {"headers": {"x-request-id": {"schema": {"type": "string"}}}}
+            ),
+            "response fields are not supported",
+        ),
+        (
+            lambda document: document["components"]["responses"]["CustomToolResponse"]["content"][
+                "application/json"
+            ].update({"encoding": {}}),
+            "media type fields are not supported",
         ),
         (
             lambda document: document["components"]["schemas"]["CustomTool"]["properties"].update(

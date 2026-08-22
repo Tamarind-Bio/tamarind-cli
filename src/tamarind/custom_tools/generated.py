@@ -16,12 +16,6 @@ def _segment(value: str) -> str:
     return quote(value, safe="")
 
 
-GpuType: TypeAlias = Literal["None", "T4", "L4", "L40S", "A10", "A100"]
-MemorySize: TypeAlias = Literal[
-    "8Gi", "12Gi", "24Gi", "32Gi", "48Gi", "64Gi", "90Gi", "96Gi", "180Gi"
-]
-
-
 class PublicBuildEvent(TypedDict):
     message: str
     timestamp: int
@@ -41,6 +35,9 @@ class PublicCreateCustomToolRequest(TypedDict):
     gpuType: NotRequired[GpuType]
     memory: NotRequired[MemorySize]
     name: str
+
+
+PublicToolStatus: TypeAlias = Literal["Draft", "Building", "Deployed"]
 
 
 class PublicCustomTool(TypedDict):
@@ -95,9 +92,6 @@ class PublicStatus(TypedDict):
     status: str
 
 
-PublicToolStatus: TypeAlias = Literal["Draft", "Building", "Deployed"]
-
-
 class PublicUpdateCustomToolRequest(TypedDict):
     autoPublish: NotRequired[bool | None]
     cpu: NotRequired[int | None]
@@ -124,6 +118,10 @@ class PublicUploadSession(TypedDict):
     uploadUrl: str
 
 
+PublicVersionOrigin: TypeAlias = Literal["tamarind", "build", "save", "github", "rollback"]
+PublicVersionStatus: TypeAlias = Literal["Queued", "Running", "Complete", "Stopped"]
+
+
 class PublicVersion(TypedDict):
     buildCompletedAt: str | None
     buildDurationSeconds: int | None
@@ -135,14 +133,14 @@ class PublicVersion(TypedDict):
     versionName: str
 
 
-PublicVersionOrigin: TypeAlias = Literal["tamarind", "build", "save", "github", "rollback"]
-
-
 class PublicVersionPage(TypedDict):
     items: list[PublicVersion]
 
 
-PublicVersionStatus: TypeAlias = Literal["Queued", "Running", "Complete", "Stopped"]
+GpuType: TypeAlias = Literal["None", "T4", "L4", "L40S", "A10", "A100"]
+MemorySize: TypeAlias = Literal[
+    "8Gi", "12Gi", "24Gi", "32Gi", "48Gi", "64Gi", "90Gi", "96Gi", "180Gi"
+]
 
 
 class GeneratedCustomToolsTransport:

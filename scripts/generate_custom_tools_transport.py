@@ -136,6 +136,45 @@ def _model(definition: SchemaDefinition) -> str:
     return "\n".join(lines)
 
 
+def _schema_references(schema: Schema) -> set[str]:
+    references = {schema.reference} if schema.kind == "reference" and schema.reference else set()
+    if schema.items is not None:
+        references.update(_schema_references(schema.items))
+    for field in schema.fields:
+        references.update(_schema_references(field.schema))
+    if isinstance(schema.additional_properties, Schema):
+        references.update(_schema_references(schema.additional_properties))
+    return references
+
+
+def _ordered_schema_definitions(api: Api) -> list[SchemaDefinition]:
+    by_name = {definition.name: definition for definition in api.schemas}
+    if len(by_name) != len(api.schemas):
+        raise ValueError("Schema definitions must have unique names")
+    ordered: list[SchemaDefinition] = []
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(name: str) -> None:
+        if name in visited:
+            return
+        if name in visiting:
+            raise ValueError(f"Recursive schema dependency reached the Python emitter: {name}")
+        definition = by_name.get(name)
+        if definition is None:
+            raise ValueError(f"Schema reference target is missing from the IR: {name}")
+        visiting.add(name)
+        for dependency in sorted(_schema_references(definition.schema)):
+            visit(dependency)
+        visiting.remove(name)
+        visited.add(name)
+        ordered.append(definition)
+
+    for definition in api.schemas:
+        visit(definition.name)
+    return ordered
+
+
 def _parameter_annotation(parameter: Parameter) -> str:
     if parameter.schema.nullable:
         raise ValueError(f"Wire parameter cannot be nullable: {parameter.wire_name}")
@@ -253,8 +292,8 @@ def _method(operation: Operation, *, async_method: bool) -> tuple[str, str]:
 def emit_python(api: Api) -> str:
     """Render Python using only the normalized representation."""
 
+    models = [_model(definition) for definition in _ordered_schema_definitions(api)]
     aliases = _property_aliases(api)
-    models = [_model(definition) for definition in api.schemas]
     methods: list[str] = []
     emitted_names: set[str] = set()
     for operation in api.operations:
@@ -290,9 +329,9 @@ def emit_python(api: Api) -> str:
             "def _segment(value: str) -> str:",
             "    return quote(value, safe='')",
             "",
-            *aliases,
-            "",
             *models,
+            "",
+            *aliases,
             "",
             "class GeneratedCustomToolsTransport:",
             "    def __init__(self, client: HTTPClient):",

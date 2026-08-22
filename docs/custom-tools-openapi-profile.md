@@ -34,6 +34,12 @@ than the entire OpenAPI specification.
 - Scalar enumerations and constants, defaults, typed maps, and nullable schemas represented as
   `anyOf: [<schema>, {"type": "null"}]`.
 
+Every supported OpenAPI object kind has a closed field allowlist. Documentation-only
+`title`, `summary`, `description`, `tags`, and the extracted `x-doc-group` annotation may
+be accepted where applicable without affecting the transport. Any other field is rejected,
+even when it is valid in general OpenAPI, unless the IR and emitter explicitly support its
+transport behavior.
+
 ## Explicit non-goals
 
 The validator rejects these constructs with a location-specific error:

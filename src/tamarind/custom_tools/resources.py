@@ -576,7 +576,9 @@ async def _await_with_timeout(awaitable: Awaitable[T], remaining: float | None) 
         )
     except asyncio.TimeoutError:
         raise CustomToolBuildTimeoutError("Custom Tool build monitoring timed out") from None
-    except TamarindError:
+    except TamarindError as exc:
+        if isinstance(exc.__cause__, httpx.TimeoutException):
+            raise CustomToolBuildTimeoutError("Custom Tool build monitoring timed out") from None
         raise
 
 

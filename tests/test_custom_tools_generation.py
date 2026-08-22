@@ -7,6 +7,7 @@ import subprocess
 import sys
 
 from tamarind_codegen.custom_tools import normalize
+from scripts.generate_custom_tools_transport import generate
 
 
 def test_openapi_extraction_keeps_only_the_custom_tools_dependency_closure(
@@ -146,6 +147,28 @@ def test_generated_transport_is_importable(tmp_path: Path) -> None:
     assert module.OPENAPI_SERVER_URL == "https://app.tamarind.bio/api/"
     assert hasattr(module.GeneratedCustomToolsTransport, "deploy_custom_tool")
     assert hasattr(module.GeneratedCustomToolsTransport, "get_custom_tool_version_async")
+
+
+def test_generated_aliases_follow_schema_dependency_order(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    document = json.loads((root / "openapi/custom-tools-v1.json").read_text())
+    schemas = document["components"]["schemas"]
+    document["components"]["schemas"] = {
+        "PublicVersionList": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/PublicVersion"},
+        },
+        **schemas,
+    }
+    generated = tmp_path / "generated_forward_alias.py"
+    generated.write_text(generate(document))
+
+    module_spec = importlib.util.spec_from_file_location("generated_forward_alias", generated)
+    assert module_spec is not None and module_spec.loader is not None
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+
+    assert module.PublicVersionList == list[module.PublicVersion]
 
 
 def test_version_routes_use_numbered_version_handles() -> None:

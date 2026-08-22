@@ -9,6 +9,41 @@ from urllib.parse import urlsplit
 HTTP_METHODS = {"delete", "get", "patch", "post", "put"}
 PARAMETER_LOCATIONS = {"path", "query"}
 SCHEMA_TYPES = {"array", "boolean", "integer", "null", "number", "object", "string"}
+DOCUMENT_FIELDS = {"components", "info", "openapi", "paths", "security", "servers"}
+INFO_FIELDS = {"description", "summary", "title", "version"}
+SERVER_FIELDS = {"description", "url"}
+COMPONENT_FIELDS = {
+    "parameters",
+    "requestBodies",
+    "responses",
+    "schemas",
+    "securitySchemes",
+}
+PATH_ITEM_FIELDS = HTTP_METHODS | {"description", "parameters", "summary"}
+OPERATION_FIELDS = {
+    "description",
+    "operationId",
+    "parameters",
+    "requestBody",
+    "responses",
+    "summary",
+    "tags",
+    "x-doc-group",
+}
+PARAMETER_FIELDS = {
+    "allowReserved",
+    "description",
+    "explode",
+    "in",
+    "name",
+    "required",
+    "schema",
+    "style",
+}
+REQUEST_BODY_FIELDS = {"content", "description", "required"}
+RESPONSE_FIELDS = {"content", "description"}
+MEDIA_TYPE_FIELDS = {"schema"}
+SECURITY_SCHEME_FIELDS = {"description", "in", "name", "type"}
 COMPOSITION_KEYS = {"allOf", "not", "oneOf"}
 CONSTRAINT_KEYS = {"maxLength", "maximum", "minLength", "minimum", "pattern"}
 SCHEMA_ANNOTATIONS = {"default", "description", "title"}
@@ -31,6 +66,16 @@ class ProfileViolation(ValueError):
         super().__init__(f"{location}: {message}")
         self.location = location
         self.message = message
+
+
+def _reject_unsupported_fields(
+    value: Mapping[str, Any], allowed: set[str], location: str, object_name: str
+) -> None:
+    unsupported = set(value) - allowed
+    if unsupported:
+        raise ProfileViolation(
+            location, f"{object_name} fields are not supported: {sorted(unsupported)}"
+        )
 
 
 def _mapping(value: object, location: str) -> Mapping[str, Any]:
@@ -225,6 +270,7 @@ def _validate_schema(
 
 def _validate_parameter(document: Mapping[str, Any], value: object, location: str) -> None:
     parameter = _dereference(document, value, location, "parameters")
+    _reject_unsupported_fields(parameter, PARAMETER_FIELDS, location, "parameter")
     name = parameter.get("name")
     if not isinstance(name, str) or not name:
         raise ProfileViolation(f"{location}.name", "must be a non-empty string")
@@ -235,20 +281,6 @@ def _validate_parameter(document: Mapping[str, Any], value: object, location: st
         raise ProfileViolation(location, "path parameters must be required")
     if "schema" not in parameter:
         raise ProfileViolation(location, "parameters must declare a schema")
-    unsupported = set(parameter) - {
-        "allowReserved",
-        "description",
-        "explode",
-        "in",
-        "name",
-        "required",
-        "schema",
-        "style",
-    }
-    if unsupported:
-        raise ProfileViolation(
-            location, f"parameter fields are not supported: {sorted(unsupported)}"
-        )
     expected_style = "simple" if parameter_location == "path" else "form"
     expected_explode = parameter_location == "query"
     if parameter.get("style", expected_style) != expected_style:
@@ -265,8 +297,7 @@ def _validate_server_and_auth(document: Mapping[str, Any]) -> None:
     if len(servers) != 1:
         raise ProfileViolation("servers", "exactly one global server is required")
     server = _mapping(servers[0], "servers[0]")
-    if set(server) - {"description", "url"}:
-        raise ProfileViolation("servers[0]", "server variables and extensions are not supported")
+    _reject_unsupported_fields(server, SERVER_FIELDS, "servers[0]", "server")
     url = server.get("url")
     if not isinstance(url, str) or "{" in url or "}" in url:
         raise ProfileViolation("servers[0].url", "must be a concrete HTTPS URL")
@@ -283,6 +314,14 @@ def _validate_server_and_auth(document: Mapping[str, Any]) -> None:
 
     components = _mapping(document.get("components", {}), "components")
     schemes = _mapping(components.get("securitySchemes", {}), "components.securitySchemes")
+    for name, raw_scheme in schemes.items():
+        scheme = _mapping(raw_scheme, f"components.securitySchemes.{name}")
+        _reject_unsupported_fields(
+            scheme,
+            SECURITY_SCHEME_FIELDS,
+            f"components.securitySchemes.{name}",
+            "security scheme",
+        )
     matching = [
         name
         for name, raw_scheme in schemes.items()
@@ -291,7 +330,7 @@ def _validate_server_and_auth(document: Mapping[str, Any]) -> None:
         and raw_scheme.get("in") == "header"
         and str(raw_scheme.get("name", "")).lower() == "x-api-key"
     ]
-    if len(matching) != 1:
+    if len(schemes) != 1 or len(matching) != 1:
         raise ProfileViolation(
             "components.securitySchemes", "exactly one x-api-key header scheme is required"
         )
@@ -314,6 +353,9 @@ def _json_schema(
         )
     media_type = next(iter(media))
     json_media = _mapping(media[media_type], f"{location}.{media_type}")
+    _reject_unsupported_fields(
+        json_media, MEDIA_TYPE_FIELDS, f"{location}.{media_type}", "media type"
+    )
     if "schema" not in json_media:
         raise ProfileViolation(location, f"{media_type} content must declare a schema")
     _validate_schema(document, json_media["schema"], f"{location}.{media_type}.schema")
@@ -321,6 +363,9 @@ def _json_schema(
 
 def _validate_request_body(document: Mapping[str, Any], value: object, location: str) -> None:
     body = _dereference(document, value, location, "requestBodies")
+    _reject_unsupported_fields(body, REQUEST_BODY_FIELDS, location, "request body")
+    if "required" in body and not isinstance(body["required"], bool):
+        raise ProfileViolation(f"{location}.required", "must be a boolean")
     _json_schema(
         document,
         body.get("content"),
@@ -331,6 +376,7 @@ def _validate_request_body(document: Mapping[str, Any], value: object, location:
 
 def _validate_response(document: Mapping[str, Any], value: object, location: str) -> None:
     response = _dereference(document, value, location, "responses")
+    _reject_unsupported_fields(response, RESPONSE_FIELDS, location, "response")
     if not isinstance(response.get("description"), str):
         raise ProfileViolation(f"{location}.description", "must be a string")
     if "content" in response and response["content"]:
@@ -340,60 +386,62 @@ def _validate_response(document: Mapping[str, Any], value: object, location: str
             f"{location}.content",
             frozenset({"application/json", "application/problem+json"}),
         )
-    if "links" in response:
-        raise ProfileViolation(f"{location}.links", "response links are not supported")
 
 
 def validate_profile(document: Mapping[str, Any]) -> None:
     """Reject constructs the normalized IR and Python generator do not promise to support."""
 
+    _reject_unsupported_fields(document, DOCUMENT_FIELDS, "document", "document")
     if document.get("openapi") not in {"3.1.0", "3.1.1"}:
         raise ProfileViolation("openapi", "the profile requires OpenAPI 3.1")
-    if "webhooks" in document:
-        raise ProfileViolation("webhooks", "webhooks are not supported")
-    if document.get("jsonSchemaDialect") is not None:
-        raise ProfileViolation("jsonSchemaDialect", "custom JSON Schema dialects are not supported")
     info = _mapping(document.get("info"), "info")
+    _reject_unsupported_fields(info, INFO_FIELDS, "info", "info")
     if not isinstance(info.get("title"), str) or not isinstance(info.get("version"), str):
         raise ProfileViolation("info", "title and version must be strings")
-    _validate_server_and_auth(document)
 
     components = _mapping(document.get("components", {}), "components")
+    _reject_unsupported_fields(components, COMPONENT_FIELDS, "components", "components")
+    _validate_server_and_auth(document)
     schemas = _mapping(components.get("schemas", {}), "components.schemas")
     for name, schema in schemas.items():
         _validate_schema(document, schema, f"components.schemas.{name}")
+    parameters = _mapping(components.get("parameters", {}), "components.parameters")
+    for name, parameter in parameters.items():
+        _validate_parameter(document, parameter, f"components.parameters.{name}")
+    request_bodies = _mapping(components.get("requestBodies", {}), "components.requestBodies")
+    for name, request_body in request_bodies.items():
+        _validate_request_body(document, request_body, f"components.requestBodies.{name}")
+    component_responses = _mapping(components.get("responses", {}), "components.responses")
+    for name, response in component_responses.items():
+        _validate_response(document, response, f"components.responses.{name}")
 
     paths = _mapping(document.get("paths"), "paths")
     operation_ids: set[str] = set()
     for path, raw_path_item in paths.items():
+        if not isinstance(path, str) or not path.startswith("/"):
+            raise ProfileViolation(f"paths.{path}", "path keys must start with '/'")
         path_item = _mapping(raw_path_item, f"paths.{path}")
-        for index, parameter in enumerate(path_item.get("parameters", [])):
+        _reject_unsupported_fields(path_item, PATH_ITEM_FIELDS, f"paths.{path}", "path item")
+        path_parameters = _sequence(path_item.get("parameters", []), f"paths.{path}.parameters")
+        for index, parameter in enumerate(path_parameters):
             _validate_parameter(document, parameter, f"paths.{path}.parameters[{index}]")
         for method, raw_operation in path_item.items():
-            if method == "parameters" or method.startswith("x-"):
+            if method in {"description", "parameters", "summary"}:
                 continue
-            if method not in HTTP_METHODS:
-                raise ProfileViolation(f"paths.{path}.{method}", "HTTP method is not supported")
             operation = _mapping(raw_operation, f"paths.{path}.{method}")
-            if "servers" in operation or "servers" in path_item:
-                raise ProfileViolation(
-                    f"paths.{path}.{method}.servers", "server overrides are not supported"
-                )
-            if "security" in operation:
-                raise ProfileViolation(
-                    f"paths.{path}.{method}.security", "operation auth overrides are not supported"
-                )
-            if "callbacks" in operation:
-                raise ProfileViolation(
-                    f"paths.{path}.{method}.callbacks", "callbacks are not supported"
-                )
+            _reject_unsupported_fields(
+                operation, OPERATION_FIELDS, f"paths.{path}.{method}", "operation"
+            )
             operation_id = operation.get("operationId")
             if not isinstance(operation_id, str) or not operation_id:
                 raise ProfileViolation(f"paths.{path}.{method}.operationId", "is required")
             if operation_id in operation_ids:
                 raise ProfileViolation(f"paths.{path}.{method}.operationId", "must be unique")
             operation_ids.add(operation_id)
-            for index, parameter in enumerate(operation.get("parameters", [])):
+            operation_parameters = _sequence(
+                operation.get("parameters", []), f"paths.{path}.{method}.parameters"
+            )
+            for index, parameter in enumerate(operation_parameters):
                 _validate_parameter(
                     document, parameter, f"paths.{path}.{method}.parameters[{index}]"
                 )

@@ -536,6 +536,17 @@ def test_monitor_recomputes_the_deadline_after_log_poll(monkeypatch) -> None:
     assert refreshed is False
 
 
+def test_monitor_maps_http_request_timeout_to_build_timeout() -> None:
+    async def timed_out_request():
+        try:
+            raise httpx.ReadTimeout("request timed out")
+        except httpx.TimeoutException as exc:
+            raise resources.TamarindError("network error") from exc
+
+    with pytest.raises(resources.CustomToolBuildTimeoutError, match="monitoring timed out"):
+        asyncio.run(resources._await_with_timeout(timed_out_request(), 1.0))
+
+
 def test_monitor_refreshes_version_after_empty_advancing_log_cursor(monkeypatch) -> None:
     requested_cursors: list[str | None] = []
 
