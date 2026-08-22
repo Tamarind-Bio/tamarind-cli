@@ -215,7 +215,7 @@ def test_property_aliases_ignore_documentation_metadata(tmp_path: Path) -> None:
     custom_tool["properties"]["gpuType"]["description"] = "GPU requested by the tool"
     spec = tmp_path / "documented_alias.json"
     generated = tmp_path / "generated_documented_alias.py"
-    spec.write_text(json.dumps(document))
+    spec.write_text(json.dumps(document), encoding="utf-8")
 
     subprocess.run(
         [
@@ -232,12 +232,12 @@ def test_property_aliases_ignore_documentation_metadata(tmp_path: Path) -> None:
 
 def test_generated_models_preserve_non_identifier_wire_keys(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
-    document = json.loads((root / "openapi/custom-tools-v1.json").read_text())
+    document = json.loads((root / "openapi/custom-tools-v1.json").read_text(encoding="utf-8"))
     model = document["components"]["schemas"]["PublicCreateCustomToolRequest"]
     model["properties"]["K"] = {"type": "string"}
     spec = tmp_path / "unicode-property.json"
     generated = tmp_path / "generated_unicode_property.py"
-    spec.write_text(json.dumps(document))
+    spec.write_text(json.dumps(document), encoding="utf-8")
 
     subprocess.run(
         [
@@ -249,16 +249,16 @@ def test_generated_models_preserve_non_identifier_wire_keys(tmp_path: Path) -> N
         check=True,
     )
 
-    assert "'K': NotRequired[str]" in generated.read_text()
+    assert "'K': NotRequired[str]" in generated.read_text(encoding="utf-8")
 
 
 def test_generated_models_reject_nfkc_ambiguous_schema_names(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
-    document = json.loads((root / "openapi/custom-tools-v1.json").read_text())
+    document = json.loads((root / "openapi/custom-tools-v1.json").read_text(encoding="utf-8"))
     document["components"]["schemas"]["K"] = {"type": "string"}
     spec = tmp_path / "unicode-schema.json"
     generated = tmp_path / "generated_unicode_schema.py"
-    spec.write_text(json.dumps(document))
+    spec.write_text(json.dumps(document), encoding="utf-8")
 
     with pytest.raises(subprocess.CalledProcessError):
         subprocess.run(
