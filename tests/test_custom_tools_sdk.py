@@ -547,12 +547,9 @@ def test_monitor_maps_http_request_timeout_to_build_timeout() -> None:
         asyncio.run(resources._await_with_timeout(timed_out_request(), 1.0))
 
 
-def test_monitor_refreshes_version_after_empty_advancing_log_cursor(monkeypatch) -> None:
-    requested_cursors: list[str | None] = []
-
-    async def logs(_version, *, cursor, **_kwargs):
-        requested_cursors.append(cursor)
-        return resources.BuildLogPage(items=(), status="SUCCEEDED", next_cursor="advanced")
+def test_monitor_without_callback_does_not_fetch_logs(monkeypatch) -> None:
+    async def logs(*_args, **_kwargs):
+        raise AssertionError("logs must not be fetched without an event callback")
 
     async def refresh(version, **_kwargs):
         return resources.Version(
@@ -586,16 +583,13 @@ def test_monitor_refreshes_version_after_empty_advancing_log_cursor(monkeypatch)
     completed = asyncio.run(version._monitor(timeout=1.0, interval=0.1, on_event=None))
 
     assert completed.status == "Complete"
-    assert requested_cursors == [None, "advanced"]
 
 
-def test_monitor_advances_log_progress_without_an_event_callback(monkeypatch) -> None:
-    requested_cursors: list[str | None] = []
+def test_monitor_without_callback_polls_until_complete(monkeypatch) -> None:
     refreshes = 0
 
-    async def logs(_version, *, cursor, **_kwargs):
-        requested_cursors.append(cursor)
-        return resources.BuildLogPage(items=(), status="RUNNING", next_cursor="advanced")
+    async def logs(*_args, **_kwargs):
+        raise AssertionError("logs must not be fetched without an event callback")
 
     async def refresh(version, **_kwargs):
         nonlocal refreshes
@@ -632,7 +626,7 @@ def test_monitor_advances_log_progress_without_an_event_callback(monkeypatch) ->
     completed = asyncio.run(version._monitor(timeout=1.0, interval=0.001, on_event=None))
 
     assert completed.status == "Complete"
-    assert requested_cursors == [None, "advanced", "advanced"]
+    assert refreshes == 2
 
 
 def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> None:

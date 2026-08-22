@@ -19,7 +19,8 @@ the profile validator and normalizer. The generator consumes only the normalized
 The first profile intentionally covers the public Custom Tools control-plane API rather
 than the entire OpenAPI specification.
 
-- OpenAPI 3.1 documents.
+- OpenAPI 3.1 documents using the default OpenAPI dialect or the standard JSON Schema
+  2020-12 dialect. Custom dialects are rejected.
 - One concrete global HTTPS server and one global `x-api-key` header security scheme.
 - HTTP `GET`, `POST`, `PUT`, `PATCH`, and `DELETE` operations with unique `operationId`s.
 - Non-null scalar path and query parameters. Path parameters must be required strings.

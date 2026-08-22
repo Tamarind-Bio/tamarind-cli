@@ -265,6 +265,12 @@ def test_normalize_produces_an_openapi_free_ir() -> None:
             "document fields are not supported",
         ),
         (
+            lambda document: document.update(
+                {"jsonSchemaDialect": "https://example.com/custom-dialect"}
+            ),
+            "only the standard OpenAPI and JSON Schema dialects are supported",
+        ),
+        (
             lambda document: document["info"].update({"contact": {"name": "Support"}}),
             "info fields are not supported",
         ),

@@ -19,6 +19,7 @@ def test_openapi_extraction_keeps_only_the_custom_tools_dependency_closure(
         json.dumps(
             {
                 "openapi": "3.1.0",
+                "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
                 "info": {"title": "test", "version": "1"},
                 "servers": [{"url": "https://app.tamarind.bio/api"}],
                 "security": [{"ApiKey": []}],
@@ -98,6 +99,7 @@ def test_openapi_extraction_keeps_only_the_custom_tools_dependency_closure(
 
     sliced = json.loads(output.read_text())
     assert set(sliced["paths"]) == {"/custom-tools"}
+    assert sliced["jsonSchemaDialect"] == "https://json-schema.org/draft/2020-12/schema"
     assert set(sliced["components"]["responses"]) == {"Error", "ToolResponse"}
     assert set(sliced["components"]["schemas"]) == {"Nested", "Tool"}
     assert set(sliced["components"]["securitySchemes"]) == {"ApiKey"}

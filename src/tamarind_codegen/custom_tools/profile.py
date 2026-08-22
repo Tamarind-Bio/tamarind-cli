@@ -9,7 +9,19 @@ from urllib.parse import urlsplit
 HTTP_METHODS = {"delete", "get", "patch", "post", "put"}
 PARAMETER_LOCATIONS = {"path", "query"}
 SCHEMA_TYPES = {"array", "boolean", "integer", "null", "number", "object", "string"}
-DOCUMENT_FIELDS = {"components", "info", "openapi", "paths", "security", "servers"}
+JSON_SCHEMA_DIALECTS = {
+    "https://json-schema.org/draft/2020-12/schema",
+    "https://spec.openapis.org/oas/3.1/dialect/base",
+}
+DOCUMENT_FIELDS = {
+    "components",
+    "info",
+    "jsonSchemaDialect",
+    "openapi",
+    "paths",
+    "security",
+    "servers",
+}
 INFO_FIELDS = {"description", "summary", "title", "version"}
 SERVER_FIELDS = {"description", "url"}
 COMPONENT_FIELDS = {
@@ -450,6 +462,13 @@ def validate_profile(document: Mapping[str, Any]) -> None:
     _reject_unsupported_fields(document, DOCUMENT_FIELDS, "document", "document")
     if document.get("openapi") not in {"3.1.0", "3.1.1"}:
         raise ProfileViolation("openapi", "the profile requires OpenAPI 3.1")
+    dialect = document.get("jsonSchemaDialect")
+    if dialect is not None and (
+        not isinstance(dialect, str) or dialect not in JSON_SCHEMA_DIALECTS
+    ):
+        raise ProfileViolation(
+            "jsonSchemaDialect", "only the standard OpenAPI and JSON Schema dialects are supported"
+        )
     info = _mapping(document.get("info"), "info")
     _reject_unsupported_fields(info, INFO_FIELDS, "info", "info")
     if not isinstance(info.get("title"), str) or not isinstance(info.get("version"), str):

@@ -278,7 +278,7 @@ class Version:
         self, *, timeout: float | None, interval: float, on_event: EventCallback | None
     ) -> "Version":
         deadline = None if timeout is None else _clock() + timeout
-        logs = _LogProgress()
+        logs = _LogProgress() if on_event is not None else None
         current = self
 
         def remaining_budget() -> float | None:
@@ -294,12 +294,12 @@ class Version:
         while True:
             if current.terminal:
                 return _require_success(current)
-            remaining = remaining_budget()
-            page = await _await_with_timeout(
-                current._logs_async(cursor=logs.cursor, request_timeout=remaining), remaining
-            )
-            events = logs.consume(page)
-            if on_event is not None:
+            if logs is not None and on_event is not None:
+                remaining = remaining_budget()
+                page = await _await_with_timeout(
+                    current._logs_async(cursor=logs.cursor, request_timeout=remaining), remaining
+                )
+                events = logs.consume(page)
                 for event in events:
                     on_event(event)
             remaining = remaining_budget()
@@ -307,12 +307,13 @@ class Version:
                 current._refresh_async(request_timeout=remaining), remaining
             )
             if current.terminal:
-                remaining = remaining_budget()
-                page = await _await_with_timeout(
-                    current._logs_async(cursor=logs.cursor, request_timeout=remaining), remaining
-                )
-                events = logs.consume(page)
-                if on_event is not None:
+                if logs is not None and on_event is not None:
+                    remaining = remaining_budget()
+                    page = await _await_with_timeout(
+                        current._logs_async(cursor=logs.cursor, request_timeout=remaining),
+                        remaining,
+                    )
+                    events = logs.consume(page)
                     for event in events:
                         on_event(event)
                 return _require_success(current)
