@@ -372,9 +372,9 @@ class CustomTools:
         timeout, interval = _validate_monitor_options(
             timeout=source_timeout, interval=poll_interval
         )
-        session = self._transport.create_custom_tool_upload(tool.name)
         archive = build_source_tree_archive(tree, max_bytes=MAX_TOOL_SOURCE_BYTES)
         try:
+            session = self._transport.create_custom_tool_upload(tool.name)
             _upload_archive(
                 session["uploadUrl"],
                 archive.content(),

@@ -140,13 +140,18 @@ def _annotation(schema: dict[str, Any]) -> str:
     if "prefixItems" in schema:
         raise ValueError("prefixItems schemas are outside the generated SDK profile")
     if "$ref" in schema:
+        ref = schema["$ref"]
+        if not isinstance(ref, str) or not ref.startswith("#/components/schemas/"):
+            raise ValueError(
+                f"External schema references are outside the generated SDK profile: {ref}"
+            )
         unsupported_siblings = set(schema) - {"$ref"} - REFERENCE_ANNOTATION_SIBLINGS
         if unsupported_siblings:
             raise ValueError(
                 "Schema reference siblings are outside the generated SDK profile: "
                 f"{sorted(unsupported_siblings)}"
             )
-        return schema["$ref"].rsplit("/", 1)[-1]
+        return ref.rsplit("/", 1)[-1]
     if "anyOf" in schema:
         unsupported_siblings = set(schema) - {"anyOf"} - REFERENCE_ANNOTATION_SIBLINGS
         if unsupported_siblings:
@@ -164,11 +169,40 @@ def _annotation(schema: dict[str, Any]) -> str:
                 f"{sorted(unsupported_siblings)}"
             )
         return " | ".join(dict.fromkeys(_annotation(part) for part in schema["oneOf"]))
+    kind = schema.get("type")
+    admitted_kinds = (
+        set(kind) if isinstance(kind, list) else {kind} if isinstance(kind, str) else set()
+    )
+
+    def admitted(value: object) -> bool:
+        if not admitted_kinds:
+            return True
+        if value is None:
+            return "null" in admitted_kinds
+        if isinstance(value, bool):
+            return "boolean" in admitted_kinds
+        if isinstance(value, int):
+            return "integer" in admitted_kinds or "number" in admitted_kinds
+        if isinstance(value, float):
+            return "number" in admitted_kinds
+        if isinstance(value, str):
+            return "string" in admitted_kinds
+        if isinstance(value, list):
+            return "array" in admitted_kinds
+        if isinstance(value, dict):
+            return "object" in admitted_kinds
+        return False
+
     if "const" in schema:
+        if not admitted(schema["const"]):
+            raise ValueError("Const value conflicts with its declared schema type")
         return f"Literal[{schema['const']!r}]"
     if "enum" in schema:
+        if not isinstance(schema["enum"], list) or any(
+            not admitted(value) for value in schema["enum"]
+        ):
+            raise ValueError("Enum values conflict with their declared schema type")
         return "Literal[" + ", ".join(repr(value) for value in schema["enum"]) + "]"
-    kind = schema.get("type")
     if isinstance(kind, list):
         siblings = {key: value for key, value in schema.items() if key != "type"}
         return " | ".join(dict.fromkeys(_annotation({**siblings, "type": item}) for item in kind))

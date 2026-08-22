@@ -229,6 +229,46 @@ def test_build_caps_archive_at_the_server_source_limit(tmp_path: Path, monkeypat
     assert observed_limit == resources.MAX_TOOL_SOURCE_BYTES
 
 
+def test_build_constructs_archive_before_creating_upload_session(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _source(tmp_path)
+    events: list[str] = []
+
+    class Archive:
+        digest = "sha256:test"
+
+        def content(self):
+            raise AssertionError("upload must not start in this lifecycle test")
+
+        def close(self):
+            events.append("close")
+
+    class Transport:
+        def create_custom_tool_upload(self, _name):
+            events.append("session")
+            raise RuntimeError("session failed")
+
+    def build_archive(_tree, *, max_bytes):
+        assert max_bytes == resources.MAX_TOOL_SOURCE_BYTES
+        events.append("archive")
+        return Archive()
+
+    monkeypatch.setattr(resources, "build_source_tree_archive", build_archive)
+    collection = resources.CustomTools(Transport())  # type: ignore[arg-type]
+    tool = type("Tool", (), {"name": "example"})()
+
+    with pytest.raises(RuntimeError, match="session failed"):
+        collection._build(  # type: ignore[arg-type]
+            tool,
+            resources.inspect_source_tree(tmp_path),
+            source_timeout=1,
+            poll_interval=0.1,
+        )
+
+    assert events == ["archive", "session", "close"]
+
+
 @respx.mock
 def test_build_tracks_queued_deploy_by_source_ref(tmp_path: Path) -> None:
     _source(tmp_path)

@@ -546,6 +546,26 @@ def test_openapi_extraction_uses_the_public_path_boundary(tmp_path: Path) -> Non
     }
     unsupported_contracts.append((ref_sibling_model, "Schema reference siblings"))
 
+    external_ref = deepcopy(sliced)
+    external_ref["paths"]["/custom-tools"]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] = {"$ref": "https://schemas.example/str"}
+    unsupported_contracts.append((external_ref, "External schema references"))
+
+    inconsistent_enum = deepcopy(sliced)
+    inconsistent_enum["components"]["schemas"]["CreatePayload"]["properties"]["name"] = {
+        "type": "string",
+        "enum": ["ok", 1],
+    }
+    unsupported_contracts.append((inconsistent_enum, "Enum values conflict"))
+
+    inconsistent_const = deepcopy(sliced)
+    inconsistent_const["components"]["schemas"]["CreatePayload"]["properties"]["name"] = {
+        "type": "integer",
+        "const": "one",
+    }
+    unsupported_contracts.append((inconsistent_const, "Const value conflicts"))
+
     tuple_model = deepcopy(sliced)
     tuple_model["components"]["schemas"]["CreatePayload"]["properties"]["name"] = {
         "type": "array",
