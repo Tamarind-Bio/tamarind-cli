@@ -701,6 +701,33 @@ def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> N
     assert delivered == [first, final, trailing]
 
 
+def test_monitor_rechecks_deadline_after_terminal_log_callback(monkeypatch) -> None:
+    ticks = iter((0.0, 0.1, 1.1))
+    monkeypatch.setattr(resources, "_clock", lambda: next(ticks))
+
+    async def logs(*_args, **_kwargs):
+        return resources.BuildLogPage(
+            items=(resources.BuildEvent("complete", 1),), status="SUCCEEDED"
+        )
+
+    monkeypatch.setattr(resources.Version, "_logs_async", logs)
+    version = resources.Version(
+        name="v1",
+        source_revision="a" * 40,
+        status="Complete",
+        origin="build",
+        started_at="2026-08-15T00:00:00Z",
+        completed_at="2026-08-15T00:01:00Z",
+        duration_seconds=60,
+        error=None,
+        tool_name="example",
+        _collection=None,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(resources.CustomToolBuildTimeoutError, match="monitoring timed out"):
+        asyncio.run(version._monitor(timeout=1.0, interval=0.1, on_event=lambda _event: None))
+
+
 def test_log_progress_deduplicates_cumulative_pages_without_a_cursor() -> None:
     first = resources.BuildEvent("first", 1)
     second = resources.BuildEvent("second", 2)

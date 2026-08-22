@@ -287,7 +287,8 @@ class Version:
             remaining = deadline - _clock()
             if remaining <= 0:
                 raise CustomToolBuildTimeoutError(
-                    f"Custom Tool Version {self.tool_name}/{self.name} is still {current.status}"
+                    f"Custom Tool Version {self.tool_name}/{self.name} monitoring timed out "
+                    f"while status is {current.status}"
                 )
             return remaining
 
@@ -301,6 +302,8 @@ class Version:
             )
             for event in logs.consume(page):
                 on_event(event)
+                remaining_budget()
+            remaining_budget()
             return page.next_cursor is not None and page.next_cursor != requested_cursor
 
         while not current.terminal:
