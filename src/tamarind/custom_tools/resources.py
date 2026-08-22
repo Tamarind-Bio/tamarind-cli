@@ -435,20 +435,19 @@ def _wait_for_source_ref(
     tool: CustomTool, source_hash: str, *, timeout: float, interval: float
 ) -> str:
     deadline = _clock() + timeout
+
+    def timeout_error() -> CustomToolUploadError:
+        return CustomToolUploadError(f"Source extraction did not finish within {timeout:g} seconds")
+
     while True:
-        remaining = deadline - _clock()
-        if remaining <= 0:
-            raise CustomToolUploadError(
-                f"Source extraction did not finish within {timeout:g} seconds"
-            )
+        remaining = _remaining_poll_budget(deadline, timeout_error)
         try:
             current = tool._refresh(request_timeout=remaining)
         except TamarindError as exc:
             if not isinstance(exc.__cause__, httpx.TimeoutException):
                 raise
-            raise CustomToolUploadError(
-                f"Source extraction did not finish within {timeout:g} seconds"
-            ) from None
+            raise timeout_error() from None
+        _remaining_poll_budget(deadline, timeout_error)
         if current.connection_error:
             raise CustomToolUploadError(f"Source extraction failed: {current.connection_error}")
         if current.source_hash == source_hash and current.source_ref is not None:
@@ -466,26 +465,36 @@ def _wait_for_version_ref(
     interval: float,
 ) -> Version:
     deadline = _clock() + timeout
+
+    def timeout_error() -> CustomToolBuildTimeoutError:
+        return CustomToolBuildTimeoutError(
+            f"Custom Tool deploy {tool_name}@{source_ref[:12]} did not receive a numbered version "
+            f"within {timeout:g} seconds"
+        )
+
     while True:
-        remaining = deadline - _clock()
-        if remaining <= 0:
-            raise CustomToolBuildTimeoutError(
-                f"Custom Tool deploy {tool_name}@{source_ref[:12]} did not receive a numbered version "
-                f"within {timeout:g} seconds"
-            )
+        remaining = _remaining_poll_budget(deadline, timeout_error)
         try:
             versions = collection._versions(tool_name, limit=50, request_timeout=remaining).items
         except TamarindError as exc:
             if not isinstance(exc.__cause__, httpx.TimeoutException):
                 raise
-            raise CustomToolBuildTimeoutError(
-                f"Custom Tool deploy {tool_name}@{source_ref[:12]} did not receive a numbered version "
-                f"within {timeout:g} seconds"
-            ) from None
+            raise timeout_error() from None
+        _remaining_poll_budget(deadline, timeout_error)
         for version in versions:
             if version.source_revision == source_ref and version.name not in exclude_versions:
                 return version
         time.sleep(min(interval, max(0.0, deadline - _clock())))
+
+
+def _remaining_poll_budget(
+    deadline: float,
+    timeout_error: Callable[[], CustomToolUploadError | CustomToolBuildTimeoutError],
+) -> float:
+    remaining = deadline - _clock()
+    if remaining <= 0:
+        raise timeout_error()
+    return remaining
 
 
 def _upload_archive(

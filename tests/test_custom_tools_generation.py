@@ -6,6 +6,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 from tamarind_codegen.custom_tools import normalize
 
 
@@ -106,7 +108,7 @@ def test_openapi_extraction_keeps_only_the_custom_tools_dependency_closure(
     assert normalize(sliced).operations[0].operation_id == "listCustomTools"
 
 
-def test_openapi_extraction_consumes_path_item_components(tmp_path: Path) -> None:
+def test_openapi_extraction_consumes_and_merges_path_item_components(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     source = tmp_path / "public.json"
     output = tmp_path / "custom-tools.json"
@@ -117,7 +119,15 @@ def test_openapi_extraction_consumes_path_item_components(tmp_path: Path) -> Non
                 "info": {"title": "test", "version": "1"},
                 "servers": [{"url": "https://app.tamarind.bio/api"}],
                 "security": [{"ApiKey": []}],
-                "paths": {"/custom-tools": {"$ref": "#/components/pathItems/CustomTools"}},
+                "paths": {
+                    "/custom-tools": {
+                        "$ref": "#/components/pathItems/CustomTools",
+                        "post": {
+                            "operationId": "createCustomTool",
+                            "responses": {"201": {"description": "created"}},
+                        },
+                    }
+                },
                 "components": {
                     "pathItems": {
                         "CustomTools": {
@@ -147,7 +157,55 @@ def test_openapi_extraction_consumes_path_item_components(tmp_path: Path) -> Non
 
     sliced = json.loads(output.read_text())
     assert "pathItems" not in sliced["components"]
-    assert normalize(sliced).operations[0].operation_id == "listCustomTools"
+    assert {operation.operation_id for operation in normalize(sliced).operations} == {
+        "createCustomTool",
+        "listCustomTools",
+    }
+
+
+def test_openapi_extraction_rejects_conflicting_path_item_siblings(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    source = tmp_path / "public.json"
+    output = tmp_path / "custom-tools.json"
+    source.write_text(
+        json.dumps(
+            {
+                "openapi": "3.1.0",
+                "info": {"title": "test", "version": "1"},
+                "paths": {
+                    "/custom-tools": {
+                        "$ref": "#/components/pathItems/CustomTools",
+                        "get": {
+                            "operationId": "replacement",
+                            "responses": {"200": {"description": "replacement"}},
+                        },
+                    }
+                },
+                "components": {
+                    "pathItems": {
+                        "CustomTools": {
+                            "get": {
+                                "operationId": "listCustomTools",
+                                "responses": {"200": {"description": "ok"}},
+                            }
+                        }
+                    }
+                },
+            }
+        )
+    )
+
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.run(
+            [
+                sys.executable,
+                str(root / "scripts/extract_custom_tools_openapi.py"),
+                str(source),
+                str(output),
+            ],
+            check=True,
+            capture_output=True,
+        )
 
 
 def test_property_aliases_ignore_documentation_metadata(tmp_path: Path) -> None:

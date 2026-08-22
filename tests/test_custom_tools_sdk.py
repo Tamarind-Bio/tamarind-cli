@@ -326,6 +326,25 @@ def test_source_poll_rejects_error_before_matching_digest() -> None:
         )
 
 
+def test_source_poll_rechecks_deadline_after_successful_response(monkeypatch) -> None:
+    ticks = iter((0.0, 0.1, 1.1))
+    monkeypatch.setattr(resources, "_clock", lambda: next(ticks))
+    current = type(
+        "Current",
+        (),
+        {"connection_error": None, "source_hash": "sha256:new", "source_ref": "source-ref"},
+    )()
+    tool = type("Tool", (), {"_refresh": lambda self, **_kwargs: current})()
+
+    with pytest.raises(CustomToolUploadError, match="did not finish within 1 seconds"):
+        resources._wait_for_source_ref(  # type: ignore[arg-type]
+            tool,
+            "sha256:new",
+            timeout=1,
+            interval=0.1,
+        )
+
+
 def test_version_poll_request_timeout_maps_to_build_deadline() -> None:
     from tamarind.errors import TamarindError
 
@@ -336,6 +355,24 @@ def test_version_poll_request_timeout_maps_to_build_deadline() -> None:
         (),
         {"_versions": lambda self, *_args, **_kwargs: (_ for _ in ()).throw(timeout)},
     )()
+
+    with pytest.raises(CustomToolBuildTimeoutError, match="did not receive a numbered version"):
+        resources._wait_for_version_ref(  # type: ignore[arg-type]
+            collection,
+            "example",
+            "a" * 40,
+            exclude_versions=set(),
+            timeout=1,
+            interval=0.1,
+        )
+
+
+def test_version_poll_rechecks_deadline_after_successful_response(monkeypatch) -> None:
+    ticks = iter((0.0, 0.1, 1.1))
+    monkeypatch.setattr(resources, "_clock", lambda: next(ticks))
+    version = type("Version", (), {"source_revision": "a" * 40, "name": "v1"})()
+    page = type("Page", (), {"items": (version,)})()
+    collection = type("Collection", (), {"_versions": lambda self, *_args, **_kwargs: page})()
 
     with pytest.raises(CustomToolBuildTimeoutError, match="did not receive a numbered version"):
         resources._wait_for_version_ref(  # type: ignore[arg-type]

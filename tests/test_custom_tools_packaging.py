@@ -185,6 +185,66 @@ def test_archive_rejects_portable_name_collisions() -> None:
         packaging.build_source_tree_archive(tree)
 
 
+@pytest.mark.parametrize("reverse_files", [False, True])
+def test_archive_rejects_file_and_directory_prefix_collisions(
+    tmp_path: Path, reverse_files: bool
+) -> None:
+    source = tmp_path / "source.py"
+    source.write_text("pass\n")
+    inspected = packaging.SourceFile.inspect("source.py", source, tmp_path)
+    blocking_file = packaging.SourceFile(
+        relative="Foo",
+        path=inspected.path,
+        root=inspected.root,
+        device=inspected.device,
+        inode=inspected.inode,
+        size=inspected.size,
+        modified_ns=inspected.modified_ns,
+        mode=inspected.mode,
+        content_sha256=inspected.content_sha256,
+    )
+    nested_file = packaging.SourceFile(
+        relative="foo/bar.py",
+        path=inspected.path,
+        root=inspected.root,
+        device=inspected.device,
+        inode=inspected.inode,
+        size=inspected.size,
+        modified_ns=inspected.modified_ns,
+        mode=inspected.mode,
+        content_sha256=inspected.content_sha256,
+    )
+    files = (blocking_file, nested_file)
+    tree = packaging.SourceTree(
+        files=tuple(reversed(files)) if reverse_files else files,
+        empty_directories=(),
+    )
+
+    with pytest.raises(CustomToolUploadError, match="colliding portable paths"):
+        packaging.build_source_tree_archive(tree)
+
+
+def test_archive_rejects_file_and_synthetic_directory_prefix_collisions(tmp_path: Path) -> None:
+    source = tmp_path / "source.py"
+    source.write_text("pass\n")
+    inspected = packaging.SourceFile.inspect("source.py", source, tmp_path)
+    blocking_file = packaging.SourceFile(
+        relative="Foo",
+        path=inspected.path,
+        root=inspected.root,
+        device=inspected.device,
+        inode=inspected.inode,
+        size=inspected.size,
+        modified_ns=inspected.modified_ns,
+        mode=inspected.mode,
+        content_sha256=inspected.content_sha256,
+    )
+    tree = packaging.SourceTree(files=(blocking_file,), empty_directories=("foo/bar",))
+
+    with pytest.raises(CustomToolUploadError, match="colliding portable paths"):
+        packaging.build_source_tree_archive(tree)
+
+
 def test_inspection_rejects_directory_traversal_errors(tmp_path: Path, monkeypatch) -> None:
     _valid_source(tmp_path)
 

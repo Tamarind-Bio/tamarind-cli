@@ -95,7 +95,12 @@ def _resolve_component(
     target = components.get(name)
     if not isinstance(target, dict):
         raise ValueError(f"Unresolved {kind} reference: {ref}")
-    return _resolve_component(target, kind, components, seen | {ref})
+    resolved = _resolve_component(target, kind, components, seen | {ref})
+    siblings = {key: child for key, child in value.items() if key != "$ref"}
+    conflicts = resolved.keys() & siblings.keys()
+    if conflicts:
+        raise ValueError(f"Ambiguous {kind} reference siblings for {ref}: {sorted(conflicts)}")
+    return {**resolved, **siblings}
 
 
 def extract(spec: dict[str, Any]) -> dict[str, Any]:

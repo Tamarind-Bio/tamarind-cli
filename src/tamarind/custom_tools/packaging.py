@@ -292,15 +292,7 @@ def build_source_tree_archive(
         mode = _EXECUTABLE_FILE_MODE if executable else _REGULAR_FILE_MODE
         entries.append((source_file.relative, source_file, mode))
     _enforce_source_entry_limit(len(entries))
-    portable_names: set[str] = set()
-    for relative, _, _ in entries:
-        archive_name = relative.removesuffix("/")
-        portable_name = _validate_archive_name(archive_name, Path(archive_name))
-        if portable_name in portable_names:
-            raise CustomToolUploadError(
-                f"Source archive contains colliding portable paths: {archive_name}"
-            )
-        portable_names.add(portable_name)
+    _validate_portable_manifest(entries)
 
     output = _CappedArchive(max_bytes)
     try:
@@ -335,6 +327,34 @@ def build_source_tree_archive(
     except BaseException:
         output.close()
         raise
+
+
+def _validate_portable_manifest(entries: list[tuple[str, SourceFile | None, int]]) -> None:
+    entry_paths: set[str] = set()
+    file_paths: set[str] = set()
+    required_directories: set[str] = set()
+    for relative, _, mode in entries:
+        archive_name = relative.removesuffix("/")
+        portable_name = _validate_archive_name(archive_name, Path(archive_name))
+        parts = portable_name.split("/")
+        ancestors = {"/".join(parts[:index]) for index in range(1, len(parts))}
+        is_directory = stat.S_ISDIR(mode)
+        collision = (
+            portable_name in entry_paths
+            or portable_name in required_directories
+            and not is_directory
+            or bool(ancestors & file_paths)
+        )
+        if collision:
+            raise CustomToolUploadError(
+                f"Source archive contains colliding portable paths: {archive_name}"
+            )
+        entry_paths.add(portable_name)
+        required_directories.update(ancestors)
+        if is_directory:
+            required_directories.add(portable_name)
+        else:
+            file_paths.add(portable_name)
 
 
 def is_link_like(path: Path) -> bool:
