@@ -297,9 +297,30 @@ def test_source_poll_request_timeout_maps_to_upload_deadline(monkeypatch) -> Non
     )()
 
     with pytest.raises(CustomToolUploadError, match="did not finish within 1 seconds"):
-        resources._wait_for_source(  # type: ignore[arg-type]
+        resources._wait_for_source_ref(  # type: ignore[arg-type]
             tool,
             "sha256:test",
+            timeout=1,
+            interval=0.1,
+        )
+
+
+def test_source_poll_rejects_error_before_matching_digest() -> None:
+    current = type(
+        "Current",
+        (),
+        {
+            "connection_error": "archive could not be extracted",
+            "source_hash": "sha256:new",
+            "source_ref": "old-ref",
+        },
+    )()
+    tool = type("Tool", (), {"_refresh": lambda self, **_kwargs: current})()
+
+    with pytest.raises(CustomToolUploadError, match="archive could not be extracted"):
+        resources._wait_for_source_ref(  # type: ignore[arg-type]
+            tool,
+            "sha256:new",
             timeout=1,
             interval=0.1,
         )
@@ -632,10 +653,12 @@ def test_monitor_without_callback_polls_until_complete(monkeypatch) -> None:
 def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> None:
     first = resources.BuildEvent("building", 1)
     final = resources.BuildEvent("complete", 2)
+    trailing = resources.BuildEvent("image pushed", 3)
     pages = iter(
         (
             resources.BuildLogPage(items=(first,), status="RUNNING", next_cursor="cursor-1"),
             resources.BuildLogPage(items=(final,), status="SUCCEEDED", next_cursor="cursor-2"),
+            resources.BuildLogPage(items=(trailing,), status="SUCCEEDED"),
         )
     )
 
@@ -675,7 +698,7 @@ def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> N
     completed = asyncio.run(version._monitor(timeout=1.0, interval=0.1, on_event=delivered.append))
 
     assert completed.status == "Complete"
-    assert delivered == [first, final]
+    assert delivered == [first, final, trailing]
 
 
 def test_log_progress_deduplicates_cumulative_pages_without_a_cursor() -> None:

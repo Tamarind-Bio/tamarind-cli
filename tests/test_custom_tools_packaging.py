@@ -169,6 +169,22 @@ def test_source_inspection_rejects_unencodable_archive_names(tmp_path: Path) -> 
         packaging.SourceFile.inspect("bad\udcff.py", tmp_path / "bad.py", tmp_path)
 
 
+@pytest.mark.parametrize(
+    "relative",
+    [r"dir\file.py", r"..\file.py", "/absolute.py", "dir/../file.py", "bad:name.py", "NUL"],
+)
+def test_source_inspection_rejects_nonportable_archive_names(tmp_path: Path, relative: str) -> None:
+    with pytest.raises(CustomToolUploadError, match="path is not portable"):
+        packaging.SourceFile.inspect(relative, tmp_path / "source.py", tmp_path)
+
+
+def test_archive_rejects_portable_name_collisions() -> None:
+    tree = packaging.SourceTree(files=(), empty_directories=("Models", "models"))
+
+    with pytest.raises(CustomToolUploadError, match="colliding portable paths"):
+        packaging.build_source_tree_archive(tree)
+
+
 def test_inspection_rejects_directory_traversal_errors(tmp_path: Path, monkeypatch) -> None:
     _valid_source(tmp_path)
 

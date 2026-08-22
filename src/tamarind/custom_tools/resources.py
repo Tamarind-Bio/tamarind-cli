@@ -291,34 +291,32 @@ class Version:
                 )
             return remaining
 
-        while True:
-            if current.terminal:
-                return _require_success(current)
-            if logs is not None and on_event is not None:
-                remaining = remaining_budget()
-                page = await _await_with_timeout(
-                    current._logs_async(cursor=logs.cursor, request_timeout=remaining), remaining
-                )
-                events = logs.consume(page)
-                for event in events:
-                    on_event(event)
+        async def deliver_log_page(version: Version) -> bool:
+            if logs is None or on_event is None:
+                return False
+            requested_cursor = logs.cursor
+            remaining = remaining_budget()
+            page = await _await_with_timeout(
+                version._logs_async(cursor=requested_cursor, request_timeout=remaining), remaining
+            )
+            for event in logs.consume(page):
+                on_event(event)
+            return page.next_cursor is not None and page.next_cursor != requested_cursor
+
+        while not current.terminal:
+            if logs is not None:
+                await deliver_log_page(current)
             remaining = remaining_budget()
             current = await _await_with_timeout(
                 current._refresh_async(request_timeout=remaining), remaining
             )
-            if current.terminal:
-                if logs is not None and on_event is not None:
-                    remaining = remaining_budget()
-                    page = await _await_with_timeout(
-                        current._logs_async(cursor=logs.cursor, request_timeout=remaining),
-                        remaining,
-                    )
-                    events = logs.consume(page)
-                    for event in events:
-                        on_event(event)
-                return _require_success(current)
-            remaining = remaining_budget()
-            await asyncio.sleep(interval if remaining is None else min(interval, remaining))
+            if not current.terminal:
+                remaining = remaining_budget()
+                await asyncio.sleep(interval if remaining is None else min(interval, remaining))
+
+        while await deliver_log_page(current):
+            pass
+        return _require_success(current)
 
 
 class CustomTools:
@@ -386,22 +384,18 @@ class CustomTools:
         finally:
             archive.close()
         self._transport.finalize_custom_tool_upload(tool.name, session["uploadId"])
-        uploaded = _wait_for_source(
+        source_ref = _wait_for_source_ref(
             tool,
             archive.digest,
             timeout=cast(float, timeout),
             interval=interval,
         )
-        if uploaded.source_ref is None:
-            raise CustomToolUploadError(
-                "Source extraction finished without an immutable source revision"
-            )
         existing_version_names = {
             version.name for version in self._versions(tool.name, limit=50).items
         }
         deployed = self._transport.deploy_custom_tool(
             tool.name,
-            cast(PublicDeployRequest, {"expectedSourceRef": uploaded.source_ref}),
+            cast(PublicDeployRequest, {"expectedSourceRef": source_ref}),
         )
         version_name = deployed["versionName"]
         if version_name is not None:
@@ -434,9 +428,9 @@ class CustomTools:
         return _version_from_wire(self, tool_name, wire)
 
 
-def _wait_for_source(
+def _wait_for_source_ref(
     tool: CustomTool, source_hash: str, *, timeout: float, interval: float
-) -> CustomTool:
+) -> str:
     deadline = _clock() + timeout
     while True:
         remaining = deadline - _clock()
@@ -452,10 +446,10 @@ def _wait_for_source(
             raise CustomToolUploadError(
                 f"Source extraction did not finish within {timeout:g} seconds"
             ) from None
-        if current.source_hash == source_hash:
-            return current
         if current.connection_error:
             raise CustomToolUploadError(f"Source extraction failed: {current.connection_error}")
+        if current.source_hash == source_hash and current.source_ref is not None:
+            return current.source_ref
         time.sleep(min(interval, max(0.0, deadline - _clock())))
 
 

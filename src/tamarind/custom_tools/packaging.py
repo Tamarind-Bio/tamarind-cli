@@ -11,6 +11,7 @@ from pathlib import Path
 import stat
 from tempfile import SpooledTemporaryFile
 from typing import BinaryIO, cast
+import unicodedata
 import zipfile
 
 from typing_extensions import Buffer
@@ -38,6 +39,12 @@ _ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 _REGULAR_FILE_MODE = 0o100644
 _EXECUTABLE_FILE_MODE = 0o100755
 _DIRECTORY_MODE = 0o040755
+_WINDOWS_INVALID_NAME_CHARACTERS = frozenset('<>:"\\|?*')
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {"aux", "con", "nul", "prn"}
+    | {f"com{index}" for index in range(1, 10)}
+    | {f"lpt{index}" for index in range(1, 10)}
+)
 _MAX_SOURCE_ENTRIES = 25_000
 MAX_TOOL_SOURCE_BYTES = 5 * 1024 * 1024 * 1024
 _ARCHIVE_MEMORY_BYTES = 8 * 1024 * 1024
@@ -285,6 +292,15 @@ def build_source_tree_archive(
         mode = _EXECUTABLE_FILE_MODE if executable else _REGULAR_FILE_MODE
         entries.append((source_file.relative, source_file, mode))
     _enforce_source_entry_limit(len(entries))
+    portable_names: set[str] = set()
+    for relative, _, _ in entries:
+        archive_name = relative.removesuffix("/")
+        portable_name = _validate_archive_name(archive_name, Path(archive_name))
+        if portable_name in portable_names:
+            raise CustomToolUploadError(
+                f"Source archive contains colliding portable paths: {archive_name}"
+            )
+        portable_names.add(portable_name)
 
     output = _CappedArchive(max_bytes)
     try:
@@ -383,11 +399,29 @@ def _enforce_source_entry_limit(
         )
 
 
-def _validate_archive_name(relative: str, path: Path) -> None:
+def _validate_archive_name(relative: str, path: Path) -> str:
     try:
         relative.encode("utf-8")
     except UnicodeEncodeError as exc:
         raise CustomToolUploadError(f"Source archive path is not valid UTF-8: {path}") from exc
+    parts = relative.split("/")
+    invalid = (
+        not relative
+        or relative.startswith("/")
+        or any(part in {"", ".", ".."} for part in parts)
+        or any(
+            part.endswith((" ", "."))
+            or any(
+                ord(character) < 32 or character in _WINDOWS_INVALID_NAME_CHARACTERS
+                for character in part
+            )
+            or part.split(".", 1)[0].casefold() in _WINDOWS_RESERVED_NAMES
+            for part in parts
+        )
+    )
+    if invalid:
+        raise CustomToolUploadError(f"Source archive path is not portable: {path}")
+    return unicodedata.normalize("NFC", relative.casefold())
 
 
 def _metadata_is_link_like(metadata: os.stat_result) -> bool:
