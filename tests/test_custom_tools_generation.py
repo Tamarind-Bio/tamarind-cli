@@ -38,7 +38,7 @@ def test_projection_resolves_local_path_item_references() -> None:
 
     projected = project_custom_tools(document)
 
-    assert set(projected["paths"][path]) == {"get", "patch"}
+    assert set(projected["paths"][path]) == {"delete", "get", "patch"}
 
 
 def test_projection_rejects_unsupported_path_item_references() -> None:
@@ -154,6 +154,9 @@ def test_generated_models_reject_names_that_shadow_annotation_builtins(
     root = Path(__file__).resolve().parents[1]
     document = json.loads((root / "openapi/public-v1.json").read_text(encoding="utf-8"))
     document["components"]["schemas"][name] = {"type": "string"}
+    document["components"]["schemas"]["PublicCustomTool"]["properties"]["shadowed"] = {
+        "$ref": f"#/components/schemas/{name}"
+    }
     spec = tmp_path / "shadowed-builtin.json"
     generated = tmp_path / "generated_shadowed_builtin.py"
     spec.write_text(json.dumps(document), encoding="utf-8")
