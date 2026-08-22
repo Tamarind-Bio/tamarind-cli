@@ -205,7 +205,7 @@ class CustomTool:
         return self._collection._build(self, tree, source_timeout=source_timeout)
 
     def get_version(self, name: str) -> "Version":
-        return self._collection._get_version(self.name, name)
+        return self._collection._get_version(self.name, self.generation, name)
 
     def versions(
         self,
@@ -214,7 +214,13 @@ class CustomTool:
         limit: int = 50,
         cursor: str | None = None,
     ) -> Page["Version"]:
-        return self._collection._versions(self.name, status=status, limit=limit, cursor=cursor)
+        return self._collection._versions(
+            self.name,
+            self.generation,
+            status=status,
+            limit=limit,
+            cursor=cursor,
+        )
 
 
 @dataclass(frozen=True)
@@ -230,6 +236,7 @@ class Version:
     duration_seconds: int | None
     error: BuildError | None
     tool_name: str
+    tool_generation: str
     _collection: "CustomTools" = field(repr=False, compare=False)
 
     @property
@@ -243,13 +250,13 @@ class Version:
         wire = self._collection._transport.get_custom_tool_version(
             self.tool_name, self.name, timeout=request_timeout
         )
-        return _version_from_wire(self._collection, self.tool_name, wire)
+        return _version_from_wire(self._collection, self.tool_name, self.tool_generation, wire)
 
     async def _refresh_async(self, *, request_timeout: float | None) -> "Version":
         wire = await self._collection._transport.get_custom_tool_version_async(
             self.tool_name, self.name, timeout=request_timeout
         )
-        return _version_from_wire(self._collection, self.tool_name, wire)
+        return _version_from_wire(self._collection, self.tool_name, self.tool_generation, wire)
 
     def logs(self, *, cursor: str | None = None) -> BuildLogPage:
         return self._logs(cursor=cursor, request_timeout=None)
@@ -269,16 +276,14 @@ class Version:
         return _log_page_from_wire(wire)
 
     def cancel(self) -> "Version":
-        generation = self._collection.get(self.tool_name).generation
         wire = self._collection._transport.cancel_custom_tool_build(
-            self.tool_name, self.name, generation
+            self.tool_name, self.name, self.tool_generation
         )
-        return _version_from_wire(self._collection, self.tool_name, wire)
+        return _version_from_wire(self._collection, self.tool_name, self.tool_generation, wire)
 
     def publish(self) -> CustomTool:
-        generation = self._collection.get(self.tool_name).generation
         wire = self._collection._transport.publish_custom_tool_version(
-            self.tool_name, self.name, generation
+            self.tool_name, self.name, self.tool_generation
         )
         return _tool_from_wire(self._collection, wire)
 
@@ -333,6 +338,7 @@ class Version:
             current = await _await_with_timeout(
                 current._refresh_async(request_timeout=remaining), remaining
             )
+            remaining_budget()
             if not current.terminal:
                 remaining = remaining_budget()
                 await asyncio.sleep(interval if remaining is None else min(interval, remaining))
@@ -439,11 +445,12 @@ class CustomTools:
             )
         finally:
             archive.close()
-        return _version_from_wire(self, tool.name, result["version"])
+        return _version_from_wire(self, tool.name, tool.generation, result["version"])
 
     def _versions(
         self,
         tool_name: str,
+        tool_generation: str,
         *,
         status: PublicVersionStatus | None,
         limit: int,
@@ -458,17 +465,24 @@ class CustomTools:
             timeout=request_timeout,
         )
         return Page(
-            items=tuple(_version_from_wire(self, tool_name, item) for item in wire["items"]),
+            items=tuple(
+                _version_from_wire(self, tool_name, tool_generation, item) for item in wire["items"]
+            ),
             next_cursor=wire["nextCursor"],
         )
 
     def _get_version(
-        self, tool_name: str, version_name: str, *, request_timeout: float | None = None
+        self,
+        tool_name: str,
+        tool_generation: str,
+        version_name: str,
+        *,
+        request_timeout: float | None = None,
     ) -> Version:
         wire = self._transport.get_custom_tool_version(
             tool_name, version_name, timeout=request_timeout
         )
-        return _version_from_wire(self, tool_name, wire)
+        return _version_from_wire(self, tool_name, tool_generation, wire)
 
 
 def _upload_archive(
@@ -516,7 +530,9 @@ def _tool_from_wire(collection: CustomTools, wire: PublicCustomTool) -> CustomTo
     )
 
 
-def _version_from_wire(collection: CustomTools, tool_name: str, wire: PublicVersion) -> Version:
+def _version_from_wire(
+    collection: CustomTools, tool_name: str, tool_generation: str, wire: PublicVersion
+) -> Version:
     error = wire["error"]
     completed_at = wire["completedAt"]
     duration_seconds = None
@@ -536,6 +552,7 @@ def _version_from_wire(collection: CustomTools, tool_name: str, wire: PublicVers
         duration_seconds=duration_seconds,
         error=BuildError(error["code"], error["message"]) if error else None,
         tool_name=tool_name,
+        tool_generation=tool_generation,
         _collection=collection,
     )
 

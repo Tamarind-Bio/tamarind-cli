@@ -381,7 +381,9 @@ def test_build_fails_closed_when_generation_changes(tmp_path: Path) -> None:
 
 @respx.mock
 def test_version_logs_cancel_and_publish_use_version_routes() -> None:
-    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    get_tool = respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool())
+    )
     respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
         return_value=httpx.Response(200, json=_version())
     )
@@ -413,6 +415,7 @@ def test_version_logs_cancel_and_publish_use_version_routes() -> None:
 
     assert cancel.calls.last.request.headers["If-Match"] == "generation-1"
     assert publish.calls.last.request.headers["If-Match"] == "generation-1"
+    assert get_tool.call_count == 1
 
 
 @respx.mock
@@ -457,6 +460,7 @@ def test_monitor_recomputes_the_deadline_after_log_poll(monkeypatch) -> None:
         duration_seconds=None,
         error=None,
         tool_name="example",
+        tool_generation="generation-1",
         _collection=None,  # type: ignore[arg-type]
     )
 
@@ -494,6 +498,7 @@ def test_monitor_without_callback_does_not_fetch_logs(monkeypatch) -> None:
             duration_seconds=60,
             error=version.error,
             tool_name=version.tool_name,
+            tool_generation=version.tool_generation,
             _collection=version._collection,
         )
 
@@ -511,12 +516,55 @@ def test_monitor_without_callback_does_not_fetch_logs(monkeypatch) -> None:
         duration_seconds=None,
         error=None,
         tool_name="example",
+        tool_generation="generation-1",
         _collection=None,  # type: ignore[arg-type]
     )
 
     completed = asyncio.run(version._monitor(timeout=1.0, interval=0.1, on_event=None))
 
     assert completed.status == "Complete"
+
+
+def test_monitor_rechecks_deadline_after_terminal_refresh(monkeypatch) -> None:
+    ticks = iter((0.0, 0.1, 1.1))
+    monkeypatch.setattr(resources, "_clock", lambda: next(ticks))
+
+    async def refresh(version, **_kwargs):
+        return resources.Version(
+            name=version.name,
+            source_revision=version.source_revision,
+            source_digest=version.source_digest,
+            status="Complete",
+            origin=version.origin,
+            created_at=version.created_at,
+            started_at=version.started_at,
+            completed_at="2026-08-15T00:01:00Z",
+            duration_seconds=60,
+            error=version.error,
+            tool_name=version.tool_name,
+            tool_generation=version.tool_generation,
+            _collection=version._collection,
+        )
+
+    monkeypatch.setattr(resources.Version, "_refresh_async", refresh)
+    version = resources.Version(
+        name="v1",
+        source_revision="a" * 40,
+        source_digest="sha256:" + "a" * 64,
+        status="Running",
+        origin="build",
+        created_at="2026-08-15T00:00:00Z",
+        started_at="2026-08-15T00:00:00Z",
+        completed_at=None,
+        duration_seconds=None,
+        error=None,
+        tool_name="example",
+        tool_generation="generation-1",
+        _collection=None,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(resources.CustomToolBuildTimeoutError, match="monitoring timed out"):
+        asyncio.run(version._monitor(timeout=1.0, interval=0.1, on_event=None))
 
 
 def test_monitor_without_callback_polls_until_complete(monkeypatch) -> None:
@@ -541,6 +589,7 @@ def test_monitor_without_callback_polls_until_complete(monkeypatch) -> None:
             duration_seconds=60 if status == "Complete" else None,
             error=version.error,
             tool_name=version.tool_name,
+            tool_generation=version.tool_generation,
             _collection=version._collection,
         )
 
@@ -558,6 +607,7 @@ def test_monitor_without_callback_polls_until_complete(monkeypatch) -> None:
         duration_seconds=None,
         error=None,
         tool_name="example",
+        tool_generation="generation-1",
         _collection=None,  # type: ignore[arg-type]
     )
 
@@ -595,6 +645,7 @@ def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> N
             duration_seconds=60,
             error=version.error,
             tool_name=version.tool_name,
+            tool_generation=version.tool_generation,
             _collection=version._collection,
         )
 
@@ -612,6 +663,7 @@ def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> N
         duration_seconds=None,
         error=None,
         tool_name="example",
+        tool_generation="generation-1",
         _collection=None,  # type: ignore[arg-type]
     )
     delivered: list[resources.BuildEvent] = []
@@ -644,6 +696,7 @@ def test_monitor_rechecks_deadline_after_terminal_log_callback(monkeypatch) -> N
         duration_seconds=60,
         error=None,
         tool_name="example",
+        tool_generation="generation-1",
         _collection=None,  # type: ignore[arg-type]
     )
 
