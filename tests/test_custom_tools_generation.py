@@ -7,7 +7,6 @@ import subprocess
 import sys
 
 from tamarind_codegen.custom_tools import normalize
-from scripts.generate_custom_tools_transport import generate
 
 
 def test_openapi_extraction_keeps_only_the_custom_tools_dependency_closure(
@@ -160,8 +159,18 @@ def test_generated_aliases_follow_schema_dependency_order(tmp_path: Path) -> Non
         },
         **schemas,
     }
+    spec = tmp_path / "forward_alias.json"
     generated = tmp_path / "generated_forward_alias.py"
-    generated.write_text(generate(document))
+    spec.write_text(json.dumps(document))
+    subprocess.run(
+        [
+            sys.executable,
+            str(root / "scripts/generate_custom_tools_transport.py"),
+            str(spec),
+            str(generated),
+        ],
+        check=True,
+    )
 
     module_spec = importlib.util.spec_from_file_location("generated_forward_alias", generated)
     assert module_spec is not None and module_spec.loader is not None
