@@ -146,7 +146,9 @@ class SourceFile:
     content_sha256: str
 
     @classmethod
-    def inspect(cls, relative: str, path: Path, root: Path) -> SourceFile:
+    def inspect(
+        cls, relative: str, path: Path, root: Path, *, max_bytes: int | None = None
+    ) -> SourceFile:
         _validate_archive_name(relative, path)
         metadata = _file_metadata(path)
         _assert_contained(root, path)
@@ -155,6 +157,7 @@ class SourceFile:
             raise CustomToolUploadError(f"Source file changed during inspection: {path}")
         if not stat.S_ISREG(metadata.st_mode):
             raise CustomToolUploadError(f"Source archives can contain only regular files: {path}")
+        _enforce_source_byte_limit(metadata.st_size, maximum=max_bytes)
         content_sha256 = _content_digest(path, metadata)
         confirmed = _file_metadata(path)
         if _identity(metadata) != _identity(confirmed):
@@ -241,9 +244,10 @@ def inspect_source_tree(folder: str | Path) -> SourceTree:
     except OSError as exc:
         raise CustomToolUploadError(f"Cannot resolve Custom Tool source folder: {root}") from exc
 
-    files: list[SourceFile] = []
+    retained_file_paths: list[Path] = []
     empty_directories: list[str] = []
     retained_entries = 0
+    retained_bytes = 0
     pending = [root]
     while pending:
         current_path = pending.pop()
@@ -253,15 +257,26 @@ def inspect_source_tree(folder: str | Path) -> SourceTree:
             max_entries=_MAX_SOURCE_ENTRIES - retained_entries,
         )
         retained_entries += len(kept_directories) + len(kept_files)
+        retained_bytes += sum(_file_metadata(path).st_size for path in kept_files)
+        _enforce_source_byte_limit(retained_bytes)
         pending.extend(reversed(kept_directories))
-        files.extend(
-            SourceFile.inspect(path.relative_to(root).as_posix(), path, resolved_root)
-            for path in kept_files
-        )
+        retained_file_paths.extend(kept_files)
         if current_path != root and not kept_directories and not kept_files:
             relative = current_path.relative_to(root).as_posix()
             _validate_archive_name(relative, current_path)
             empty_directories.append(relative)
+
+    files: list[SourceFile] = []
+    inspected_bytes = 0
+    for path in retained_file_paths:
+        source_file = SourceFile.inspect(
+            path.relative_to(root).as_posix(),
+            path,
+            resolved_root,
+            max_bytes=MAX_TOOL_SOURCE_BYTES - inspected_bytes,
+        )
+        inspected_bytes += source_file.size
+        files.append(source_file)
 
     return SourceTree(
         files=tuple(files),
@@ -291,6 +306,7 @@ def build_source_tree_archive(
         mode = _EXECUTABLE_FILE_MODE if executable else _REGULAR_FILE_MODE
         entries.append((source_file.relative, source_file, mode))
     _enforce_source_entry_limit(len(entries))
+    _enforce_source_byte_limit(sum(source_file.size for source_file in tree.files))
     _validate_portable_manifest(entries)
 
     output = _CappedArchive(max_bytes)
@@ -415,6 +431,15 @@ def _enforce_source_entry_limit(
     if count > maximum:
         raise CustomToolUploadError(
             f"Custom Tool source exceeds the {_MAX_SOURCE_ENTRIES}-entry limit"
+        )
+
+
+def _enforce_source_byte_limit(size: int, *, maximum: int | None = None) -> None:
+    if maximum is None:
+        maximum = MAX_TOOL_SOURCE_BYTES
+    if size > maximum:
+        raise CustomToolUploadError(
+            f"Custom Tool source exceeds the {MAX_TOOL_SOURCE_BYTES}-byte uncompressed limit"
         )
 
 

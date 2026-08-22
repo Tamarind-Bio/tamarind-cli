@@ -258,6 +258,18 @@ def test_normalize_produces_an_openapi_free_ir() -> None:
             "object schemas with properties must set additionalProperties to false",
         ),
         (
+            lambda document: document["components"]["schemas"].__setitem__(
+                "CustomTool",
+                {
+                    "anyOf": [
+                        document["components"]["schemas"]["CustomTool"],
+                        {"type": "null"},
+                    ]
+                },
+            ),
+            "named object schemas cannot be nullable",
+        ),
+        (
             lambda document: document["components"]["schemas"].update(
                 {"Empty": {"type": "object", "additionalProperties": False}}
             ),

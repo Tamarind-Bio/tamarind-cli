@@ -334,6 +334,15 @@ def test_generated_transport_is_importable(tmp_path: Path) -> None:
     assert hasattr(module.GeneratedCustomToolsTransport, "get_custom_tool_version_async")
 
 
+def test_generated_optional_fields_have_runtime_typed_dict_metadata() -> None:
+    from tamarind.custom_tools.generated import PublicCreateCustomToolRequest
+
+    assert PublicCreateCustomToolRequest.__required_keys__ == frozenset({"name"})
+    assert PublicCreateCustomToolRequest.__optional_keys__ == frozenset(
+        {"cpu", "description", "displayName", "gpuType", "memory"}
+    )
+
+
 def test_generated_aliases_follow_schema_dependency_order(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     document = json.loads((root / "openapi/custom-tools-v1.json").read_text())

@@ -227,6 +227,9 @@ def _validate_schema(
             if not (isinstance(part, Mapping) and part.get("type") == "null")
         )
         _validate_schema(document, non_null, f"{location}.anyOf", stack, named=named)
+        nullable_kind, _ = _schema_shape(document, non_null, f"{location}.anyOf")
+        if named and nullable_kind == "object":
+            raise ProfileViolation(location, "named object schemas cannot be nullable")
         return
 
     kind = schema.get("type")

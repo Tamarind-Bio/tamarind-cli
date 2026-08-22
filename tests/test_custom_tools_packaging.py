@@ -305,12 +305,41 @@ def test_inspection_bounds_retained_manifest_entries(tmp_path: Path, monkeypatch
         packaging.inspect_source_tree(tmp_path)
 
 
+def test_inspection_bounds_uncompressed_source_before_hashing(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"compressible")
+    monkeypatch.setattr(packaging, "MAX_TOOL_SOURCE_BYTES", source.stat().st_size - 1)
+    monkeypatch.setattr(
+        packaging,
+        "_content_digest",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("oversized source must be rejected before hashing")
+        ),
+    )
+
+    with pytest.raises(CustomToolUploadError, match="uncompressed limit"):
+        packaging.inspect_source_tree(tmp_path)
+
+
 def test_archive_rechecks_manifest_entry_budget(tmp_path: Path, monkeypatch) -> None:
     _valid_source(tmp_path)
     tree = packaging.inspect_source_tree(tmp_path)
     monkeypatch.setattr(packaging, "_MAX_SOURCE_ENTRIES", 3)
 
     with pytest.raises(CustomToolUploadError, match="3-entry limit"):
+        packaging.build_source_tree_archive(tree)
+
+
+def test_archive_rechecks_uncompressed_source_budget(tmp_path: Path, monkeypatch) -> None:
+    _valid_source(tmp_path)
+    tree = packaging.inspect_source_tree(tmp_path)
+    monkeypatch.setattr(
+        packaging,
+        "MAX_TOOL_SOURCE_BYTES",
+        sum(source_file.size for source_file in tree.files) - 1,
+    )
+
+    with pytest.raises(CustomToolUploadError, match="uncompressed limit"):
         packaging.build_source_tree_archive(tree)
 
 

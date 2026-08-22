@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, TypeAlias, TypedDict, cast
-from typing_extensions import NotRequired
+from typing import Any, Literal, TypeAlias, cast
+from typing_extensions import NotRequired, TypedDict
 from urllib.parse import quote
 
 from tamarind.http import HTTPClient
