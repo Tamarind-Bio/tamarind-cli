@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
+from hashlib import sha256
+import json
 from typing import Any, cast
 
 from .ir import (
@@ -20,6 +22,7 @@ from .ir import (
     Scalar,
     Schema,
     SchemaDefinition,
+    SchemaKind,
 )
 from .profile import HTTP_METHODS, _dereference, validate_profile
 
@@ -42,21 +45,26 @@ def _schema(value: Mapping[str, Any]) -> Schema:
         non_null = next(part for part in value["anyOf"] if part.get("type") != "null")
         return replace(_schema(non_null), nullable=True, description=value.get("description"))
 
-    kind = value["type"]
+    kind = cast(SchemaKind, value["type"])
     constraints = tuple(
         Constraint(cast(Any, key), value[key])
         for key in ("minLength", "maxLength", "pattern", "minimum", "maximum")
         if key in value
     )
-    common = {
-        "description": value.get("description"),
-        "enum": tuple(cast(list[Scalar], value.get("enum", []))),
-        "has_const": "const" in value,
-        "const": cast(Scalar, value.get("const")),
-        "constraints": constraints,
-    }
+    description = cast(str | None, value.get("description"))
+    enum = tuple(cast(list[Scalar], value.get("enum", [])))
+    has_const = "const" in value
+    const = cast(Scalar, value.get("const"))
     if kind == "array":
-        return Schema(kind="array", items=_schema(value["items"]), **common)
+        return Schema(
+            kind="array",
+            description=description,
+            items=_schema(value["items"]),
+            enum=enum,
+            has_const=has_const,
+            const=const,
+            constraints=constraints,
+        )
     if kind == "object":
         required = set(value.get("required", []))
         fields = tuple(
@@ -74,16 +82,27 @@ def _schema(value: Mapping[str, Any]) -> Schema:
         normalized_additional = (
             _schema(additional) if isinstance(additional, Mapping) else additional
         )
-        object_kind = (
+        object_kind: SchemaKind = (
             "map" if not fields and isinstance(normalized_additional, Schema) else "object"
         )
         return Schema(
             kind=object_kind,
+            description=description,
             fields=fields,
             additional_properties=normalized_additional,
-            **common,
+            enum=enum,
+            has_const=has_const,
+            const=const,
+            constraints=constraints,
         )
-    return Schema(kind=kind, **common)
+    return Schema(
+        kind=kind,
+        description=description,
+        enum=enum,
+        has_const=has_const,
+        const=const,
+        constraints=constraints,
+    )
 
 
 def _parameter(document: Mapping[str, Any], value: object) -> Parameter:
@@ -166,10 +185,12 @@ def normalize(document: Mapping[str, Any]) -> Api:
 
     info = cast(Mapping[str, str], document["info"])
     servers = cast(list[Mapping[str, str]], document.get("servers", []))
+    canonical = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
     return Api(
         title=info["title"],
         version=info["version"],
-        server_url=servers[0].get("url") if servers else None,
+        server_url=servers[0]["url"].rstrip("/") + "/",
+        source_sha256=sha256(canonical).hexdigest(),
         schemas=schemas,
         operations=tuple(operations),
     )

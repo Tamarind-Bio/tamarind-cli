@@ -12,6 +12,7 @@ def _document() -> dict:
         "openapi": "3.1.0",
         "info": {"title": "Custom Tools", "version": "1.0"},
         "servers": [{"url": "https://app.tamarind.bio/api"}],
+        "security": [{"ApiKeyAuth": []}],
         "paths": {
             "/custom-tools/{name}": {
                 "parameters": [
@@ -52,6 +53,9 @@ def _document() -> dict:
             }
         },
         "components": {
+            "securitySchemes": {
+                "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "x-api-key"}
+            },
             "schemas": {
                 "CustomTool": {
                     "type": "object",
@@ -93,7 +97,7 @@ def test_profile_accepts_the_documented_subset() -> None:
 def test_normalize_produces_an_openapi_free_ir() -> None:
     api = normalize(_document())
 
-    assert api.server_url == "https://app.tamarind.bio/api"
+    assert api.server_url == "https://app.tamarind.bio/api/"
     assert [schema.name for schema in api.schemas] == ["CustomTool", "UpdateCustomTool"]
 
     custom_tool = api.schemas[0].schema

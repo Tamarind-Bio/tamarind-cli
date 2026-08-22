@@ -112,6 +112,7 @@ class Operation:
 class Api:
     title: str
     version: str
-    server_url: str | None
+    server_url: str
+    source_sha256: str
     schemas: tuple[SchemaDefinition, ...]
     operations: tuple[Operation, ...]

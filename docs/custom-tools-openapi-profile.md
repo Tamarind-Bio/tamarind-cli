@@ -20,6 +20,7 @@ The first profile intentionally covers the public Custom Tools control-plane API
 than the entire OpenAPI specification.
 
 - OpenAPI 3.1 documents.
+- One concrete global HTTPS server and one global `x-api-key` header security scheme.
 - HTTP `GET`, `POST`, `PUT`, `PATCH`, and `DELETE` operations with unique `operationId`s.
 - Path and query parameters. Path parameters must be required.
 - Optional or required `application/json` request bodies.

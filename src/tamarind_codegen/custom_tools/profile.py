@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import Any
+from urllib.parse import urlsplit
 
 HTTP_METHODS = {"delete", "get", "patch", "post", "put"}
 PARAMETER_LOCATIONS = {"path", "query"}
@@ -215,6 +216,46 @@ def _validate_parameter(document: Mapping[str, Any], value: object, location: st
     _validate_schema(document, parameter["schema"], f"{location}.schema")
 
 
+def _validate_server_and_auth(document: Mapping[str, Any]) -> None:
+    servers = _sequence(document.get("servers"), "servers")
+    if len(servers) != 1:
+        raise ProfileViolation("servers", "exactly one global server is required")
+    server = _mapping(servers[0], "servers[0]")
+    if set(server) - {"description", "url"}:
+        raise ProfileViolation("servers[0]", "server variables and extensions are not supported")
+    url = server.get("url")
+    if not isinstance(url, str) or "{" in url or "}" in url:
+        raise ProfileViolation("servers[0].url", "must be a concrete HTTPS URL")
+    parsed = urlsplit(url)
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ProfileViolation("servers[0].url", "must be a concrete HTTPS URL")
+
+    components = _mapping(document.get("components", {}), "components")
+    schemes = _mapping(components.get("securitySchemes", {}), "components.securitySchemes")
+    matching = [
+        name
+        for name, raw_scheme in schemes.items()
+        if isinstance(raw_scheme, Mapping)
+        and raw_scheme.get("type") == "apiKey"
+        and raw_scheme.get("in") == "header"
+        and str(raw_scheme.get("name", "")).lower() == "x-api-key"
+    ]
+    if len(matching) != 1:
+        raise ProfileViolation(
+            "components.securitySchemes", "exactly one x-api-key header scheme is required"
+        )
+    expected: list[dict[str, list[str]]] = [{matching[0]: []}]
+    if document.get("security") != expected:
+        raise ProfileViolation("security", "global x-api-key authentication is required")
+
+
 def _json_schema(
     document: Mapping[str, Any],
     content: object,
@@ -266,9 +307,12 @@ def validate_profile(document: Mapping[str, Any]) -> None:
         raise ProfileViolation("openapi", "the profile requires OpenAPI 3.1")
     if "webhooks" in document:
         raise ProfileViolation("webhooks", "webhooks are not supported")
+    if document.get("jsonSchemaDialect") is not None:
+        raise ProfileViolation("jsonSchemaDialect", "custom JSON Schema dialects are not supported")
     info = _mapping(document.get("info"), "info")
     if not isinstance(info.get("title"), str) or not isinstance(info.get("version"), str):
         raise ProfileViolation("info", "title and version must be strings")
+    _validate_server_and_auth(document)
 
     components = _mapping(document.get("components", {}), "components")
     schemas = _mapping(components.get("schemas", {}), "components.schemas")
@@ -287,6 +331,14 @@ def validate_profile(document: Mapping[str, Any]) -> None:
             if method not in HTTP_METHODS:
                 raise ProfileViolation(f"paths.{path}.{method}", "HTTP method is not supported")
             operation = _mapping(raw_operation, f"paths.{path}.{method}")
+            if "servers" in operation or "servers" in path_item:
+                raise ProfileViolation(
+                    f"paths.{path}.{method}.servers", "server overrides are not supported"
+                )
+            if "security" in operation:
+                raise ProfileViolation(
+                    f"paths.{path}.{method}.security", "operation auth overrides are not supported"
+                )
             if "callbacks" in operation:
                 raise ProfileViolation(
                     f"paths.{path}.{method}.callbacks", "callbacks are not supported"

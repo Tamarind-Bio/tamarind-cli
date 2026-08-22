@@ -2,10 +2,10 @@
 
 The CLI, the [MCP server](https://mcp.tamarind.bio), and the web app are all
 **thin clients** over the same platform. The CLI never re-implements business
-logic; it only knows how to call two well-defined surfaces. This is what keeps
+logic; it only knows how to call three well-defined surfaces. This is what keeps
 the CLI and the MCP from drifting as the platform evolves.
 
-## Two surfaces, two single sources of truth
+## Three surfaces, three single sources of truth
 
 ### 1. Job/file REST surface — source of truth: the OpenAPI spec
 
@@ -37,11 +37,11 @@ Because the logic lives in one module, *where* discovery is hosted (the MCP host
 today; potentially the main API or a dedicated service later) is a deployment
 detail that can change without any client change and without drift.
 
-## Custom Tools SDK compiler boundary
+### 3. Custom Tools surface — source of truth: the public OpenAPI artifact
 
-The Custom Tools SDK is being added as a third surface. Its transport will be
-generated from the website's public OpenAPI contract through a deliberately
-small compiler pipeline:
+Custom Tool creation, source upload/finalization, deploy, Versions, logs,
+cancellation, and publication are generated from the website backend's public
+OpenAPI artifact through a deliberately small compiler pipeline:
 
 ```text
 OpenAPI -> Tamarind profile validation -> normalized IR -> Python transport
@@ -51,6 +51,22 @@ The profile and ownership boundaries are documented in
 [`custom-tools-openapi-profile.md`](custom-tools-openapi-profile.md). The
 language-neutral IR prevents the Python emitter from accumulating OpenAPI
 parsing, reference-resolution, and compatibility policy.
+
+The committed SDK slice is selected by the `/custom-tools` path boundary; it
+does not depend on optional documentation tags. CI regenerates the typed
+transport from that slice and rejects drift.
+
+The SDK owns archive-local concerns that only the client can decide safely:
+deterministic ZIP construction, symlink and junction rejection, upload limits,
+JSON parseability and top-level object shape, and warnings about the networkless
+runtime. The backend owns the evolving `config.json` business contract and
+validates it before accepting a build. The SDK deliberately does not maintain a
+second list of configuration fields, enums, or cross-field rules.
+
+`CustomTool.build()` composes the existing requests: create upload, PUT archive,
+finalize, poll source readiness, deploy, fetch Version. It adds no server-side
+BuildRequest, queue, lease, claim, or repair state. An ambiguous deploy response
+is therefore handled honestly by listing Versions before a manual retry.
 
 ## Why not a single binary that re-encodes the API?
 
