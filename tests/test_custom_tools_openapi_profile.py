@@ -116,6 +116,8 @@ def test_normalize_produces_an_openapi_free_ir() -> None:
         ("name", "path"),
         ("includeVersions", "query"),
     ]
+    assert get_tool.parameters[1].schema.has_default is True
+    assert get_tool.parameters[1].schema.default is False
     assert get_tool.responses[0].schema is not None
     assert get_tool.responses[0].schema.reference == "CustomTool"
 
@@ -146,6 +148,61 @@ def test_normalize_produces_an_openapi_free_ir() -> None:
             "only path and query parameters are supported",
         ),
         (lambda document: document.update({"webhooks": {}}), "webhooks are not supported"),
+        (
+            lambda document: document["paths"]["/custom-tools/{name}"]["get"]["parameters"][
+                0
+            ].update({"style": "deepObject"}),
+            "non-default parameter style is not supported",
+        ),
+        (
+            lambda document: document["paths"]["/custom-tools/{name}"]["get"]["parameters"][
+                0
+            ].update({"explode": False}),
+            "non-default parameter explode is not supported",
+        ),
+        (
+            lambda document: document["paths"]["/custom-tools/{name}"]["get"]["parameters"][
+                0
+            ].update({"allowReserved": True}),
+            "allowReserved parameters are not supported",
+        ),
+        (
+            lambda document: document["components"]["schemas"]["CustomTool"]["properties"].update(
+                {"tags": {"type": "array", "items": {"type": "string"}, "minItems": 1}}
+            ),
+            "schema keywords are not supported",
+        ),
+        (
+            lambda document: document["paths"]["/custom-tools/{name}"]["get"].update(
+                {"servers": [{"url": "https://other.example/api"}]}
+            ),
+            "server overrides are not supported",
+        ),
+        (
+            lambda document: document["components"]["schemas"]["CustomTool"]["properties"].update(
+                {"shape": {"type": "object", "const": {"x": 1}}}
+            ),
+            "must be a JSON scalar",
+        ),
+        (
+            lambda document: document["components"]["schemas"]["CustomTool"]["properties"].update(
+                {
+                    "brokenNullable": {
+                        "anyOf": [
+                            {"type": "string"},
+                            {"type": "null", "const": "not-null"},
+                        ]
+                    }
+                }
+            ),
+            "nullable branch must be exactly",
+        ),
+        (
+            lambda document: document["paths"]["/custom-tools/{name}"]["get"]["responses"][
+                "200"
+            ].update({"description": "override"}),
+            "reference siblings are not supported",
+        ),
     ],
 )
 def test_profile_rejects_unsupported_constructs(mutate, message: str) -> None:
@@ -174,3 +231,16 @@ def test_operation_parameters_override_path_parameters() -> None:
         len([parameter for parameter in operation.parameters if parameter.wire_name == "name"]) == 1
     )
     assert operation.parameters[0].description == "Operation-specific description"
+
+
+def test_explicit_empty_response_content_is_bodyless() -> None:
+    document = _document()
+    document["paths"]["/custom-tools/{name}"]["get"]["responses"]["204"] = {
+        "description": "No content",
+        "content": {},
+    }
+
+    api = normalize(document)
+
+    response = next(item for item in api.operations[0].responses if item.status == "204")
+    assert response.schema is None

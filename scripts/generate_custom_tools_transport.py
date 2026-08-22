@@ -108,7 +108,9 @@ def _property_aliases(api: Api) -> list[str]:
                 continue
             field = next((item for item in model.fields if item.wire_name == wire_name), None)
             if field is not None:
-                candidates.append(replace(field.schema, nullable=False))
+                candidates.append(
+                    replace(field.schema, nullable=False, has_default=False, default=None)
+                )
         if not candidates or any(candidate != candidates[0] for candidate in candidates[1:]):
             raise ValueError(f"Public property alias {alias} is missing or inconsistent")
         lines.append(f"{alias}: TypeAlias = {_annotation(candidates[0])}")

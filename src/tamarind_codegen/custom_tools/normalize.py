@@ -39,11 +39,23 @@ def _schema(value: Mapping[str, Any]) -> Schema:
     if "$ref" in value:
         ref = cast(str, value["$ref"])
         name = ref.removeprefix("#/components/schemas/").replace("~1", "/").replace("~0", "~")
-        return Schema(kind="reference", reference=name, description=value.get("description"))
+        return Schema(
+            kind="reference",
+            reference=name,
+            description=value.get("description"),
+            has_default="default" in value,
+            default=_json_value(value.get("default")),
+        )
 
     if "anyOf" in value:
         non_null = next(part for part in value["anyOf"] if part.get("type") != "null")
-        return replace(_schema(non_null), nullable=True, description=value.get("description"))
+        return replace(
+            _schema(non_null),
+            nullable=True,
+            description=value.get("description"),
+            has_default="default" in value,
+            default=_json_value(value.get("default")),
+        )
 
     kind = cast(SchemaKind, value["type"])
     constraints = tuple(
@@ -55,6 +67,8 @@ def _schema(value: Mapping[str, Any]) -> Schema:
     enum = tuple(cast(list[Scalar], value.get("enum", [])))
     has_const = "const" in value
     const = cast(Scalar, value.get("const"))
+    has_default = "default" in value
+    default = _json_value(value.get("default"))
     if kind == "array":
         return Schema(
             kind="array",
@@ -63,6 +77,8 @@ def _schema(value: Mapping[str, Any]) -> Schema:
             enum=enum,
             has_const=has_const,
             const=const,
+            has_default=has_default,
+            default=default,
             constraints=constraints,
         )
     if kind == "object":
@@ -73,8 +89,6 @@ def _schema(value: Mapping[str, Any]) -> Schema:
                 schema=_schema(child),
                 required=name in required,
                 description=child.get("description"),
-                has_default="default" in child,
-                default=_json_value(child.get("default")),
             )
             for name, child in value.get("properties", {}).items()
         )
@@ -93,6 +107,8 @@ def _schema(value: Mapping[str, Any]) -> Schema:
             enum=enum,
             has_const=has_const,
             const=const,
+            has_default=has_default,
+            default=default,
             constraints=constraints,
         )
     return Schema(
@@ -101,6 +117,8 @@ def _schema(value: Mapping[str, Any]) -> Schema:
         enum=enum,
         has_const=has_const,
         const=const,
+        has_default=has_default,
+        default=default,
         constraints=constraints,
     )
 
@@ -119,12 +137,7 @@ def _parameter(document: Mapping[str, Any], value: object) -> Parameter:
 def _request_body(document: Mapping[str, Any], value: object) -> RequestBody:
     raw = _dereference(document, value, "requestBody", "requestBodies")
     schema = raw["content"]["application/json"]["schema"]
-    return RequestBody(
-        required=raw.get("required", False),
-        schema=_schema(schema),
-        has_default="default" in schema,
-        default=_json_value(schema.get("default")),
-    )
+    return RequestBody(required=raw.get("required", False), schema=_schema(schema))
 
 
 def _response(document: Mapping[str, Any], status: str, value: object) -> Response:

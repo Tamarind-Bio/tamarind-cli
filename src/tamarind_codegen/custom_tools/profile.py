@@ -11,26 +11,16 @@ PARAMETER_LOCATIONS = {"path", "query"}
 SCHEMA_TYPES = {"array", "boolean", "integer", "null", "number", "object", "string"}
 COMPOSITION_KEYS = {"allOf", "not", "oneOf"}
 CONSTRAINT_KEYS = {"maxLength", "maximum", "minLength", "minimum", "pattern"}
-UNSUPPORTED_SCHEMA_KEYS = {
-    "contains",
-    "dependentSchemas",
-    "discriminator",
-    "else",
-    "if",
-    "patternProperties",
-    "prefixItems",
-    "propertyNames",
-    "then",
-    "unevaluatedProperties",
-}
-REFERENCE_ANNOTATIONS = {
-    "default",
-    "deprecated",
-    "description",
-    "examples",
-    "readOnly",
-    "title",
-    "writeOnly",
+SCHEMA_ANNOTATIONS = {"default", "description", "title"}
+SCHEMA_COMMON_KEYS = SCHEMA_ANNOTATIONS | {"const", "enum", "type"}
+SCHEMA_KEYS_BY_TYPE = {
+    "array": {"items"},
+    "boolean": set(),
+    "integer": {"maximum", "minimum"},
+    "null": set(),
+    "number": {"maximum", "minimum"},
+    "object": {"additionalProperties", "properties", "required"},
+    "string": {"maxLength", "minLength", "pattern"},
 }
 
 
@@ -53,6 +43,24 @@ def _sequence(value: object, location: str) -> Sequence[Any]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         raise ProfileViolation(location, "must be an array")
     return value
+
+
+def _value_matches_type(value: object, kind: str) -> bool:
+    if kind == "null":
+        return value is None
+    if kind == "boolean":
+        return isinstance(value, bool)
+    if kind == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if kind == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if kind == "string":
+        return isinstance(value, str)
+    if kind == "array":
+        return isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray))
+    if kind == "object":
+        return isinstance(value, Mapping)
+    return False
 
 
 def _component(document: Mapping[str, Any], ref: str, location: str) -> Mapping[str, Any]:
@@ -86,7 +94,7 @@ def _dereference(
         return item
     if not isinstance(ref, str):
         raise ProfileViolation(f"{location}.$ref", "must be a string")
-    unsupported = set(item) - {"$ref"} - REFERENCE_ANNOTATIONS
+    unsupported = set(item) - {"$ref"}
     if unsupported:
         raise ProfileViolation(
             location, f"reference siblings are not supported: {sorted(unsupported)}"
@@ -113,7 +121,7 @@ def _validate_schema(
     if ref is not None:
         if not isinstance(ref, str):
             raise ProfileViolation(f"{location}.$ref", "must be a string")
-        unsupported = set(schema) - {"$ref"} - REFERENCE_ANNOTATIONS
+        unsupported = set(schema) - {"$ref", "default", "description"}
         if unsupported:
             raise ProfileViolation(
                 location, f"reference siblings are not supported: {sorted(unsupported)}"
@@ -133,13 +141,8 @@ def _validate_schema(
         raise ProfileViolation(
             location, f"schema composition is not supported: {sorted(unsupported_composition)}"
         )
-    unsupported_keywords = UNSUPPORTED_SCHEMA_KEYS & set(schema)
-    if unsupported_keywords:
-        raise ProfileViolation(
-            location, f"schema keywords are not supported: {sorted(unsupported_keywords)}"
-        )
     if "anyOf" in schema:
-        unsupported = set(schema) - {"anyOf"} - REFERENCE_ANNOTATIONS
+        unsupported = set(schema) - {"anyOf"} - SCHEMA_ANNOTATIONS
         if unsupported:
             raise ProfileViolation(
                 location, f"nullable anyOf siblings are not supported: {sorted(unsupported)}"
@@ -147,11 +150,15 @@ def _validate_schema(
         alternatives = _sequence(schema["anyOf"], f"{location}.anyOf")
         if len(alternatives) != 2:
             raise ProfileViolation(location, "anyOf is supported only for one schema plus null")
-        null_count = sum(
-            isinstance(part, Mapping) and part.get("type") == "null" for part in alternatives
-        )
-        if null_count != 1:
+        null_branches = [
+            part
+            for part in alternatives
+            if isinstance(part, Mapping) and part.get("type") == "null"
+        ]
+        if len(null_branches) != 1:
             raise ProfileViolation(location, "anyOf is supported only for one schema plus null")
+        if dict(null_branches[0]) != {"type": "null"}:
+            raise ProfileViolation(location, "the nullable branch must be exactly {'type': 'null'}")
         non_null = next(
             part
             for part in alternatives
@@ -163,6 +170,11 @@ def _validate_schema(
     kind = schema.get("type")
     if not isinstance(kind, str) or kind not in SCHEMA_TYPES:
         raise ProfileViolation(location, f"must declare one supported type, got {kind!r}")
+    unsupported = set(schema) - SCHEMA_COMMON_KEYS - SCHEMA_KEYS_BY_TYPE[kind]
+    if unsupported:
+        raise ProfileViolation(
+            location, f"schema keywords are not supported: {sorted(unsupported)}"
+        )
 
     if "enum" in schema:
         enum = _sequence(schema["enum"], f"{location}.enum")
@@ -172,6 +184,16 @@ def _validate_schema(
             isinstance(item, (Mapping, Sequence)) and not isinstance(item, str) for item in enum
         ):
             raise ProfileViolation(f"{location}.enum", "values must be JSON scalars")
+        if any(not _value_matches_type(item, kind) for item in enum):
+            raise ProfileViolation(f"{location}.enum", "values must match the declared type")
+    if "const" in schema:
+        const = schema["const"]
+        if isinstance(const, (Mapping, Sequence)) and not isinstance(const, str):
+            raise ProfileViolation(f"{location}.const", "must be a JSON scalar")
+        if not _value_matches_type(const, kind):
+            raise ProfileViolation(f"{location}.const", "must match the declared type")
+    if "default" in schema and not _value_matches_type(schema["default"], kind):
+        raise ProfileViolation(f"{location}.default", "must match the declared type")
 
     if kind == "array":
         if "items" not in schema:
@@ -213,6 +235,28 @@ def _validate_parameter(document: Mapping[str, Any], value: object, location: st
         raise ProfileViolation(location, "path parameters must be required")
     if "schema" not in parameter:
         raise ProfileViolation(location, "parameters must declare a schema")
+    unsupported = set(parameter) - {
+        "allowReserved",
+        "description",
+        "explode",
+        "in",
+        "name",
+        "required",
+        "schema",
+        "style",
+    }
+    if unsupported:
+        raise ProfileViolation(
+            location, f"parameter fields are not supported: {sorted(unsupported)}"
+        )
+    expected_style = "simple" if parameter_location == "path" else "form"
+    expected_explode = parameter_location == "query"
+    if parameter.get("style", expected_style) != expected_style:
+        raise ProfileViolation(location, "non-default parameter style is not supported")
+    if parameter.get("explode", expected_explode) is not expected_explode:
+        raise ProfileViolation(location, "non-default parameter explode is not supported")
+    if parameter.get("allowReserved", False) is not False:
+        raise ProfileViolation(location, "allowReserved parameters are not supported")
     _validate_schema(document, parameter["schema"], f"{location}.schema")
 
 
@@ -289,7 +333,7 @@ def _validate_response(document: Mapping[str, Any], value: object, location: str
     response = _dereference(document, value, location, "responses")
     if not isinstance(response.get("description"), str):
         raise ProfileViolation(f"{location}.description", "must be a string")
-    if "content" in response:
+    if "content" in response and response["content"]:
         _json_schema(
             document,
             response["content"],

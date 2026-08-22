@@ -48,8 +48,6 @@ class Field:
     schema: Schema
     required: bool
     description: str | None = None
-    has_default: bool = False
-    default: JsonValue = None
 
 
 @dataclass(frozen=True)
@@ -64,6 +62,8 @@ class Schema:
     enum: tuple[Scalar, ...] = ()
     has_const: bool = False
     const: Scalar = None
+    has_default: bool = False
+    default: JsonValue = None
     constraints: tuple[Constraint, ...] = ()
 
 
@@ -86,8 +86,6 @@ class Parameter:
 class RequestBody:
     required: bool
     schema: Schema
-    has_default: bool = False
-    default: JsonValue = None
 
 
 @dataclass(frozen=True)

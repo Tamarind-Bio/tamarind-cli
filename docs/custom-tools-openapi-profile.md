@@ -23,13 +23,15 @@ than the entire OpenAPI specification.
 - One concrete global HTTPS server and one global `x-api-key` header security scheme.
 - HTTP `GET`, `POST`, `PUT`, `PATCH`, and `DELETE` operations with unique `operationId`s.
 - Path and query parameters. Path parameters must be required.
+- Only default OpenAPI parameter serialization: simple/non-exploded paths and
+  form/exploded queries, without `allowReserved`.
 - Optional or required `application/json` request bodies.
 - `application/json` and `application/problem+json` responses, plus responses with no body.
 - Local references to component schemas, responses, parameters, and request bodies.
 - Object, array, string, integer, number, boolean, and null schemas.
 - String and numeric constraints used by the API: `minLength`, `maxLength`, `pattern`,
   `minimum`, and `maximum`.
-- Enumerations, constants, defaults, typed maps, and nullable schemas represented as
+- Scalar enumerations and constants, defaults, typed maps, and nullable schemas represented as
   `anyOf: [<schema>, {"type": "null"}]`.
 
 ## Explicit non-goals
@@ -40,6 +42,7 @@ The validator rejects these constructs with a location-specific error:
 - callbacks, webhooks, links, and cookie or header parameters;
 - XML, multipart, form-encoded, or multiple request/response media types;
 - general `oneOf`, `allOf`, or `anyOf` unions;
+- schema assertions other than the string and numeric constraints listed above;
 - discriminators, recursive references, tuples, and conditional JSON Schema;
 - arbitrary extension behavior that would require the Python emitter to understand
   OpenAPI.
