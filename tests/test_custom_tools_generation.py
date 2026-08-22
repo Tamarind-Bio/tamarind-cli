@@ -26,7 +26,10 @@ def test_openapi_extraction_keeps_only_the_custom_tools_dependency_closure(
                     "/custom-tools": {
                         "get": {
                             "operationId": "listCustomTools",
-                            "responses": {"200": {"$ref": "#/components/responses/ToolResponse"}},
+                            "responses": {
+                                "200": {"$ref": "#/components/responses/ToolResponse"},
+                                "default": {"$ref": "#/components/responses/Error"},
+                            },
                         }
                     },
                     "/custom-tools-preview": {
@@ -56,14 +59,26 @@ def test_openapi_extraction_keeps_only_the_custom_tools_dependency_closure(
                                 }
                             },
                         },
+                        "Error": {
+                            "description": "error",
+                            "content": {
+                                "application/problem+json": {
+                                    "schema": {"$ref": "#/components/schemas/Nested"}
+                                }
+                            },
+                        },
                         "Unused": {"description": "unused"},
                     },
                     "schemas": {
                         "Tool": {
                             "type": "object",
-                            "properties": {"name": {"type": "string"}},
-                            "required": ["name"],
+                            "properties": {
+                                "name": {"type": "string"},
+                                "default": {"$ref": "#/components/schemas/Nested"},
+                            },
+                            "required": ["name", "default"],
                         },
+                        "Nested": {"type": "string"},
                         "Unused": {"type": "string"},
                     },
                 },
@@ -83,9 +98,10 @@ def test_openapi_extraction_keeps_only_the_custom_tools_dependency_closure(
 
     sliced = json.loads(output.read_text())
     assert set(sliced["paths"]) == {"/custom-tools"}
-    assert set(sliced["components"]["responses"]) == {"ToolResponse"}
-    assert set(sliced["components"]["schemas"]) == {"Tool"}
+    assert set(sliced["components"]["responses"]) == {"Error", "ToolResponse"}
+    assert set(sliced["components"]["schemas"]) == {"Nested", "Tool"}
     assert set(sliced["components"]["securitySchemes"]) == {"ApiKey"}
+    assert normalize(sliced).operations[0].operation_id == "listCustomTools"
 
 
 def test_openapi_extraction_consumes_path_item_components(tmp_path: Path) -> None:

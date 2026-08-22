@@ -49,12 +49,13 @@ def _schema(value: Mapping[str, Any]) -> Schema:
 
     if "anyOf" in value:
         non_null = next(part for part in value["anyOf"] if part.get("type") != "null")
+        normalized = _schema(non_null)
         return replace(
-            _schema(non_null),
+            normalized,
             nullable=True,
-            description=value.get("description"),
-            has_default="default" in value,
-            default=_json_value(value.get("default")),
+            description=value.get("description", normalized.description),
+            has_default="default" in value or normalized.has_default,
+            default=(_json_value(value["default"]) if "default" in value else normalized.default),
         )
 
     kind = cast(SchemaKind, value["type"])

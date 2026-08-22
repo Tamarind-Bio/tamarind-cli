@@ -25,13 +25,16 @@ than the entire OpenAPI specification.
 - Non-null scalar path and query parameters. Path parameters must be required strings.
 - Only default OpenAPI parameter serialization: simple/non-exploded paths and
   form/exploded queries, without `allowReserved`.
-- Optional or required `application/json` request bodies.
+- Optional or required non-null `application/json` request bodies.
 - `application/json` and `application/problem+json` responses, plus responses with no body.
+- Exactly one successful response per operation.
 - Local references to component schemas, responses, parameters, and request bodies.
-- Object, array, string, integer, number, boolean, and null schemas.
+- Named component objects, typed maps, arrays, strings, integers, numbers, booleans, and null
+  schemas. Structured object schemas must be component definitions; objects cannot combine
+  declared properties with typed additional properties.
 - String and numeric constraints used by the API: `minLength`, `maxLength`, `pattern`,
   `minimum`, and `maximum`.
-- Scalar enumerations and constants, defaults, typed maps, and nullable schemas represented as
+- Scalar enumerations and constants, defaults, and nullable schemas represented as
   `anyOf: [<schema>, {"type": "null"}]`.
 
 Every supported OpenAPI object kind has a closed field allowlist. Documentation-only

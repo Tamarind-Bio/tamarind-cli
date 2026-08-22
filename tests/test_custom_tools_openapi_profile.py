@@ -180,6 +180,87 @@ def test_normalize_produces_an_openapi_free_ir() -> None:
             "path parameters must use string schemas",
         ),
         (
+            lambda document: document["paths"]["/custom-tools/{name}"]["patch"]["requestBody"][
+                "content"
+            ]["application/json"].update({"schema": {"type": "null"}}),
+            "request bodies must use non-null schemas",
+        ),
+        (
+            lambda document: document["paths"]["/custom-tools/{name}"]["patch"]["requestBody"][
+                "content"
+            ]["application/json"].update(
+                {
+                    "schema": {
+                        "type": "object",
+                        "properties": {"name": {"type": "string"}},
+                    }
+                }
+            ),
+            "structured object schemas must be named components",
+        ),
+        (
+            lambda document: document["components"]["schemas"]["CustomTool"]["properties"].update(
+                {
+                    "inline": {
+                        "type": "object",
+                        "properties": {"value": {"type": "string"}},
+                    }
+                }
+            ),
+            "structured object schemas must be named components",
+        ),
+        (
+            lambda document: document["components"]["schemas"].update(
+                {
+                    "InlineItems": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"value": {"type": "string"}},
+                        },
+                    }
+                }
+            ),
+            "structured object schemas must be named components",
+        ),
+        (
+            lambda document: document["paths"]["/custom-tools/{name}"]["get"][
+                "responses"
+            ].__setitem__(
+                "200",
+                {
+                    "description": "Inline object",
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {"value": {"type": "string"}},
+                            }
+                        }
+                    },
+                },
+            ),
+            "structured object schemas must be named components",
+        ),
+        (
+            lambda document: document["components"]["schemas"]["CustomTool"].update(
+                {"additionalProperties": {"type": "string"}}
+            ),
+            "cannot mix properties with typed additionalProperties",
+        ),
+        (
+            lambda document: document["components"]["schemas"].update(
+                {"Empty": {"type": "object", "additionalProperties": False}}
+            ),
+            "closed empty object schemas are not supported",
+        ),
+        (
+            lambda document: document["paths"]["/custom-tools/{name}"]["get"]["responses"].update(
+                {"201": {"description": "Also successful"}}
+            ),
+            "exactly one successful response is required",
+        ),
+        (
             lambda document: document.update({"webhooks": {}}),
             "document fields are not supported",
         ),
@@ -261,6 +342,28 @@ def test_normalize_produces_an_openapi_free_ir() -> None:
         ),
         (
             lambda document: document["components"]["schemas"]["CustomTool"]["properties"].update(
+                {"choice": {"type": "string", "enum": ["a", "b"], "const": "a"}}
+            ),
+            "schemas cannot combine enum and const",
+        ),
+        (
+            lambda document: document["paths"]["/custom-tools/{name}"]["get"]["parameters"][
+                0
+            ].update({"required": "yes"}),
+            "must be a boolean",
+        ),
+        (
+            lambda document: document["paths"]["/custom-tools/{name}"]["get"]["parameters"].append(
+                {
+                    "name": "includeVersions",
+                    "in": "query",
+                    "schema": {"type": "boolean"},
+                }
+            ),
+            "duplicate parameter",
+        ),
+        (
+            lambda document: document["components"]["schemas"]["CustomTool"]["properties"].update(
                 {
                     "brokenNullable": {
                         "anyOf": [
@@ -310,7 +413,9 @@ def test_operation_parameters_override_path_parameters() -> None:
 
 def test_explicit_empty_response_content_is_bodyless() -> None:
     document = _document()
-    document["paths"]["/custom-tools/{name}"]["get"]["responses"]["204"] = {
+    responses = document["paths"]["/custom-tools/{name}"]["get"]["responses"]
+    responses.pop("200")
+    responses["204"] = {
         "description": "No content",
         "content": {},
     }
@@ -319,3 +424,19 @@ def test_explicit_empty_response_content_is_bodyless() -> None:
 
     response = next(item for item in api.operations[0].responses if item.status == "204")
     assert response.schema is None
+
+
+def test_nullable_schema_preserves_inner_annotations() -> None:
+    document = _document()
+    document["components"]["schemas"]["CustomTool"]["properties"]["sourceRef"] = {
+        "anyOf": [
+            {"type": "string", "description": "Source revision", "default": "pending"},
+            {"type": "null"},
+        ]
+    }
+
+    source_ref = normalize(document).schemas[0].schema.fields[2].schema
+
+    assert source_ref.description == "Source revision"
+    assert source_ref.has_default is True
+    assert source_ref.default == "pending"

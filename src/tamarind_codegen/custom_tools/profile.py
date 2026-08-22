@@ -159,7 +159,12 @@ def _dereference(
 
 
 def _validate_schema(
-    document: Mapping[str, Any], value: object, location: str, stack: frozenset[str] = frozenset()
+    document: Mapping[str, Any],
+    value: object,
+    location: str,
+    stack: frozenset[str] = frozenset(),
+    *,
+    named: bool = False,
 ) -> None:
     schema = _mapping(value, location)
     ref = schema.get("$ref")
@@ -178,7 +183,7 @@ def _validate_schema(
         if ref in stack:
             raise ProfileViolation(location, "recursive schema references are not supported")
         target = _component(document, ref, location)
-        _validate_schema(document, target, location, stack | {ref})
+        _validate_schema(document, target, location, stack | {ref}, named=True)
         return
 
     unsupported_composition = COMPOSITION_KEYS & set(schema)
@@ -209,7 +214,7 @@ def _validate_schema(
             for part in alternatives
             if not (isinstance(part, Mapping) and part.get("type") == "null")
         )
-        _validate_schema(document, non_null, f"{location}.anyOf")
+        _validate_schema(document, non_null, f"{location}.anyOf", stack, named=named)
         return
 
     kind = schema.get("type")
@@ -231,6 +236,8 @@ def _validate_schema(
             raise ProfileViolation(f"{location}.enum", "values must be JSON scalars")
         if any(not _value_matches_type(item, kind) for item in enum):
             raise ProfileViolation(f"{location}.enum", "values must match the declared type")
+    if "enum" in schema and "const" in schema:
+        raise ProfileViolation(location, "schemas cannot combine enum and const")
     if "const" in schema:
         const = schema["const"]
         if isinstance(const, (Mapping, Sequence)) and not isinstance(const, str):
@@ -246,6 +253,8 @@ def _validate_schema(
         _validate_schema(document, schema["items"], f"{location}.items", stack)
     elif kind == "object":
         properties = _mapping(schema.get("properties", {}), f"{location}.properties")
+        if properties and not named:
+            raise ProfileViolation(location, "structured object schemas must be named components")
         required = _sequence(schema.get("required", []), f"{location}.required")
         if any(not isinstance(name, str) for name in required):
             raise ProfileViolation(f"{location}.required", "entries must be strings")
@@ -257,6 +266,12 @@ def _validate_schema(
         for name, child in properties.items():
             _validate_schema(document, child, f"{location}.properties.{name}", stack)
         additional = schema.get("additionalProperties")
+        if properties and isinstance(additional, Mapping):
+            raise ProfileViolation(
+                location, "object schemas cannot mix properties with typed additionalProperties"
+            )
+        if not properties and additional is False:
+            raise ProfileViolation(location, "closed empty object schemas are not supported")
         if additional is not None and not isinstance(additional, bool):
             _validate_schema(document, additional, f"{location}.additionalProperties", stack)
 
@@ -268,13 +283,11 @@ def _validate_schema(
             raise ProfileViolation(f"{location}.{key}", "must be a number")
 
 
-def _parameter_schema_shape(
-    document: Mapping[str, Any], value: object, location: str
-) -> tuple[str, bool]:
+def _schema_shape(document: Mapping[str, Any], value: object, location: str) -> tuple[str, bool]:
     schema = _mapping(value, location)
     ref = schema.get("$ref")
     if isinstance(ref, str):
-        return _parameter_schema_shape(document, _component(document, ref, location), location)
+        return _schema_shape(document, _component(document, ref, location), location)
     if "anyOf" in schema:
         alternatives = _sequence(schema["anyOf"], f"{location}.anyOf")
         non_null = next(
@@ -282,12 +295,14 @@ def _parameter_schema_shape(
             for part in alternatives
             if not (isinstance(part, Mapping) and part.get("type") == "null")
         )
-        kind, _ = _parameter_schema_shape(document, non_null, location)
+        kind, _ = _schema_shape(document, non_null, location)
         return kind, True
     return str(schema["type"]), False
 
 
-def _validate_parameter(document: Mapping[str, Any], value: object, location: str) -> None:
+def _validate_parameter(
+    document: Mapping[str, Any], value: object, location: str
+) -> tuple[str, str]:
     parameter = _dereference(document, value, location, "parameters")
     _reject_unsupported_fields(parameter, PARAMETER_FIELDS, location, "parameter")
     name = parameter.get("name")
@@ -296,6 +311,8 @@ def _validate_parameter(document: Mapping[str, Any], value: object, location: st
     parameter_location = parameter.get("in")
     if parameter_location not in PARAMETER_LOCATIONS:
         raise ProfileViolation(f"{location}.in", "only path and query parameters are supported")
+    if "required" in parameter and not isinstance(parameter["required"], bool):
+        raise ProfileViolation(f"{location}.required", "must be a boolean")
     if parameter_location == "path" and parameter.get("required") is not True:
         raise ProfileViolation(location, "path parameters must be required")
     if "schema" not in parameter:
@@ -309,11 +326,22 @@ def _validate_parameter(document: Mapping[str, Any], value: object, location: st
     if parameter.get("allowReserved", False) is not False:
         raise ProfileViolation(location, "allowReserved parameters are not supported")
     _validate_schema(document, parameter["schema"], f"{location}.schema")
-    kind, nullable = _parameter_schema_shape(document, parameter["schema"], f"{location}.schema")
+    kind, nullable = _schema_shape(document, parameter["schema"], f"{location}.schema")
     if nullable or kind not in {"boolean", "integer", "number", "string"}:
         raise ProfileViolation(location, "parameters must use non-null scalar schemas")
     if parameter_location == "path" and kind != "string":
         raise ProfileViolation(location, "path parameters must use string schemas")
+    return name, parameter_location
+
+
+def _validate_parameter_list(document: Mapping[str, Any], value: object, location: str) -> None:
+    parameters = _sequence(value, location)
+    identities: set[tuple[str, str]] = set()
+    for index, parameter in enumerate(parameters):
+        identity = _validate_parameter(document, parameter, f"{location}[{index}]")
+        if identity in identities:
+            raise ProfileViolation(f"{location}[{index}]", "duplicate parameter")
+        identities.add(identity)
 
 
 def _validate_server_and_auth(document: Mapping[str, Any]) -> None:
@@ -396,6 +424,10 @@ def _validate_request_body(document: Mapping[str, Any], value: object, location:
         f"{location}.content",
         frozenset({"application/json"}),
     )
+    schema = body["content"]["application/json"]["schema"]
+    kind, nullable = _schema_shape(document, schema, f"{location}.content.schema")
+    if nullable or kind == "null":
+        raise ProfileViolation(location, "request bodies must use non-null schemas")
 
 
 def _validate_response(document: Mapping[str, Any], value: object, location: str) -> None:
@@ -428,7 +460,7 @@ def validate_profile(document: Mapping[str, Any]) -> None:
     _validate_server_and_auth(document)
     schemas = _mapping(components.get("schemas", {}), "components.schemas")
     for name, schema in schemas.items():
-        _validate_schema(document, schema, f"components.schemas.{name}")
+        _validate_schema(document, schema, f"components.schemas.{name}", named=True)
     parameters = _mapping(components.get("parameters", {}), "components.parameters")
     for name, parameter in parameters.items():
         _validate_parameter(document, parameter, f"components.parameters.{name}")
@@ -446,9 +478,9 @@ def validate_profile(document: Mapping[str, Any]) -> None:
             raise ProfileViolation(f"paths.{path}", "path keys must start with '/'")
         path_item = _mapping(raw_path_item, f"paths.{path}")
         _reject_unsupported_fields(path_item, PATH_ITEM_FIELDS, f"paths.{path}", "path item")
-        path_parameters = _sequence(path_item.get("parameters", []), f"paths.{path}.parameters")
-        for index, parameter in enumerate(path_parameters):
-            _validate_parameter(document, parameter, f"paths.{path}.parameters[{index}]")
+        _validate_parameter_list(
+            document, path_item.get("parameters", []), f"paths.{path}.parameters"
+        )
         for method, raw_operation in path_item.items():
             if method in {"description", "parameters", "summary"}:
                 continue
@@ -462,13 +494,11 @@ def validate_profile(document: Mapping[str, Any]) -> None:
             if operation_id in operation_ids:
                 raise ProfileViolation(f"paths.{path}.{method}.operationId", "must be unique")
             operation_ids.add(operation_id)
-            operation_parameters = _sequence(
-                operation.get("parameters", []), f"paths.{path}.{method}.parameters"
+            _validate_parameter_list(
+                document,
+                operation.get("parameters", []),
+                f"paths.{path}.{method}.parameters",
             )
-            for index, parameter in enumerate(operation_parameters):
-                _validate_parameter(
-                    document, parameter, f"paths.{path}.{method}.parameters[{index}]"
-                )
             if "requestBody" in operation:
                 _validate_request_body(
                     document, operation["requestBody"], f"paths.{path}.{method}.requestBody"
@@ -478,3 +508,9 @@ def validate_profile(document: Mapping[str, Any]) -> None:
                 raise ProfileViolation(f"paths.{path}.{method}.responses", "must not be empty")
             for status, response in responses.items():
                 _validate_response(document, response, f"paths.{path}.{method}.responses.{status}")
+            successful = [str(status) for status in responses if str(status).startswith("2")]
+            if len(successful) != 1:
+                raise ProfileViolation(
+                    f"paths.{path}.{method}.responses",
+                    "exactly one successful response is required",
+                )

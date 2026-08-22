@@ -13,52 +13,44 @@ CUSTOM_TOOLS_PATH = "/custom-tools"
 HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete"})
 OPENAPI_OPERATION_KEYS = HTTP_METHODS | {"head", "options", "trace"}
 OPAQUE_VALUE_KEYS = frozenset({"example", "examples", "default", "const", "enum"})
+SCHEMA_CHILD_KEYS = frozenset({"additionalProperties", "items"})
+SCHEMA_CHILD_ARRAY_KEYS = frozenset({"allOf", "anyOf", "oneOf", "prefixItems"})
 
 
 def _is_custom_tools_path(path: str) -> bool:
     return path == CUSTOM_TOOLS_PATH or path.startswith(f"{CUSTOM_TOOLS_PATH}/")
 
 
-def _schema_refs(node: object, *, opaque: bool = False) -> set[str]:
+def _refs(node: object, prefix: str, *, schema_context: bool = False) -> set[str]:
     refs: set[str] = set()
-    if opaque:
-        return refs
-    if isinstance(node, dict):
-        ref = node.get("$ref")
-        if isinstance(ref, str) and ref.startswith("#/components/schemas/"):
-            token = ref[len("#/components/schemas/") :]
-            refs.add(token.replace("~1", "/").replace("~0", "~"))
-        for key, value in node.items():
-            refs.update(
-                _schema_refs(value, opaque=key in OPAQUE_VALUE_KEYS or key.startswith("x-"))
-            )
-    elif isinstance(node, list):
-        for value in node:
-            refs.update(_schema_refs(value))
-    return refs
-
-
-def _component_refs(node: object, kind: str, *, opaque: bool = False) -> set[str]:
-    refs: set[str] = set()
-    if opaque:
-        return refs
-    prefix = f"#/components/{kind}/"
     if isinstance(node, dict):
         ref = node.get("$ref")
         if isinstance(ref, str) and ref.startswith(prefix):
-            refs.add(ref[len(prefix) :].replace("~1", "/").replace("~0", "~"))
+            token = ref[len(prefix) :]
+            refs.add(token.replace("~1", "/").replace("~0", "~"))
         for key, value in node.items():
-            refs.update(
-                _component_refs(
-                    value,
-                    kind,
-                    opaque=key in OPAQUE_VALUE_KEYS or key.startswith("x-"),
-                )
+            if key.startswith("x-") or (schema_context and key in OPAQUE_VALUE_KEYS):
+                continue
+            if schema_context and key == "properties" and isinstance(value, dict):
+                for property_schema in value.values():
+                    refs.update(_refs(property_schema, prefix, schema_context=True))
+                continue
+            child_is_schema = key == "schema" or (
+                schema_context and key in SCHEMA_CHILD_KEYS | SCHEMA_CHILD_ARRAY_KEYS
             )
+            refs.update(_refs(value, prefix, schema_context=child_is_schema))
     elif isinstance(node, list):
         for value in node:
-            refs.update(_component_refs(value, kind))
+            refs.update(_refs(value, prefix, schema_context=schema_context))
     return refs
+
+
+def _schema_refs(node: object, *, schema_context: bool = False) -> set[str]:
+    return _refs(node, "#/components/schemas/", schema_context=schema_context)
+
+
+def _component_refs(node: object, kind: str) -> set[str]:
+    return _refs(node, f"#/components/{kind}/")
 
 
 def _security_scheme_names(requirements: object) -> set[str]:
@@ -163,7 +155,7 @@ def extract(spec: dict[str, Any]) -> dict[str, Any]:
     pending = list(reachable)
     while pending:
         name = pending.pop()
-        for child in _schema_refs(schemas.get(name, {})) - reachable:
+        for child in _schema_refs(schemas.get(name, {}), schema_context=True) - reachable:
             reachable.add(child)
             pending.append(child)
 
