@@ -86,8 +86,8 @@ def _archive_digest(root: Path) -> str:
 @respx.mock
 def test_create_list_and_update_wrap_public_routes() -> None:
     create = respx.post(f"{BASE}custom-tools").mock(return_value=httpx.Response(201, json=_tool()))
-    respx.get(f"{BASE}custom-tools").mock(
-        return_value=httpx.Response(200, json={"items": [_tool()]})
+    listed_route = respx.get(f"{BASE}custom-tools").mock(
+        return_value=httpx.Response(200, json={"items": [_tool()], "nextCursor": "tools-page-2"})
     )
     update = respx.patch(f"{BASE}custom-tools/example").mock(
         return_value=httpx.Response(200, json={**_tool(), "description": "updated"})
@@ -95,11 +95,14 @@ def test_create_list_and_update_wrap_public_routes() -> None:
 
     with Tamarind(api_key="key", api_base=BASE) as client:
         tool = client.custom_tools.create("example")
-        listed = client.custom_tools.list().items
+        page = client.custom_tools.list(limit=1)
+        listed = page.items
         changed = tool.update(description="updated")
 
     assert json.loads(create.calls.last.request.content) == {"name": "example"}
     assert listed[0].name == "example"
+    assert page.next_cursor == "tools-page-2"
+    assert listed_route.calls.last.request.url.params["limit"] == "1"
     assert json.loads(update.calls.last.request.content) == {"description": "updated"}
     assert update.calls.last.request.headers["If-Match"] == "generation-1"
     assert changed.description == "updated"
@@ -181,6 +184,59 @@ def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> 
         "expectedSourceDigest": digest,
     }
     assert version.name == "v1"
+    assert version.source_digest == digest
+
+
+@respx.mock
+def test_build_rejects_archive_larger_than_upload_session_limit(tmp_path: Path) -> None:
+    _source(tmp_path)
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.post(f"{BASE}custom-tools/example/uploads").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "uploadId": "upload-1",
+                "uploadUrl": UPLOAD,
+                "uploadMethod": "PUT",
+                "uploadHeaders": {},
+                "expiresAt": "2026-08-15T00:15:00Z",
+                "maxBytes": 1,
+            },
+        )
+    )
+    upload = respx.put(UPLOAD).mock(return_value=httpx.Response(200))
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(CustomToolUploadError, match="upload session allows at most 1 bytes"):
+            client.custom_tools.get("example").build(tmp_path)
+
+    assert not upload.called
+
+
+@respx.mock
+def test_version_pages_preserve_and_accept_cursors() -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    versions = respx.get(f"{BASE}custom-tools/example/versions").mock(
+        return_value=httpx.Response(
+            200,
+            json={"items": [_version()], "nextCursor": "versions-page-2"},
+        )
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        page = client.custom_tools.get("example").versions(
+            status="Running",
+            limit=1,
+            cursor="versions-page-1",
+        )
+
+    assert page.next_cursor == "versions-page-2"
+    assert page.items[0].source_digest == "sha256:" + "a" * 64
+    assert dict(versions.calls.last.request.url.params) == {
+        "status": "Running",
+        "limit": "1",
+        "cursor": "versions-page-1",
+    }
 
 
 def test_build_caps_archive_at_the_server_source_limit(tmp_path: Path, monkeypatch) -> None:
@@ -357,6 +413,7 @@ def test_monitor_recomputes_the_deadline_after_log_poll(monkeypatch) -> None:
     version = resources.Version(
         name="v1",
         source_revision="a" * 40,
+        source_digest="sha256:" + "a" * 64,
         status="Running",
         origin="build",
         started_at="2026-08-15T00:00:00Z",
@@ -392,6 +449,7 @@ def test_monitor_without_callback_does_not_fetch_logs(monkeypatch) -> None:
         return resources.Version(
             name=version.name,
             source_revision=version.source_revision,
+            source_digest=version.source_digest,
             status="Complete",
             origin=version.origin,
             started_at=version.started_at,
@@ -407,6 +465,7 @@ def test_monitor_without_callback_does_not_fetch_logs(monkeypatch) -> None:
     version = resources.Version(
         name="v1",
         source_revision="a" * 40,
+        source_digest="sha256:" + "a" * 64,
         status="Running",
         origin="build",
         started_at="2026-08-15T00:00:00Z",
@@ -435,6 +494,7 @@ def test_monitor_without_callback_polls_until_complete(monkeypatch) -> None:
         return resources.Version(
             name=version.name,
             source_revision=version.source_revision,
+            source_digest=version.source_digest,
             status=status,
             origin=version.origin,
             started_at=version.started_at,
@@ -450,6 +510,7 @@ def test_monitor_without_callback_polls_until_complete(monkeypatch) -> None:
     version = resources.Version(
         name="v1",
         source_revision="a" * 40,
+        source_digest="sha256:" + "a" * 64,
         status="Running",
         origin="build",
         started_at="2026-08-15T00:00:00Z",
@@ -485,6 +546,7 @@ def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> N
         return resources.Version(
             name=version.name,
             source_revision=version.source_revision,
+            source_digest=version.source_digest,
             status="Complete",
             origin=version.origin,
             started_at=version.started_at,
@@ -500,6 +562,7 @@ def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> N
     version = resources.Version(
         name="v1",
         source_revision="a" * 40,
+        source_digest="sha256:" + "a" * 64,
         status="Running",
         origin="build",
         started_at="2026-08-15T00:00:00Z",
@@ -530,6 +593,7 @@ def test_monitor_rechecks_deadline_after_terminal_log_callback(monkeypatch) -> N
     version = resources.Version(
         name="v1",
         source_revision="a" * 40,
+        source_digest="sha256:" + "a" * 64,
         status="Complete",
         origin="build",
         started_at="2026-08-15T00:00:00Z",

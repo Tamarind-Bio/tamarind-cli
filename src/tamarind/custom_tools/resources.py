@@ -63,6 +63,7 @@ _UNSET = _Unset()
 @dataclass(frozen=True)
 class Page(Generic[T]):
     items: tuple[T, ...]
+    next_cursor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -203,14 +204,21 @@ class CustomTool:
     def get_version(self, name: str) -> "Version":
         return self._collection._get_version(self.name, name)
 
-    def versions(self, *, limit: int = 50) -> Page["Version"]:
-        return self._collection._versions(self.name, limit=limit)
+    def versions(
+        self,
+        *,
+        status: PublicVersionStatus | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> Page["Version"]:
+        return self._collection._versions(self.name, status=status, limit=limit, cursor=cursor)
 
 
 @dataclass(frozen=True)
 class Version:
     name: str
     source_revision: str
+    source_digest: str | None
     status: PublicVersionStatus
     origin: str
     started_at: str
@@ -369,9 +377,24 @@ class CustomTools:
     def _get(self, name: str, *, request_timeout: float | None) -> CustomTool:
         return _tool_from_wire(self, self._transport.get_custom_tool(name, timeout=request_timeout))
 
-    def list(self) -> Page[CustomTool]:
-        wire = self._transport.list_custom_tools()
-        return Page(items=tuple(_tool_from_wire(self, item) for item in wire["items"]))
+    def list(
+        self,
+        *,
+        status: PublicCustomToolStatus | None = None,
+        published: bool | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> Page[CustomTool]:
+        wire = self._transport.list_custom_tools(
+            status=status,
+            published=published,
+            limit=limit,
+            cursor=cursor,
+        )
+        return Page(
+            items=tuple(_tool_from_wire(self, item) for item in wire["items"]),
+            next_cursor=wire["nextCursor"],
+        )
 
     def _update(
         self, name: str, generation: str, body: PublicUpdateCustomToolRequest
@@ -385,6 +408,11 @@ class CustomTools:
         archive = build_source_tree_archive(tree, max_bytes=MAX_TOOL_SOURCE_BYTES)
         try:
             session = self._transport.create_custom_tool_upload(tool.name, tool.generation)
+            if archive.size > session["maxBytes"]:
+                raise CustomToolUploadError(
+                    f"Source archive is {archive.size} bytes but the upload session allows "
+                    f"at most {session['maxBytes']} bytes."
+                )
             _upload_archive(
                 session["uploadUrl"],
                 archive.content(),
@@ -409,13 +437,24 @@ class CustomTools:
         return _version_from_wire(self, tool.name, result["version"])
 
     def _versions(
-        self, tool_name: str, *, limit: int, request_timeout: float | None = None
+        self,
+        tool_name: str,
+        *,
+        status: PublicVersionStatus | None,
+        limit: int,
+        cursor: str | None,
+        request_timeout: float | None = None,
     ) -> Page[Version]:
         wire = self._transport.list_custom_tool_versions(
-            tool_name, limit=limit, timeout=request_timeout
+            tool_name,
+            status=status,
+            limit=limit,
+            cursor=cursor,
+            timeout=request_timeout,
         )
         return Page(
-            items=tuple(_version_from_wire(self, tool_name, item) for item in wire["items"])
+            items=tuple(_version_from_wire(self, tool_name, item) for item in wire["items"]),
+            next_cursor=wire["nextCursor"],
         )
 
     def _get_version(
@@ -477,6 +516,7 @@ def _version_from_wire(collection: CustomTools, tool_name: str, wire: PublicVers
     return Version(
         name=wire["name"],
         source_revision=wire["sourceRevision"],
+        source_digest=wire["sourceDigest"],
         status=wire["status"],
         origin=wire["origin"],
         started_at=wire["startedAt"],

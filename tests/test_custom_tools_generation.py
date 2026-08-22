@@ -28,6 +28,28 @@ def test_cli_projects_custom_tools_from_the_complete_public_spec() -> None:
     assert "PublicPipeline" not in projected["components"]["schemas"]
 
 
+def test_projection_resolves_local_path_item_references() -> None:
+    root = Path(__file__).resolve().parents[1]
+    document = json.loads((root / "openapi/public-v1.json").read_text())
+    path = "/custom-tools/{name}"
+    path_item = document["paths"][path]
+    document["components"].setdefault("pathItems", {})["CustomToolItem"] = path_item
+    document["paths"][path] = {"$ref": "#/components/pathItems/CustomToolItem"}
+
+    projected = project_custom_tools(document)
+
+    assert set(projected["paths"][path]) == {"get", "patch"}
+
+
+def test_projection_rejects_unsupported_path_item_references() -> None:
+    root = Path(__file__).resolve().parents[1]
+    document = json.loads((root / "openapi/public-v1.json").read_text())
+    document["paths"]["/custom-tools/{name}"] = {"$ref": "https://example.com/path-item.json"}
+
+    with pytest.raises(ValueError, match="local components/pathItems"):
+        project_custom_tools(document)
+
+
 def test_property_aliases_ignore_documentation_metadata(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     document = json.loads((root / "openapi/public-v1.json").read_text())

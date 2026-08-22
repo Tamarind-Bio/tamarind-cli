@@ -64,23 +64,58 @@ def _security_scheme_names(requirements: object) -> set[str]:
     return names
 
 
+def _resolve_path_item(
+    document: dict[str, Any],
+    path_item: object,
+    *,
+    location: str,
+    seen: frozenset[str] = frozenset(),
+) -> dict[str, Any] | None:
+    if not isinstance(path_item, dict):
+        return None
+    ref = path_item.get("$ref")
+    if ref is None:
+        return path_item
+    if not isinstance(ref, str) or not ref.startswith("#/components/pathItems/"):
+        raise ValueError(f"{location}.$ref must target a local components/pathItems entry")
+    if set(path_item) != {"$ref"}:
+        raise ValueError(f"{location} cannot combine $ref with sibling fields")
+    if ref in seen:
+        raise ValueError(f"{location} contains a recursive Path Item reference")
+    name = ref.removeprefix("#/components/pathItems/").replace("~1", "/").replace("~0", "~")
+    components = document.get("components", {})
+    path_items = components.get("pathItems", {}) if isinstance(components, dict) else {}
+    if not isinstance(path_items, dict) or name not in path_items:
+        raise ValueError(f"{location} references missing Path Item {ref!r}")
+    resolved = _resolve_path_item(
+        document,
+        path_items[name],
+        location=f"components.pathItems.{name}",
+        seen=seen | {ref},
+    )
+    if resolved is None:
+        raise ValueError(f"components.pathItems.{name} must be an object")
+    return resolved
+
+
 def project_custom_tools(document: dict[str, Any]) -> dict[str, Any]:
     """Select tagged Custom Tools operations and their reachable component closure."""
 
     paths: dict[str, Any] = {}
     for path, path_item in document.get("paths", {}).items():
-        if not isinstance(path_item, dict):
+        resolved_path_item = _resolve_path_item(document, path_item, location=f"paths.{path}")
+        if resolved_path_item is None:
             continue
         selected = {
             method: operation
-            for method, operation in path_item.items()
+            for method, operation in resolved_path_item.items()
             if method in HTTP_METHODS
             and isinstance(operation, dict)
             and CUSTOM_TOOLS_TAG in operation.get("tags", [])
         }
         if selected:
-            if isinstance(path_item.get("parameters"), list):
-                selected["parameters"] = path_item["parameters"]
+            if isinstance(resolved_path_item.get("parameters"), list):
+                selected["parameters"] = resolved_path_item["parameters"]
             paths[path] = selected
 
     if not paths:
