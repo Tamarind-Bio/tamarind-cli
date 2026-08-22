@@ -445,7 +445,9 @@ def _wait_for_source(
             )
         try:
             current = tool._refresh(request_timeout=remaining)
-        except httpx.TimeoutException:
+        except TamarindError as exc:
+            if not isinstance(exc.__cause__, httpx.TimeoutException):
+                raise
             raise CustomToolUploadError(
                 f"Source extraction did not finish within {timeout:g} seconds"
             ) from None
@@ -475,7 +477,9 @@ def _wait_for_version_ref(
             )
         try:
             versions = collection._versions(tool_name, limit=50, request_timeout=remaining).items
-        except httpx.TimeoutException:
+        except TamarindError as exc:
+            if not isinstance(exc.__cause__, httpx.TimeoutException):
+                raise
             raise CustomToolBuildTimeoutError(
                 f"Custom Tool deploy {tool_name}@{source_ref[:12]} did not receive a numbered version "
                 f"within {timeout:g} seconds"

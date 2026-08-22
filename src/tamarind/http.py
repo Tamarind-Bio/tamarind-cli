@@ -96,8 +96,6 @@ class HTTPClient:
                 json=json,
                 timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
             )
-        except httpx.TimeoutException:
-            raise
         except httpx.HTTPError as exc:
             raise TamarindError(f"Network error talking to {self.base_url}: {exc}") from exc
 
@@ -141,8 +139,6 @@ class HTTPClient:
                     json=json,
                     timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
                 )
-        except httpx.TimeoutException:
-            raise
         except httpx.HTTPError as exc:
             raise TamarindError(f"Network error talking to {self.base_url}: {exc}") from exc
 

@@ -286,10 +286,14 @@ def test_build_constructs_archive_before_creating_upload_session(
 
 
 def test_source_poll_request_timeout_maps_to_upload_deadline(monkeypatch) -> None:
+    from tamarind.errors import TamarindError
+
+    timeout = TamarindError("network timeout")
+    timeout.__cause__ = httpx.ReadTimeout("slow")
     tool = type(
         "Tool",
         (),
-        {"_refresh": lambda self, **_kwargs: (_ for _ in ()).throw(httpx.ReadTimeout("slow"))},
+        {"_refresh": lambda self, **_kwargs: (_ for _ in ()).throw(timeout)},
     )()
 
     with pytest.raises(CustomToolUploadError, match="did not finish within 1 seconds"):
@@ -302,14 +306,14 @@ def test_source_poll_request_timeout_maps_to_upload_deadline(monkeypatch) -> Non
 
 
 def test_version_poll_request_timeout_maps_to_build_deadline() -> None:
+    from tamarind.errors import TamarindError
+
+    timeout = TamarindError("network timeout")
+    timeout.__cause__ = httpx.ReadTimeout("slow")
     collection = type(
         "Collection",
         (),
-        {
-            "_versions": lambda self, *_args, **_kwargs: (_ for _ in ()).throw(
-                httpx.ReadTimeout("slow")
-            )
-        },
+        {"_versions": lambda self, *_args, **_kwargs: (_ for _ in ()).throw(timeout)},
     )()
 
     with pytest.raises(CustomToolBuildTimeoutError, match="did not receive a numbered version"):
