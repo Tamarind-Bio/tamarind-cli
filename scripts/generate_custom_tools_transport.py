@@ -29,7 +29,13 @@ RESERVED_NAMES = {
     "TypeAlias",
     "TypedDict",
     "_segment",
+    "bool",
     "cast",
+    "dict",
+    "float",
+    "int",
+    "list",
+    "str",
 }
 
 
@@ -227,18 +233,25 @@ def _success(operation: Operation) -> Response:
     return responses[0]
 
 
-def _request_lines(call: list[str], *, async_method: bool, optional_body: bool) -> list[str]:
+def _request_lines(
+    call: list[str],
+    *,
+    async_method: bool,
+    optional_body: bool,
+    capture_response: bool,
+) -> list[str]:
     request = "await self._client.request_async" if async_method else "self._client.request"
+    invocation = f"response = {request}" if capture_response else request
     if not optional_body:
-        return [f"        response = {request}(", *call, "        )"]
+        return [f"        {invocation}(", *call, "        )"]
     with_body = [*call[:-1], "            json=body,", call[-1]]
     return [
         "        if body is None:",
-        f"            response = {request}(",
+        f"            {invocation}(",
         *[f"    {line}" for line in call],
         "            )",
         "        else:",
-        f"            response = {request}(",
+        f"            {invocation}(",
         *[f"    {line}" for line in with_body],
         "            )",
     ]
@@ -319,6 +332,7 @@ def _method(operation: Operation, *, async_method: bool) -> tuple[str, str]:
             async_method=async_method,
             optional_body=operation.request_body is not None
             and not operation.request_body.required,
+            capture_response=success.schema is not None,
         ),
         return_line,
     ]

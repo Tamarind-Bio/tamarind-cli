@@ -4155,6 +4155,60 @@
       }
     },
     "/custom-tools/{name}": {
+      "delete": {
+        "description": "Delete this generation and release its name for reuse.",
+        "operationId": "deleteCustomTool",
+        "parameters": [
+          {
+            "description": "The custom tool name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The custom tool name.",
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
+              "minLength": 1,
+              "title": "If-Match",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Delete a custom tool",
+        "tags": [
+          "custom-tools"
+        ],
+        "x-doc-group": "Custom Tools"
+      },
       "get": {
         "description": "Get a custom tool's configuration, source status, and current version.",
         "operationId": "getCustomTool",

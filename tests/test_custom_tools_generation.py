@@ -147,6 +147,30 @@ def test_generated_models_reject_nfkc_ambiguous_schema_names(tmp_path: Path) -> 
         )
 
 
+@pytest.mark.parametrize("name", ["str", "int", "float", "bool", "list", "dict"])
+def test_generated_models_reject_names_that_shadow_annotation_builtins(
+    tmp_path: Path, name: str
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    document = json.loads((root / "openapi/public-v1.json").read_text(encoding="utf-8"))
+    document["components"]["schemas"][name] = {"type": "string"}
+    spec = tmp_path / "shadowed-builtin.json"
+    generated = tmp_path / "generated_shadowed_builtin.py"
+    spec.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.run(
+            [
+                sys.executable,
+                str(root / "scripts/generate_custom_tools_transport.py"),
+                str(spec),
+                str(generated),
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+
 def test_current_openapi_normalizes_to_the_expected_surface() -> None:
     root = Path(__file__).resolve().parents[1]
     api = normalize(project_custom_tools(json.loads((root / "openapi/public-v1.json").read_text())))
@@ -156,6 +180,7 @@ def test_current_openapi_normalizes_to_the_expected_surface() -> None:
         "cancelCustomToolBuild",
         "createCustomTool",
         "createCustomToolUpload",
+        "deleteCustomTool",
         "buildCustomToolVersion",
         "getCustomTool",
         "getCustomToolVersion",
@@ -203,6 +228,7 @@ def test_generated_transport_is_importable(tmp_path: Path) -> None:
 
     assert module.OPENAPI_SERVER_URL == "https://app.tamarind.bio/api/"
     assert hasattr(module.GeneratedCustomToolsTransport, "build_custom_tool_version")
+    assert hasattr(module.GeneratedCustomToolsTransport, "delete_custom_tool")
     assert hasattr(module.GeneratedCustomToolsTransport, "get_custom_tool_version_async")
 
 

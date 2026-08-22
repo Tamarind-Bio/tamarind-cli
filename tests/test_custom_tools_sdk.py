@@ -114,6 +114,17 @@ def test_create_list_and_update_wrap_public_routes() -> None:
 
 
 @respx.mock
+def test_delete_uses_the_tool_generation() -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    delete = respx.delete(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(204))
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        client.custom_tools.get("example").delete()
+
+    assert delete.calls.last.request.headers["If-Match"] == "generation-1"
+
+
+@respx.mock
 def test_custom_tools_transport_owns_plain_404_classification() -> None:
     respx.get(f"{BASE}custom-tools/missing").mock(
         return_value=httpx.Response(404, json={"detail": "Not Found"})
@@ -250,6 +261,7 @@ def test_version_pages_preserve_and_accept_cursors() -> None:
 @respx.mock
 def test_version_preserves_duration_and_stable_error_code() -> None:
     failed = _version(status="Stopped", error="Docker build failed")
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
     respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
         return_value=httpx.Response(200, json=failed)
     )
@@ -258,6 +270,7 @@ def test_version_preserves_duration_and_stable_error_code() -> None:
         version = client.custom_tools.get("example").get_version("v1")
 
     assert version.duration_seconds == 60
+    assert version.created_at == failed["createdAt"]
     assert version.error is not None
     assert version.error.code == "build_failed"
     assert version.error.message == "Docker build failed"
@@ -438,6 +451,7 @@ def test_monitor_recomputes_the_deadline_after_log_poll(monkeypatch) -> None:
         source_digest="sha256:" + "a" * 64,
         status="Running",
         origin="build",
+        created_at="2026-08-15T00:00:00Z",
         started_at="2026-08-15T00:00:00Z",
         completed_at=None,
         duration_seconds=None,
@@ -474,6 +488,7 @@ def test_monitor_without_callback_does_not_fetch_logs(monkeypatch) -> None:
             source_digest=version.source_digest,
             status="Complete",
             origin=version.origin,
+            created_at=version.created_at,
             started_at=version.started_at,
             completed_at="2026-08-15T00:01:00Z",
             duration_seconds=60,
@@ -490,6 +505,7 @@ def test_monitor_without_callback_does_not_fetch_logs(monkeypatch) -> None:
         source_digest="sha256:" + "a" * 64,
         status="Running",
         origin="build",
+        created_at="2026-08-15T00:00:00Z",
         started_at="2026-08-15T00:00:00Z",
         completed_at=None,
         duration_seconds=None,
@@ -519,6 +535,7 @@ def test_monitor_without_callback_polls_until_complete(monkeypatch) -> None:
             source_digest=version.source_digest,
             status=status,
             origin=version.origin,
+            created_at=version.created_at,
             started_at=version.started_at,
             completed_at="2026-08-15T00:01:00Z" if status == "Complete" else None,
             duration_seconds=60 if status == "Complete" else None,
@@ -535,6 +552,7 @@ def test_monitor_without_callback_polls_until_complete(monkeypatch) -> None:
         source_digest="sha256:" + "a" * 64,
         status="Running",
         origin="build",
+        created_at="2026-08-15T00:00:00Z",
         started_at="2026-08-15T00:00:00Z",
         completed_at=None,
         duration_seconds=None,
@@ -571,6 +589,7 @@ def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> N
             source_digest=version.source_digest,
             status="Complete",
             origin=version.origin,
+            created_at=version.created_at,
             started_at=version.started_at,
             completed_at="2026-08-15T00:01:00Z",
             duration_seconds=60,
@@ -587,6 +606,7 @@ def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> N
         source_digest="sha256:" + "a" * 64,
         status="Running",
         origin="build",
+        created_at="2026-08-15T00:00:00Z",
         started_at="2026-08-15T00:00:00Z",
         completed_at=None,
         duration_seconds=None,
@@ -618,6 +638,7 @@ def test_monitor_rechecks_deadline_after_terminal_log_callback(monkeypatch) -> N
         source_digest="sha256:" + "a" * 64,
         status="Complete",
         origin="build",
+        created_at="2026-08-15T00:00:00Z",
         started_at="2026-08-15T00:00:00Z",
         completed_at="2026-08-15T00:01:00Z",
         duration_seconds=60,

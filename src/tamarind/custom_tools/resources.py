@@ -178,6 +178,10 @@ class CustomTool:
         )
         return self._collection._update(self.name, self.generation, body)
 
+    def delete(self) -> None:
+        """Delete this exact tool generation and release its name for reuse."""
+        self._collection._delete(self.name, self.generation)
+
     def validate(self, folder: str | Path) -> ValidationReport:
         return validate_folder(folder)
 
@@ -220,6 +224,7 @@ class Version:
     source_digest: str | None
     status: PublicVersionStatus
     origin: str
+    created_at: str
     started_at: str
     completed_at: str | None
     duration_seconds: int | None
@@ -400,6 +405,9 @@ class CustomTools:
     ) -> CustomTool:
         return _tool_from_wire(self, self._transport.update_custom_tool(name, generation, body))
 
+    def _delete(self, name: str, generation: str) -> None:
+        self._transport.delete_custom_tool(name, generation)
+
     def _build(self, tool: CustomTool, tree: SourceTree, *, source_timeout: float) -> Version:
         timeout, _ = _validate_monitor_options(timeout=source_timeout, interval=1.0)
         archive = build_source_tree_archive(tree, max_bytes=MAX_TOOL_SOURCE_BYTES)
@@ -522,6 +530,7 @@ def _version_from_wire(collection: CustomTools, tool_name: str, wire: PublicVers
         source_digest=wire["sourceDigest"],
         status=wire["status"],
         origin=wire["origin"],
+        created_at=wire["createdAt"],
         started_at=wire["startedAt"],
         completed_at=completed_at,
         duration_seconds=duration_seconds,

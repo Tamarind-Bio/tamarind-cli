@@ -170,6 +170,16 @@ def test_normalize_produces_an_openapi_free_ir() -> None:
             "path parameters must use string schemas",
         ),
         (
+            lambda document: document["paths"]["/custom-tools/{name}"]["get"]["parameters"].append(
+                {
+                    "name": "x-retry-count",
+                    "in": "header",
+                    "schema": {"type": "integer"},
+                }
+            ),
+            "header parameters must use string schemas",
+        ),
+        (
             lambda document: document["paths"]["/custom-tools/{name}"]["patch"]["requestBody"][
                 "content"
             ]["application/json"].update({"schema": {"type": "null"}}),
@@ -362,6 +372,18 @@ def test_normalize_produces_an_openapi_free_ir() -> None:
                 {"choice": {"type": "string", "enum": ["a", "b"], "const": "a"}}
             ),
             "schemas cannot combine enum and const",
+        ),
+        (
+            lambda document: document["components"]["schemas"]["CustomTool"]["properties"].update(
+                {"ratio": {"type": "number", "enum": [1.5]}}
+            ),
+            "floating-point enum values cannot be represented",
+        ),
+        (
+            lambda document: document["components"]["schemas"]["CustomTool"]["properties"].update(
+                {"ratio": {"type": "number", "const": 1.5}}
+            ),
+            "floating-point const values cannot be represented",
         ),
         (
             lambda document: document["paths"]["/custom-tools/{name}"]["get"]["parameters"][

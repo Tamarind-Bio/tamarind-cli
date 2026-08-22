@@ -9,7 +9,7 @@ from urllib.parse import quote
 from tamarind.http import HTTPClient
 
 OPENAPI_SERVER_URL = "https://app.tamarind.bio/api/"
-OPENAPI_SHA256 = "3ecc8be9f803bdda4157c49f41e27334d5e9487d53051ad0841a80b87dbb0356"
+OPENAPI_SHA256 = "38276abb99cf166a4c19290e854333221959c981be92041d32cea05fbfe1672f"
 
 
 def _segment(value: str) -> str:
@@ -199,6 +199,15 @@ class GeneratedCustomToolsTransport:
             timeout=timeout,
         )
         return cast(PublicCustomTool, response.json())
+
+    def delete_custom_tool(self, name: str, if_match: str, *, timeout: float | None = None) -> None:
+        self._client.request(
+            "DELETE",
+            f"custom-tools/{_segment(name)}",
+            headers={"If-Match": if_match},
+            timeout=timeout,
+        )
+        return None
 
     def get_custom_tool(self, name: str, *, timeout: float | None = None) -> PublicCustomTool:
         response = self._client.request(
