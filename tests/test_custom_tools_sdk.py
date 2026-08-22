@@ -531,7 +531,7 @@ def test_monitor_recomputes_the_deadline_after_log_poll(monkeypatch) -> None:
     )
 
     with pytest.raises(resources.CustomToolBuildTimeoutError):
-        asyncio.run(version._monitor(timeout=1.0, interval=0.1, on_event=None))
+        asyncio.run(version._monitor(timeout=1.0, interval=0.1, on_event=lambda _event: None))
 
     assert refreshed is False
 
