@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 import math
+import re
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -73,6 +74,7 @@ SCHEMA_KEYS_BY_TYPE = {
     "object": {"additionalProperties", "properties", "required"},
     "string": {"maxLength", "minLength", "pattern"},
 }
+RESPONSE_STATUS_PATTERN = re.compile(r"[1-5](?:[0-9]{2}|XX)\Z")
 
 
 class ProfileViolation(ValueError):
@@ -375,6 +377,8 @@ def _validate_parameter(
         raise ProfileViolation(location, "path parameters must use string schemas")
     if parameter_location == "header" and kind != "string":
         raise ProfileViolation(location, "header parameters must use string schemas")
+    if parameter_location == "header" and name.casefold() == "x-api-key":
+        raise ProfileViolation(location, "x-api-key is owned by the authenticated transport")
     return name, parameter_location
 
 
@@ -397,10 +401,17 @@ def _validate_server_and_auth(document: Mapping[str, Any]) -> None:
     url = server.get("url")
     if not isinstance(url, str) or "{" in url or "}" in url:
         raise ProfileViolation("servers[0].url", "must be a concrete HTTPS URL")
-    parsed = urlsplit(url)
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname
+        parsed.port
+    except ValueError as exc:
+        raise ProfileViolation("servers[0].url", "must be a concrete HTTPS URL") from exc
     if (
         parsed.scheme != "https"
         or not parsed.netloc
+        or not hostname
+        or any(character.isspace() for character in hostname)
         or parsed.username is not None
         or parsed.password is not None
         or parsed.query
@@ -558,8 +569,15 @@ def validate_profile(document: Mapping[str, Any]) -> None:
             if not responses:
                 raise ProfileViolation(f"paths.{path}.{method}.responses", "must not be empty")
             for status, response in responses.items():
+                if not isinstance(status, str) or (
+                    status != "default" and RESPONSE_STATUS_PATTERN.fullmatch(status) is None
+                ):
+                    raise ProfileViolation(
+                        f"paths.{path}.{method}.responses.{status}",
+                        "must be default, a three-digit HTTP status, or an nXX range",
+                    )
                 _validate_response(document, response, f"paths.{path}.{method}.responses.{status}")
-            successful = [str(status) for status in responses if str(status).startswith("2")]
+            successful = [status for status in responses if status.startswith("2")]
             if len(successful) != 1:
                 raise ProfileViolation(
                     f"paths.{path}.{method}.responses",

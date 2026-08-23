@@ -94,6 +94,55 @@ def test_profile_accepts_the_documented_subset() -> None:
     validate_profile(_document())
 
 
+@pytest.mark.parametrize("status", ["200garbage", "2999", "20", "099", "600", "2xx", 200])
+def test_profile_rejects_malformed_response_status_keys(status: object) -> None:
+    document = _document()
+    responses = document["paths"]["/custom-tools/{name}"]["get"]["responses"]
+    responses.pop("200")
+    responses[status] = {"description": "Malformed"}
+
+    with pytest.raises(ProfileViolation, match="must be default, a three-digit HTTP status"):
+        validate_profile(document)
+
+
+@pytest.mark.parametrize("status", ["200", "299", "2XX"])
+def test_profile_accepts_supported_success_response_statuses(status: str) -> None:
+    document = _document()
+    responses = document["paths"]["/custom-tools/{name}"]["get"]["responses"]
+    success = responses.pop("200")
+    responses[status] = success
+
+    validate_profile(document)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com:notaport/api",
+        "https://example.com:99999/api",
+        "https://exam ple.com/api",
+        "https://[not-an-ipv6]/api",
+    ],
+)
+def test_profile_rejects_invalid_server_authorities(url: str) -> None:
+    document = _document()
+    document["servers"][0]["url"] = url
+
+    with pytest.raises(ProfileViolation, match="must be a concrete HTTPS URL"):
+        validate_profile(document)
+
+
+@pytest.mark.parametrize("name", ["x-api-key", "X-API-Key", "X-Api-Key"])
+def test_profile_rejects_transport_owned_api_key_headers(name: str) -> None:
+    document = _document()
+    document["paths"]["/custom-tools/{name}"]["get"]["parameters"].append(
+        {"name": name, "in": "header", "required": True, "schema": {"type": "string"}}
+    )
+
+    with pytest.raises(ProfileViolation, match="owned by the authenticated transport"):
+        validate_profile(document)
+
+
 @pytest.mark.parametrize("keyword", ["minLength", "maxLength", "minItems", "maxItems"])
 @pytest.mark.parametrize("value", [-1, 1.5, True])
 def test_profile_rejects_invalid_cardinality_constraints(keyword: str, value: object) -> None:
