@@ -459,7 +459,7 @@ def _validate_server_and_auth(document: Mapping[str, Any]) -> None:
     try:
         parsed = urlsplit(url)
         hostname = parsed.hostname
-        parsed.port
+        port = parsed.port
     except ValueError as exc:
         raise ProfileViolation("servers[0].url", "must be a concrete HTTPS URL") from exc
     valid_hostname = False
@@ -475,7 +475,9 @@ def _validate_server_and_auth(document: Mapping[str, Any]) -> None:
         or not valid_hostname
         or parsed.username is not None
         or parsed.password is not None
+        or port == 0
         or URL_PATH_PATTERN.fullmatch(parsed.path) is None
+        or parsed.path.endswith("//")
         or parsed.query
         or parsed.fragment
     ):
@@ -636,6 +638,14 @@ def validate_profile(document: Mapping[str, Any]) -> None:
                 f"paths.{path}",
                 "path keys must use valid RFC 3986 path characters and percent escapes",
             )
+        relative_segments = path.removeprefix("/").split("/")
+        if ":" in relative_segments[0]:
+            raise ProfileViolation(
+                f"paths.{path}",
+                "the first path segment must not contain ':'",
+            )
+        if any(segment in {".", ".."} for segment in relative_segments):
+            raise ProfileViolation(f"paths.{path}", "path keys must not contain dot segments")
         path_item = _mapping(raw_path_item, f"paths.{path}")
         _reject_unsupported_fields(path_item, PATH_ITEM_FIELDS, f"paths.{path}", "path item")
         path_parameter_identities = _validate_parameter_list(

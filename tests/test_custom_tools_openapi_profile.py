@@ -119,6 +119,7 @@ def test_profile_accepts_supported_success_response_statuses(status: str) -> Non
     "url",
     [
         "https://example.com:notaport/api",
+        "https://example.com:0/api",
         "https://example.com:99999/api",
         "https://exam ple.com/api",
         "https://example.com\x00/api",
@@ -132,6 +133,7 @@ def test_profile_accepts_supported_success_response_statuses(status: str) -> Non
         "https://example.com/api\tv1",
         " https://example.com/api",
         "https://example.com/api ",
+        "https://example.com/api//",
     ],
 )
 def test_profile_rejects_invalid_server_authorities(url: str) -> None:
@@ -729,6 +731,24 @@ def test_profile_rejects_multiple_leading_path_slashes() -> None:
     document["paths"]["//custom-tools/{name}"] = document["paths"].pop("/custom-tools/{name}")
 
     with pytest.raises(ProfileViolation, match="exactly one"):
+        validate_profile(document)
+
+
+@pytest.mark.parametrize(
+    ("path", "message"),
+    [
+        ("/custom-tools:preview", "first path segment"),
+        ("/custom-tools/{name}/../versions", "dot segments"),
+        ("/./custom-tools/{name}", "dot segments"),
+    ],
+)
+def test_profile_rejects_paths_that_change_during_relative_resolution(
+    path: str, message: str
+) -> None:
+    document = _document()
+    document["paths"][path] = document["paths"].pop("/custom-tools/{name}")
+
+    with pytest.raises(ProfileViolation, match=message):
         validate_profile(document)
 
 
