@@ -24,12 +24,13 @@ UPLOAD = "https://uploads.test/source.zip"
 
 def _tool(
     *,
+    generation: str = "generation-1",
     source_digest: str | None = None,
     source: bool = False,
 ) -> dict:
     return {
         "name": "example",
-        "generation": "generation-1",
+        "generation": generation,
         "displayName": "Example",
         "description": "",
         "functions": [],
@@ -122,6 +123,23 @@ def test_delete_uses_the_tool_generation() -> None:
         client.custom_tools.get("example").delete()
 
     assert delete.calls.last.request.headers["If-Match"] == "generation-1"
+
+
+@respx.mock
+def test_refresh_rejects_a_reused_tool_name() -> None:
+    route = respx.get(f"{BASE}custom-tools/example").mock(
+        side_effect=[
+            httpx.Response(200, json=_tool()),
+            httpx.Response(200, json=_tool(generation="generation-2")),
+        ]
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        selected = client.custom_tools.get("example")
+        with pytest.raises(StaleCustomToolError, match="different generation"):
+            selected.refresh()
+
+    assert route.call_count == 2
 
 
 @respx.mock
@@ -444,7 +462,7 @@ def test_monitor_recomputes_the_deadline_after_log_poll(monkeypatch) -> None:
     refreshed = False
 
     async def logs(*_args, **_kwargs):
-        return resources.BuildLogPage(items=(), status="RUNNING")
+        return resources.BuildLogPage(items=(), status="Running")
 
     async def refresh(*_args, **_kwargs):
         nonlocal refreshed
@@ -484,6 +502,17 @@ def test_monitor_maps_http_request_timeout_to_build_timeout() -> None:
 
     with pytest.raises(resources.CustomToolBuildTimeoutError, match="monitoring timed out"):
         asyncio.run(resources._await_with_timeout(timed_out_request(), 1.0))
+
+
+def test_unbounded_monitor_preserves_transport_timeout() -> None:
+    async def timed_out_request():
+        try:
+            raise httpx.ReadTimeout("request timed out")
+        except httpx.TimeoutException as exc:
+            raise resources.TamarindError("network error") from exc
+
+    with pytest.raises(resources.TamarindError, match="network error"):
+        asyncio.run(resources._await_with_timeout(timed_out_request(), None))
 
 
 def test_monitor_without_callback_does_not_fetch_logs(monkeypatch) -> None:
@@ -628,9 +657,9 @@ def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> N
     trailing = resources.BuildEvent("image pushed", 3)
     pages = iter(
         (
-            resources.BuildLogPage(items=(first,), status="RUNNING", next_cursor="cursor-1"),
-            resources.BuildLogPage(items=(final,), status="SUCCEEDED", next_cursor="cursor-2"),
-            resources.BuildLogPage(items=(trailing,), status="SUCCEEDED"),
+            resources.BuildLogPage(items=(first,), status="Running", next_cursor="cursor-1"),
+            resources.BuildLogPage(items=(final,), status="Complete", next_cursor="cursor-2"),
+            resources.BuildLogPage(items=(trailing,), status="Complete"),
         )
     )
 
@@ -685,7 +714,7 @@ def test_monitor_rechecks_deadline_after_terminal_log_callback(monkeypatch) -> N
 
     async def logs(*_args, **_kwargs):
         return resources.BuildLogPage(
-            items=(resources.BuildEvent("complete", 1),), status="SUCCEEDED"
+            items=(resources.BuildEvent("complete", 1),), status="Complete"
         )
 
     monkeypatch.setattr(resources.Version, "_logs_async", logs)
@@ -714,8 +743,8 @@ def test_log_progress_deduplicates_cumulative_pages_without_a_cursor() -> None:
     second = resources.BuildEvent("second", 2)
     progress = resources._LogProgress()
 
-    assert progress.consume(resources.BuildLogPage(items=(first,), status="RUNNING")) == (first,)
-    assert progress.consume(resources.BuildLogPage(items=(first, second), status="RUNNING")) == (
+    assert progress.consume(resources.BuildLogPage(items=(first,), status="Running")) == (first,)
+    assert progress.consume(resources.BuildLogPage(items=(first, second), status="Running")) == (
         second,
     )
 
@@ -726,10 +755,10 @@ def test_log_progress_treats_cursor_pages_as_incremental() -> None:
     progress = resources._LogProgress()
 
     assert progress.consume(
-        resources.BuildLogPage(items=(first,), status="RUNNING", next_cursor="cursor-1")
+        resources.BuildLogPage(items=(first,), status="Running", next_cursor="cursor-1")
     ) == (first,)
     assert progress.consume(
-        resources.BuildLogPage(items=(second,), status="RUNNING", next_cursor="cursor-2")
+        resources.BuildLogPage(items=(second,), status="Running", next_cursor="cursor-2")
     ) == (second,)
 
 
@@ -739,8 +768,8 @@ def test_log_progress_retains_and_deduplicates_a_terminal_cursor() -> None:
     progress = resources._LogProgress()
 
     assert progress.consume(
-        resources.BuildLogPage(items=(first,), status="RUNNING", next_cursor="cursor-1")
+        resources.BuildLogPage(items=(first,), status="Running", next_cursor="cursor-1")
     ) == (first,)
-    assert progress.consume(resources.BuildLogPage(items=(final,), status="RUNNING")) == (final,)
+    assert progress.consume(resources.BuildLogPage(items=(final,), status="Running")) == (final,)
     assert progress.cursor == "cursor-1"
-    assert progress.consume(resources.BuildLogPage(items=(final,), status="RUNNING")) == ()
+    assert progress.consume(resources.BuildLogPage(items=(final,), status="Running")) == ()

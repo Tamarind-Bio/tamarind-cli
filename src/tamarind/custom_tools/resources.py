@@ -45,6 +45,7 @@ from tamarind.errors import (
     CustomToolBuildFailedError,
     CustomToolBuildTimeoutError,
     CustomToolUploadError,
+    StaleCustomToolError,
     TamarindError,
     ValidationError,
 )
@@ -84,7 +85,7 @@ class BuildEvent:
 @dataclass(frozen=True)
 class BuildLogPage:
     items: tuple[BuildEvent, ...]
-    status: str
+    status: PublicVersionStatus
     next_cursor: str | None = None
     error: BuildError | None = None
 
@@ -153,7 +154,13 @@ class CustomTool:
         return self._refresh(request_timeout=None)
 
     def _refresh(self, *, request_timeout: float | None) -> "CustomTool":
-        return self._collection._get(self.name, request_timeout=request_timeout)
+        refreshed = self._collection._get(self.name, request_timeout=request_timeout)
+        if refreshed.generation != self.generation:
+            raise StaleCustomToolError(
+                f"Custom Tool {self.name!r} now refers to a different generation; "
+                "fetch it again explicitly to select the replacement."
+            )
+        return refreshed
 
     def update(
         self,
@@ -623,9 +630,11 @@ async def _await_with_timeout(awaitable: Awaitable[T], remaining: float | None) 
             await awaitable if remaining is None else await asyncio.wait_for(awaitable, remaining)
         )
     except asyncio.TimeoutError:
+        if remaining is None:
+            raise
         raise CustomToolBuildTimeoutError("Custom Tool build monitoring timed out") from None
     except TamarindError as exc:
-        if isinstance(exc.__cause__, httpx.TimeoutException):
+        if remaining is not None and isinstance(exc.__cause__, httpx.TimeoutException):
             raise CustomToolBuildTimeoutError("Custom Tool build monitoring timed out") from None
         raise
 
