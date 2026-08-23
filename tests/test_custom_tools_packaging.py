@@ -288,6 +288,22 @@ def test_archive_rejects_file_and_synthetic_directory_prefix_collisions(tmp_path
         packaging.build_source_tree_archive(tree)
 
 
+def test_archive_rejects_case_colliding_ancestor_directories(tmp_path: Path) -> None:
+    source = tmp_path / "source.py"
+    source.write_text("pass\n")
+    inspected = packaging.SourceFile.inspect("source.py", source, tmp_path)
+    tree = packaging.SourceTree(
+        files=(
+            replace(inspected, relative="Models/a.py"),
+            replace(inspected, relative="models/b.py"),
+        ),
+        empty_directories=(),
+    )
+
+    with pytest.raises(CustomToolUploadError, match="colliding portable paths"):
+        packaging.build_source_tree_archive(tree)
+
+
 def test_inspection_rejects_directory_traversal_errors(tmp_path: Path, monkeypatch) -> None:
     _valid_source(tmp_path)
 
@@ -486,6 +502,28 @@ def test_archive_aborts_while_compressed_output_crosses_upload_limit(tmp_path: P
 
     with pytest.raises(CustomToolUploadError, match="1024-byte upload limit"):
         build_archive(tmp_path, max_bytes=1024)
+
+
+def test_temporary_archive_io_failures_are_typed() -> None:
+    archive = packaging._CappedArchive(max_bytes=None)
+
+    class FailingStream:
+        def tell(self) -> int:
+            return 0
+
+        def write(self, _data) -> int:
+            raise OSError("temporary filesystem full")
+
+        def close(self) -> None:
+            pass
+
+    archive._stream.close()
+    archive._stream = FailingStream()  # type: ignore[assignment]
+
+    with pytest.raises(CustomToolUploadError, match="archive write failed") as raised:
+        archive.write(b"content")
+
+    assert isinstance(raised.value.__cause__, OSError)
 
 
 def test_archive_closes_spool_when_construction_fails(tmp_path: Path, monkeypatch) -> None:

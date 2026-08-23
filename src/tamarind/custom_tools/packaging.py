@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import stat
 from tempfile import SpooledTemporaryFile
-from typing import BinaryIO, cast
+from typing import BinaryIO, Callable, TypeVar, cast
 import unicodedata
 import zipfile
 
@@ -47,13 +47,24 @@ _WINDOWS_RESERVED_NAMES = frozenset(
 _MAX_SOURCE_ENTRIES = 25_000
 MAX_TOOL_SOURCE_BYTES = 5 * 1024 * 1024 * 1024
 _ARCHIVE_MEMORY_BYTES = 8 * 1024 * 1024
+_T = TypeVar("_T")
+
+
+def _temporary_archive_io(operation: str, action: Callable[[], _T]) -> _T:
+    try:
+        return action()
+    except OSError as exc:
+        raise CustomToolUploadError(f"Temporary source archive {operation} failed") from exc
 
 
 class _CappedArchive:
     """A seekable ZIP target whose retained content cannot exceed the service cap."""
 
     def __init__(self, max_bytes: int | None) -> None:
-        self._stream = SpooledTemporaryFile(max_size=_ARCHIVE_MEMORY_BYTES, mode="w+b")
+        self._stream = _temporary_archive_io(
+            "creation",
+            lambda: SpooledTemporaryFile(max_size=_ARCHIVE_MEMORY_BYTES, mode="w+b"),
+        )
         self._max_bytes = max_bytes
 
     def write(self, data: Buffer) -> int:
@@ -62,10 +73,10 @@ class _CappedArchive:
             raise CustomToolUploadError(
                 f"Source archive exceeds the {self._max_bytes}-byte upload limit"
             )
-        return self._stream.write(data)
+        return _temporary_archive_io("write", lambda: self._stream.write(data))
 
     def read(self, size: int = -1) -> bytes:
-        return self._stream.read(size)
+        return _temporary_archive_io("read", lambda: self._stream.read(size))
 
     def __iter__(self) -> "_CappedArchive":
         return self
@@ -77,16 +88,16 @@ class _CappedArchive:
         return chunk
 
     def seek(self, offset: int, whence: int = 0) -> int:
-        return self._stream.seek(offset, whence)
+        return _temporary_archive_io("seek", lambda: self._stream.seek(offset, whence))
 
     def tell(self) -> int:
-        return self._stream.tell()
+        return _temporary_archive_io("position check", self._stream.tell)
 
     def flush(self) -> None:
-        self._stream.flush()
+        _temporary_archive_io("flush", self._stream.flush)
 
     def close(self) -> None:
-        self._stream.close()
+        _temporary_archive_io("close", self._stream.close)
 
 
 @dataclass(frozen=True)
@@ -341,7 +352,10 @@ def build_source_tree_archive(
         output.seek(0)
         return SourceArchive(digest=f"sha256:{digest.hexdigest()}", size=size, _stream=output)
     except BaseException:
-        output.close()
+        try:
+            output.close()
+        except CustomToolUploadError:
+            pass
         raise
 
 
@@ -349,11 +363,13 @@ def _validate_portable_manifest(entries: list[tuple[str, SourceFile | None, int]
     entry_paths: set[str] = set()
     file_paths: set[str] = set()
     required_directories: set[str] = set()
+    directory_spellings: dict[str, str] = {}
     for relative, _, mode in entries:
         archive_name = relative.removesuffix("/")
-        portable_name = _validate_archive_name(archive_name, Path(archive_name)).casefold()
-        parts = portable_name.split("/")
-        ancestors = {"/".join(parts[:index]) for index in range(1, len(parts))}
+        canonical_name = _validate_archive_name(archive_name, Path(archive_name))
+        portable_name = canonical_name.casefold()
+        parts = canonical_name.split("/")
+        ancestors = {"/".join(parts[:index]).casefold() for index in range(1, len(parts))}
         is_directory = stat.S_ISDIR(mode)
         collision = (
             portable_name in entry_paths
@@ -365,6 +381,15 @@ def _validate_portable_manifest(entries: list[tuple[str, SourceFile | None, int]
             raise CustomToolUploadError(
                 f"Source archive contains colliding portable paths: {archive_name}"
             )
+        directory_parts = range(1, len(parts) + 1) if is_directory else range(1, len(parts))
+        for index in directory_parts:
+            spelling = "/".join(parts[:index])
+            portable_directory = spelling.casefold()
+            previous = directory_spellings.setdefault(portable_directory, spelling)
+            if previous != spelling:
+                raise CustomToolUploadError(
+                    f"Source archive contains colliding portable paths: {archive_name}"
+                )
         entry_paths.add(portable_name)
         required_directories.update(ancestors)
         if is_directory:
