@@ -7,6 +7,7 @@ from typing import Any
 
 CUSTOM_TOOLS_TAG = "custom-tools"
 HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete"})
+OPENAPI_HTTP_METHODS = HTTP_METHODS | {"head", "options", "trace"}
 OPAQUE_VALUE_KEYS = frozenset({"example", "examples", "default", "const", "enum"})
 SCHEMA_CHILD_KEYS = frozenset({"additionalProperties", "items"})
 SCHEMA_CHILD_ARRAY_KEYS = frozenset({"allOf", "anyOf", "oneOf", "prefixItems"})
@@ -106,16 +107,20 @@ def project_custom_tools(document: dict[str, Any]) -> dict[str, Any]:
         resolved_path_item = _resolve_path_item(document, path_item, location=f"paths.{path}")
         if resolved_path_item is None:
             continue
-        selected = {
+        selected_operations = {
             method: operation
             for method, operation in resolved_path_item.items()
-            if method in HTTP_METHODS
+            if method in OPENAPI_HTTP_METHODS
             and isinstance(operation, dict)
             and CUSTOM_TOOLS_TAG in operation.get("tags", [])
         }
-        if selected:
-            if isinstance(resolved_path_item.get("parameters"), list):
-                selected["parameters"] = resolved_path_item["parameters"]
+        if selected_operations:
+            selected = {
+                field: value
+                for field, value in resolved_path_item.items()
+                if field not in OPENAPI_HTTP_METHODS
+            }
+            selected.update(selected_operations)
             paths[path] = selected
 
     if not paths:

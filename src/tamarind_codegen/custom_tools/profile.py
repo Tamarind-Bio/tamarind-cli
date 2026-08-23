@@ -260,10 +260,10 @@ def _validate_schema(
             raise ProfileViolation(f"{location}.enum", "values must be JSON scalars")
         if any(not _value_matches_type(item, kind) for item in enum):
             raise ProfileViolation(f"{location}.enum", "values must match the declared type")
-        if kind == "number" and any(isinstance(item, float) for item in enum):
+        if kind == "number":
             raise ProfileViolation(
                 f"{location}.enum",
-                "floating-point enum values cannot be represented as Python Literal types",
+                "number enums cannot be represented faithfully as Python Literal types",
             )
     if "enum" in schema and "const" in schema:
         raise ProfileViolation(location, "schemas cannot combine enum and const")
@@ -273,10 +273,10 @@ def _validate_schema(
             raise ProfileViolation(f"{location}.const", "must be a JSON scalar")
         if not _value_matches_type(const, kind):
             raise ProfileViolation(f"{location}.const", "must match the declared type")
-        if kind == "number" and isinstance(const, float):
+        if kind == "number":
             raise ProfileViolation(
                 f"{location}.const",
-                "floating-point const values cannot be represented as Python Literal types",
+                "number consts cannot be represented faithfully as Python Literal types",
             )
     if "default" in schema and not _value_matches_type(schema["default"], kind):
         raise ProfileViolation(f"{location}.default", "must match the declared type")

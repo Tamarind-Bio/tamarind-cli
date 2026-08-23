@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from tamarind_codegen.custom_tools import normalize
+from tamarind_codegen.custom_tools import ProfileViolation, normalize, validate_profile
 from tamarind_codegen.custom_tools.project import project_custom_tools
 
 
@@ -48,6 +48,32 @@ def test_projection_rejects_unsupported_path_item_references() -> None:
 
     with pytest.raises(ValueError, match="local components/pathItems"):
         project_custom_tools(document)
+
+
+def test_projection_preserves_tagged_unsupported_methods_for_profile_rejection() -> None:
+    root = Path(__file__).resolve().parents[1]
+    document = json.loads((root / "openapi/public-v1.json").read_text())
+    operation = document["paths"]["/custom-tools/{name}"]["get"].copy()
+    operation["operationId"] = "headCustomTool"
+    document["paths"]["/custom-tools/{name}"]["head"] = operation
+
+    projected = project_custom_tools(document)
+
+    assert "head" in projected["paths"]["/custom-tools/{name}"]
+    with pytest.raises(ProfileViolation, match="path item fields are not supported"):
+        validate_profile(projected)
+
+
+def test_projection_preserves_path_semantics_for_profile_rejection() -> None:
+    root = Path(__file__).resolve().parents[1]
+    document = json.loads((root / "openapi/public-v1.json").read_text())
+    document["paths"]["/custom-tools/{name}"]["servers"] = [{"url": "https://other.example/api"}]
+
+    projected = project_custom_tools(document)
+
+    assert "servers" in projected["paths"]["/custom-tools/{name}"]
+    with pytest.raises(ProfileViolation, match="path item fields are not supported"):
+        validate_profile(projected)
 
 
 def test_generated_property_aliases_follow_referenced_components(tmp_path: Path) -> None:
@@ -147,8 +173,22 @@ def test_generated_models_reject_nfkc_ambiguous_schema_names(tmp_path: Path) -> 
         )
 
 
-@pytest.mark.parametrize("name", ["str", "int", "float", "bool", "list", "dict"])
-def test_generated_models_reject_names_that_shadow_annotation_builtins(
+@pytest.mark.parametrize(
+    "name",
+    [
+        "str",
+        "int",
+        "float",
+        "bool",
+        "list",
+        "dict",
+        "quote",
+        "HTTPClient",
+        "TypedDict",
+        "GeneratedCustomToolsTransport",
+    ],
+)
+def test_generated_models_reject_names_owned_by_the_emitter(
     tmp_path: Path, name: str
 ) -> None:
     root = Path(__file__).resolve().parents[1]

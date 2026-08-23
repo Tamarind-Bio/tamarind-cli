@@ -18,25 +18,28 @@ from tamarind_codegen.custom_tools.project import project_custom_tools
 ASYNC_OPERATIONS = frozenset({"getCustomToolVersion", "listCustomToolBuildLogs"})
 HTTP_METHODS = frozenset({"DELETE", "GET", "PATCH", "POST", "PUT"})
 PROPERTY_ALIASES = {"gpuType": "GpuType", "memory": "MemorySize"}
-RESERVED_NAMES = {
-    "Any",
-    "GeneratedCustomToolsTransport",
-    "HTTPClient",
-    "Literal",
-    "NotRequired",
-    "OPENAPI_SERVER_URL",
-    "OPENAPI_SHA256",
-    "TypeAlias",
-    "TypedDict",
-    "_segment",
-    "bool",
-    "cast",
-    "dict",
-    "float",
-    "int",
-    "list",
-    "str",
-} | set(PROPERTY_ALIASES.values())
+TYPING_IMPORTS = ("Any", "Literal", "TypeAlias", "cast")
+TYPING_EXTENSIONS_IMPORTS = ("NotRequired", "TypedDict")
+URLLIB_PARSE_IMPORTS = ("quote",)
+TAMARIND_HTTP_IMPORTS = ("HTTPClient",)
+ANNOTATION_BUILTINS = frozenset({"bool", "dict", "float", "int", "list", "str"})
+GENERATED_DECLARATIONS = frozenset(
+    {
+        "OPENAPI_SERVER_URL",
+        "OPENAPI_SHA256",
+        "GeneratedCustomToolsTransport",
+        "_segment",
+    }
+)
+RESERVED_NAMES = (
+    ANNOTATION_BUILTINS
+    | GENERATED_DECLARATIONS
+    | frozenset(TYPING_IMPORTS)
+    | frozenset(TYPING_EXTENSIONS_IMPORTS)
+    | frozenset(URLLIB_PARSE_IMPORTS)
+    | frozenset(TAMARIND_HTTP_IMPORTS)
+    | frozenset(PROPERTY_ALIASES.values())
+)
 
 
 def _python_name(value: str, *, label: str) -> str:
@@ -374,11 +377,11 @@ def emit_python(api: Api) -> str:
             "",
             "from __future__ import annotations",
             "",
-            "from typing import Any, Literal, TypeAlias, cast",
-            "from typing_extensions import NotRequired, TypedDict",
-            "from urllib.parse import quote",
+            f"from typing import {', '.join(TYPING_IMPORTS)}",
+            f"from typing_extensions import {', '.join(TYPING_EXTENSIONS_IMPORTS)}",
+            f"from urllib.parse import {', '.join(URLLIB_PARSE_IMPORTS)}",
             "",
-            "from tamarind.http import HTTPClient",
+            f"from tamarind.http import {', '.join(TAMARIND_HTTP_IMPORTS)}",
             "",
             f"OPENAPI_SERVER_URL = {api.server_url!r}",
             f"OPENAPI_SHA256 = {api.source_sha256!r}",

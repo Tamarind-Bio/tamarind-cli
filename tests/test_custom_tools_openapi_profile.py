@@ -377,13 +377,25 @@ def test_normalize_produces_an_openapi_free_ir() -> None:
             lambda document: document["components"]["schemas"]["CustomTool"]["properties"].update(
                 {"ratio": {"type": "number", "enum": [1.5]}}
             ),
-            "floating-point enum values cannot be represented",
+            "number enums cannot be represented faithfully",
+        ),
+        (
+            lambda document: document["components"]["schemas"]["CustomTool"]["properties"].update(
+                {"ratio": {"type": "number", "enum": [1]}}
+            ),
+            "number enums cannot be represented faithfully",
         ),
         (
             lambda document: document["components"]["schemas"]["CustomTool"]["properties"].update(
                 {"ratio": {"type": "number", "const": 1.5}}
             ),
-            "floating-point const values cannot be represented",
+            "number consts cannot be represented faithfully",
+        ),
+        (
+            lambda document: document["components"]["schemas"]["CustomTool"]["properties"].update(
+                {"ratio": {"type": "number", "const": 1}}
+            ),
+            "number consts cannot be represented faithfully",
         ),
         (
             lambda document: document["paths"]["/custom-tools/{name}"]["get"]["parameters"][
