@@ -12,12 +12,12 @@ from tamarind_codegen.custom_tools import ProfileViolation, normalize, validate_
 from tamarind_codegen.custom_tools.project import project_custom_tools
 
 
-def test_cli_projects_custom_tools_from_the_complete_public_spec() -> None:
+def test_cli_projection_is_idempotent_for_the_vendored_custom_tools_spec() -> None:
     root = Path(__file__).resolve().parents[1]
     document = json.loads((root / "openapi/public-v1.json").read_text())
     projected = project_custom_tools(document)
 
-    assert len(projected["paths"]) < len(document["paths"])
+    assert projected == document
     assert all(
         "custom-tools" in operation["tags"]
         for path_item in projected["paths"].values()
@@ -26,6 +26,23 @@ def test_cli_projects_custom_tools_from_the_complete_public_spec() -> None:
     )
     assert "PublicCustomTool" in projected["components"]["schemas"]
     assert "PublicPipeline" not in projected["components"]["schemas"]
+
+
+def test_projection_removes_unrelated_operations_from_a_complete_spec() -> None:
+    root = Path(__file__).resolve().parents[1]
+    document = json.loads((root / "openapi/public-v1.json").read_text())
+    document["paths"]["/health"] = {
+        "get": {
+            "operationId": "health",
+            "responses": {"200": {"description": "ok"}},
+            "tags": ["system"],
+        }
+    }
+
+    projected = project_custom_tools(document)
+
+    assert "/health" not in projected["paths"]
+    assert len(projected["paths"]) < len(document["paths"])
 
 
 def test_projection_resolves_local_path_item_references() -> None:
