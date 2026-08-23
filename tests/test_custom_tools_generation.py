@@ -20,6 +20,7 @@ def _producer_checkout(tmp_path: Path, source: bytes) -> tuple[Path, Path, str]:
     artifact.write_bytes(source)
     commands = [
         ["git", "init", str(checkout)],
+        ["git", "-C", str(checkout), "config", "core.autocrlf", "false"],
         ["git", "-C", str(checkout), "config", "user.name", "Contract Test"],
         ["git", "-C", str(checkout), "config", "user.email", "contract@example.com"],
         [
