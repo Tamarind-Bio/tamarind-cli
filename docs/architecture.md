@@ -64,7 +64,8 @@ validates it before accepting a build. The SDK deliberately does not maintain a
 second list of configuration fields, enums, or cross-field rules.
 
 `CustomTool.build()` composes the existing requests: create upload, PUT the archive,
-submit the digest-checked build request, and return its Version. It adds no server-side
+submit the digest-checked build request, and return a typed result containing the server's
+action plus its durable Version. It adds no server-side
 BuildRequest, queue, lease, claim, or repair state. An ambiguous build response
 is therefore handled honestly by listing Versions before a manual retry.
 

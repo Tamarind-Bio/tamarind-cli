@@ -187,12 +187,12 @@ def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> 
     build = respx.post(f"{BASE}custom-tools/example/versions").mock(
         return_value=httpx.Response(
             202,
-            json={"action": "build", "version": _version(source_digest=digest)},
+            json={"action": "reuse_image", "version": _version(source_digest=digest)},
         )
     )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
-        version = client.custom_tools.get("example").build(tmp_path)
+        result = client.custom_tools.get("example").build(tmp_path)
 
     assert upload.calls.last.request.content.startswith(b"PK")
     assert upload.calls.last.request.headers["Content-Type"] == "application/zip"
@@ -202,8 +202,9 @@ def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> 
         "uploadId": "upload-1",
         "expectedSourceDigest": digest,
     }
-    assert version.name == "v1"
-    assert version.source_digest == digest
+    assert result.action == "reuse_image"
+    assert result.version.name == "v1"
+    assert result.version.source_digest == digest
 
 
 @respx.mock
@@ -256,13 +257,14 @@ def test_version_pages_preserve_and_accept_cursors() -> None:
         "limit": "1",
         "cursor": "versions-page-1",
     }
+    assert versions.calls.last.request.headers["If-Match"] == "generation-1"
 
 
 @respx.mock
 def test_version_preserves_duration_and_stable_error_code() -> None:
     failed = _version(status="Stopped", error="Docker build failed")
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
-    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+    get_version = respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
         return_value=httpx.Response(200, json=failed)
     )
 
@@ -274,6 +276,7 @@ def test_version_preserves_duration_and_stable_error_code() -> None:
     assert version.error is not None
     assert version.error.code == "build_failed"
     assert version.error.message == "Docker build failed"
+    assert get_version.calls.last.request.headers["If-Match"] == "generation-1"
 
 
 def test_build_caps_archive_at_the_server_source_limit(tmp_path: Path, monkeypatch) -> None:
@@ -384,10 +387,10 @@ def test_version_logs_cancel_and_publish_use_version_routes() -> None:
     get_tool = respx.get(f"{BASE}custom-tools/example").mock(
         return_value=httpx.Response(200, json=_tool())
     )
-    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+    get_version = respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
         return_value=httpx.Response(200, json=_version())
     )
-    respx.get(f"{BASE}custom-tools/example/versions/v1/logs").mock(
+    logs = respx.get(f"{BASE}custom-tools/example/versions/v1/logs").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -415,6 +418,8 @@ def test_version_logs_cancel_and_publish_use_version_routes() -> None:
 
     assert cancel.calls.last.request.headers["If-Match"] == "generation-1"
     assert publish.calls.last.request.headers["If-Match"] == "generation-1"
+    assert get_version.calls.last.request.headers["If-Match"] == "generation-1"
+    assert logs.calls.last.request.headers["If-Match"] == "generation-1"
     assert get_tool.call_count == 1
 
 

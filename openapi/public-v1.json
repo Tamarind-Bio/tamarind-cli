@@ -4462,6 +4462,18 @@
               "description": "Pagination token from the previous response's `nextCursor`.",
               "title": "Cursor"
             }
+          },
+          {
+            "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
+              "minLength": 1,
+              "title": "If-Match",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -4596,6 +4608,18 @@
               "minLength": 2,
               "pattern": "^v[1-9][0-9]*$",
               "title": "Version Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
+              "minLength": 1,
+              "title": "If-Match",
               "type": "string"
             }
           }
@@ -4758,6 +4782,18 @@
               ],
               "description": "Pagination token from the previous response's `nextCursor`.",
               "title": "Cursor"
+            }
+          },
+          {
+            "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
+              "minLength": 1,
+              "title": "If-Match",
+              "type": "string"
             }
           }
         ],

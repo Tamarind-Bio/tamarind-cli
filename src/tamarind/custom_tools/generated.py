@@ -9,7 +9,7 @@ from urllib.parse import quote
 from tamarind.http import HTTPClient
 
 OPENAPI_SERVER_URL = "https://app.tamarind.bio/api/"
-OPENAPI_SHA256 = "38276abb99cf166a4c19290e854333221959c981be92041d32cea05fbfe1672f"
+OPENAPI_SHA256 = "be8c5ffc24ca75a4099a342205b4f68743ea44b8cf4a287ffc99d2cf8ea52946"
 
 
 def _segment(value: str) -> str:
@@ -248,6 +248,7 @@ class GeneratedCustomToolsTransport:
     def list_custom_tool_versions(
         self,
         name: str,
+        if_match: str,
         status: PublicVersionStatus | None = None,
         limit: int | None = None,
         cursor: str | None = None,
@@ -258,6 +259,7 @@ class GeneratedCustomToolsTransport:
             "GET",
             f"custom-tools/{_segment(name)}/versions",
             params={"status": status, "limit": limit, "cursor": cursor},
+            headers={"If-Match": if_match},
             timeout=timeout,
         )
         return cast(PublicVersionPage, response.json())
@@ -280,11 +282,12 @@ class GeneratedCustomToolsTransport:
         return cast(PublicBuildResult, response.json())
 
     def get_custom_tool_version(
-        self, name: str, version_name: str, *, timeout: float | None = None
+        self, name: str, version_name: str, if_match: str, *, timeout: float | None = None
     ) -> PublicVersion:
         response = self._client.request(
             "GET",
             f"custom-tools/{_segment(name)}/versions/{_segment(version_name)}",
+            headers={"If-Match": if_match},
             timeout=timeout,
         )
         return cast(PublicVersion, response.json())
@@ -304,6 +307,7 @@ class GeneratedCustomToolsTransport:
         self,
         name: str,
         version_name: str,
+        if_match: str,
         cursor: str | None = None,
         *,
         timeout: float | None = None,
@@ -312,6 +316,7 @@ class GeneratedCustomToolsTransport:
             "GET",
             f"custom-tools/{_segment(name)}/versions/{_segment(version_name)}/logs",
             params={"cursor": cursor},
+            headers={"If-Match": if_match},
             timeout=timeout,
         )
         return cast(PublicBuildLogPage, response.json())
@@ -328,11 +333,12 @@ class GeneratedCustomToolsTransport:
         return cast(PublicCustomTool, response.json())
 
     async def get_custom_tool_version_async(
-        self, name: str, version_name: str, *, timeout: float | None = None
+        self, name: str, version_name: str, if_match: str, *, timeout: float | None = None
     ) -> PublicVersion:
         response = await self._client.request_async(
             "GET",
             f"custom-tools/{_segment(name)}/versions/{_segment(version_name)}",
+            headers={"If-Match": if_match},
             timeout=timeout,
         )
         return cast(PublicVersion, response.json())
@@ -341,6 +347,7 @@ class GeneratedCustomToolsTransport:
         self,
         name: str,
         version_name: str,
+        if_match: str,
         cursor: str | None = None,
         *,
         timeout: float | None = None,
@@ -349,6 +356,7 @@ class GeneratedCustomToolsTransport:
             "GET",
             f"custom-tools/{_segment(name)}/versions/{_segment(version_name)}/logs",
             params={"cursor": cursor},
+            headers={"If-Match": if_match},
             timeout=timeout,
         )
         return cast(PublicBuildLogPage, response.json())
