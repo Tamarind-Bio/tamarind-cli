@@ -621,7 +621,6 @@ def validate_profile(document: Mapping[str, Any]) -> None:
             "?" in path
             or "#" in path
             or any(ord(character) <= 0x20 or ord(character) == 0x7F for character in path)
-            or URL_PATH_PATTERN.fullmatch(re.sub(r"\{[^{}]+\}", "template", path)) is None
         ):
             raise ProfileViolation(
                 f"paths.{path}",
@@ -631,6 +630,11 @@ def validate_profile(document: Mapping[str, Any]) -> None:
             raise ProfileViolation(
                 f"paths.{path}",
                 "path keys must use balanced, nonempty template expressions",
+            )
+        if URL_PATH_PATTERN.fullmatch(re.sub(r"\{[^{}]+\}", "template", path)) is None:
+            raise ProfileViolation(
+                f"paths.{path}",
+                "path keys must use valid RFC 3986 path characters and percent escapes",
             )
         path_item = _mapping(raw_path_item, f"paths.{path}")
         _reject_unsupported_fields(path_item, PATH_ITEM_FIELDS, f"paths.{path}", "path item")
