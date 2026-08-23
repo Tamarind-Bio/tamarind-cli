@@ -94,6 +94,33 @@ def test_profile_accepts_the_documented_subset() -> None:
     validate_profile(_document())
 
 
+@pytest.mark.parametrize("keyword", ["minLength", "maxLength", "minItems", "maxItems"])
+@pytest.mark.parametrize("value", [-1, 1.5, True])
+def test_profile_rejects_invalid_cardinality_constraints(keyword: str, value: object) -> None:
+    document = _document()
+    target_type = "array" if keyword.endswith("Items") else "string"
+    schema: dict[str, object] = {"type": target_type, keyword: value}
+    if target_type == "array":
+        schema["items"] = {"type": "string"}
+    document["components"]["schemas"]["CustomTool"]["properties"]["bounded"] = schema
+
+    with pytest.raises(ProfileViolation, match="must be a non-negative integer"):
+        validate_profile(document)
+
+
+@pytest.mark.parametrize("keyword", ["minimum", "maximum"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), True])
+def test_profile_rejects_invalid_numeric_bounds(keyword: str, value: object) -> None:
+    document = _document()
+    document["components"]["schemas"]["CustomTool"]["properties"]["bounded"] = {
+        "type": "number",
+        keyword: value,
+    }
+
+    with pytest.raises(ProfileViolation, match="must be a finite number"):
+        validate_profile(document)
+
+
 def test_normalize_produces_an_openapi_free_ir() -> None:
     api = normalize(_document())
 

@@ -345,13 +345,22 @@ class Version:
                 )
             return remaining
 
+        async def await_with_budget(
+            start: Callable[[float | None], Awaitable[T]],
+        ) -> T:
+            remaining = remaining_budget()
+            result = await _await_with_timeout(start(remaining), remaining)
+            remaining_budget()
+            return result
+
         async def deliver_log_page(version: Version) -> bool:
             if logs is None or on_event is None:
                 return False
             requested_cursor = logs.cursor
-            remaining = remaining_budget()
-            page = await _await_with_timeout(
-                version._logs_async(cursor=requested_cursor, request_timeout=remaining), remaining
+            page = await await_with_budget(
+                lambda remaining: version._logs_async(
+                    cursor=requested_cursor, request_timeout=remaining
+                )
             )
             for event in logs.consume(page):
                 on_event(event)
@@ -362,11 +371,9 @@ class Version:
         while not current.terminal:
             if logs is not None:
                 await deliver_log_page(current)
-            remaining = remaining_budget()
-            current = await _await_with_timeout(
-                current._refresh_async(request_timeout=remaining), remaining
+            current = await await_with_budget(
+                lambda remaining: current._refresh_async(request_timeout=remaining)
             )
-            remaining_budget()
             if not current.terminal:
                 remaining = remaining_budget()
                 await asyncio.sleep(interval if remaining is None else min(interval, remaining))

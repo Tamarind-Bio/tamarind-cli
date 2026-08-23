@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import shutil
 
-from generate_custom_tools_transport import generate
+from generate_custom_tools_transport import write_generated_transport
 from tamarind_codegen.custom_tools.profile import validate_profile
 from tamarind_codegen.custom_tools.project import project_custom_tools
 
@@ -50,7 +50,7 @@ def main() -> None:
         + "\n",
         encoding="utf-8",
     )
-    generated_path.write_text(generate(document), encoding="utf-8")
+    write_generated_transport(document, generated_path)
 
 
 if __name__ == "__main__":

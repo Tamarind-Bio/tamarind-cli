@@ -188,9 +188,7 @@ def test_generated_models_reject_nfkc_ambiguous_schema_names(tmp_path: Path) -> 
         "GeneratedCustomToolsTransport",
     ],
 )
-def test_generated_models_reject_names_owned_by_the_emitter(
-    tmp_path: Path, name: str
-) -> None:
+def test_generated_models_reject_names_owned_by_the_emitter(tmp_path: Path, name: str) -> None:
     root = Path(__file__).resolve().parents[1]
     document = json.loads((root / "openapi/public-v1.json").read_text(encoding="utf-8"))
     document["components"]["schemas"][name] = {"type": "string"}
@@ -274,9 +272,30 @@ def test_generated_transport_matches_committed_openapi(tmp_path: Path) -> None:
         ],
         check=True,
     )
-    subprocess.run([sys.executable, "-m", "ruff", "format", str(generated)], check=True)
 
     assert generated.read_text() == (root / "src/tamarind/custom_tools/generated.py").read_text()
+
+
+def test_contract_sync_writes_the_canonical_generated_transport(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [
+            sys.executable,
+            str(root / "scripts/sync_custom_tools_contract.py"),
+            str(root / "openapi/public-v1.json"),
+            "--source-repository",
+            "Tamarind-Bio/tamarind-website",
+            "--source-commit",
+            "a" * 40,
+            "--root",
+            str(tmp_path),
+        ],
+        check=True,
+    )
+
+    assert (tmp_path / "src/tamarind/custom_tools/generated.py").read_text() == (
+        root / "src/tamarind/custom_tools/generated.py"
+    ).read_text()
 
 
 def test_generated_transport_is_importable(tmp_path: Path) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import math
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -58,15 +59,9 @@ RESPONSE_FIELDS = {"content", "description"}
 MEDIA_TYPE_FIELDS = {"schema"}
 SECURITY_SCHEME_FIELDS = {"description", "in", "name", "type"}
 COMPOSITION_KEYS = {"allOf", "not", "oneOf"}
-CONSTRAINT_KEYS = {
-    "maxItems",
-    "maxLength",
-    "maximum",
-    "minItems",
-    "minLength",
-    "minimum",
-    "pattern",
-}
+CARDINALITY_CONSTRAINT_KEYS = {"maxItems", "maxLength", "minItems", "minLength"}
+NUMERIC_BOUND_KEYS = {"maximum", "minimum"}
+CONSTRAINT_KEYS = CARDINALITY_CONSTRAINT_KEYS | NUMERIC_BOUND_KEYS | {"pattern"}
 SCHEMA_ANNOTATIONS = {"default", "description", "title"}
 SCHEMA_COMMON_KEYS = SCHEMA_ANNOTATIONS | {"const", "enum", "type"}
 SCHEMA_KEYS_BY_TYPE = {
@@ -314,8 +309,16 @@ def _validate_schema(
         value = schema[key]
         if key == "pattern" and not isinstance(value, str):
             raise ProfileViolation(f"{location}.{key}", "must be a string")
-        if key != "pattern" and (isinstance(value, bool) or not isinstance(value, (int, float))):
-            raise ProfileViolation(f"{location}.{key}", "must be a number")
+        if key in CARDINALITY_CONSTRAINT_KEYS and (
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+        ):
+            raise ProfileViolation(f"{location}.{key}", "must be a non-negative integer")
+        if key in NUMERIC_BOUND_KEYS and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+        ):
+            raise ProfileViolation(f"{location}.{key}", "must be a finite number")
 
 
 def _schema_shape(document: Mapping[str, Any], value: object, location: str) -> tuple[str, bool]:

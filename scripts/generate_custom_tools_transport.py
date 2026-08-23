@@ -8,6 +8,8 @@ import json
 import keyword
 from pathlib import Path
 import re
+import subprocess
+import sys
 import unicodedata
 
 from tamarind_codegen.custom_tools import Api, Operation, Parameter, RequestBody, Response, Schema
@@ -22,6 +24,7 @@ TYPING_IMPORTS = ("Any", "Literal", "TypeAlias", "cast")
 TYPING_EXTENSIONS_IMPORTS = ("NotRequired", "TypedDict")
 URLLIB_PARSE_IMPORTS = ("quote",)
 TAMARIND_HTTP_IMPORTS = ("HTTPClient",)
+FORMAT_CONFIG = Path(__file__).resolve().parents[1] / "pyproject.toml"
 ANNOTATION_BUILTINS = frozenset({"bool", "dict", "float", "int", "list", "str"})
 GENERATED_DECLARATIONS = frozenset(
     {
@@ -409,14 +412,36 @@ def generate(document: dict[str, object]) -> str:
     return emit_python(normalize(project_custom_tools(document)))
 
 
+def write_generated_transport(document: dict[str, object], output: Path) -> None:
+    """Write the one canonical, CI-verifiable representation of the transport."""
+    formatted = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "ruff",
+            "format",
+            "--config",
+            str(FORMAT_CONFIG),
+            "--stdin-filename",
+            str(output),
+            "-",
+        ],
+        input=generate(document),
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(formatted, encoding="utf-8")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("spec", type=Path)
     parser.add_argument("output", type=Path)
     args = parser.parse_args()
     document = json.loads(args.spec.read_text(encoding="utf-8"))
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(generate(document), encoding="utf-8")
+    write_generated_transport(document, args.output)
 
 
 if __name__ == "__main__":

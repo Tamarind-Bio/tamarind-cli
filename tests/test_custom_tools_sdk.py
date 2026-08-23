@@ -511,6 +511,40 @@ def test_monitor_recomputes_the_deadline_after_log_poll(monkeypatch) -> None:
     assert refreshed is False
 
 
+def test_monitor_does_not_dispatch_logs_after_the_deadline(monkeypatch) -> None:
+    ticks = iter((0.0, 0.1, 1.1))
+    monkeypatch.setattr(resources, "_clock", lambda: next(ticks))
+    delivered: list[resources.BuildEvent] = []
+
+    async def logs(*_args, **_kwargs):
+        return resources.BuildLogPage(
+            items=(resources.BuildEvent("too late", 1),), status="Running"
+        )
+
+    monkeypatch.setattr(resources.Version, "_logs_async", logs)
+    version = resources.Version(
+        name="v1",
+        source_revision="a" * 40,
+        source_digest="sha256:" + "a" * 64,
+        status="Running",
+        terminal=False,
+        origin="build",
+        created_at="2026-08-15T00:00:00Z",
+        started_at="2026-08-15T00:00:00Z",
+        completed_at=None,
+        duration_seconds=None,
+        error=None,
+        tool_name="example",
+        tool_generation="generation-1",
+        _collection=None,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(resources.CustomToolBuildTimeoutError):
+        asyncio.run(version._monitor(timeout=1.0, interval=0.1, on_event=delivered.append))
+
+    assert delivered == []
+
+
 def test_monitor_maps_http_request_timeout_to_build_timeout() -> None:
     async def timed_out_request():
         try:
@@ -734,7 +768,7 @@ def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> N
     assert delivered == [first, final, trailing]
 
 
-def test_monitor_rechecks_deadline_after_terminal_log_callback(monkeypatch) -> None:
+def test_monitor_rechecks_deadline_after_terminal_log_fetch(monkeypatch) -> None:
     ticks = iter((0.0, 0.1, 1.1))
     monkeypatch.setattr(resources, "_clock", lambda: next(ticks))
 
