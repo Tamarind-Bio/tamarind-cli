@@ -621,10 +621,11 @@ def validate_profile(document: Mapping[str, Any]) -> None:
             "?" in path
             or "#" in path
             or any(ord(character) <= 0x20 or ord(character) == 0x7F for character in path)
+            or URL_PATH_PATTERN.fullmatch(re.sub(r"\{[^{}]+\}", "template", path)) is None
         ):
             raise ProfileViolation(
                 f"paths.{path}",
-                "path keys must not contain query, fragment, whitespace, or control characters",
+                "path keys must use valid RFC 3986 path characters and percent escapes",
             )
         if re.fullmatch(r"(?:[^{}]|\{[^{}]+\})*", path) is None:
             raise ProfileViolation(

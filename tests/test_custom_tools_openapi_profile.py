@@ -711,14 +711,28 @@ def test_profile_rejects_a_body_bearing_wildcard_success_response() -> None:
         "/custom-tools#fragment",
         "/custom tools",
         "/custom-tools\x00",
+        "/custom-tools/%ZZ",
+        "/custom-tools/%2",
+        "/custom-tools/%",
     ],
 )
 def test_profile_rejects_non_path_characters_in_path_keys(path: str) -> None:
     document = _document()
     document["paths"][path] = document["paths"].pop("/custom-tools/{name}")
 
-    with pytest.raises(ProfileViolation, match="path keys must not contain"):
+    with pytest.raises(ProfileViolation, match="valid RFC 3986 path characters"):
         validate_profile(document)
+
+
+@pytest.mark.parametrize("path", ["/custom-tools/%2F", "/custom-tools/{name}/versions"])
+def test_profile_accepts_valid_path_escapes_and_templates(path: str) -> None:
+    document = _document()
+    path_item = document["paths"].pop("/custom-tools/{name}")
+    if "{name}" not in path:
+        path_item["parameters"] = []
+    document["paths"][path] = path_item
+
+    validate_profile(document)
 
 
 @pytest.mark.parametrize(
