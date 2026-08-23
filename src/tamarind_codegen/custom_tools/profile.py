@@ -303,7 +303,13 @@ def _validate_schema(
             )
         for name, child in properties.items():
             _validate_schema(document, child, f"{location}.properties.{name}", stack)
+        has_additional = "additionalProperties" in schema
         additional = schema.get("additionalProperties")
+        if has_additional and not isinstance(additional, (bool, Mapping)):
+            raise ProfileViolation(
+                f"{location}.additionalProperties",
+                "must be a boolean or schema object",
+            )
         if properties and additional is not False:
             raise ProfileViolation(
                 location,
@@ -311,7 +317,7 @@ def _validate_schema(
             )
         if not properties and additional is False:
             raise ProfileViolation(location, "closed empty object schemas are not supported")
-        if additional is not None and not isinstance(additional, bool):
+        if isinstance(additional, Mapping):
             _validate_schema(document, additional, f"{location}.additionalProperties", stack)
 
     for key in CONSTRAINT_KEYS & set(schema):
@@ -511,20 +517,24 @@ def _validate_response(
     _reject_unsupported_fields(response, RESPONSE_FIELDS, location, "response")
     if not isinstance(response.get("description"), str):
         raise ProfileViolation(f"{location}.description", "must be a string")
-    if "content" in response and response["content"]:
-        if status in BODYLESS_RESPONSE_STATUSES:
-            raise ProfileViolation(location, f"HTTP {status} responses must not declare content")
-        if status == "2XX":
-            raise ProfileViolation(
-                location,
-                "2XX wildcard responses must not declare content because the range includes bodyless statuses",
+    if "content" in response:
+        content = _mapping(response["content"], f"{location}.content")
+        if content:
+            if status in BODYLESS_RESPONSE_STATUSES:
+                raise ProfileViolation(
+                    location, f"HTTP {status} responses must not declare content"
+                )
+            if status == "2XX":
+                raise ProfileViolation(
+                    location,
+                    "2XX wildcard responses must not declare content because the range includes bodyless statuses",
+                )
+            _json_schema(
+                document,
+                content,
+                f"{location}.content",
+                frozenset({"application/json", "application/problem+json"}),
             )
-        _json_schema(
-            document,
-            response["content"],
-            f"{location}.content",
-            frozenset({"application/json", "application/problem+json"}),
-        )
 
 
 def validate_profile(document: Mapping[str, Any]) -> None:
@@ -574,6 +584,11 @@ def validate_profile(document: Mapping[str, Any]) -> None:
             raise ProfileViolation(
                 f"paths.{path}",
                 "path keys must not contain query, fragment, whitespace, or control characters",
+            )
+        if re.fullmatch(r"(?:[^{}]|\{[^{}]+\})*", path) is None:
+            raise ProfileViolation(
+                f"paths.{path}",
+                "path keys must use balanced, nonempty template expressions",
             )
         path_item = _mapping(raw_path_item, f"paths.{path}")
         _reject_unsupported_fields(path_item, PATH_ITEM_FIELDS, f"paths.{path}", "path item")

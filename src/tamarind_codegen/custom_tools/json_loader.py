@@ -1,0 +1,28 @@
+"""Strict JSON loading for generated-contract entry points."""
+
+from __future__ import annotations
+
+import json
+from typing import Any, NoReturn
+
+
+def _reject_constant(value: str) -> NoReturn:
+    raise ValueError(f"non-standard JSON constant {value!r}")
+
+
+def _object_without_duplicate_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object member {key!r}")
+        result[key] = value
+    return result
+
+
+def load_json_document(raw: str | bytes) -> Any:
+    """Parse standards-compliant JSON without silently discarding duplicate members."""
+    return json.loads(
+        raw,
+        parse_constant=_reject_constant,
+        object_pairs_hook=_object_without_duplicate_members,
+    )

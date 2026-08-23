@@ -9,6 +9,7 @@ import sys
 import pytest
 
 from tamarind_codegen.custom_tools import ProfileViolation, normalize, validate_profile
+from tamarind_codegen.custom_tools.json_loader import load_json_document
 from tamarind_codegen.custom_tools.project import project_custom_tools
 
 
@@ -26,6 +27,40 @@ def test_cli_projection_is_idempotent_for_the_vendored_custom_tools_spec() -> No
     )
     assert "PublicCustomTool" in projected["components"]["schemas"]
     assert "PublicPipeline" not in projected["components"]["schemas"]
+
+
+def test_contract_entrypoints_reject_duplicate_json_members(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    spec = tmp_path / "duplicate.json"
+    spec.write_text('{"openapi":"3.1.0","openapi":"3.1.1"}', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="duplicate JSON object member"):
+        load_json_document(spec.read_bytes())
+
+    commands = [
+        [sys.executable, str(root / "scripts/validate_custom_tools_openapi.py"), str(spec)],
+        [
+            sys.executable,
+            str(root / "scripts/generate_custom_tools_transport.py"),
+            str(spec),
+            str(tmp_path / "generated.py"),
+        ],
+        [
+            sys.executable,
+            str(root / "scripts/sync_custom_tools_contract.py"),
+            str(spec),
+            "--source-repository",
+            "Tamarind-Bio/tamarind-website",
+            "--source-commit",
+            "0" * 40,
+            "--root",
+            str(tmp_path / "sync-root"),
+        ],
+    ]
+    for command in commands:
+        result = subprocess.run(command, capture_output=True, text=True)
+        assert result.returncode != 0
+        assert "duplicate JSON object member" in result.stderr
 
 
 def test_projection_removes_unrelated_operations_from_a_complete_spec() -> None:

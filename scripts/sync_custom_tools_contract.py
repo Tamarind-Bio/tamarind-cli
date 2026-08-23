@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 from generate_custom_tools_transport import write_generated_transport
+from tamarind_codegen.custom_tools.json_loader import load_json_document
 from tamarind_codegen.custom_tools.profile import validate_profile
 from tamarind_codegen.custom_tools.project import project_custom_tools
 
@@ -26,7 +27,7 @@ def main() -> None:
     args = parser.parse_args()
 
     raw = args.source.read_bytes()
-    document = json.loads(raw)
+    document = load_json_document(raw)
     projection = project_custom_tools(document)
     validate_profile(projection)
     projected = (json.dumps(projection, indent=2, sort_keys=True) + "\n").encode()

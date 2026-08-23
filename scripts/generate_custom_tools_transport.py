@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
-import json
 import keyword
 from pathlib import Path
 import re
@@ -14,6 +13,7 @@ import unicodedata
 
 from tamarind_codegen.custom_tools import Api, Operation, Parameter, RequestBody, Response, Schema
 from tamarind_codegen.custom_tools.ir import Field, SchemaDefinition
+from tamarind_codegen.custom_tools.json_loader import load_json_document
 from tamarind_codegen.custom_tools.normalize import normalize
 from tamarind_codegen.custom_tools.project import project_custom_tools
 
@@ -441,7 +441,7 @@ def main() -> None:
     parser.add_argument("spec", type=Path)
     parser.add_argument("output", type=Path)
     args = parser.parse_args()
-    document = json.loads(args.spec.read_text(encoding="utf-8"))
+    document = load_json_document(args.spec.read_bytes())
     write_generated_transport(document, args.output)
 
 

@@ -598,6 +598,14 @@ def test_profile_accepts_a_bodyless_wildcard_success_response() -> None:
     validate_profile(document)
 
 
+def test_profile_rejects_non_object_response_content() -> None:
+    document = _document()
+    document["paths"]["/custom-tools/{name}"]["get"]["responses"]["200"]["content"] = []
+
+    with pytest.raises(ProfileViolation, match="must be an object"):
+        validate_profile(document)
+
+
 def test_profile_rejects_a_body_bearing_wildcard_success_response() -> None:
     document = _document()
     responses = document["paths"]["/custom-tools/{name}"]["get"]["responses"]
@@ -625,6 +633,34 @@ def test_profile_rejects_non_path_characters_in_path_keys(path: str) -> None:
     document["paths"][path] = document["paths"].pop("/custom-tools/{name}")
 
     with pytest.raises(ProfileViolation, match="path keys must not contain"):
+        validate_profile(document)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/custom-tools/{name",
+        "/custom-tools/name}",
+        "/custom-tools/{}",
+        "/custom-tools/{{name}}",
+    ],
+)
+def test_profile_rejects_malformed_path_templates(path: str) -> None:
+    document = _document()
+    document["paths"][path] = document["paths"].pop("/custom-tools/{name}")
+
+    with pytest.raises(ProfileViolation, match="balanced, nonempty template expressions"):
+        validate_profile(document)
+
+
+def test_profile_rejects_null_additional_properties() -> None:
+    document = _document()
+    document["components"]["schemas"]["Empty"] = {
+        "type": "object",
+        "additionalProperties": None,
+    }
+
+    with pytest.raises(ProfileViolation, match="must be a boolean or schema object"):
         validate_profile(document)
 
 
