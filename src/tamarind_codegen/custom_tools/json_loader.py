@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from decimal import Decimal
 from typing import Any, NoReturn
 
 
@@ -24,6 +25,8 @@ def _finite_float(value: str) -> float:
     parsed = float(value)
     if not math.isfinite(parsed):
         raise ValueError(f"JSON number is outside the finite float range: {value!r}")
+    if parsed == 0.0 and Decimal(value) != 0:
+        raise ValueError(f"JSON number underflows the finite float range: {value!r}")
     return parsed
 
 

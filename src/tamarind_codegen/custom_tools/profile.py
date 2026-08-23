@@ -134,6 +134,16 @@ def _value_matches_type(value: object, kind: str) -> bool:
     return False
 
 
+def _validate_default(value: Mapping[str, Any], kind: str, nullable: bool, location: str) -> None:
+    if "default" not in value:
+        return
+    default = value["default"]
+    if default is None and nullable:
+        return
+    if not _value_matches_type(default, kind):
+        raise ProfileViolation(f"{location}.default", "must match the declared type")
+
+
 def _component(document: Mapping[str, Any], ref: str, location: str) -> Mapping[str, Any]:
     if not ref.startswith("#/components/"):
         raise ProfileViolation(location, "external references are not supported")
@@ -210,6 +220,8 @@ def _validate_schema(
             raise ProfileViolation(location, "recursive schema references are not supported")
         target = _component(document, ref, location)
         _validate_schema(document, target, location, stack | {ref}, named=True)
+        resolved_kind, resolved_nullable = _schema_shape(document, target, location)
+        _validate_default(schema, resolved_kind, resolved_nullable, location)
         return
 
     unsupported_composition = COMPOSITION_KEYS & set(schema)
@@ -244,6 +256,7 @@ def _validate_schema(
         nullable_kind, _ = _schema_shape(document, non_null, f"{location}.anyOf")
         if named and nullable_kind == "object":
             raise ProfileViolation(location, "named object schemas cannot be nullable")
+        _validate_default(schema, nullable_kind, True, location)
         return
 
     kind = schema.get("type")
@@ -283,8 +296,7 @@ def _validate_schema(
                 f"{location}.const",
                 "number consts cannot be represented faithfully as Python Literal types",
             )
-    if "default" in schema and not _value_matches_type(schema["default"], kind):
-        raise ProfileViolation(f"{location}.default", "must match the declared type")
+    _validate_default(schema, kind, False, location)
 
     if kind == "array":
         if "items" not in schema:
@@ -297,6 +309,8 @@ def _validate_schema(
         required = _sequence(schema.get("required", []), f"{location}.required")
         if any(not isinstance(name, str) for name in required):
             raise ProfileViolation(f"{location}.required", "entries must be strings")
+        if len(required) != len(set(required)):
+            raise ProfileViolation(f"{location}.required", "entries must be unique")
         missing = set(required) - set(properties)
         if missing:
             raise ProfileViolation(
@@ -323,8 +337,15 @@ def _validate_schema(
 
     for key in CONSTRAINT_KEYS & set(schema):
         value = schema[key]
-        if key == "pattern" and not isinstance(value, str):
-            raise ProfileViolation(f"{location}.{key}", "must be a string")
+        if key == "pattern":
+            if not isinstance(value, str):
+                raise ProfileViolation(f"{location}.{key}", "must be a string")
+            try:
+                re.compile(value)
+            except re.error as exc:
+                raise ProfileViolation(
+                    f"{location}.{key}", "must be a valid Python regular expression"
+                ) from exc
         if key in CARDINALITY_CONSTRAINT_KEYS and (
             isinstance(value, bool) or not isinstance(value, int) or value < 0
         ):
@@ -418,7 +439,15 @@ def _validate_server_and_auth(document: Mapping[str, Any]) -> None:
     server = _mapping(servers[0], "servers[0]")
     _reject_unsupported_fields(server, SERVER_FIELDS, "servers[0]", "server")
     url = server.get("url")
-    if not isinstance(url, str) or "{" in url or "}" in url:
+    if (
+        not isinstance(url, str)
+        or "{" in url
+        or "}" in url
+        or any(
+            character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
+            for character in url
+        )
+    ):
         raise ProfileViolation("servers[0].url", "must be a concrete HTTPS URL")
     try:
         parsed = urlsplit(url)

@@ -63,8 +63,11 @@ def test_contract_entrypoints_reject_duplicate_json_members(tmp_path: Path) -> N
         assert "duplicate JSON object member" in result.stderr
 
 
-@pytest.mark.parametrize("raw", ['{"value":1e400}', '{"value":NaN}'])
-def test_strict_contract_loader_rejects_non_finite_numbers(raw: str) -> None:
+@pytest.mark.parametrize(
+    "raw",
+    ['{"value":1e400}', '{"value":NaN}', '{"value":1e-400}', '{"value":-1e-400}'],
+)
+def test_strict_contract_loader_rejects_unrepresentable_numbers(raw: str) -> None:
     with pytest.raises(ValueError):
         load_json_document(raw)
 

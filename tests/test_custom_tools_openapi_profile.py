@@ -127,6 +127,11 @@ def test_profile_accepts_supported_success_response_statuses(status: str) -> Non
         "https://example.com/api\x00v1",
         "https://example.com/api%zz",
         "https://example.com/api v1",
+        "https://example.com/api\nv1",
+        "https://example.com/api\rv1",
+        "https://example.com/api\tv1",
+        " https://example.com/api",
+        "https://example.com/api ",
     ],
 )
 def test_profile_rejects_invalid_server_authorities(url: str) -> None:
@@ -192,6 +197,54 @@ def test_profile_rejects_invalid_numeric_bounds(keyword: str, value: object) -> 
     }
 
     with pytest.raises(ProfileViolation, match="must be a finite number"):
+        validate_profile(document)
+
+
+@pytest.mark.parametrize("pattern", ["[", "(", "\\"])
+def test_profile_rejects_invalid_string_patterns(pattern: str) -> None:
+    document = _document()
+    document["components"]["schemas"]["CustomTool"]["properties"]["sourceRef"] = {
+        "type": "string",
+        "pattern": pattern,
+    }
+
+    with pytest.raises(ProfileViolation, match="valid Python regular expression"):
+        validate_profile(document)
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": "string", "default": 123},
+        {"anyOf": [{"type": "string"}, {"type": "null"}], "default": 123},
+        {"$ref": "#/components/schemas/UpdateCustomTool", "default": 123},
+    ],
+)
+def test_profile_validates_defaults_on_every_supported_schema_shape(
+    schema: dict[str, object],
+) -> None:
+    document = _document()
+    document["components"]["schemas"]["CustomTool"]["properties"]["invalidDefault"] = schema
+
+    with pytest.raises(ProfileViolation, match="default: must match the declared type"):
+        validate_profile(document)
+
+
+def test_profile_accepts_null_as_a_nullable_wrapper_default() -> None:
+    document = _document()
+    document["components"]["schemas"]["CustomTool"]["properties"]["nullableDefault"] = {
+        "anyOf": [{"type": "string"}, {"type": "null"}],
+        "default": None,
+    }
+
+    validate_profile(document)
+
+
+def test_profile_rejects_duplicate_required_properties() -> None:
+    document = _document()
+    document["components"]["schemas"]["CustomTool"]["required"] = ["name", "name"]
+
+    with pytest.raises(ProfileViolation, match="required: entries must be unique"):
         validate_profile(document)
 
 
