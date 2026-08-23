@@ -62,6 +62,7 @@ def _tool(
 def _version(
     *,
     status: str = "Running",
+    terminal: bool | None = None,
     error: str | None = None,
     source_digest: str = "sha256:" + "a" * 64,
 ) -> dict:
@@ -74,7 +75,7 @@ def _version(
         "createdAt": "2026-08-15T00:00:00Z",
         "startedAt": "2026-08-15T00:00:00Z",
         "completedAt": "2026-08-15T00:01:00Z" if status in {"Complete", "Stopped"} else None,
-        "terminal": status in {"Complete", "Stopped"},
+        "terminal": status in {"Complete", "Stopped"} if terminal is None else terminal,
         "error": {"code": "build_failed", "message": error} if error else None,
     }
 
@@ -214,6 +215,9 @@ def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> 
 
     assert upload.calls.last.request.content.startswith(b"PK")
     assert upload.calls.last.request.headers["Content-Type"] == "application/zip"
+    assert upload.calls.last.request.headers["Content-Length"] == str(
+        len(upload.calls.last.request.content)
+    )
     assert create_upload.calls.last.request.headers["If-Match"] == "generation-1"
     assert build.calls.last.request.headers["If-Match"] == "generation-1"
     assert json.loads(build.calls.last.request.content) == {
@@ -295,6 +299,19 @@ def test_version_preserves_duration_and_stable_error_code() -> None:
     assert version.error.code == "build_failed"
     assert version.error.message == "Docker build failed"
     assert get_version.calls.last.request.headers["If-Match"] == "generation-1"
+
+
+@respx.mock
+def test_version_preserves_the_server_terminal_marker() -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+        return_value=httpx.Response(200, json=_version(status="Running", terminal=True))
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        version = client.custom_tools.get("example").get_version("v1")
+
+    assert version.terminal is True
 
 
 def test_build_caps_archive_at_the_server_source_limit(tmp_path: Path, monkeypatch) -> None:
@@ -476,6 +493,7 @@ def test_monitor_recomputes_the_deadline_after_log_poll(monkeypatch) -> None:
         source_revision="a" * 40,
         source_digest="sha256:" + "a" * 64,
         status="Running",
+        terminal=False,
         origin="build",
         created_at="2026-08-15T00:00:00Z",
         started_at="2026-08-15T00:00:00Z",
@@ -525,6 +543,7 @@ def test_monitor_without_callback_does_not_fetch_logs(monkeypatch) -> None:
             source_revision=version.source_revision,
             source_digest=version.source_digest,
             status="Complete",
+            terminal=True,
             origin=version.origin,
             created_at=version.created_at,
             started_at=version.started_at,
@@ -543,6 +562,7 @@ def test_monitor_without_callback_does_not_fetch_logs(monkeypatch) -> None:
         source_revision="a" * 40,
         source_digest="sha256:" + "a" * 64,
         status="Running",
+        terminal=False,
         origin="build",
         created_at="2026-08-15T00:00:00Z",
         started_at="2026-08-15T00:00:00Z",
@@ -569,6 +589,7 @@ def test_monitor_rechecks_deadline_after_terminal_refresh(monkeypatch) -> None:
             source_revision=version.source_revision,
             source_digest=version.source_digest,
             status="Complete",
+            terminal=True,
             origin=version.origin,
             created_at=version.created_at,
             started_at=version.started_at,
@@ -586,6 +607,7 @@ def test_monitor_rechecks_deadline_after_terminal_refresh(monkeypatch) -> None:
         source_revision="a" * 40,
         source_digest="sha256:" + "a" * 64,
         status="Running",
+        terminal=False,
         origin="build",
         created_at="2026-08-15T00:00:00Z",
         started_at="2026-08-15T00:00:00Z",
@@ -616,6 +638,7 @@ def test_monitor_without_callback_polls_until_complete(monkeypatch) -> None:
             source_revision=version.source_revision,
             source_digest=version.source_digest,
             status=status,
+            terminal=status == "Complete",
             origin=version.origin,
             created_at=version.created_at,
             started_at=version.started_at,
@@ -634,6 +657,7 @@ def test_monitor_without_callback_polls_until_complete(monkeypatch) -> None:
         source_revision="a" * 40,
         source_digest="sha256:" + "a" * 64,
         status="Running",
+        terminal=False,
         origin="build",
         created_at="2026-08-15T00:00:00Z",
         started_at="2026-08-15T00:00:00Z",
@@ -672,6 +696,7 @@ def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> N
             source_revision=version.source_revision,
             source_digest=version.source_digest,
             status="Complete",
+            terminal=True,
             origin=version.origin,
             created_at=version.created_at,
             started_at=version.started_at,
@@ -690,6 +715,7 @@ def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> N
         source_revision="a" * 40,
         source_digest="sha256:" + "a" * 64,
         status="Running",
+        terminal=False,
         origin="build",
         created_at="2026-08-15T00:00:00Z",
         started_at="2026-08-15T00:00:00Z",
@@ -723,6 +749,7 @@ def test_monitor_rechecks_deadline_after_terminal_log_callback(monkeypatch) -> N
         source_revision="a" * 40,
         source_digest="sha256:" + "a" * 64,
         status="Complete",
+        terminal=True,
         origin="build",
         created_at="2026-08-15T00:00:00Z",
         started_at="2026-08-15T00:00:00Z",

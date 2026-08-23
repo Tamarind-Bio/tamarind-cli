@@ -246,6 +246,7 @@ class Version:
     source_revision: str
     source_digest: str | None
     status: PublicVersionStatus
+    terminal: bool
     origin: str
     created_at: str
     started_at: str
@@ -255,10 +256,6 @@ class Version:
     tool_name: str
     tool_generation: str
     _collection: "CustomTools" = field(repr=False, compare=False)
-
-    @property
-    def terminal(self) -> bool:
-        return self.status in ("Complete", "Stopped")
 
     def refresh(self) -> "Version":
         return self._refresh(request_timeout=None)
@@ -458,6 +455,7 @@ class CustomTools:
             _upload_archive(
                 session["uploadUrl"],
                 archive.content(),
+                size=archive.size,
                 method=session.get("uploadMethod", "PUT"),
                 headers=session.get("uploadHeaders", {}),
                 timeout=self._upload_timeout,
@@ -521,10 +519,21 @@ class CustomTools:
 
 
 def _upload_archive(
-    url: str, data: BinaryIO, *, method: str, headers: dict[str, str], timeout: float
+    url: str,
+    data: BinaryIO,
+    *,
+    size: int,
+    method: str,
+    headers: dict[str, str],
+    timeout: float,
 ) -> None:
+    request_headers = dict(headers)
+    if not any(name.lower() == "content-length" for name in request_headers):
+        request_headers["Content-Length"] = str(size)
     try:
-        response = httpx.request(method, url, content=data, headers=headers, timeout=timeout)
+        response = httpx.request(
+            method, url, content=data, headers=request_headers, timeout=timeout
+        )
         response.raise_for_status()
     except httpx.TimeoutException:
         raise CustomToolUploadError(f"Source upload timed out after {timeout:g} seconds.") from None
@@ -580,6 +589,7 @@ def _version_from_wire(
         source_revision=wire["sourceRevision"],
         source_digest=wire["sourceDigest"],
         status=wire["status"],
+        terminal=wire["terminal"],
         origin=wire["origin"],
         created_at=wire["createdAt"],
         started_at=wire["startedAt"],

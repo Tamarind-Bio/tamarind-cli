@@ -36,7 +36,7 @@ RESERVED_NAMES = {
     "int",
     "list",
     "str",
-}
+} | set(PROPERTY_ALIASES.values())
 
 
 def _python_name(value: str, *, label: str) -> str:
