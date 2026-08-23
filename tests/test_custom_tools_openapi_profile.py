@@ -200,6 +200,21 @@ def test_profile_rejects_invalid_numeric_bounds(keyword: str, value: object) -> 
         validate_profile(document)
 
 
+@pytest.mark.parametrize("keyword", ["minimum", "maximum"])
+def test_profile_preserves_arbitrary_precision_integer_bounds(keyword: str) -> None:
+    document = _document()
+    bound = 10**400
+    document["components"]["schemas"]["CustomTool"]["properties"]["bounded"] = {
+        "type": "integer",
+        keyword: bound,
+    }
+
+    api = normalize(document)
+
+    bounded = next(field for field in api.schemas[0].schema.fields if field.wire_name == "bounded")
+    assert bounded.schema.constraints[0].value == bound
+
+
 @pytest.mark.parametrize("pattern", ["[", "(", "\\"])
 def test_profile_rejects_invalid_string_patterns(pattern: str) -> None:
     document = _document()

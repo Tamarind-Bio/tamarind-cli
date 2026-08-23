@@ -149,6 +149,12 @@ def _validate_unique_entries(value: Sequence[Any], location: str) -> None:
         raise ProfileViolation(location, "entries must be unique")
 
 
+def _is_finite_number(value: object) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return not isinstance(value, float) or math.isfinite(value)
+
+
 def _component(document: Mapping[str, Any], ref: str, location: str) -> Mapping[str, Any]:
     if not ref.startswith("#/components/"):
         raise ProfileViolation(location, "external references are not supported")
@@ -355,11 +361,7 @@ def _validate_schema(
             isinstance(value, bool) or not isinstance(value, int) or value < 0
         ):
             raise ProfileViolation(f"{location}.{key}", "must be a non-negative integer")
-        if key in NUMERIC_BOUND_KEYS and (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not math.isfinite(value)
-        ):
+        if key in NUMERIC_BOUND_KEYS and not _is_finite_number(value):
             raise ProfileViolation(f"{location}.{key}", "must be a finite number")
 
 
