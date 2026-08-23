@@ -308,6 +308,13 @@ def test_normalize_produces_an_openapi_free_ir() -> None:
     assert update_tool.request_body.schema.reference == "UpdateCustomTool"
 
 
+def test_normalize_preserves_a_canonical_server_trailing_slash() -> None:
+    document = _document()
+    document["servers"][0]["url"] = "https://app.tamarind.bio/api/"
+
+    assert normalize(document).server_url == "https://app.tamarind.bio/api/"
+
+
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [

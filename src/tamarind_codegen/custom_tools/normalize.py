@@ -210,11 +210,12 @@ def normalize(document: Mapping[str, Any]) -> Api:
 
     info = cast(Mapping[str, str], document["info"])
     servers = cast(list[Mapping[str, str]], document.get("servers", []))
+    server_url = servers[0]["url"]
     canonical = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
     return Api(
         title=info["title"],
         version=info["version"],
-        server_url=servers[0]["url"].rstrip("/") + "/",
+        server_url=server_url if server_url.endswith("/") else server_url + "/",
         source_sha256=sha256(canonical).hexdigest(),
         schemas=schemas,
         operations=tuple(operations),
