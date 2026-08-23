@@ -146,7 +146,12 @@ def test_generated_models_preserve_non_identifier_wire_keys(tmp_path: Path) -> N
         check=True,
     )
 
-    assert "'K': NotRequired[str]" in generated.read_text(encoding="utf-8")
+    module_spec = importlib.util.spec_from_file_location("generated_unicode_property", generated)
+    assert module_spec is not None and module_spec.loader is not None
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+
+    assert "K" in module.PublicCreateCustomToolRequest.__annotations__
 
 
 def test_generated_models_reject_nfkc_ambiguous_schema_names(tmp_path: Path) -> None:

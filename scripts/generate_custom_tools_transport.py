@@ -428,6 +428,7 @@ def write_generated_transport(document: dict[str, object], output: Path) -> None
         ],
         input=generate(document),
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=True,
     ).stdout
