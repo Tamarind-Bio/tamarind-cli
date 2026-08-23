@@ -105,7 +105,7 @@ def test_profile_rejects_malformed_response_status_keys(status: object) -> None:
         validate_profile(document)
 
 
-@pytest.mark.parametrize("status", ["200", "299", "2XX"])
+@pytest.mark.parametrize("status", ["200", "299"])
 def test_profile_accepts_supported_success_response_statuses(status: str) -> None:
     document = _document()
     responses = document["paths"]["/custom-tools/{name}"]["get"]["responses"]
@@ -586,6 +586,45 @@ def test_profile_rejects_content_for_bodyless_response_statuses(status: str) -> 
     }
 
     with pytest.raises(ProfileViolation, match="must not declare content"):
+        validate_profile(document)
+
+
+def test_profile_accepts_a_bodyless_wildcard_success_response() -> None:
+    document = _document()
+    responses = document["paths"]["/custom-tools/{name}"]["get"]["responses"]
+    responses.pop("200")
+    responses["2XX"] = {"description": "Success"}
+
+    validate_profile(document)
+
+
+def test_profile_rejects_a_body_bearing_wildcard_success_response() -> None:
+    document = _document()
+    responses = document["paths"]["/custom-tools/{name}"]["get"]["responses"]
+    responses.pop("200")
+    responses["2XX"] = {
+        "description": "Success",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CustomTool"}}},
+    }
+
+    with pytest.raises(ProfileViolation, match="wildcard responses must not declare content"):
+        validate_profile(document)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/custom-tools?mode=preview",
+        "/custom-tools#fragment",
+        "/custom tools",
+        "/custom-tools\x00",
+    ],
+)
+def test_profile_rejects_non_path_characters_in_path_keys(path: str) -> None:
+    document = _document()
+    document["paths"][path] = document["paths"].pop("/custom-tools/{name}")
+
+    with pytest.raises(ProfileViolation, match="path keys must not contain"):
         validate_profile(document)
 
 

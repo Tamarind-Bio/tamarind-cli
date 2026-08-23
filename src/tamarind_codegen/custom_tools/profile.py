@@ -514,6 +514,11 @@ def _validate_response(
     if "content" in response and response["content"]:
         if status in BODYLESS_RESPONSE_STATUSES:
             raise ProfileViolation(location, f"HTTP {status} responses must not declare content")
+        if status == "2XX":
+            raise ProfileViolation(
+                location,
+                "2XX wildcard responses must not declare content because the range includes bodyless statuses",
+            )
         _json_schema(
             document,
             response["content"],
@@ -561,6 +566,15 @@ def validate_profile(document: Mapping[str, Any]) -> None:
     for path, raw_path_item in paths.items():
         if not isinstance(path, str) or not path.startswith("/"):
             raise ProfileViolation(f"paths.{path}", "path keys must start with '/'")
+        if (
+            "?" in path
+            or "#" in path
+            or any(ord(character) <= 0x20 or ord(character) == 0x7F for character in path)
+        ):
+            raise ProfileViolation(
+                f"paths.{path}",
+                "path keys must not contain query, fragment, whitespace, or control characters",
+            )
         path_item = _mapping(raw_path_item, f"paths.{path}")
         _reject_unsupported_fields(path_item, PATH_ITEM_FIELDS, f"paths.{path}", "path item")
         _validate_parameter_list(
