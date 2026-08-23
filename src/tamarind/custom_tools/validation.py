@@ -8,7 +8,11 @@ from pathlib import Path
 import re
 from typing import NoReturn
 
-from tamarind.custom_tools.packaging import SourceTree, inspect_source_tree
+from tamarind.custom_tools.packaging import (
+    SourceTree,
+    inspect_source_tree,
+    validate_source_tree_manifest,
+)
 from tamarind.errors import CustomToolUploadError
 
 
@@ -70,6 +74,12 @@ def validate_folder(folder: str | Path) -> ValidationReport:
 
 def validate_source_tree(tree: SourceTree) -> ValidationReport:
     """Check only facts available from the exact archive snapshot."""
+    try:
+        validate_source_tree_manifest(tree)
+    except CustomToolUploadError as exc:
+        return ValidationReport(
+            errors=(ValidationProblem(code="invalid_source_tree", path=".", message=str(exc)),)
+        )
     errors: list[ValidationProblem] = []
     warnings: list[ValidationProblem] = []
 

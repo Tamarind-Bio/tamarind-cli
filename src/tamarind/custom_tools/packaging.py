@@ -155,6 +155,7 @@ class SourceFile:
     modified_ns: int
     mode: int
     content_sha256: str
+    executable: bool = False
 
     @classmethod
     def inspect(
@@ -169,7 +170,7 @@ class SourceFile:
         if not stat.S_ISREG(metadata.st_mode):
             raise CustomToolUploadError(f"Source archives can contain only regular files: {path}")
         _enforce_source_byte_limit(metadata.st_size, maximum=max_bytes)
-        content_sha256 = _content_digest(path, metadata)
+        content_sha256, executable = _content_facts(path, metadata)
         confirmed = _file_metadata(path)
         if _identity(metadata) != _identity(confirmed):
             raise CustomToolUploadError(f"Source file changed during inspection: {path}")
@@ -183,6 +184,7 @@ class SourceFile:
             modified_ns=metadata.st_mtime_ns,
             mode=metadata.st_mode,
             content_sha256=content_sha256,
+            executable=executable,
         )
         return inspected
 
@@ -288,10 +290,12 @@ def inspect_source_tree(folder: str | Path) -> SourceTree:
         inspected_bytes += source_file.size
         files.append(source_file)
 
-    return SourceTree(
+    tree = SourceTree(
         files=tuple(files),
         empty_directories=tuple(empty_directories),
     )
+    validate_source_tree_manifest(tree)
+    return tree
 
 
 def build_archive(folder: str | Path, *, max_bytes: int | None = None) -> SourceArchive:
@@ -305,21 +309,7 @@ def build_source_tree_archive(
     max_bytes: int | None = None,
 ) -> SourceArchive:
     """Package one previously inspected source snapshot."""
-    entries: list[tuple[str, SourceFile | None, int]] = []
-    for relative in tree.empty_directories:
-        relative = _validate_archive_name(relative, Path(relative))
-        entries.append((f"{relative}/", None, _DIRECTORY_MODE))
-        # Git cannot persist an empty tree. The marker keeps the directory
-        # present when the backend commits the uploaded archive to Gitea.
-        entries.append((f"{relative}/.gitkeep", None, _REGULAR_FILE_MODE))
-    for source_file in tree.files:
-        relative = _validate_archive_name(source_file.relative, source_file.path)
-        executable = relative == "run.sh" or bool(source_file.mode & 0o111)
-        mode = _EXECUTABLE_FILE_MODE if executable else _REGULAR_FILE_MODE
-        entries.append((relative, source_file, mode))
-    _enforce_source_entry_limit(len(entries))
-    _enforce_source_byte_limit(sum(source_file.size for source_file in tree.files))
-    _validate_portable_manifest(entries)
+    entries = _archive_entries(tree)
 
     output = _CappedArchive(max_bytes)
     try:
@@ -357,6 +347,30 @@ def build_source_tree_archive(
         except CustomToolUploadError:
             pass
         raise
+
+
+def validate_source_tree_manifest(tree: SourceTree) -> None:
+    """Reject a tree that cannot be represented as one portable archive."""
+    _archive_entries(tree)
+
+
+def _archive_entries(tree: SourceTree) -> list[tuple[str, SourceFile | None, int]]:
+    entries: list[tuple[str, SourceFile | None, int]] = []
+    for relative in tree.empty_directories:
+        relative = _validate_archive_name(relative, Path(relative))
+        entries.append((f"{relative}/", None, _DIRECTORY_MODE))
+        # Git cannot persist an empty tree. The marker keeps the directory
+        # present when the backend commits the uploaded archive to Gitea.
+        entries.append((f"{relative}/.gitkeep", None, _REGULAR_FILE_MODE))
+    for source_file in tree.files:
+        relative = _validate_archive_name(source_file.relative, source_file.path)
+        executable = relative == "run.sh" or source_file.executable
+        mode = _EXECUTABLE_FILE_MODE if executable else _REGULAR_FILE_MODE
+        entries.append((relative, source_file, mode))
+    _enforce_source_entry_limit(len(entries))
+    _enforce_source_byte_limit(sum(source_file.size for source_file in tree.files))
+    _validate_portable_manifest(entries)
+    return entries
 
 
 def _validate_portable_manifest(entries: list[tuple[str, SourceFile | None, int]]) -> None:
@@ -528,7 +542,7 @@ def _file_metadata(path: Path) -> os.stat_result:
         raise CustomToolUploadError(f"Source file changed during inspection: {path}") from exc
 
 
-def _content_digest(path: Path, expected: os.stat_result) -> str:
+def _content_facts(path: Path, expected: os.stat_result) -> tuple[str, bool]:
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags)
@@ -537,11 +551,16 @@ def _content_digest(path: Path, expected: os.stat_result) -> str:
             f"Source file cannot be read during inspection: {path}"
         ) from exc
     digest = sha256()
+    begins_with_shebang = False
+    first_chunk = True
     with os.fdopen(descriptor, "rb") as source:
         if _identity(os.fstat(source.fileno())) != _identity(expected):
             raise CustomToolUploadError(f"Source file changed during inspection: {path}")
         try:
             while chunk := source.read(1024 * 1024):
+                if first_chunk:
+                    begins_with_shebang = chunk.startswith(b"#!")
+                    first_chunk = False
                 digest.update(chunk)
         except OSError as exc:
             raise CustomToolUploadError(
@@ -549,7 +568,7 @@ def _content_digest(path: Path, expected: os.stat_result) -> str:
             ) from exc
         if _identity(os.fstat(source.fileno())) != _identity(expected):
             raise CustomToolUploadError(f"Source file changed during inspection: {path}")
-    return digest.hexdigest()
+    return digest.hexdigest(), begins_with_shebang
 
 
 def _identity(metadata: os.stat_result) -> tuple[int, int, int, int, int]:

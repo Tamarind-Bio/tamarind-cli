@@ -117,12 +117,33 @@ def test_archive_preserves_explicit_build_inputs_and_empty_directories(tmp_path:
 
 def test_archive_makes_runtime_entrypoint_executable_on_every_platform(tmp_path: Path) -> None:
     _valid_source(tmp_path)
+    (tmp_path / "helper.sh").write_text("#!/bin/sh\ntrue\n")
 
     with zipfile.ZipFile(BytesIO(build_archive(tmp_path).data)) as archive:
         modes = {info.filename: info.external_attr >> 16 for info in archive.infolist()}
 
     assert modes["run.sh"] == 0o100755
+    assert modes["helper.sh"] == 0o100755
     assert modes["main.py"] == 0o100644
+
+
+def test_archive_modes_do_not_depend_on_host_executable_bits(tmp_path: Path) -> None:
+    source = tmp_path / "helper.sh"
+    source.write_text("#!/bin/sh\ntrue\n")
+    source.chmod(0o644)
+    regular = packaging.SourceFile.inspect("helper.sh", source, tmp_path)
+
+    regular_archive = packaging.build_source_tree_archive(
+        packaging.SourceTree(files=(regular,), empty_directories=())
+    )
+    source.chmod(0o755)
+    executable = packaging.SourceFile.inspect("helper.sh", source, tmp_path)
+    executable_archive = packaging.build_source_tree_archive(
+        packaging.SourceTree(files=(executable,), empty_directories=())
+    )
+
+    assert regular_archive.data == executable_archive.data
+    assert regular_archive.digest == executable_archive.digest
 
 
 def test_archive_rejects_symlinks(tmp_path: Path) -> None:
@@ -304,6 +325,25 @@ def test_archive_rejects_case_colliding_ancestor_directories(tmp_path: Path) -> 
         packaging.build_source_tree_archive(tree)
 
 
+def test_validation_rejects_case_colliding_ancestor_directories(tmp_path: Path) -> None:
+    source = tmp_path / "source.py"
+    source.write_text("pass\n")
+    inspected = packaging.SourceFile.inspect("source.py", source, tmp_path)
+    tree = packaging.SourceTree(
+        files=(
+            replace(inspected, relative="Models/a.py"),
+            replace(inspected, relative="models/b.py"),
+        ),
+        empty_directories=(),
+    )
+
+    report = validation.validate_source_tree(tree)
+
+    assert [(problem.code, problem.path) for problem in report.errors] == [
+        ("invalid_source_tree", ".")
+    ]
+
+
 def test_inspection_rejects_directory_traversal_errors(tmp_path: Path, monkeypatch) -> None:
     _valid_source(tmp_path)
 
@@ -356,7 +396,7 @@ def test_inspection_bounds_uncompressed_source_before_hashing(tmp_path: Path, mo
     monkeypatch.setattr(packaging, "MAX_TOOL_SOURCE_BYTES", source.stat().st_size - 1)
     monkeypatch.setattr(
         packaging,
-        "_content_digest",
+        "_content_facts",
         lambda *_args: (_ for _ in ()).throw(
             AssertionError("oversized source must be rejected before hashing")
         ),
