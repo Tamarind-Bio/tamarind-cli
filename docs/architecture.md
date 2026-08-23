@@ -44,7 +44,7 @@ are generated from the website backend's public
 OpenAPI artifact through a deliberately small compiler pipeline:
 
 ```text
-complete backend OpenAPI -> Custom Tools tag projection -> Tamarind profile validation -> normalized IR -> Python transport
+complete backend OpenAPI -> pinned Custom Tools projection -> Tamarind profile validation -> normalized IR -> Python transport
 ```
 
 The profile and ownership boundaries are documented in
@@ -52,9 +52,9 @@ The profile and ownership boundaries are documented in
 language-neutral IR prevents the Python emitter from accumulating OpenAPI
 parsing, reference-resolution, and compatibility policy.
 
-The CLI vendors the complete backend artifact with immutable provenance. Its compiler
-selects the stable `custom-tools` tag and computes the referenced component closure before
-validation. CI regenerates the typed transport from that pinned full artifact and rejects drift.
+The CLI vendors only the deterministic `custom-tools` tag projection with immutable
+provenance. The sync boundary computes the referenced component closure once; CI validates
+and regenerates the typed transport from that pinned projection and rejects drift.
 
 The SDK owns archive-local concerns that only the client can decide safely:
 deterministic ZIP construction, symlink and junction rejection, upload limits,

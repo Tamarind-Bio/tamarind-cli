@@ -1,4 +1,4 @@
-"""Project the Custom Tools contract from Tamarind's complete public OpenAPI."""
+"""Project the Custom Tools contract from a complete or already-projected OpenAPI."""
 
 from __future__ import annotations
 

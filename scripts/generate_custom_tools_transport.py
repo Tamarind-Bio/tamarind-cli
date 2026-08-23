@@ -376,7 +376,7 @@ def emit_python(api: Api) -> str:
 
     return "\n".join(
         [
-            '"""Generated from the Custom Tools projection of openapi/public-v1.json. Do not edit by hand."""',
+            '"""Generated from the deterministic Custom Tools OpenAPI projection. Do not edit by hand."""',
             "",
             "from __future__ import annotations",
             "",

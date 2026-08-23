@@ -17,7 +17,7 @@ def main() -> None:
         "artifactSha256": lock.get("artifactSha256"),
         "schemaVersion": 1,
         "sourceCommit": lock.get("sourceCommit"),
-        "sourcePath": "backend/app/public_api/openapi/public-v1.generated.json",
+        "sourcePath": "backend/app/public_api/openapi/public-v1.generated.json#tag=custom-tools",
         "sourceRepository": "Tamarind-Bio/tamarind-website",
     }:
         raise SystemExit("public-v1.lock.json has an unsupported shape or source")

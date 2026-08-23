@@ -77,7 +77,8 @@ than an invitation for the emitter to guess.
 | Formatting and type correctness | CI |
 | Runtime upload, build, and polling behavior | Hand-written SDK layer |
 
-The backend commits one complete public OpenAPI artifact. The CLI vendors it verbatim,
-records its source repository, full commit, path, and SHA-256 in
-`openapi/public-v1.lock.json`, then deterministically projects operations tagged
-`custom-tools` before profile validation and generation.
+The backend commits one complete public OpenAPI artifact. The sync boundary
+deterministically projects operations tagged `custom-tools` and their reachable
+component closure; the CLI vendors only that projection and records its source
+repository, full commit, tagged source path, and projection SHA-256 in
+`openapi/public-v1.lock.json` before profile validation and generation.
