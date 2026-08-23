@@ -9,7 +9,7 @@ from urllib.parse import quote
 from tamarind.http import HTTPClient
 
 OPENAPI_SERVER_URL = "https://app.tamarind.bio/api/"
-OPENAPI_SHA256 = "2d2f0f05d5452110ccdb21b5a73546d09ddcdde911706b6a4087a34519944a8c"
+OPENAPI_SHA256 = "ecb181bf2c8e5cb3d18f121b91932fd6046b8ceb2f5e482108618a032a8f8d39"
 
 
 def _segment(value: str) -> str:
@@ -54,7 +54,7 @@ PublicVersion = TypedDict(
         "name": str,
         "origin": str,
         "sourceDigest": str | None,
-        "sourceRevision": str,
+        "sourceRevision": str | None,
         "startedAt": str,
         "status": PublicVersionStatus,
         "terminal": bool,

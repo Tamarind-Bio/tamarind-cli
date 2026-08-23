@@ -782,9 +782,16 @@
             "title": "Sourcedigest"
           },
           "sourceRevision": {
-            "description": "Immutable source revision used by this version.",
-            "title": "Sourcerevision",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Immutable source revision used by this version. Null when source is hidden.",
+            "title": "Sourcerevision"
           },
           "startedAt": {
             "title": "Startedat",
