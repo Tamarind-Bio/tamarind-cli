@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from io import BytesIO
 import json
 import os
@@ -46,6 +47,34 @@ def test_archive_is_deterministic_and_excludes_local_artifacts(tmp_path: Path) -
     with zipfile.ZipFile(BytesIO(first.data)) as archive:
         assert archive.namelist() == ["Dockerfile", "config.json", "main.py", "run.sh"]
         assert all(info.date_time == (1980, 1, 1, 0, 0, 0) for info in archive.infolist())
+
+
+def test_archive_normalizes_entry_names_before_digesting(tmp_path: Path) -> None:
+    source = tmp_path / "source.txt"
+    source.write_text("same content")
+    inspected = packaging.SourceFile.inspect("source.txt", source, tmp_path)
+    composed = replace(inspected, relative="caf\N{LATIN SMALL LETTER E WITH ACUTE}.txt")
+    decomposed = replace(inspected, relative="cafe\N{COMBINING ACUTE ACCENT}.txt")
+
+    composed_archive = packaging.build_source_tree_archive(
+        packaging.SourceTree(
+            files=(composed,), empty_directories=("caf\N{LATIN SMALL LETTER E WITH ACUTE}",)
+        )
+    )
+    decomposed_archive = packaging.build_source_tree_archive(
+        packaging.SourceTree(
+            files=(decomposed,), empty_directories=("cafe\N{COMBINING ACUTE ACCENT}",)
+        )
+    )
+
+    assert composed_archive.digest == decomposed_archive.digest
+    assert composed_archive.data == decomposed_archive.data
+    with zipfile.ZipFile(BytesIO(decomposed_archive.data)) as archive:
+        assert archive.namelist() == [
+            "caf\N{LATIN SMALL LETTER E WITH ACUTE}.txt",
+            "caf\N{LATIN SMALL LETTER E WITH ACUTE}/",
+            "caf\N{LATIN SMALL LETTER E WITH ACUTE}/.gitkeep",
+        ]
 
 
 @pytest.mark.parametrize("metadata_name", [".git", ".GIT", ".Hg", ".sVn"])

@@ -149,7 +149,7 @@ class SourceFile:
     def inspect(
         cls, relative: str, path: Path, root: Path, *, max_bytes: int | None = None
     ) -> SourceFile:
-        _validate_archive_name(relative, path)
+        relative = _validate_archive_name(relative, path)
         metadata = _file_metadata(path)
         _assert_contained(root, path)
         confirmed = _file_metadata(path)
@@ -263,8 +263,7 @@ def inspect_source_tree(folder: str | Path) -> SourceTree:
         retained_file_paths.extend(kept_files)
         if current_path != root and not kept_directories and not kept_files:
             relative = current_path.relative_to(root).as_posix()
-            _validate_archive_name(relative, current_path)
-            empty_directories.append(relative)
+            empty_directories.append(_validate_archive_name(relative, current_path))
 
     files: list[SourceFile] = []
     inspected_bytes = 0
@@ -297,14 +296,16 @@ def build_source_tree_archive(
     """Package one previously inspected source snapshot."""
     entries: list[tuple[str, SourceFile | None, int]] = []
     for relative in tree.empty_directories:
+        relative = _validate_archive_name(relative, Path(relative))
         entries.append((f"{relative}/", None, _DIRECTORY_MODE))
         # Git cannot persist an empty tree. The marker keeps the directory
         # present when the backend commits the uploaded archive to Gitea.
         entries.append((f"{relative}/.gitkeep", None, _REGULAR_FILE_MODE))
     for source_file in tree.files:
-        executable = source_file.relative == "run.sh" or bool(source_file.mode & 0o111)
+        relative = _validate_archive_name(source_file.relative, source_file.path)
+        executable = relative == "run.sh" or bool(source_file.mode & 0o111)
         mode = _EXECUTABLE_FILE_MODE if executable else _REGULAR_FILE_MODE
-        entries.append((source_file.relative, source_file, mode))
+        entries.append((relative, source_file, mode))
     _enforce_source_entry_limit(len(entries))
     _enforce_source_byte_limit(sum(source_file.size for source_file in tree.files))
     _validate_portable_manifest(entries)
@@ -350,7 +351,7 @@ def _validate_portable_manifest(entries: list[tuple[str, SourceFile | None, int]
     required_directories: set[str] = set()
     for relative, _, mode in entries:
         archive_name = relative.removesuffix("/")
-        portable_name = _validate_archive_name(archive_name, Path(archive_name))
+        portable_name = _validate_archive_name(archive_name, Path(archive_name)).casefold()
         parts = portable_name.split("/")
         ancestors = {"/".join(parts[:index]) for index in range(1, len(parts))}
         is_directory = stat.S_ISDIR(mode)
@@ -444,6 +445,7 @@ def _enforce_source_byte_limit(size: int, *, maximum: int | None = None) -> None
 
 
 def _validate_archive_name(relative: str, path: Path) -> str:
+    relative = unicodedata.normalize("NFC", relative)
     try:
         relative.encode("utf-8")
     except UnicodeEncodeError as exc:
@@ -465,7 +467,7 @@ def _validate_archive_name(relative: str, path: Path) -> str:
     )
     if invalid:
         raise CustomToolUploadError(f"Source archive path is not portable: {path}")
-    return unicodedata.normalize("NFC", relative.casefold())
+    return relative
 
 
 def _metadata_is_link_like(metadata: os.stat_result) -> bool:
