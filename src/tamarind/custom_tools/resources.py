@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime
 import math
 from pathlib import Path
 import time
@@ -251,7 +250,6 @@ class Version:
     created_at: str
     started_at: str
     completed_at: str | None
-    duration_seconds: int | None
     error: BuildError | None
     tool_name: str
     tool_generation: str
@@ -585,12 +583,6 @@ def _version_from_wire(
     collection: CustomTools, tool_name: str, tool_generation: str, wire: PublicVersion
 ) -> Version:
     error = wire["error"]
-    completed_at = wire["completedAt"]
-    duration_seconds = None
-    if completed_at is not None:
-        started = datetime.fromisoformat(wire["startedAt"].replace("Z", "+00:00"))
-        completed = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
-        duration_seconds = max(0, int((completed - started).total_seconds()))
     return Version(
         name=wire["name"],
         source_revision=wire["sourceRevision"],
@@ -600,8 +592,7 @@ def _version_from_wire(
         origin=wire["origin"],
         created_at=wire["createdAt"],
         started_at=wire["startedAt"],
-        completed_at=completed_at,
-        duration_seconds=duration_seconds,
+        completed_at=wire["completedAt"],
         error=BuildError(error["code"], error["message"]) if error else None,
         tool_name=tool_name,
         tool_generation=tool_generation,
@@ -632,8 +623,10 @@ def _log_page_from_wire(wire: PublicBuildLogPage) -> BuildLogPage:
 
 
 def _require_success(version: Version) -> Version:
-    if version.status == "Stopped":
-        message = version.error.message if version.error else "build stopped"
+    if version.status != "Complete":
+        message = (
+            version.error.message if version.error else f"build ended with status {version.status}"
+        )
         raise CustomToolBuildFailedError(
             f"Custom Tool Version {version.tool_name}/{version.name} failed: {message}",
             detail=version,

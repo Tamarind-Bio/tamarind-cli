@@ -283,7 +283,7 @@ def test_version_pages_preserve_and_accept_cursors() -> None:
 
 
 @respx.mock
-def test_version_preserves_duration_and_stable_error_code() -> None:
+def test_version_preserves_wire_timestamps_and_stable_error_code() -> None:
     failed = _version(status="Stopped", error="Docker build failed")
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
     get_version = respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
@@ -293,8 +293,9 @@ def test_version_preserves_duration_and_stable_error_code() -> None:
     with Tamarind(api_key="key", api_base=BASE) as client:
         version = client.custom_tools.get("example").get_version("v1")
 
-    assert version.duration_seconds == 60
     assert version.created_at == failed["createdAt"]
+    assert version.started_at == failed["startedAt"]
+    assert version.completed_at == failed["completedAt"]
     assert version.error is not None
     assert version.error.code == "build_failed"
     assert version.error.message == "Docker build failed"
@@ -312,6 +313,29 @@ def test_version_preserves_the_server_terminal_marker() -> None:
         version = client.custom_tools.get("example").get_version("v1")
 
     assert version.terminal is True
+
+
+@respx.mock
+def test_version_does_not_interpret_wire_timestamps() -> None:
+    wire = {
+        **_version(status="Complete"),
+        "createdAt": "created by server",
+        "startedAt": "started by server",
+        "completedAt": "completed by server",
+    }
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+        return_value=httpx.Response(200, json=wire)
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        version = client.custom_tools.get("example").get_version("v1")
+
+    assert (version.created_at, version.started_at, version.completed_at) == (
+        "created by server",
+        "started by server",
+        "completed by server",
+    )
 
 
 def test_build_caps_archive_at_the_server_source_limit(tmp_path: Path, monkeypatch) -> None:
@@ -473,6 +497,19 @@ def test_terminal_failure_raises_typed_error() -> None:
             version.monitor(timeout=1)
 
 
+@respx.mock
+def test_non_complete_terminal_version_raises_typed_error() -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+        return_value=httpx.Response(200, json=_version(status="Running", terminal=True))
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        version = client.custom_tools.get("example").get_version("v1")
+        with pytest.raises(CustomToolBuildFailedError, match="status Running"):
+            version.monitor(timeout=1)
+
+
 def test_monitor_recomputes_the_deadline_after_log_poll(monkeypatch) -> None:
     ticks = iter((0.0, 0.1, 1.1))
     monkeypatch.setattr(resources, "_clock", lambda: next(ticks))
@@ -498,7 +535,6 @@ def test_monitor_recomputes_the_deadline_after_log_poll(monkeypatch) -> None:
         created_at="2026-08-15T00:00:00Z",
         started_at="2026-08-15T00:00:00Z",
         completed_at=None,
-        duration_seconds=None,
         error=None,
         tool_name="example",
         tool_generation="generation-1",
@@ -532,7 +568,6 @@ def test_monitor_does_not_dispatch_logs_after_the_deadline(monkeypatch) -> None:
         created_at="2026-08-15T00:00:00Z",
         started_at="2026-08-15T00:00:00Z",
         completed_at=None,
-        duration_seconds=None,
         error=None,
         tool_name="example",
         tool_generation="generation-1",
@@ -582,7 +617,6 @@ def test_monitor_without_callback_does_not_fetch_logs(monkeypatch) -> None:
             created_at=version.created_at,
             started_at=version.started_at,
             completed_at="2026-08-15T00:01:00Z",
-            duration_seconds=60,
             error=version.error,
             tool_name=version.tool_name,
             tool_generation=version.tool_generation,
@@ -601,7 +635,6 @@ def test_monitor_without_callback_does_not_fetch_logs(monkeypatch) -> None:
         created_at="2026-08-15T00:00:00Z",
         started_at="2026-08-15T00:00:00Z",
         completed_at=None,
-        duration_seconds=None,
         error=None,
         tool_name="example",
         tool_generation="generation-1",
@@ -628,7 +661,6 @@ def test_monitor_rechecks_deadline_after_terminal_refresh(monkeypatch) -> None:
             created_at=version.created_at,
             started_at=version.started_at,
             completed_at="2026-08-15T00:01:00Z",
-            duration_seconds=60,
             error=version.error,
             tool_name=version.tool_name,
             tool_generation=version.tool_generation,
@@ -646,7 +678,6 @@ def test_monitor_rechecks_deadline_after_terminal_refresh(monkeypatch) -> None:
         created_at="2026-08-15T00:00:00Z",
         started_at="2026-08-15T00:00:00Z",
         completed_at=None,
-        duration_seconds=None,
         error=None,
         tool_name="example",
         tool_generation="generation-1",
@@ -677,7 +708,6 @@ def test_monitor_without_callback_polls_until_complete(monkeypatch) -> None:
             created_at=version.created_at,
             started_at=version.started_at,
             completed_at="2026-08-15T00:01:00Z" if status == "Complete" else None,
-            duration_seconds=60 if status == "Complete" else None,
             error=version.error,
             tool_name=version.tool_name,
             tool_generation=version.tool_generation,
@@ -696,7 +726,6 @@ def test_monitor_without_callback_polls_until_complete(monkeypatch) -> None:
         created_at="2026-08-15T00:00:00Z",
         started_at="2026-08-15T00:00:00Z",
         completed_at=None,
-        duration_seconds=None,
         error=None,
         tool_name="example",
         tool_generation="generation-1",
@@ -735,7 +764,6 @@ def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> N
             created_at=version.created_at,
             started_at=version.started_at,
             completed_at="2026-08-15T00:01:00Z",
-            duration_seconds=60,
             error=version.error,
             tool_name=version.tool_name,
             tool_generation=version.tool_generation,
@@ -754,7 +782,6 @@ def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> N
         created_at="2026-08-15T00:00:00Z",
         started_at="2026-08-15T00:00:00Z",
         completed_at=None,
-        duration_seconds=None,
         error=None,
         tool_name="example",
         tool_generation="generation-1",
@@ -788,7 +815,6 @@ def test_monitor_rechecks_deadline_after_terminal_log_fetch(monkeypatch) -> None
         created_at="2026-08-15T00:00:00Z",
         started_at="2026-08-15T00:00:00Z",
         completed_at="2026-08-15T00:01:00Z",
-        duration_seconds=60,
         error=None,
         tool_name="example",
         tool_generation="generation-1",
