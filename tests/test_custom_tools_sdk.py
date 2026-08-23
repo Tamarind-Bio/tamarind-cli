@@ -16,10 +16,17 @@ from tamarind.errors import (
     CustomToolNotFoundError,
     CustomToolUploadError,
     StaleCustomToolError,
+    ValidationError,
 )
 
 BASE = "https://api.test/"
 UPLOAD = "https://uploads.test/source.zip"
+
+
+@pytest.mark.parametrize("value", [10**400, -(10**400)])
+def test_custom_tool_timeouts_reject_integers_outside_the_float_range(value: int) -> None:
+    with pytest.raises(ValidationError, match="finite number greater than zero"):
+        resources._positive_finite_number(value, "timeout")
 
 
 def _tool(

@@ -13,6 +13,38 @@ from tamarind_codegen.custom_tools.json_loader import load_json_document
 from tamarind_codegen.custom_tools.project import project_custom_tools
 
 
+def _producer_checkout(tmp_path: Path, source: bytes) -> tuple[Path, Path, str]:
+    checkout = tmp_path / "producer"
+    artifact = checkout / "backend/app/public_api/openapi/public-v1.generated.json"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(source)
+    commands = [
+        ["git", "init", str(checkout)],
+        ["git", "-C", str(checkout), "config", "user.name", "Contract Test"],
+        ["git", "-C", str(checkout), "config", "user.email", "contract@example.com"],
+        [
+            "git",
+            "-C",
+            str(checkout),
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/Tamarind-Bio/tamarind-website.git",
+        ],
+        ["git", "-C", str(checkout), "add", "."],
+        ["git", "-C", str(checkout), "commit", "-m", "Add contract"],
+    ]
+    for command in commands:
+        subprocess.run(command, check=True, capture_output=True)
+    commit = subprocess.run(
+        ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    return checkout, artifact, commit
+
+
 def test_cli_projection_is_idempotent_for_the_vendored_custom_tools_spec() -> None:
     root = Path(__file__).resolve().parents[1]
     document = json.loads((root / "openapi/public-v1.json").read_text())
@@ -31,8 +63,7 @@ def test_cli_projection_is_idempotent_for_the_vendored_custom_tools_spec() -> No
 
 def test_contract_entrypoints_reject_duplicate_json_members(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
-    spec = tmp_path / "duplicate.json"
-    spec.write_text('{"openapi":"3.1.0","openapi":"3.1.1"}', encoding="utf-8")
+    checkout, spec, commit = _producer_checkout(tmp_path, b'{"openapi":"3.1.0","openapi":"3.1.1"}')
 
     with pytest.raises(ValueError, match="duplicate JSON object member"):
         load_json_document(spec.read_bytes())
@@ -49,10 +80,12 @@ def test_contract_entrypoints_reject_duplicate_json_members(tmp_path: Path) -> N
             sys.executable,
             str(root / "scripts/sync_custom_tools_contract.py"),
             str(spec),
+            "--source-checkout",
+            str(checkout),
             "--source-repository",
             "Tamarind-Bio/tamarind-website",
             "--source-commit",
-            "0" * 40,
+            commit,
             "--root",
             str(tmp_path / "sync-root"),
         ],
@@ -361,15 +394,20 @@ def test_generated_transport_matches_committed_openapi(tmp_path: Path) -> None:
 
 def test_contract_sync_writes_the_canonical_generated_transport(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
+    checkout, source, commit = _producer_checkout(
+        tmp_path, (root / "openapi/public-v1.json").read_bytes()
+    )
     subprocess.run(
         [
             sys.executable,
             str(root / "scripts/sync_custom_tools_contract.py"),
-            str(root / "openapi/public-v1.json"),
+            str(source),
+            "--source-checkout",
+            str(checkout),
             "--source-repository",
             "Tamarind-Bio/tamarind-website",
             "--source-commit",
-            "a" * 40,
+            commit,
             "--root",
             str(tmp_path),
         ],
@@ -394,7 +432,8 @@ def test_contract_sync_leaves_committed_artifacts_unchanged_when_generation_fail
     )
     first_operation["operationId"] = "123"
     source = tmp_path / "invalid.json"
-    source.write_text(json.dumps(document), encoding="utf-8")
+    source_bytes = json.dumps(document).encode()
+    checkout, source, commit = _producer_checkout(tmp_path, source_bytes)
     targets = {
         "openapi/public-v1.json": "old spec\n",
         "openapi/public-v1.lock.json": "old lock\n",
@@ -410,10 +449,12 @@ def test_contract_sync_leaves_committed_artifacts_unchanged_when_generation_fail
             sys.executable,
             str(root / "scripts/sync_custom_tools_contract.py"),
             str(source),
+            "--source-checkout",
+            str(checkout),
             "--source-repository",
             "Tamarind-Bio/tamarind-website",
             "--source-commit",
-            "a" * 40,
+            commit,
             "--root",
             str(tmp_path / "root"),
         ],
@@ -456,6 +497,8 @@ def test_contract_sync_rejects_invalid_provenance_before_writing_outputs(
         sys.executable,
         str(root / "scripts/sync_custom_tools_contract.py"),
         str(root / "openapi/public-v1.json"),
+        "--source-checkout",
+        str(root),
         "--source-repository",
         "Tamarind-Bio/tamarind-website",
         "--source-commit",
@@ -472,6 +515,46 @@ def test_contract_sync_rejects_invalid_provenance_before_writing_outputs(
     assert message in result.stderr
     for relative, content in targets.items():
         assert (tmp_path / "root" / relative).read_text() == content
+
+
+@pytest.mark.parametrize("mismatch", ["commit", "artifact", "origin"])
+def test_contract_sync_verifies_the_checked_out_backend_before_writing(
+    tmp_path: Path, mismatch: str
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    source_bytes = (root / "openapi/public-v1.json").read_bytes()
+    checkout, source, commit = _producer_checkout(tmp_path, source_bytes)
+    if mismatch == "commit":
+        commit = "0" * 40
+    elif mismatch == "artifact":
+        source.write_bytes(source_bytes + b"\n")
+    else:
+        subprocess.run(
+            ["git", "-C", str(checkout), "remote", "set-url", "origin", "https://example.com/x"],
+            check=True,
+        )
+    output_root = tmp_path / "output"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(root / "scripts/sync_custom_tools_contract.py"),
+            str(source),
+            "--source-checkout",
+            str(checkout),
+            "--source-repository",
+            "Tamarind-Bio/tamarind-website",
+            "--source-commit",
+            commit,
+            "--root",
+            str(output_root),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert not output_root.exists()
 
 
 def test_generated_transport_is_importable(tmp_path: Path) -> None:

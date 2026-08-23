@@ -615,8 +615,8 @@ def validate_profile(document: Mapping[str, Any]) -> None:
     paths = _mapping(document.get("paths"), "paths")
     operation_ids: set[str] = set()
     for path, raw_path_item in paths.items():
-        if not isinstance(path, str) or not path.startswith("/"):
-            raise ProfileViolation(f"paths.{path}", "path keys must start with '/'")
+        if not isinstance(path, str) or not path.startswith("/") or path.startswith("//"):
+            raise ProfileViolation(f"paths.{path}", "path keys must start with exactly one '/'")
         if (
             "?" in path
             or "#" in path

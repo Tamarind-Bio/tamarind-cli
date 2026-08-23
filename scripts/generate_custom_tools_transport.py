@@ -305,7 +305,7 @@ def _method(operation: Operation, *, async_method: bool) -> tuple[str, str]:
     supplied_path_parameters = {wire_name for wire_name, _ in path_parameters}
     if placeholders != supplied_path_parameters:
         raise ValueError(f"{operation.operation_id} path parameters do not match its path template")
-    rendered_path = operation.path.lstrip("/")
+    rendered_path = operation.path.removeprefix("/")
     for wire_name, py_name in path_parameters:
         rendered_path = rendered_path.replace(
             "{" + wire_name + "}", "{" + f"_segment({py_name})" + "}"

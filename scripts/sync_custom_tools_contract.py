@@ -13,12 +13,17 @@ from generate_custom_tools_transport import write_generated_transport
 from tamarind_codegen.custom_tools.json_loader import load_json_document
 from tamarind_codegen.custom_tools.profile import validate_profile
 from tamarind_codegen.custom_tools.project import project_custom_tools
-from tamarind_codegen.custom_tools.provenance import SOURCE_PATH, validate_source_provenance
+from tamarind_codegen.custom_tools.provenance import (
+    SOURCE_PATH,
+    validate_source_provenance,
+    verify_source_checkout,
+)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("source", type=Path)
+    parser.add_argument("--source-checkout", required=True, type=Path)
     parser.add_argument("--source-repository", required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument(
@@ -38,6 +43,10 @@ def main() -> None:
         parser.error(str(exc))
 
     raw = args.source.read_bytes()
+    try:
+        verify_source_checkout(args.source_checkout, args.source_commit, raw)
+    except ValueError as exc:
+        parser.error(str(exc))
     document = load_json_document(raw)
     projection = project_custom_tools(document)
     validate_profile(projection)

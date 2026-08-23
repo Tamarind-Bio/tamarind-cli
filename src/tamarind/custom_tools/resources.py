@@ -662,7 +662,10 @@ def _validate_monitor_options(
 def _positive_finite_number(value: object, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValidationError(f"{label} must be a finite number greater than zero")
-    normalized = float(value)
+    try:
+        normalized = float(value)
+    except OverflowError:
+        raise ValidationError(f"{label} must be a finite number greater than zero") from None
     if not math.isfinite(normalized) or normalized <= 0:
         raise ValidationError(f"{label} must be a finite number greater than zero")
     return normalized

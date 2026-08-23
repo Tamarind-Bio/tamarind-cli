@@ -724,6 +724,14 @@ def test_profile_rejects_non_path_characters_in_path_keys(path: str) -> None:
         validate_profile(document)
 
 
+def test_profile_rejects_multiple_leading_path_slashes() -> None:
+    document = _document()
+    document["paths"]["//custom-tools/{name}"] = document["paths"].pop("/custom-tools/{name}")
+
+    with pytest.raises(ProfileViolation, match="exactly one"):
+        validate_profile(document)
+
+
 @pytest.mark.parametrize("path", ["/custom-tools/%2F", "/custom-tools/{name}/versions"])
 def test_profile_accepts_valid_path_escapes_and_templates(path: str) -> None:
     document = _document()
