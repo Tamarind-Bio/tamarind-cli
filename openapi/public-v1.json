@@ -1,6 +1,16 @@
 {
   "components": {
     "responses": {
+      "BadRequest": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/PublicProblem"
+            }
+          }
+        },
+        "description": "The request is valid HTTP but uses an unsupported parameter combination."
+      },
       "Error": {
         "content": {
           "application/problem+json": {
@@ -11,6 +21,16 @@
         },
         "description": "An error occurred (RFC 9457 problem+json). Switch on the stable `code`, not on prose."
       },
+      "Forbidden": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/PublicProblem"
+            }
+          }
+        },
+        "description": "The authenticated API key is not allowed to use this operation."
+      },
       "NotFound": {
         "content": {
           "application/problem+json": {
@@ -20,6 +40,16 @@
           }
         },
         "description": "The addressed resource does not exist, or is not visible to your tenant."
+      },
+      "ServiceUnavailable": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/PublicProblem"
+            }
+          }
+        },
+        "description": "A dependency required by this operation is temporarily unavailable."
       },
       "Unauthorized": {
         "content": {
@@ -77,6 +107,352 @@
         ],
         "title": "Flow",
         "type": "string"
+      },
+      "LegacyJobPage": {
+        "additionalProperties": false,
+        "properties": {
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/LegacyJobSummary"
+            },
+            "title": "Jobs",
+            "type": "array"
+          },
+          "startKey": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startkey"
+          },
+          "statuses": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Statuses",
+            "type": "object"
+          }
+        },
+        "required": [
+          "jobs",
+          "statuses"
+        ],
+        "title": "LegacyJobPage",
+        "type": "object"
+      },
+      "LegacyJobStatus": {
+        "enum": [
+          "In Queue",
+          "Running",
+          "Complete",
+          "Failed",
+          "Stopped"
+        ],
+        "title": "LegacyJobStatus",
+        "type": "string"
+      },
+      "LegacyJobSummary": {
+        "additionalProperties": false,
+        "description": "Fields published by the old handler after its explicit keep-list and enrichments.",
+        "properties": {
+          "AggregationError": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aggregationerror"
+          },
+          "Batch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch"
+          },
+          "Completed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed"
+          },
+          "Created": {
+            "title": "Created",
+            "type": "string"
+          },
+          "JobName": {
+            "title": "Jobname",
+            "type": "string"
+          },
+          "JobStatus": {
+            "$ref": "#/components/schemas/LegacyJobStatus"
+          },
+          "Score": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "Settings": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings"
+          },
+          "Started": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started"
+          },
+          "TamarindSchemaVersion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tamarindschemaversion"
+          },
+          "Type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "User": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User"
+          },
+          "WeightedHours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weightedhours"
+          },
+          "batchStatus": {
+            "anyOf": [
+              {
+                "enum": [
+                  "Running",
+                  "Aggregating",
+                  "Complete",
+                  "Stopped",
+                  "AggregationFailed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batchstatus"
+          }
+        },
+        "required": [
+          "JobName",
+          "JobStatus",
+          "Created",
+          "Type"
+        ],
+        "title": "LegacyJobSummary",
+        "type": "object"
+      },
+      "LegacySingleJob": {
+        "additionalProperties": false,
+        "properties": {
+          "AggregationError": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aggregationerror"
+          },
+          "Batch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch"
+          },
+          "Completed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed"
+          },
+          "Created": {
+            "title": "Created",
+            "type": "string"
+          },
+          "JobName": {
+            "title": "Jobname",
+            "type": "string"
+          },
+          "JobStatus": {
+            "$ref": "#/components/schemas/LegacyJobStatus"
+          },
+          "Score": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "Settings": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings"
+          },
+          "Started": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started"
+          },
+          "TamarindSchemaVersion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tamarindschemaversion"
+          },
+          "Type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "User": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User"
+          },
+          "WeightedHours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weightedhours"
+          },
+          "batchStatus": {
+            "anyOf": [
+              {
+                "enum": [
+                  "Running",
+                  "Aggregating",
+                  "Complete",
+                  "Stopped",
+                  "AggregationFailed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batchstatus"
+          },
+          "statuses": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Statuses",
+            "type": "object"
+          }
+        },
+        "required": [
+          "JobName",
+          "JobStatus",
+          "Created",
+          "Type",
+          "statuses"
+        ],
+        "title": "LegacySingleJob",
+        "type": "object"
       },
       "MoleculeChainInfo": {
         "description": "Type + role tags of one chain in a molecule's `entity`, keyed by the same\nchain id \u2014 so a reader tells a protein sequence from a SMILES, and sees\nheavy/light/lead roles, without loading the group's schema.",
@@ -292,6 +668,53 @@
         "title": "PublicBuildResult",
         "type": "object"
       },
+      "PublicCcdInput": {
+        "properties": {
+          "ccdCode": {
+            "description": "The submitted PDB Chemical Component Dictionary code.",
+            "title": "Ccdcode",
+            "type": "string"
+          },
+          "kind": {
+            "const": "ccd",
+            "description": "A ligand identified by a PDB CCD code.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "parameter": {
+            "description": "The tool setting that received this input.",
+            "title": "Parameter",
+            "type": "string"
+          },
+          "source": {
+            "description": "Where this input value came from.",
+            "discriminator": {
+              "mapping": {
+                "literal": "#/components/schemas/PublicLiteralInputSource",
+                "molecule": "#/components/schemas/PublicMoleculeInputSource"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicLiteralInputSource"
+              },
+              {
+                "$ref": "#/components/schemas/PublicMoleculeInputSource"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "kind",
+          "parameter",
+          "ccdCode",
+          "source"
+        ],
+        "title": "PublicCcdInput",
+        "type": "object"
+      },
       "PublicChainMappingEntry": {
         "additionalProperties": false,
         "description": "The spec's `ChainMappingEntry` \u2014 how ONE chain is defined for ingestion,\nkeyed by chain id.\n\nThis is what REPLACED the old fixed CSV role vocabulary\n(`heavy_chain`/`light_chain`/`sequence`/...), which could only describe\nantibody-shaped data and could not name a chain id at all (design notes \u00a71).",
@@ -358,61 +781,8 @@
         "title": "PublicChainType",
         "type": "string"
       },
-      "PublicClarification": {
-        "description": "One question, when `interactive` mode cannot answer without it.",
-        "properties": {
-          "answerSchema": {
-            "additionalProperties": true,
-            "description": "JSON Schema the answer must satisfy. Empty when unconstrained.",
-            "title": "Answerschema",
-            "type": "object"
-          },
-          "field": {
-            "description": "What the question is about, as a field name.",
-            "title": "Field",
-            "type": "string"
-          },
-          "id": {
-            "description": "Pass this back as the key in `clarificationAnswers`.",
-            "title": "Id",
-            "type": "string"
-          },
-          "options": {
-            "anyOf": [
-              {
-                "items": {},
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Accepted answers, when the choice is closed.",
-            "title": "Options"
-          },
-          "question": {
-            "description": "The question, for a person to read.",
-            "title": "Question",
-            "type": "string"
-          },
-          "whyNeeded": {
-            "description": "What changes about the recommendation depending on the answer.",
-            "title": "Whyneeded",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "field",
-          "question",
-          "answerSchema",
-          "whyNeeded"
-        ],
-        "title": "PublicClarification",
-        "type": "object"
-      },
       "PublicCommitQueued": {
-        "description": "Returned when `wait=false` (the default).",
+        "description": "Returned after the import is queued.",
         "properties": {
           "groupName": {
             "anyOf": [
@@ -848,7 +1218,7 @@
                 "type": "null"
               }
             ],
-            "description": "SHA-256 digest of the current source archive. Null when source is absent or hidden.",
+            "description": "SHA-256 digest of the current source archive after it has been admitted for a build. Null when the current source is unbuilt, absent, or hidden.",
             "title": "Sourcedigest"
           },
           "status": {
@@ -1039,7 +1409,7 @@
         "type": "object"
       },
       "PublicFastaMode": {
-        "description": "The spec's `fastaMode` \u2014 how a FASTA file is split into molecules.\n\nDeliberately NOT the internal `FastaMode`'s spelling: the public contract says\n`one-entity-per-file` / `one-entity-per-header` where the internal enum says\n`one-complex-per-file` / `one-complex-per-line`. The public surface drops the\n\"complex\" vocabulary entirely, and `header` describes the FASTA `>` record more\nhonestly than `line`. `to_internal_fasta_mode` is the only bridge.",
+        "description": "The public spelling of the ingestion worker's FASTA split modes.",
         "enum": [
           "one-entity-per-file",
           "one-entity-per-header"
@@ -1158,6 +1528,7 @@
                 "type": "null"
               }
             ],
+            "description": "CSV imports (including `fileFormat: auto` with a `.csv` filename) may be up to 2 GiB. All other formats, including files left for content-based auto-detection, are limited to 16 MiB.",
             "title": "Sizebytes"
           }
         },
@@ -1421,6 +1792,17 @@
             ],
             "title": "Filename"
           },
+          "groupId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Groupid"
+          },
           "groupName": {
             "anyOf": [
               {
@@ -1436,6 +1818,31 @@
             "title": "Importid",
             "type": "string"
           },
+          "moleculeCount": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moleculecount"
+          },
+          "moleculeIds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moleculeids"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -1444,9 +1851,12 @@
         "required": [
           "importId",
           "status",
+          "groupId",
           "groupName",
           "fileName",
-          "fileFormat"
+          "fileFormat",
+          "moleculeIds",
+          "moleculeCount"
         ],
         "title": "PublicImportStatus",
         "type": "object"
@@ -1512,6 +1922,345 @@
           "residueFields"
         ],
         "title": "PublicInputSlot",
+        "type": "object"
+      },
+      "PublicJobDetail": {
+        "properties": {
+          "batchId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The batch identifier for a batch parent; null for a standalone job.",
+            "title": "Batchid"
+          },
+          "completedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the job reached a terminal state, as an ISO 8601 timestamp.",
+            "title": "Completedat"
+          },
+          "createdAt": {
+            "description": "When the job was created, as an ISO 8601 timestamp.",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "description": "Opaque job id. Pass it to `GET /v1/jobs/{job_id}`.",
+            "title": "Id",
+            "type": "string"
+          },
+          "inputs": {
+            "description": "Submitted biological inputs, represented by their specific input type.",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "ccd": "#/components/schemas/PublicCcdInput",
+                  "sequence": "#/components/schemas/PublicSequenceInput",
+                  "smiles": "#/components/schemas/PublicSmilesInput",
+                  "structure": "#/components/schemas/PublicStructureInput",
+                  "unavailable": "#/components/schemas/PublicUnavailableInput"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/PublicSequenceInput"
+                },
+                {
+                  "$ref": "#/components/schemas/PublicSmilesInput"
+                },
+                {
+                  "$ref": "#/components/schemas/PublicCcdInput"
+                },
+                {
+                  "$ref": "#/components/schemas/PublicStructureInput"
+                },
+                {
+                  "$ref": "#/components/schemas/PublicUnavailableInput"
+                }
+              ]
+            },
+            "title": "Inputs",
+            "type": "array"
+          },
+          "kind": {
+            "description": "Whether this is one job or the parent of a submitted batch.",
+            "enum": [
+              "standalone",
+              "batch"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name supplied when the job or batch was submitted.",
+            "title": "Name",
+            "type": "string"
+          },
+          "settings": {
+            "additionalProperties": true,
+            "description": "Submitted run settings that are safe to return and are not biological inputs.",
+            "title": "Settings",
+            "type": "object"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When execution started, as an ISO 8601 timestamp; null while queued.",
+            "title": "Startedat"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PublicJobStatus",
+            "description": "The job's current lifecycle state."
+          },
+          "stoppedReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the job stopped; present only when `status` is `stopped`.",
+            "title": "Stoppedreason"
+          },
+          "tool": {
+            "$ref": "#/components/schemas/PublicJobTool",
+            "description": "The tool and schema version used by the job."
+          },
+          "usage": {
+            "$ref": "#/components/schemas/PublicJobUsage",
+            "description": "The compute usage recorded for this job."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "tool",
+          "status",
+          "createdAt",
+          "startedAt",
+          "completedAt",
+          "batchId",
+          "usage",
+          "settings",
+          "inputs",
+          "stoppedReason"
+        ],
+        "title": "PublicJobDetail",
+        "type": "object"
+      },
+      "PublicJobPage": {
+        "properties": {
+          "items": {
+            "description": "Jobs in this page, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/PublicJobSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass this value as `cursor` to fetch the next page; null on the last page.",
+            "title": "Nextcursor"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "title": "PublicJobPage",
+        "type": "object"
+      },
+      "PublicJobStatus": {
+        "enum": [
+          "queued",
+          "running",
+          "succeeded",
+          "failed",
+          "stopped"
+        ],
+        "title": "PublicJobStatus",
+        "type": "string"
+      },
+      "PublicJobSummary": {
+        "properties": {
+          "batchId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The batch identifier for a batch parent; null for a standalone job.",
+            "title": "Batchid"
+          },
+          "completedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the job reached a terminal state, as an ISO 8601 timestamp.",
+            "title": "Completedat"
+          },
+          "createdAt": {
+            "description": "When the job was created, as an ISO 8601 timestamp.",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "description": "Opaque job id. Pass it to `GET /v1/jobs/{job_id}`.",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Whether this is one job or the parent of a submitted batch.",
+            "enum": [
+              "standalone",
+              "batch"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name supplied when the job or batch was submitted.",
+            "title": "Name",
+            "type": "string"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When execution started, as an ISO 8601 timestamp; null while queued.",
+            "title": "Startedat"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PublicJobStatus",
+            "description": "The job's current lifecycle state."
+          },
+          "tool": {
+            "$ref": "#/components/schemas/PublicJobTool",
+            "description": "The tool and schema version used by the job."
+          },
+          "usage": {
+            "$ref": "#/components/schemas/PublicJobUsage",
+            "description": "The compute usage recorded for this job."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "tool",
+          "status",
+          "createdAt",
+          "startedAt",
+          "completedAt",
+          "batchId",
+          "usage"
+        ],
+        "title": "PublicJobSummary",
+        "type": "object"
+      },
+      "PublicJobTool": {
+        "properties": {
+          "id": {
+            "description": "The tool type that ran the job.",
+            "title": "Id",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The exact tool schema version used by the job, when it was recorded.",
+            "title": "Version"
+          }
+        },
+        "required": [
+          "id",
+          "version"
+        ],
+        "title": "PublicJobTool",
+        "type": "object"
+      },
+      "PublicJobUsage": {
+        "properties": {
+          "weightedHours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Compute usage normalized by runtime and hardware tier; null until available.",
+            "title": "Weightedhours"
+          }
+        },
+        "required": [
+          "weightedHours"
+        ],
+        "title": "PublicJobUsage",
+        "type": "object"
+      },
+      "PublicLiteralInputSource": {
+        "properties": {
+          "kind": {
+            "const": "literal",
+            "description": "The input value was stored directly on the job.",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "PublicLiteralInputSource",
         "type": "object"
       },
       "PublicMolecule": {
@@ -1700,7 +2449,7 @@
       },
       "PublicMoleculeBinding": {
         "additionalProperties": false,
-        "description": "A molecule binding. Provide the molecules ONE of these ways (exactly one):\n\n- `group` \u2014 an existing molecules group id, OR\n- `sequences` \u2014 raw protein sequences, OR\n- `smiles` \u2014 raw small-molecule SMILES, OR\n- `pdbs` / `sdfs` \u2014 paths (relative to your user folder) of already-uploaded structure files.\n\nFor the raw-value forms the server creates a molecules group for you (optionally named via `name`),\nthen binds it \u2014 so you don't have to pre-create one. The inferred molecule type (protein for\nsequences/pdbs, small molecule for smiles/sdfs) must match the target input node.",
+        "description": "A molecule binding. Provide the molecules ONE of these ways (exactly one):\n\n- `group` \u2014 an existing molecules group id, OR\n- `sequences` \u2014 raw protein or nucleic-acid sequences, OR\n- `smiles` \u2014 raw small-molecule SMILES, OR\n- `pdbs` / `sdfs` \u2014 paths (relative to your user folder) of already-uploaded structure files.\n\nFor the raw-value forms the server creates a molecules group for you (optionally named via `name`),\nthen binds it \u2014 so you don't have to pre-create one. The target input node declares the polymer\ntype for sequences/PDBs; SMILES/SDFs require a small-molecule target.",
         "properties": {
           "chainMapping": {
             "anyOf": [
@@ -1754,7 +2503,7 @@
                 "type": "null"
               }
             ],
-            "description": "Uploaded .pdb file paths (relative to your user folder) to make a group from.",
+            "description": "Uploaded .pdb file paths (relative to your user folder) to make a protein or nucleic-acid group from.",
             "title": "Pdbs"
           },
           "residuesByChain": {
@@ -1799,7 +2548,7 @@
                 "type": "null"
               }
             ],
-            "description": "Raw protein sequences to make a group from.",
+            "description": "Raw protein or nucleic-acid sequences to make a group from.",
             "title": "Sequences"
           },
           "smiles": {
@@ -1875,6 +2624,62 @@
           "entity"
         ],
         "title": "PublicMoleculeInput",
+        "type": "object"
+      },
+      "PublicMoleculeInputSource": {
+        "properties": {
+          "chains": {
+            "description": "The molecule chain ids used by this input.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Chains",
+            "type": "array"
+          },
+          "fileId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The source file, when known.",
+            "title": "Fileid"
+          },
+          "groupId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The source molecule group, when known.",
+            "title": "Groupid"
+          },
+          "kind": {
+            "const": "molecule",
+            "description": "The input was resolved from the molecules database.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "moleculeId": {
+            "description": "The molecule's id.",
+            "title": "Moleculeid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "moleculeId",
+          "groupId",
+          "fileId",
+          "chains"
+        ],
+        "title": "PublicMoleculeInputSource",
         "type": "object"
       },
       "PublicMoleculeOrigin": {
@@ -2103,7 +2908,7 @@
       },
       "PublicRecommendationInput": {
         "additionalProperties": false,
-        "description": "An input the caller already holds, when they have one.\n\nEntirely optional. The recommendation is made from the prompt alone if nothing is\nsupplied \u2014 attaching inputs only lets the service check whether it has measured that\nexact target before.",
+        "description": "What you send depends on `kind`:\n\n- `sequence` \u2014 include `sequence`, not `smiles` or `ccd`\n- `ligand` \u2014 include `smiles` or `ccd`, never both",
         "properties": {
           "ccd": {
             "anyOf": [
@@ -2116,18 +2921,18 @@
                 "type": "null"
               }
             ],
-            "description": "A ligand as a PDB chemical component id.",
+            "description": "A ligand, as a PDB component id.",
             "title": "Ccd"
           },
           "format": {
-            "description": "The input's encoding, e.g. `fasta`, `pdb`, `smiles`.",
+            "description": "How it is encoded, e.g. `fasta`, `pdb`, `smiles`.",
             "maxLength": 40,
             "minLength": 1,
             "title": "Format",
             "type": "string"
           },
           "id": {
-            "description": "Your own identifier for this input, echoed nowhere; it exists so errors can name it.",
+            "description": "Your label for this input. Used to point at it in errors.",
             "maxLength": 200,
             "minLength": 1,
             "title": "Id",
@@ -2157,7 +2962,7 @@
                 "type": "null"
               }
             ],
-            "description": "The part this plays in the complex, e.g. `antibody` or `antigen`. Changes what a benchmark match is keyed on.",
+            "description": "Its part in the complex, e.g. `antibody` or `antigen`. Sharpens the benchmark match.",
             "title": "Role"
           },
           "sequence": {
@@ -2171,7 +2976,7 @@
                 "type": "null"
               }
             ],
-            "description": "A protein sequence, one chain.",
+            "description": "One protein chain.",
             "title": "Sequence"
           },
           "smiles": {
@@ -2185,7 +2990,7 @@
                 "type": "null"
               }
             ],
-            "description": "A ligand as SMILES.",
+            "description": "A ligand, as SMILES.",
             "title": "Smiles"
           }
         },
@@ -2197,53 +3002,26 @@
         "title": "PublicRecommendationInput",
         "type": "object"
       },
-      "PublicRecommendationProvenance": {
-        "description": "What produced this answer. Present on every response, including an abstention.",
-        "properties": {
-          "catalogVersion": {
-            "description": "The tool-catalogue release the candidates came from.",
-            "title": "Catalogversion",
-            "type": "string"
-          },
-          "classifierVersion": {
-            "description": "The classifier that decided which task this request is.",
-            "title": "Classifierversion",
-            "type": "string"
-          },
-          "evidenceVersion": {
-            "description": "The benchmark release the claims resolve against. A sentinel such as `benchmark-unconfigured` means no benchmark informed this answer, and every tool will be `weak`.",
-            "title": "Evidenceversion",
-            "type": "string"
-          }
-        },
-        "required": [
-          "catalogVersion",
-          "evidenceVersion",
-          "classifierVersion"
-        ],
-        "title": "PublicRecommendationProvenance",
-        "type": "object"
-      },
       "PublicRecommendedTool": {
         "description": "One tool, in recommended order. The ORDER is the recommendation.",
         "properties": {
+          "benchmarkSeparation": {
+            "description": "How well the benchmark SEPARATES this tool from the others \u2014 not how good it is. Quality is carried by the ORDER. `clear` means the benchmark distinguishes it cleanly, which can be cleanly better OR cleanly worse, so the last tool in the list is often `clear`. `partial` means it is statistically tied with another candidate, or its benchmark row carries a leakage flag. `none` means UN-BENCHMARKED \u2014 nothing was measured, which is not the same as measuring badly. `reasonCodes` says which.",
+            "enum": [
+              "clear",
+              "partial",
+              "none"
+            ],
+            "title": "Benchmarkseparation",
+            "type": "string"
+          },
           "evidenceClaims": {
-            "description": "Identifiers for the benchmark claims this rests on, resolvable against `provenance.evidenceVersion`. Empty when the tool is un-benchmarked.",
+            "description": "Identifiers for the benchmark claims this rests on. Empty when the tool is un-benchmarked.",
             "items": {
               "type": "string"
             },
             "title": "Evidenceclaims",
             "type": "array"
-          },
-          "evidenceStrength": {
-            "description": "How strong the EVIDENCE about this tool is \u2014 not how highly it is recommended. Quality is carried by the ORDER. `strong` means the benchmark separates this tool cleanly, which can be cleanly better OR cleanly worse: the last tool in the list can be `strong`. `moderate` means it is statistically tied with another candidate or its benchmark carries a leakage flag. `weak` means UN-BENCHMARKED \u2014 nothing was measured, which is not the same as measuring badly. `reasonCodes` says which.",
-            "enum": [
-              "strong",
-              "moderate",
-              "weak"
-            ],
-            "title": "Evidencestrength",
-            "type": "string"
           },
           "reason": {
             "description": "Why this tool, in prose.",
@@ -2251,7 +3029,7 @@
             "type": "string"
           },
           "reasonCodes": {
-            "description": "Machine-readable grounds for `evidenceStrength`, e.g. `un_benchmarked`, `statistically_tied`, `benchmark_leakage_flag`, `benchmarked_clear_separation`. Branch on these rather than on `reason`.",
+            "description": "Machine-readable facts about the evidence, from a CLOSED set \u2014 branch on these rather than on `reason`, which is written for a person. One of `benchmarked_clear_separation`, `statistically_tied`, `benchmark_leakage_flag`, `un_benchmarked`, `low_cost`, `contraindicated`, `measured_on_target`, `robust_across_readings`. `measured_on_target` means the benchmark had measured THIS tool on YOUR target for the numbers. `robust_across_readings` means the request did not name its task and this tool holds up under every reading of it.",
             "items": {
               "type": "string"
             },
@@ -2266,7 +3044,7 @@
         },
         "required": [
           "toolId",
-          "evidenceStrength",
+          "benchmarkSeparation",
           "reason",
           "reasonCodes",
           "evidenceClaims"
@@ -2724,6 +3502,113 @@
         "title": "PublicSchemaPage",
         "type": "object"
       },
+      "PublicSequenceInput": {
+        "properties": {
+          "kind": {
+            "const": "sequence",
+            "description": "A protein or nucleic-acid sequence input.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The submitted sequence name, when provided.",
+            "title": "Name"
+          },
+          "parameter": {
+            "description": "The tool setting that received this input.",
+            "title": "Parameter",
+            "type": "string"
+          },
+          "sequence": {
+            "description": "The submitted biological sequence.",
+            "title": "Sequence",
+            "type": "string"
+          },
+          "source": {
+            "description": "Where this input value came from.",
+            "discriminator": {
+              "mapping": {
+                "literal": "#/components/schemas/PublicLiteralInputSource",
+                "molecule": "#/components/schemas/PublicMoleculeInputSource"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicLiteralInputSource"
+              },
+              {
+                "$ref": "#/components/schemas/PublicMoleculeInputSource"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "kind",
+          "parameter",
+          "name",
+          "sequence",
+          "source"
+        ],
+        "title": "PublicSequenceInput",
+        "type": "object"
+      },
+      "PublicSmilesInput": {
+        "properties": {
+          "kind": {
+            "const": "smiles",
+            "description": "A small molecule represented as SMILES.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "parameter": {
+            "description": "The tool setting that received this input.",
+            "title": "Parameter",
+            "type": "string"
+          },
+          "smiles": {
+            "description": "The submitted SMILES string.",
+            "title": "Smiles",
+            "type": "string"
+          },
+          "source": {
+            "description": "Where this input value came from.",
+            "discriminator": {
+              "mapping": {
+                "literal": "#/components/schemas/PublicLiteralInputSource",
+                "molecule": "#/components/schemas/PublicMoleculeInputSource"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicLiteralInputSource"
+              },
+              {
+                "$ref": "#/components/schemas/PublicMoleculeInputSource"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "kind",
+          "parameter",
+          "smiles",
+          "source"
+        ],
+        "title": "PublicSmilesInput",
+        "type": "object"
+      },
       "PublicStep": {
         "properties": {
           "completedAt": {
@@ -2899,6 +3784,53 @@
           "nextCursor"
         ],
         "title": "PublicStepMoleculePage",
+        "type": "object"
+      },
+      "PublicStructureInput": {
+        "properties": {
+          "fileName": {
+            "description": "The submitted structure file name.",
+            "title": "Filename",
+            "type": "string"
+          },
+          "kind": {
+            "const": "structure",
+            "description": "A submitted molecular structure file.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "parameter": {
+            "description": "The tool setting that received this input.",
+            "title": "Parameter",
+            "type": "string"
+          },
+          "source": {
+            "description": "Where this input value came from.",
+            "discriminator": {
+              "mapping": {
+                "literal": "#/components/schemas/PublicLiteralInputSource",
+                "molecule": "#/components/schemas/PublicMoleculeInputSource"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicLiteralInputSource"
+              },
+              {
+                "$ref": "#/components/schemas/PublicMoleculeInputSource"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "kind",
+          "parameter",
+          "fileName",
+          "source"
+        ],
+        "title": "PublicStructureInput",
         "type": "object"
       },
       "PublicSubmitPipelineRequest": {
@@ -3248,28 +4180,13 @@
         "description": "A ranked recommendation, or a reasoned refusal to make one.\n\n`abstain` is a normal outcome, not an error: it means no tool could be defended for\nthis request, and `uncertainties` says why. Callers should handle it as an answer.",
         "properties": {
           "action": {
-            "description": "`recommend` \u2014 `tools` is ranked, best first. `abstain` \u2014 `tools` is empty and `uncertainties` explains. `clarify` \u2014 only in `interactive` mode: `tools` is empty and `clarification` asks one question. In `auto` mode the same situation returns `abstain` instead, carrying the same facts in `uncertainties`.",
+            "description": "`recommend` \u2014 `tools` is ranked, best first. `abstain` \u2014 no tool could be justified, `tools` is empty, and `uncertainties` says what was missing.",
             "enum": [
               "recommend",
-              "abstain",
-              "clarify"
+              "abstain"
             ],
             "title": "Action",
             "type": "string"
-          },
-          "clarification": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PublicClarification"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The question to answer. Present only when `action` is `clarify`."
-          },
-          "provenance": {
-            "$ref": "#/components/schemas/PublicRecommendationProvenance"
           },
           "summary": {
             "description": "A short explanation of the ranking, for a person to read.",
@@ -3277,7 +4194,7 @@
             "type": "string"
           },
           "tools": {
-            "description": "Ranked best-first. Empty on `abstain`.",
+            "description": "Ranked best-first, and only the tools worth running \u2014 usually two to four, not the whole catalogue. Empty on `abstain`.",
             "items": {
               "$ref": "#/components/schemas/PublicRecommendedTool"
             },
@@ -3297,8 +4214,7 @@
           "action",
           "summary",
           "tools",
-          "uncertainties",
-          "provenance"
+          "uncertainties"
         ],
         "title": "PublicToolRecommendation",
         "type": "object"
@@ -3307,30 +4223,14 @@
         "additionalProperties": false,
         "description": "Ask which tool to run for a stated task.",
         "properties": {
-          "clarificationAnswers": {
-            "additionalProperties": true,
-            "description": "Answers to a previous `clarify` response, keyed by its `clarification.id`. Send the original prompt and inputs again alongside them \u2014 this service holds no state between calls.",
-            "title": "Clarificationanswers",
-            "type": "object"
-          },
           "inputs": {
-            "description": "Inputs you already hold. Optional.",
+            "description": "Sequences or ligands you already have. Optional.",
             "items": {
               "$ref": "#/components/schemas/PublicRecommendationInput"
             },
             "maxItems": 32,
             "title": "Inputs",
             "type": "array"
-          },
-          "mode": {
-            "default": "auto",
-            "description": "`auto` (default) \u2014 always answer, using `abstain` when the request is underspecified. `interactive` \u2014 answer with `clarify` instead when a missing fact would change the recommendation, then call again with `clarificationAnswers`. Use `auto` unless there is a person to answer.",
-            "enum": [
-              "auto",
-              "interactive"
-            ],
-            "title": "Mode",
-            "type": "string"
           },
           "prompt": {
             "description": "What you want to do, in your own words \u2014 e.g. 'predict the structure of this antibody-antigen complex'.",
@@ -3344,6 +4244,38 @@
           "prompt"
         ],
         "title": "PublicToolRecommendationRequest",
+        "type": "object"
+      },
+      "PublicUnavailableInput": {
+        "properties": {
+          "kind": {
+            "const": "unavailable",
+            "description": "An input the API cannot safely return in a typed form.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "parameter": {
+            "description": "The tool setting that received this input.",
+            "title": "Parameter",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the input value is unavailable.",
+            "enum": [
+              "source_unavailable",
+              "unsupported_legacy_input",
+              "input_limit_exceeded"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "parameter",
+          "reason"
+        ],
+        "title": "PublicUnavailableInput",
         "type": "object"
       },
       "PublicUpdateCustomToolRequest": {
@@ -4905,6 +5837,224 @@
         "x-doc-group": "Custom Tools"
       }
     },
+    "/jobs": {
+      "get": {
+        "description": "Compatibility contract for existing `/api/jobs` clients, including exact-name, batch-child, organization, member, subjob, batch-only, and legacy pagination modes. New integrations should use the typed `/api/v1/jobs` contract.",
+        "operationId": "listCompatibleJobs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 1000,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "startKey",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 16384,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startkey"
+            }
+          },
+          {
+            "in": "query",
+            "name": "jobName",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Jobname"
+            }
+          },
+          {
+            "in": "query",
+            "name": "includeSequences",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Includesequences",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "includeSubjobs",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Includesubjobs",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Organization",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "batchOnly",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Batchonly",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "batch",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Batch"
+            }
+          },
+          {
+            "in": "query",
+            "name": "jobEmail",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 320,
+                  "minLength": 3,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Jobemail"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LegacyJobPage"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacySingleJob"
+                    }
+                  ],
+                  "title": "Response Listcompatiblejobs"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "List jobs (compatibility)",
+        "tags": [
+          "jobs-compatibility"
+        ]
+      }
+    },
+    "/model-router": {
+      "post": {
+        "description": "Recommend which structure-prediction tool to run, in ranked order.\n\nDescribe the task in your own words. `tools` comes back ranked, best first \u2014 run the first\none. Send your sequences under `inputs` when you have them and the answer gets more\nspecific; a sequence pasted into the prompt itself is found and used as well, so a plain\nprompt still gets benchmark matching.\n\n`abstain` is the other normal response: no tool could be justified, and `uncertainties`\nsays what was missing \u2014 usually that the request did not say enough. Say more in the\nprompt and call again.\n\n`tools` holds only the tools worth running, usually two to four. `benchmarkSeparation`\nsays how well the benchmark distinguishes a tool, NOT how good it is, so do not rank on it.\nWhere the benchmark had already measured your target, the `reason` says so and quotes the\nnumbers, and the tool carries `measured_on_target` in `reasonCodes`.\nA call takes about 15 to 25 seconds.",
+        "operationId": "recommendTools",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicToolRecommendationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicToolRecommendation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Recommend a tool for a task",
+        "tags": [
+          "model-router-public"
+        ],
+        "x-doc-group": "Model router"
+      }
+    },
     "/molecules": {
       "get": {
         "description": "List your molecules, most recently created first.\n\nEach molecule includes its chains, scores, metadata, and files inline. Pass `scope=org` to list across your whole organization.\n\nSearch by `group`, `jobId`/`jobName`, tool, name, or protein-sequence / SMILES subsequence. Filter or sort by tool scores (e.g. `alphafold.ptm`).\n\nPaginated \u2014 follow `nextCursor` until it is null.",
@@ -4989,7 +6139,7 @@
             }
           },
           {
-            "description": "What to look for. With `mode=default` (the default, also spelled `mode=name`) this matches the molecule NAME (case-insensitive, substring), a metadata property KEY, or a score METRIC name \u2014 whichever hits, with `matchedOn` on each item saying which: without `group` it searches your whole organization and needs at least 3 characters, with `group` any length works, and it is capped at 200 characters. Answering it is a CURSOR WALK, not one shot \u2014 follow `nextCursor` until it is null, and expect empty or short pages on the way; `mode` carries the full contract. With `mode=sequence` it is instead an amino-acid sequence, at least 3 characters and up to 10000 \u2014 long enough to paste a whole chain, which is what `sequenceMatch=exact` is for. How it is matched is `sequenceMatch`; the default is a SUBSEQUENCE.",
+            "description": "Search term. `mode=default` (or `name`) matches molecule names, metadata keys, and score metrics; ungrouped searches require at least 3 characters. `mode=sequence` matches an amino-acid sequence of at least 3 characters.",
             "in": "query",
             "name": "search",
             "required": false,
@@ -5003,18 +6153,18 @@
                   "type": "null"
                 }
               ],
-              "description": "What to look for. With `mode=default` (the default, also spelled `mode=name`) this matches the molecule NAME (case-insensitive, substring), a metadata property KEY, or a score METRIC name \u2014 whichever hits, with `matchedOn` on each item saying which: without `group` it searches your whole organization and needs at least 3 characters, with `group` any length works, and it is capped at 200 characters. Answering it is a CURSOR WALK, not one shot \u2014 follow `nextCursor` until it is null, and expect empty or short pages on the way; `mode` carries the full contract. With `mode=sequence` it is instead an amino-acid sequence, at least 3 characters and up to 10000 \u2014 long enough to paste a whole chain, which is what `sequenceMatch=exact` is for. How it is matched is `sequenceMatch`; the default is a SUBSEQUENCE.",
+              "description": "Search term. `mode=default` (or `name`) matches molecule names, metadata keys, and score metrics; ungrouped searches require at least 3 characters. `mode=sequence` matches an amino-acid sequence of at least 3 characters.",
               "title": "Search"
             }
           },
           {
-            "description": "How `search` is read: `default` searches molecule NAMES, metadata property KEYS and score METRIC names at once, and each item tells you which one hit via `matchedOn`. `name` is accepted as an alias for `default` and behaves identically \u2014 the search widened, older clients were not broken. WITH `search`, AND ONLY ON THE DEFAULT ORDERING, `default` IS ALSO A CHUNKED SCAN, for the same reason `sequence` is: a substring name match cannot be served from an index, so one page is a position in a walk rather than the top N matches. That is the plain case \u2014 `search` with no `sortBy`, no `filter` and no `sequence`. Follow `nextCursor` until it is null; a page may come back EMPTY OR SHORT while `nextCursor` is still set, and that means the walk has more ground to cover, NOT that there is nothing left to find. A page's contents are relative to the slice it covers, so they are not ranked across the whole result set and stopping early truncates the answer \u2014 only the page whose `nextCursor` is null completes it. `scanProgress` is null in this mode: the walk's position is carried in the cursor and no progress fraction is reported (that is a `sequence`-mode field). ADD `sortBy`, `filter` OR `sequence` AND IT IS NOT A WALK: those orderings are ranked and paged the ordinary way, and a name term is answered from a CAPPED union instead \u2014 matches below the cap are not reachable by any later page, so a null `nextCursor` there means the PAGE is complete, not that the corpus is exhausted. If you need every name match, ask on the default ordering. `sequence` matches an amino-acid subsequence in any chain, across your whole organization; it is a CHUNKED SCAN on the same terms \u2014 an empty `items` page with a non-null `nextCursor` is normal and you must follow the cursor until it is null. There, watch `scanProgress` (0.0 to 1.0) for progress. Check the `mode` echoed back either way: an older deployment ignores this parameter and answers with a name search.",
+            "description": "How `search` is read. `default` (alias `name`) matches names, metadata keys, and score metrics. With no `sortBy`, `filter`, or `sequence`, it is a complete chunked scan: follow `nextCursor` until null, including through empty or short pages. Adding any of those options uses capped ranked pagination, so a null cursor completes that page, not every possible name match. `sequence` is a complete chunked scan over amino-acid chains. Check the echoed `mode`.",
             "in": "query",
             "name": "mode",
             "required": false,
             "schema": {
               "default": "default",
-              "description": "How `search` is read: `default` searches molecule NAMES, metadata property KEYS and score METRIC names at once, and each item tells you which one hit via `matchedOn`. `name` is accepted as an alias for `default` and behaves identically \u2014 the search widened, older clients were not broken. WITH `search`, AND ONLY ON THE DEFAULT ORDERING, `default` IS ALSO A CHUNKED SCAN, for the same reason `sequence` is: a substring name match cannot be served from an index, so one page is a position in a walk rather than the top N matches. That is the plain case \u2014 `search` with no `sortBy`, no `filter` and no `sequence`. Follow `nextCursor` until it is null; a page may come back EMPTY OR SHORT while `nextCursor` is still set, and that means the walk has more ground to cover, NOT that there is nothing left to find. A page's contents are relative to the slice it covers, so they are not ranked across the whole result set and stopping early truncates the answer \u2014 only the page whose `nextCursor` is null completes it. `scanProgress` is null in this mode: the walk's position is carried in the cursor and no progress fraction is reported (that is a `sequence`-mode field). ADD `sortBy`, `filter` OR `sequence` AND IT IS NOT A WALK: those orderings are ranked and paged the ordinary way, and a name term is answered from a CAPPED union instead \u2014 matches below the cap are not reachable by any later page, so a null `nextCursor` there means the PAGE is complete, not that the corpus is exhausted. If you need every name match, ask on the default ordering. `sequence` matches an amino-acid subsequence in any chain, across your whole organization; it is a CHUNKED SCAN on the same terms \u2014 an empty `items` page with a non-null `nextCursor` is normal and you must follow the cursor until it is null. There, watch `scanProgress` (0.0 to 1.0) for progress. Check the `mode` echoed back either way: an older deployment ignores this parameter and answers with a name search.",
+              "description": "How `search` is read. `default` (alias `name`) matches names, metadata keys, and score metrics. With no `sortBy`, `filter`, or `sequence`, it is a complete chunked scan: follow `nextCursor` until null, including through empty or short pages. Adding any of those options uses capped ranked pagination, so a null cursor completes that page, not every possible name match. `sequence` is a complete chunked scan over amino-acid chains. Check the echoed `mode`.",
               "pattern": "^(default|name|sequence)$",
               "title": "Mode",
               "type": "string"
@@ -5426,7 +6576,7 @@
     },
     "/molecules/import-file": {
       "post": {
-        "description": "Import molecules from a file. Step 1 of 3.\n\nDeclare the file to get a presigned `uploadUrl`, `PUT` the file to it, then `POST /molecules/imports/{importId}/commit`.\n\nFor a CSV, map chain columns with `chainMapping` and scalar columns with `columnMapping`. For PDB, SDF, FASTA, or zip files, the chains are read from the file.",
+        "description": "Import molecules from a file. Step 1 of 3.\n\nThen `PUT` the bytes to `uploadUrl`, and `POST\n/molecules/imports/{importId}/commit` to enqueue ingestion.\n\nFor a CSV, describe your chain columns with `chainMapping` (keyed by chain id);\n`columnMapping` handles the scalar columns only. For `pdb`/`sdf`/`fasta`/`zip`\nthe chains are read from the file.",
         "operationId": "importFile",
         "requestBody": {
           "content": {
@@ -5466,8 +6616,44 @@
       }
     },
     "/molecules/imports/{import_id}": {
+      "delete": {
+        "description": "Cancel an unclaimed import and clean its source objects.",
+        "operationId": "deleteImport",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_id",
+            "required": true,
+            "schema": {
+              "title": "Import Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Cancel or delete an import",
+        "tags": [
+          "molecules-public"
+        ]
+      },
       "get": {
-        "description": "Check an import's progress after committing.\n\nStatus moves `created` \u2192 `uploaded` \u2192 `queued` \u2192 `ingested` (or `failed`).\n\nIt reflects this import specifically, not the target group's overall state.",
+        "description": "Poll an import's progress after upload or commit.\n\nStatus moves `created` \u2192 `uploaded` \u2192 `queued` \u2192 `ingested` (or `failed` / `cancelled`).\n\nIt reflects this import specifically, not the target group's overall state.",
         "operationId": "getImport",
         "parameters": [
           {
@@ -5512,7 +6698,7 @@
     },
     "/molecules/imports/{import_id}/commit": {
       "post": {
-        "description": "Step 3 of 3: parse the uploaded file and ingest its molecules into the group.\n\n- Returns `status: \"queued\"` immediately by default \u2014 poll `GET /molecules/imports/{importId}`.",
+        "description": "Step 3 of 3: enqueue ingestion for the uploaded file.\n\n- Returns `status: \"queued\"` immediately by default \u2014 poll `GET /molecules/imports/{importId}`.",
         "operationId": "commitImport",
         "parameters": [
           {
@@ -5775,7 +6961,7 @@
         ]
       },
       "patch": {
-        "description": "Update a schema's name and/or fields.\n\nSending `fields` replaces the whole list.\n\nOnly future uploads are validated; molecules already in bound groups are left as they are.",
+        "description": "Update a schema's name and/or fields.\n\nSending `fields` replaces the whole list.\n\nMolecules already published to bound groups are left as they are. Imports that have not\npublished yet are validated against the current schema at publication.",
         "operationId": "updateSchema",
         "parameters": [
           {
@@ -5830,7 +7016,7 @@
     },
     "/molecules/upload": {
       "post": {
-        "description": "Add molecules to a group directly as JSON \u2014 no file upload. Queued, not synchronous.\n\n- A molecule's identity comes from its chains, so uploading one that already exists returns the existing molecule and adds it to the group. No duplicates are created, and the call is safe to retry.\n- Returns `202` with `status: \"pending\"` and an `importId`; the molecules are queued and not queryable yet \u2014 poll `GET /molecules/imports/{importId}` until it reports `ingested`. `moleculeIds` is exact and available immediately (content-addressed from what you sent), so record it straight away rather than re-uploading on the `202`.",
+        "description": "Queue molecules for JSON upload ingestion.\n\nReturns HTTP 202 with the exact content-addressed molecule ids and an import id.\nPoll `GET /molecules/imports/{importId}` until the import reaches `ingested`,\n`failed`, or `cancelled`; the ids become readable only after ingestion succeeds.",
         "operationId": "uploadMolecules",
         "requestBody": {
           "content": {
@@ -6397,19 +7583,19 @@
         "parameters": [
           {
             "in": "path",
-            "name": "step_id",
+            "name": "run_id",
             "required": true,
             "schema": {
-              "title": "Step Id",
+              "title": "Run Id",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "run_id",
+            "name": "step_id",
             "required": true,
             "schema": {
-              "title": "Run Id",
+              "title": "Step Id",
               "type": "string"
             }
           },
@@ -7077,26 +8263,105 @@
         "x-doc-group": "Pipelines"
       }
     },
-    "/tool-recommendations": {
-      "post": {
-        "description": "Recommend which structure-prediction tool to run, in ranked order.\n\nThe order IS the recommendation. Each tool carries an `evidenceStrength` and the benchmark\nclaims it rests on, and `provenance` names the releases those resolve against.\n\n`evidenceStrength` describes the EVIDENCE, not the ranking: `strong` means the benchmark\nseparates this tool cleanly, which can be cleanly worse, so the last tool in the list can be\n`strong`. `weak` means UN-BENCHMARKED \u2014 nothing was measured, which is not the same as\nmeasuring badly; `reasonCodes` distinguishes them.\n\n`action: \"abstain\"` is a normal outcome, not an error: no tool could be defended for\nthis request, and `uncertainties` says why.\n\nIn `interactive` mode an underspecified request answers with `action: \"clarify\"` and\none question instead; send the same prompt and inputs again with `clarificationAnswers`\nkeyed by `clarification.id`.",
-        "operationId": "recommendTools",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PublicToolRecommendationRequest"
-              }
+    "/v1/jobs": {
+      "get": {
+        "description": "List standalone jobs and batch parents visible to the caller. During dark launch this operation is available only to configured canary API-key principals.",
+        "operationId": "listJobs",
+        "parameters": [
+          {
+            "description": "List jobs visible to your API key. `mine` is the only supported value.",
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "const": "mine",
+              "default": "mine",
+              "description": "List jobs visible to your API key. `mine` is the only supported value.",
+              "title": "Scope",
+              "type": "string"
             }
           },
-          "required": true
-        },
+          {
+            "description": "Return jobs in these states. Repeat `status` to match more than one state.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/PublicJobStatus"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return jobs in these states. Repeat `status` to match more than one state.",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Return jobs submitted with this exact tool type, such as `alphafold`.",
+            "in": "query",
+            "name": "tool",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return jobs submitted with this exact tool type, such as `alphafold`.",
+              "title": "Tool"
+            }
+          },
+          {
+            "description": "Maximum number of jobs to return. A filtered page may contain fewer items.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum number of jobs to return. A filtered page may contain fewer items.",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The `nextCursor` from the previous response. Omit for the first page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 16384,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `nextCursor` from the previous response. Omit for the first page.",
+              "title": "Cursor"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PublicToolRecommendation"
+                  "$ref": "#/components/schemas/PublicJobPage"
                 }
               }
             },
@@ -7105,18 +8370,80 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "422": {
             "$ref": "#/components/responses/ValidationProblem"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Recommend a tool for a task",
+        "summary": "List jobs",
         "tags": [
-          "tool-recommendations-public"
+          "jobs-public"
         ],
-        "x-doc-group": "Tool recommendations"
+        "x-doc-group": "Jobs"
+      }
+    },
+    "/v1/jobs/{job_id}": {
+      "get": {
+        "description": "Get one job by its opaque id. During dark launch this operation is available only to configured canary API-key principals.",
+        "operationId": "getJob",
+        "parameters": [
+          {
+            "description": "The opaque `id` returned by `GET /v1/jobs`.",
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "description": "The opaque `id` returned by `GET /v1/jobs`.",
+              "maxLength": 4104,
+              "minLength": 1,
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicJobDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get job details",
+        "tags": [
+          "jobs-public"
+        ],
+        "x-doc-group": "Jobs"
       }
     }
   },
