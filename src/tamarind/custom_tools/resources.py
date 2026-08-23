@@ -242,7 +242,7 @@ class CustomTool:
 @dataclass(frozen=True)
 class Version:
     name: str
-    source_revision: str
+    source_revision: str | None
     source_digest: str | None
     status: PublicVersionStatus
     terminal: bool
