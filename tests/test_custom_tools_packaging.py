@@ -47,6 +47,7 @@ def test_archive_is_deterministic_and_excludes_local_artifacts(tmp_path: Path) -
     with zipfile.ZipFile(BytesIO(first.data)) as archive:
         assert archive.namelist() == ["Dockerfile", "config.json", "main.py", "run.sh"]
         assert all(info.date_time == (1980, 1, 1, 0, 0, 0) for info in archive.infolist())
+        assert all(info.compress_type == zipfile.ZIP_STORED for info in archive.infolist())
 
 
 def test_archive_normalizes_entry_names_before_digesting(tmp_path: Path) -> None:
@@ -238,6 +239,20 @@ def test_source_inspection_rejects_unencodable_archive_names(tmp_path: Path) -> 
     ],
 )
 def test_source_inspection_rejects_nonportable_archive_names(tmp_path: Path, relative: str) -> None:
+    with pytest.raises(CustomToolUploadError, match="path is not portable"):
+        packaging.SourceFile.inspect(relative, tmp_path / "source.py", tmp_path)
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "\N{LATIN SMALL LETTER E WITH ACUTE}" * 128,
+        "/".join(["segment" * 30] * 24),
+    ],
+)
+def test_source_inspection_rejects_overlong_utf8_archive_paths(
+    tmp_path: Path, relative: str
+) -> None:
     with pytest.raises(CustomToolUploadError, match="path is not portable"):
         packaging.SourceFile.inspect(relative, tmp_path / "source.py", tmp_path)
 
@@ -536,7 +551,7 @@ def test_archive_streams_files_without_reading_each_one_into_memory(
     assert archive.size > 0
 
 
-def test_archive_aborts_while_compressed_output_crosses_upload_limit(tmp_path: Path) -> None:
+def test_archive_aborts_while_output_crosses_upload_limit(tmp_path: Path) -> None:
     _valid_source(tmp_path)
     (tmp_path / "weights.bin").write_bytes(os.urandom(64 * 1024))
 

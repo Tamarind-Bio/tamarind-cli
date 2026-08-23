@@ -59,9 +59,10 @@ validation. CI regenerates the typed transport from that pinned full artifact an
 The SDK owns archive-local concerns that only the client can decide safely:
 deterministic ZIP construction, symlink and junction rejection, upload limits,
 JSON parseability and top-level object shape, and warnings about the networkless
-runtime. Archive modes are platform-stable: `run.sh` and files beginning with a
-shebang are executable, while all other files are regular. The backend owns the
-evolving `config.json` business contract and
+runtime. Archives use stored ZIP entries so source digests do not depend on a
+platform zlib build. Modes are also platform-stable: `run.sh` and files beginning
+with a shebang are executable, while all other files are regular. The backend owns
+the evolving `config.json` business contract and
 validates it before accepting a build. The SDK deliberately does not maintain a
 second list of configuration fields, enums, or cross-field rules.
 

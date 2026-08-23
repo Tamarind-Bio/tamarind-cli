@@ -47,6 +47,8 @@ _WINDOWS_RESERVED_NAMES = frozenset(
 _MAX_SOURCE_ENTRIES = 25_000
 MAX_TOOL_SOURCE_BYTES = 5 * 1024 * 1024 * 1024
 _ARCHIVE_MEMORY_BYTES = 8 * 1024 * 1024
+_MAX_ARCHIVE_PATH_BYTES = 4096
+_MAX_PATH_COMPONENT_BYTES = 255
 _T = TypeVar("_T")
 
 
@@ -316,17 +318,16 @@ def build_source_tree_archive(
         with zipfile.ZipFile(
             output,
             mode="w",
-            compression=zipfile.ZIP_DEFLATED,
-            compresslevel=9,
+            compression=zipfile.ZIP_STORED,
             strict_timestamps=True,
         ) as archive:
             for relative, entry_path, mode in sorted(entries, key=lambda item: item[0]):
                 info = zipfile.ZipInfo(relative, date_time=_ZIP_TIMESTAMP)
-                info.compress_type = zipfile.ZIP_DEFLATED
+                info.compress_type = zipfile.ZIP_STORED
                 info.create_system = 3
                 info.external_attr = mode << 16
                 if entry_path is None:
-                    archive.writestr(info, b"", compresslevel=9)
+                    archive.writestr(info, b"")
                     continue
                 with entry_path.open_verified() as source:
                     with archive.open(info, "w", force_zip64=True) as destination:
@@ -486,16 +487,18 @@ def _enforce_source_byte_limit(size: int, *, maximum: int | None = None) -> None
 def _validate_archive_name(relative: str, path: Path) -> str:
     relative = unicodedata.normalize("NFC", relative)
     try:
-        relative.encode("utf-8")
+        encoded = relative.encode("utf-8")
     except UnicodeEncodeError as exc:
         raise CustomToolUploadError(f"Source archive path is not valid UTF-8: {path}") from exc
     parts = relative.split("/")
     invalid = (
         not relative
         or relative.startswith("/")
+        or len(encoded) > _MAX_ARCHIVE_PATH_BYTES
         or any(part in {"", ".", ".."} for part in parts)
         or any(
-            part.endswith((" ", "."))
+            len(part.encode("utf-8")) > _MAX_PATH_COMPONENT_BYTES
+            or part.endswith((" ", "."))
             or any(
                 ord(character) < 32 or character in _WINDOWS_INVALID_NAME_CHARACTERS
                 for character in part
