@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import ipaddress
 import math
 import re
 from typing import Any
@@ -75,6 +76,12 @@ SCHEMA_KEYS_BY_TYPE = {
     "string": {"maxLength", "minLength", "pattern"},
 }
 RESPONSE_STATUS_PATTERN = re.compile(r"[1-5](?:[0-9]{2}|XX)\Z")
+HTTP_TOKEN_PATTERN = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+\Z")
+HOSTNAME_PATTERN = re.compile(
+    r"(?=.{1,253}\Z)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\Z"
+)
+BODYLESS_RESPONSE_STATUSES = {"204", "205", "304"}
 
 
 class ProfileViolation(ValueError):
@@ -377,6 +384,8 @@ def _validate_parameter(
         raise ProfileViolation(location, "path parameters must use string schemas")
     if parameter_location == "header" and kind != "string":
         raise ProfileViolation(location, "header parameters must use string schemas")
+    if parameter_location == "header" and HTTP_TOKEN_PATTERN.fullmatch(name) is None:
+        raise ProfileViolation(f"{location}.name", "must be a valid HTTP header name")
     if parameter_location == "header" and name.casefold() == "x-api-key":
         raise ProfileViolation(location, "x-api-key is owned by the authenticated transport")
     return name, parameter_location
@@ -407,11 +416,17 @@ def _validate_server_and_auth(document: Mapping[str, Any]) -> None:
         parsed.port
     except ValueError as exc:
         raise ProfileViolation("servers[0].url", "must be a concrete HTTPS URL") from exc
+    valid_hostname = False
+    if hostname:
+        try:
+            ipaddress.ip_address(hostname)
+            valid_hostname = True
+        except ValueError:
+            valid_hostname = HOSTNAME_PATTERN.fullmatch(hostname) is not None
     if (
         parsed.scheme != "https"
         or not parsed.netloc
-        or not hostname
-        or any(character.isspace() for character in hostname)
+        or not valid_hostname
         or parsed.username is not None
         or parsed.password is not None
         or parsed.query
@@ -485,12 +500,20 @@ def _validate_request_body(document: Mapping[str, Any], value: object, location:
         raise ProfileViolation(location, "request bodies must use non-null schemas")
 
 
-def _validate_response(document: Mapping[str, Any], value: object, location: str) -> None:
+def _validate_response(
+    document: Mapping[str, Any],
+    value: object,
+    location: str,
+    *,
+    status: str | None = None,
+) -> None:
     response = _dereference(document, value, location, "responses")
     _reject_unsupported_fields(response, RESPONSE_FIELDS, location, "response")
     if not isinstance(response.get("description"), str):
         raise ProfileViolation(f"{location}.description", "must be a string")
     if "content" in response and response["content"]:
+        if status in BODYLESS_RESPONSE_STATUSES:
+            raise ProfileViolation(location, f"HTTP {status} responses must not declare content")
         _json_schema(
             document,
             response["content"],
@@ -556,6 +579,9 @@ def validate_profile(document: Mapping[str, Any]) -> None:
             if operation_id in operation_ids:
                 raise ProfileViolation(f"paths.{path}.{method}.operationId", "must be unique")
             operation_ids.add(operation_id)
+            tags = _sequence(operation.get("tags", []), f"paths.{path}.{method}.tags")
+            if any(not isinstance(tag, str) for tag in tags):
+                raise ProfileViolation(f"paths.{path}.{method}.tags", "entries must be strings")
             _validate_parameter_list(
                 document,
                 operation.get("parameters", []),
@@ -576,7 +602,12 @@ def validate_profile(document: Mapping[str, Any]) -> None:
                         f"paths.{path}.{method}.responses.{status}",
                         "must be default, a three-digit HTTP status, or an nXX range",
                     )
-                _validate_response(document, response, f"paths.{path}.{method}.responses.{status}")
+                _validate_response(
+                    document,
+                    response,
+                    f"paths.{path}.{method}.responses.{status}",
+                    status=status,
+                )
             successful = [status for status in responses if status.startswith("2")]
             if len(successful) != 1:
                 raise ProfileViolation(

@@ -107,13 +107,15 @@ def project_custom_tools(document: dict[str, Any]) -> dict[str, Any]:
         resolved_path_item = _resolve_path_item(document, path_item, location=f"paths.{path}")
         if resolved_path_item is None:
             continue
-        selected_operations = {
-            method: operation
-            for method, operation in resolved_path_item.items()
-            if method in OPENAPI_HTTP_METHODS
-            and isinstance(operation, dict)
-            and CUSTOM_TOOLS_TAG in operation.get("tags", [])
-        }
+        selected_operations: dict[str, Any] = {}
+        for method, operation in resolved_path_item.items():
+            if method not in OPENAPI_HTTP_METHODS or not isinstance(operation, dict):
+                continue
+            tags = operation.get("tags", [])
+            if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+                raise ValueError(f"paths.{path}.{method}.tags must be an array of strings")
+            if CUSTOM_TOOLS_TAG in tags:
+                selected_operations[method] = operation
         if selected_operations:
             selected = {
                 field: value

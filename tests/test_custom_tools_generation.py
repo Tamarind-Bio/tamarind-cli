@@ -45,6 +45,16 @@ def test_projection_removes_unrelated_operations_from_a_complete_spec() -> None:
     assert len(projected["paths"]) < len(document["paths"])
 
 
+@pytest.mark.parametrize("tags", ["not-custom-tools-extra", ["custom-tools", 1]])
+def test_projection_rejects_malformed_operation_tags(tags: object) -> None:
+    root = Path(__file__).resolve().parents[1]
+    document = json.loads((root / "openapi/public-v1.json").read_text())
+    document["paths"]["/custom-tools/{name}"]["get"]["tags"] = tags
+
+    with pytest.raises(ValueError, match="tags must be an array of strings"):
+        project_custom_tools(document)
+
+
 def test_projection_resolves_local_path_item_references() -> None:
     root = Path(__file__).resolve().parents[1]
     document = json.loads((root / "openapi/public-v1.json").read_text())

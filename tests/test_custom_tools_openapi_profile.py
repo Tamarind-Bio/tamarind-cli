@@ -121,6 +121,8 @@ def test_profile_accepts_supported_success_response_statuses(status: str) -> Non
         "https://example.com:notaport/api",
         "https://example.com:99999/api",
         "https://exam ple.com/api",
+        "https://example.com\x00/api",
+        "https://exa^mple.com/api",
         "https://[not-an-ipv6]/api",
     ],
 )
@@ -140,6 +142,26 @@ def test_profile_rejects_transport_owned_api_key_headers(name: str) -> None:
     )
 
     with pytest.raises(ProfileViolation, match="owned by the authenticated transport"):
+        validate_profile(document)
+
+
+@pytest.mark.parametrize("name", ["Bad Header", "Bad:Header", "Bad\nHeader"])
+def test_profile_rejects_invalid_header_names(name: str) -> None:
+    document = _document()
+    document["paths"]["/custom-tools/{name}"]["get"]["parameters"].append(
+        {"name": name, "in": "header", "required": True, "schema": {"type": "string"}}
+    )
+
+    with pytest.raises(ProfileViolation, match="valid HTTP header name"):
+        validate_profile(document)
+
+
+@pytest.mark.parametrize("tags", ["not-custom-tools-extra", ["custom-tools", 1]])
+def test_profile_rejects_malformed_operation_tags(tags: object) -> None:
+    document = _document()
+    document["paths"]["/custom-tools/{name}"]["get"]["tags"] = tags
+
+    with pytest.raises(ProfileViolation, match="tags"):
         validate_profile(document)
 
 
@@ -551,6 +573,20 @@ def test_explicit_empty_response_content_is_bodyless() -> None:
 
     response = next(item for item in api.operations[0].responses if item.status == "204")
     assert response.schema is None
+
+
+@pytest.mark.parametrize("status", ["204", "205", "304"])
+def test_profile_rejects_content_for_bodyless_response_statuses(status: str) -> None:
+    document = _document()
+    responses = document["paths"]["/custom-tools/{name}"]["get"]["responses"]
+    responses.pop("200")
+    responses[status] = {
+        "description": "No content",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CustomTool"}}},
+    }
+
+    with pytest.raises(ProfileViolation, match="must not declare content"):
+        validate_profile(document)
 
 
 def test_nullable_schema_preserves_inner_annotations() -> None:
