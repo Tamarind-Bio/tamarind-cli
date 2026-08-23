@@ -124,6 +124,9 @@ def test_profile_accepts_supported_success_response_statuses(status: str) -> Non
         "https://example.com\x00/api",
         "https://exa^mple.com/api",
         "https://[not-an-ipv6]/api",
+        "https://example.com/api\x00v1",
+        "https://example.com/api%zz",
+        "https://example.com/api v1",
     ],
 )
 def test_profile_rejects_invalid_server_authorities(url: str) -> None:

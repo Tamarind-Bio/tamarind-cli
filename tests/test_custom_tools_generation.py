@@ -371,6 +371,51 @@ def test_contract_sync_writes_the_canonical_generated_transport(tmp_path: Path) 
     ).read_text()
 
 
+def test_contract_sync_leaves_committed_artifacts_unchanged_when_generation_fails(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    document = json.loads((root / "openapi/public-v1.json").read_text())
+    first_operation = next(
+        operation
+        for path_item in document["paths"].values()
+        for method, operation in path_item.items()
+        if method in {"delete", "get", "patch", "post", "put"}
+    )
+    first_operation["operationId"] = "123"
+    source = tmp_path / "invalid.json"
+    source.write_text(json.dumps(document), encoding="utf-8")
+    targets = {
+        "openapi/public-v1.json": "old spec\n",
+        "openapi/public-v1.lock.json": "old lock\n",
+        "src/tamarind/custom_tools/generated.py": "old generated\n",
+    }
+    for relative, content in targets.items():
+        target = tmp_path / "root" / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(root / "scripts/sync_custom_tools_contract.py"),
+            str(source),
+            "--source-repository",
+            "Tamarind-Bio/tamarind-website",
+            "--source-commit",
+            "a" * 40,
+            "--root",
+            str(tmp_path / "root"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    for relative, content in targets.items():
+        assert (tmp_path / "root" / relative).read_text() == content
+
+
 def test_generated_transport_is_importable(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     generated = tmp_path / "generated_transport.py"

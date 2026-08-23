@@ -81,6 +81,7 @@ HOSTNAME_PATTERN = re.compile(
     r"(?=.{1,253}\Z)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
     r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\Z"
 )
+URL_PATH_PATTERN = re.compile(r"(?:[A-Za-z0-9\-._~!$&'()*+,;=:@/]|%[0-9A-Fa-f]{2})*\Z")
 BODYLESS_RESPONSE_STATUSES = {"204", "205", "304"}
 
 
@@ -438,6 +439,7 @@ def _validate_server_and_auth(document: Mapping[str, Any]) -> None:
         or not valid_hostname
         or parsed.username is not None
         or parsed.password is not None
+        or URL_PATH_PATTERN.fullmatch(parsed.path) is None
         or parsed.query
         or parsed.fragment
     ):
