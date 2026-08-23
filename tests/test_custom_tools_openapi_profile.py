@@ -248,6 +248,17 @@ def test_profile_rejects_duplicate_required_properties() -> None:
         validate_profile(document)
 
 
+def test_profile_rejects_duplicate_enum_members() -> None:
+    document = _document()
+    document["components"]["schemas"]["CustomTool"]["properties"]["status"] = {
+        "type": "string",
+        "enum": ["Draft", "Draft"],
+    }
+
+    with pytest.raises(ProfileViolation, match="enum: entries must be unique"):
+        validate_profile(document)
+
+
 def test_normalize_produces_an_openapi_free_ir() -> None:
     api = normalize(_document())
 

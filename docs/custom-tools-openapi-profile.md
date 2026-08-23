@@ -38,9 +38,11 @@ than the entire OpenAPI specification.
   declared properties with typed additional properties.
 - String, numeric, and array constraints used by the API: `minLength`, `maxLength`,
   `pattern`, `minimum`, `maximum`, `minItems`, and `maxItems`.
-  Length and item-count constraints must be non-negative integers; numeric bounds
-  must be finite JSON numbers. Patterns must be syntactically valid in Python's
-  regular-expression dialect, which is the dialect accepted by this Python SDK profile.
+  Length and item-count constraints must be non-negative integers. Patterns must be
+  syntactically valid in Python's regular-expression dialect, which is the dialect
+  accepted by this Python SDK profile.
+- Every non-integer JSON number must be finite and exactly representable by the Python
+  transport's `float` type; synchronization rejects rather than rounds other values.
 - Scalar enumerations and constants, defaults, and nullable schemas represented as
   `anyOf: [<schema>, {"type": "null"}]`.
 

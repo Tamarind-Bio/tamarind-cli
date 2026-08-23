@@ -144,6 +144,11 @@ def _validate_default(value: Mapping[str, Any], kind: str, nullable: bool, locat
         raise ProfileViolation(f"{location}.default", "must match the declared type")
 
 
+def _validate_unique_entries(value: Sequence[Any], location: str) -> None:
+    if len(value) != len(set(value)):
+        raise ProfileViolation(location, "entries must be unique")
+
+
 def _component(document: Mapping[str, Any], ref: str, location: str) -> Mapping[str, Any]:
     if not ref.startswith("#/components/"):
         raise ProfileViolation(location, "external references are not supported")
@@ -278,6 +283,7 @@ def _validate_schema(
             raise ProfileViolation(f"{location}.enum", "values must be JSON scalars")
         if any(not _value_matches_type(item, kind) for item in enum):
             raise ProfileViolation(f"{location}.enum", "values must match the declared type")
+        _validate_unique_entries(enum, f"{location}.enum")
         if kind == "number":
             raise ProfileViolation(
                 f"{location}.enum",
@@ -309,8 +315,7 @@ def _validate_schema(
         required = _sequence(schema.get("required", []), f"{location}.required")
         if any(not isinstance(name, str) for name in required):
             raise ProfileViolation(f"{location}.required", "entries must be strings")
-        if len(required) != len(set(required)):
-            raise ProfileViolation(f"{location}.required", "entries must be unique")
+        _validate_unique_entries(required, f"{location}.required")
         missing = set(required) - set(properties)
         if missing:
             raise ProfileViolation(

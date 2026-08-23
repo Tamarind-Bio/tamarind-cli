@@ -65,7 +65,14 @@ def test_contract_entrypoints_reject_duplicate_json_members(tmp_path: Path) -> N
 
 @pytest.mark.parametrize(
     "raw",
-    ['{"value":1e400}', '{"value":NaN}', '{"value":1e-400}', '{"value":-1e-400}'],
+    [
+        '{"value":1e400}',
+        '{"value":NaN}',
+        '{"value":1e-400}',
+        '{"value":-1e-400}',
+        '{"value":0.123456789012345678901}',
+        '{"value":9007199254740993.0}',
+    ],
 )
 def test_strict_contract_loader_rejects_unrepresentable_numbers(raw: str) -> None:
     with pytest.raises(ValueError):
@@ -415,6 +422,54 @@ def test_contract_sync_leaves_committed_artifacts_unchanged_when_generation_fail
     )
 
     assert result.returncode != 0
+    for relative, content in targets.items():
+        assert (tmp_path / "root" / relative).read_text() == content
+
+
+@pytest.mark.parametrize(
+    ("argument", "value", "message"),
+    [
+        ("--source-repository", "Tamarind-Bio/website", "source repository"),
+        ("--source-path", "backend/openapi.json", "source path"),
+        ("--source-commit", "abc123", "source commit"),
+        ("--source-commit", "A" * 40, "source commit"),
+        ("--source-commit", "g" * 40, "source commit"),
+    ],
+)
+def test_contract_sync_rejects_invalid_provenance_before_writing_outputs(
+    tmp_path: Path,
+    argument: str,
+    value: str,
+    message: str,
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    targets = {
+        "openapi/public-v1.json": "old spec\n",
+        "openapi/public-v1.lock.json": "old lock\n",
+        "src/tamarind/custom_tools/generated.py": "old generated\n",
+    }
+    for relative, content in targets.items():
+        target = tmp_path / "root" / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    command = [
+        sys.executable,
+        str(root / "scripts/sync_custom_tools_contract.py"),
+        str(root / "openapi/public-v1.json"),
+        "--source-repository",
+        "Tamarind-Bio/tamarind-website",
+        "--source-commit",
+        "a" * 40,
+        "--root",
+        str(tmp_path / "root"),
+        argument,
+        value,
+    ]
+
+    result = subprocess.run(command, capture_output=True, text=True)
+
+    assert result.returncode != 0
+    assert message in result.stderr
     for relative, content in targets.items():
         assert (tmp_path / "root" / relative).read_text() == content
 

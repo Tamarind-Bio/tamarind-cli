@@ -25,8 +25,8 @@ def _finite_float(value: str) -> float:
     parsed = float(value)
     if not math.isfinite(parsed):
         raise ValueError(f"JSON number is outside the finite float range: {value!r}")
-    if parsed == 0.0 and Decimal(value) != 0:
-        raise ValueError(f"JSON number underflows the finite float range: {value!r}")
+    if Decimal.from_float(parsed) != Decimal(value):
+        raise ValueError(f"JSON number cannot be represented exactly as a float: {value!r}")
     return parsed
 
 

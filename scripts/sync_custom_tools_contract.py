@@ -13,6 +13,7 @@ from generate_custom_tools_transport import write_generated_transport
 from tamarind_codegen.custom_tools.json_loader import load_json_document
 from tamarind_codegen.custom_tools.profile import validate_profile
 from tamarind_codegen.custom_tools.project import project_custom_tools
+from tamarind_codegen.custom_tools.provenance import SOURCE_PATH, validate_source_provenance
 
 
 def main() -> None:
@@ -22,10 +23,19 @@ def main() -> None:
     parser.add_argument("--source-commit", required=True)
     parser.add_argument(
         "--source-path",
-        default="backend/app/public_api/openapi/public-v1.generated.json#tag=custom-tools",
+        default=SOURCE_PATH,
     )
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     args = parser.parse_args()
+
+    try:
+        validate_source_provenance(
+            args.source_repository,
+            args.source_commit,
+            args.source_path,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
 
     raw = args.source.read_bytes()
     document = load_json_document(raw)

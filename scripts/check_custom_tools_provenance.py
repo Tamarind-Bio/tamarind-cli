@@ -6,23 +6,31 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 from pathlib import Path
-import re
+
+from tamarind_codegen.custom_tools.provenance import validate_source_provenance
 
 
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     spec = root / "openapi" / "public-v1.json"
     lock = json.loads((root / "openapi" / "public-v1.lock.json").read_text())
-    if lock != {
-        "artifactSha256": lock.get("artifactSha256"),
-        "schemaVersion": 1,
-        "sourceCommit": lock.get("sourceCommit"),
-        "sourcePath": "backend/app/public_api/openapi/public-v1.generated.json#tag=custom-tools",
-        "sourceRepository": "Tamarind-Bio/tamarind-website",
-    }:
+    expected_fields = {
+        "artifactSha256",
+        "schemaVersion",
+        "sourceCommit",
+        "sourcePath",
+        "sourceRepository",
+    }
+    if not isinstance(lock, dict) or set(lock) != expected_fields or lock.get("schemaVersion") != 1:
         raise SystemExit("public-v1.lock.json has an unsupported shape or source")
-    if re.fullmatch(r"[0-9a-f]{40}", str(lock["sourceCommit"])) is None:
-        raise SystemExit("sourceCommit must be a full immutable Git commit SHA")
+    try:
+        validate_source_provenance(
+            lock["sourceRepository"],
+            lock["sourceCommit"],
+            lock["sourcePath"],
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     actual = sha256(spec.read_bytes()).hexdigest()
     if actual != lock["artifactSha256"]:
         raise SystemExit(
