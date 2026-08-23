@@ -600,7 +600,10 @@ def test_profile_accepts_a_bodyless_wildcard_success_response() -> None:
 
 def test_profile_rejects_non_object_response_content() -> None:
     document = _document()
-    document["paths"]["/custom-tools/{name}"]["get"]["responses"]["200"]["content"] = []
+    document["paths"]["/custom-tools/{name}"]["get"]["responses"]["200"] = {
+        "description": "Malformed",
+        "content": [],
+    }
 
     with pytest.raises(ProfileViolation, match="must be an object"):
         validate_profile(document)
