@@ -397,7 +397,9 @@ def _validate_parameter(
     return name, parameter_location
 
 
-def _validate_parameter_list(document: Mapping[str, Any], value: object, location: str) -> None:
+def _validate_parameter_list(
+    document: Mapping[str, Any], value: object, location: str
+) -> set[tuple[str, str]]:
     parameters = _sequence(value, location)
     identities: set[tuple[str, str]] = set()
     for index, parameter in enumerate(parameters):
@@ -405,6 +407,7 @@ def _validate_parameter_list(document: Mapping[str, Any], value: object, locatio
         if identity in identities:
             raise ProfileViolation(f"{location}[{index}]", "duplicate parameter")
         identities.add(identity)
+    return identities
 
 
 def _validate_server_and_auth(document: Mapping[str, Any]) -> None:
@@ -592,7 +595,7 @@ def validate_profile(document: Mapping[str, Any]) -> None:
             )
         path_item = _mapping(raw_path_item, f"paths.{path}")
         _reject_unsupported_fields(path_item, PATH_ITEM_FIELDS, f"paths.{path}", "path item")
-        _validate_parameter_list(
+        path_parameter_identities = _validate_parameter_list(
             document, path_item.get("parameters", []), f"paths.{path}.parameters"
         )
         for method, raw_operation in path_item.items():
@@ -611,11 +614,23 @@ def validate_profile(document: Mapping[str, Any]) -> None:
             tags = _sequence(operation.get("tags", []), f"paths.{path}.{method}.tags")
             if any(not isinstance(tag, str) for tag in tags):
                 raise ProfileViolation(f"paths.{path}.{method}.tags", "entries must be strings")
-            _validate_parameter_list(
+            operation_parameter_identities = _validate_parameter_list(
                 document,
                 operation.get("parameters", []),
                 f"paths.{path}.{method}.parameters",
             )
+            effective_parameter_identities = (
+                path_parameter_identities | operation_parameter_identities
+            )
+            path_parameter_names = {
+                name for name, location in effective_parameter_identities if location == "path"
+            }
+            template_parameter_names = set(re.findall(r"\{([^{}]+)\}", path))
+            if path_parameter_names != template_parameter_names:
+                raise ProfileViolation(
+                    f"paths.{path}.{method}.parameters",
+                    "path parameters must exactly match the path template",
+                )
             if "requestBody" in operation:
                 _validate_request_body(
                     document, operation["requestBody"], f"paths.{path}.{method}.requestBody"

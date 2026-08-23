@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any, NoReturn
 
 
@@ -19,10 +20,18 @@ def _object_without_duplicate_members(pairs: list[tuple[str, Any]]) -> dict[str,
     return result
 
 
+def _finite_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError(f"JSON number is outside the finite float range: {value!r}")
+    return parsed
+
+
 def load_json_document(raw: str | bytes) -> Any:
     """Parse standards-compliant JSON without silently discarding duplicate members."""
     return json.loads(
         raw,
+        parse_float=_finite_float,
         parse_constant=_reject_constant,
         object_pairs_hook=_object_without_duplicate_members,
     )

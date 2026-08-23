@@ -63,6 +63,12 @@ def test_contract_entrypoints_reject_duplicate_json_members(tmp_path: Path) -> N
         assert "duplicate JSON object member" in result.stderr
 
 
+@pytest.mark.parametrize("raw", ['{"value":1e400}', '{"value":NaN}'])
+def test_strict_contract_loader_rejects_non_finite_numbers(raw: str) -> None:
+    with pytest.raises(ValueError):
+        load_json_document(raw)
+
+
 def test_projection_removes_unrelated_operations_from_a_complete_spec() -> None:
     root = Path(__file__).resolve().parents[1]
     document = json.loads((root / "openapi/public-v1.json").read_text())

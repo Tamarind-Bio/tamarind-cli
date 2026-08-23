@@ -656,6 +656,26 @@ def test_profile_rejects_malformed_path_templates(path: str) -> None:
         validate_profile(document)
 
 
+@pytest.mark.parametrize("missing", [True, False])
+def test_profile_rejects_mismatched_path_parameters(missing: bool) -> None:
+    document = _document()
+    parameters = document["paths"]["/custom-tools/{name}"]["parameters"]
+    if missing:
+        parameters.clear()
+    else:
+        parameters.append(
+            {
+                "name": "extra",
+                "in": "path",
+                "required": True,
+                "schema": {"type": "string"},
+            }
+        )
+
+    with pytest.raises(ProfileViolation, match="must exactly match the path template"):
+        validate_profile(document)
+
+
 def test_profile_rejects_null_additional_properties() -> None:
     document = _document()
     document["components"]["schemas"]["Empty"] = {
