@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -58,6 +59,29 @@ def test_public_wire_enums_are_the_generated_contract_types() -> None:
     assert MemorySize is PublicCustomToolMemory
     assert ExportedToolStatus is PublicCustomToolStatus
     assert ExportedVersionStatus is PublicVersionStatus
+
+
+def test_transport_declares_the_success_status_of_every_model_operation() -> None:
+    from tamarind.custom_tools.transport import _MODEL_OPERATIONS
+
+    document = json.loads((ROOT / "openapi/public-v1.json").read_text())
+    expected: dict[str, int] = {}
+    for path_item in document["paths"].values():
+        for operation in path_item.values():
+            if not isinstance(operation, dict) or operation["operationId"] == "deleteCustomTool":
+                continue
+            name = re.sub(r"(?<!^)(?=[A-Z])", "_", operation["operationId"]).lower()
+            success_statuses = [
+                int(status) for status in operation["responses"] if status.startswith("2")
+            ]
+            assert len(success_statuses) == 1
+            expected[name] = success_statuses[0]
+
+    described = {
+        operation.endpoint.__name__.rsplit(".", 1)[-1]: operation.success_status
+        for operation in _MODEL_OPERATIONS
+    }
+    assert described == expected
 
 
 def test_generator_is_exactly_pinned() -> None:
@@ -137,6 +161,7 @@ def test_contract_metadata_preserves_the_declared_server(server: str) -> None:
         "https://example.test/api/%ZZ",
         "https://example.test/api path",
         "https://example.test/{base}",
+        "https://example.test:0/api",
     ],
 )
 def test_contract_metadata_rejects_an_unusable_default_server(server: str) -> None:
@@ -203,6 +228,37 @@ def test_contract_install_restores_the_previous_complete_generation(
 
     monkeypatch.setattr(sync.os, "replace", fail_during_install)
     with pytest.raises(OSError, match="injected install failure"):
+        sync._install_staged(staging, tuple(zip(staged, destinations, strict=True)))
+
+    assert [path.read_text() for path in destinations] == previous
+
+
+def test_contract_install_restores_the_previous_generation_when_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sync_custom_tools_contract as sync
+
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    destinations = tuple(tmp_path / name for name in ("spec", "lock", "metadata", "generated"))
+    staged = tuple(staging / name for name in ("spec", "lock", "metadata", "generated"))
+    for path in destinations + staged:
+        path.write_text(f"{path.parent.name}:{path.name}")
+    previous = [path.read_text() for path in destinations]
+
+    real_replace = sync.os.replace
+    install_calls = 0
+
+    def interrupt_during_install(source: Path, destination: Path) -> None:
+        nonlocal install_calls
+        if source in staged:
+            install_calls += 1
+            if install_calls == 2:
+                raise KeyboardInterrupt
+        real_replace(source, destination)
+
+    monkeypatch.setattr(sync.os, "replace", interrupt_during_install)
+    with pytest.raises(KeyboardInterrupt):
         sync._install_staged(staging, tuple(zip(staged, destinations, strict=True)))
 
     assert [path.read_text() for path in destinations] == previous

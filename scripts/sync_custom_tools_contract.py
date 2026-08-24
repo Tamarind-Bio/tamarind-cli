@@ -194,7 +194,7 @@ def _default_server_url(document: dict[str, object]) -> str:
         )
     try:
         parsed = urlsplit(server)
-        parsed.port
+        port = parsed.port
     except ValueError:
         raise SystemExit(
             "Custom Tools contract default server must be a usable absolute HTTP(S) URL"
@@ -202,6 +202,7 @@ def _default_server_url(document: dict[str, object]) -> str:
     if (
         parsed.scheme not in {"http", "https"}
         or parsed.hostname is None
+        or port == 0
         or parsed.username is not None
         or parsed.password is not None
         or parsed.query
@@ -270,7 +271,7 @@ def _install_staged(staging: Path, replacements: tuple[tuple[Path, Path], ...]) 
         for source, destination in replacements:
             os.replace(source, destination)
             installed.append(destination)
-    except Exception:
+    except BaseException:
         for destination in reversed(installed):
             _remove(destination)
         for backup, destination in reversed(backups):

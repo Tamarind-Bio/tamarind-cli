@@ -185,6 +185,33 @@ def test_generated_response_shape_failures_use_the_sdk_error_boundary() -> None:
     assert isinstance(raised.value.__cause__, KeyError)
 
 
+@pytest.mark.parametrize("status_code", [201, 202, 206, 299])
+def test_every_model_operation_rejects_undocumented_2xx_problem_responses(
+    status_code: int,
+) -> None:
+    from tamarind.custom_tools.transport import (
+        GeneratedCustomToolsTransport,
+        _MODEL_OPERATIONS,
+    )
+    from tamarind.http import HTTPClient
+
+    problem = {
+        "code": "unexpected_success",
+        "status": status_code,
+        "title": "Unexpected success",
+        "type": "https://api.test/problems/unexpected-success",
+    }
+
+    with HTTPClient(api_key="key", base_url=BASE) as client:
+        transport = GeneratedCustomToolsTransport(client)
+        for operation in _MODEL_OPERATIONS:
+            if status_code == operation.success_status:
+                continue
+            response = httpx.Response(status_code, json=problem)
+            with pytest.raises(TamarindError, match="generated contract"):
+                transport._parse(operation, response)
+
+
 @respx.mock
 def test_malformed_nested_build_errors_use_the_sdk_error_boundary() -> None:
     malformed = _version()
