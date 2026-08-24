@@ -283,3 +283,31 @@ def test_contract_sync_rejects_a_generated_package_incompatible_with_the_facade(
             ROOT / "src/tamarind/custom_tools/_contract.py",
             staging,
         )
+
+
+def test_contract_sync_exercises_generated_endpoint_signatures(
+    tmp_path: Path,
+) -> None:
+    from sync_custom_tools_contract import _verify_generated_facade
+
+    staging = tmp_path / "staging"
+    generated = staging / "generated"
+    staging.mkdir()
+    source = ROOT / "src/tamarind/custom_tools/_generated"
+    shutil.copytree(source, generated)
+    endpoint = generated / "api/custom_tools/list_custom_tool_versions.py"
+    endpoint.write_text(
+        endpoint.read_text().replace(
+            "    cursor: None | str | Unset = UNSET,\n) -> dict[str, Any]:",
+            "    cursor: None | str | Unset = UNSET,\n    required_probe: str,\n) -> dict[str, Any]:",
+            1,
+        )
+    )
+
+    with pytest.raises(subprocess.CalledProcessError):
+        _verify_generated_facade(
+            ROOT,
+            generated,
+            ROOT / "src/tamarind/custom_tools/_contract.py",
+            staging,
+        )

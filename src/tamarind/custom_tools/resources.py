@@ -101,6 +101,16 @@ class BuildResult:
     version: "Version"
 
 
+@dataclass(frozen=True)
+class _UploadSession:
+    upload_id: str
+    upload_url: str
+    upload_method: str
+    upload_headers: dict[str, str]
+    expires_at: str
+    max_bytes: int
+
+
 @dataclass
 class _LogProgress:
     """Own log-resume state without letting it control Version polling."""
@@ -455,18 +465,20 @@ class CustomTools:
         timeout, _ = _validate_monitor_options(timeout=source_timeout, interval=1.0)
         archive = build_source_tree_archive(tree, max_bytes=MAX_TOOL_SOURCE_BYTES)
         try:
-            session = self._transport.create_custom_tool_upload(tool.name, tool.generation)
-            if archive.size > session["maxBytes"]:
+            session = _upload_session_from_wire(
+                self._transport.create_custom_tool_upload(tool.name, tool.generation)
+            )
+            if archive.size > session.max_bytes:
                 raise CustomToolUploadError(
                     f"Source archive is {archive.size} bytes but the upload session allows "
-                    f"at most {session['maxBytes']} bytes."
+                    f"at most {session.max_bytes} bytes."
                 )
             _upload_archive(
-                session["uploadUrl"],
+                session.upload_url,
                 archive.content(),
                 size=archive.size,
-                method=session.get("uploadMethod", "PUT"),
-                headers=session.get("uploadHeaders", {}),
+                method=session.upload_method,
+                headers=session.upload_headers,
                 timeout=self._upload_timeout,
             )
             result = self._transport.build_custom_tool_version(
@@ -475,7 +487,7 @@ class CustomTools:
                 cast(
                     PublicCreateVersionRequest,
                     {
-                        "uploadId": session["uploadId"],
+                        "uploadId": session.upload_id,
                         "expectedSourceDigest": archive.digest,
                     },
                 ),
@@ -525,6 +537,39 @@ class CustomTools:
             timeout=request_timeout,
         )
         return _version_from_wire(self, tool_name, tool_generation, wire)
+
+
+def _upload_session_from_wire(wire: object) -> _UploadSession:
+    if not isinstance(wire, dict):
+        raise TamarindError("Custom Tools response did not match the generated contract")
+
+    upload_id = wire.get("uploadId")
+    upload_url = wire.get("uploadUrl")
+    upload_method = wire.get("uploadMethod")
+    upload_headers = wire.get("uploadHeaders")
+    expires_at = wire.get("expiresAt")
+    max_bytes = wire.get("maxBytes")
+    if (
+        not isinstance(upload_id, str)
+        or not isinstance(upload_url, str)
+        or upload_method != "PUT"
+        or not isinstance(upload_headers, dict)
+        or not all(
+            isinstance(key, str) and isinstance(value, str) for key, value in upload_headers.items()
+        )
+        or not isinstance(expires_at, str)
+        or type(max_bytes) is not int
+        or max_bytes < 0
+    ):
+        raise TamarindError("Custom Tools response did not match the generated contract")
+    return _UploadSession(
+        upload_id=upload_id,
+        upload_url=upload_url,
+        upload_method=upload_method,
+        upload_headers=cast(dict[str, str], upload_headers),
+        expires_at=expires_at,
+        max_bytes=max_bytes,
+    )
 
 
 def _upload_archive(

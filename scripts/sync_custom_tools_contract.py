@@ -251,8 +251,65 @@ def _verify_generated_facade(root: Path, generated: Path, metadata: Path, stagin
     environment = os.environ.copy()
     python_path = environment.get("PYTHONPATH")
     environment["PYTHONPATH"] = str(import_root) + (os.pathsep + python_path if python_path else "")
+    # Importing the adapter catches removed modules and models, but not a regenerated
+    # endpoint whose operation still exists with a changed call signature. Exercise every
+    # adapter method while replacing only the HTTP boundary so contract synchronization
+    # fails before an incompatible generated package is installed.
+    probe = r"""
+import asyncio
+from types import SimpleNamespace
+
+from tamarind.custom_tools.transport import GeneratedCustomToolsTransport
+
+
+class ProbeTransport(GeneratedCustomToolsTransport):
+    def __init__(self):
+        self._client = SimpleNamespace(
+            request=lambda **_kwargs: SimpleNamespace(status_code=204)
+        )
+
+    def _sync(self, _operation, _kwargs, _timeout=None):
+        return {}
+
+    async def _async(self, _operation, _kwargs, _timeout=None):
+        return {}
+
+
+transport = ProbeTransport()
+transport.list_custom_tools()
+transport.create_custom_tool({"name": "contract-probe"})
+transport.delete_custom_tool("contract-probe", "generation")
+transport.get_custom_tool("contract-probe")
+transport.update_custom_tool("contract-probe", "generation", {})
+transport.create_custom_tool_upload("contract-probe", "generation")
+transport.list_custom_tool_versions("contract-probe", "generation")
+transport.build_custom_tool_version(
+    "contract-probe",
+    "generation",
+    {
+        "uploadId": "upload",
+        "expectedSourceDigest": "sha256:" + "0" * 64,
+    },
+)
+transport.get_custom_tool_version("contract-probe", "v1", "generation")
+transport.cancel_custom_tool_build("contract-probe", "v1", "generation")
+transport.list_custom_tool_build_logs("contract-probe", "v1", "generation")
+transport.publish_custom_tool_version("contract-probe", "v1", "generation")
+
+
+async def exercise_async_facade():
+    await transport.get_custom_tool_version_async(
+        "contract-probe", "v1", "generation"
+    )
+    await transport.list_custom_tool_build_logs_async(
+        "contract-probe", "v1", "generation"
+    )
+
+
+asyncio.run(exercise_async_facade())
+"""
     subprocess.run(
-        [sys.executable, "-c", "import tamarind.custom_tools.transport"],
+        [sys.executable, "-c", probe],
         check=True,
         cwd=staging,
         env=environment,

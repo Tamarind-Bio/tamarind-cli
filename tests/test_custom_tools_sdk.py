@@ -325,6 +325,46 @@ def test_build_rejects_archive_larger_than_upload_session_limit(tmp_path: Path) 
     assert not upload.called
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("uploadId", 1),
+        ("uploadUrl", 1),
+        ("uploadMethod", "POST"),
+        ("uploadHeaders", {"Content-Type": 1}),
+        ("expiresAt", 1),
+        ("maxBytes", "1024"),
+        ("maxBytes", True),
+        ("maxBytes", -1),
+    ],
+)
+@respx.mock
+def test_build_rejects_malformed_upload_session_scalars(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    _source(tmp_path)
+    session: dict[str, object] = {
+        "uploadId": "upload-1",
+        "uploadUrl": UPLOAD,
+        "uploadMethod": "PUT",
+        "uploadHeaders": {},
+        "expiresAt": "2026-08-15T00:15:00Z",
+        "maxBytes": 1024,
+    }
+    session[field] = value
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.post(f"{BASE}custom-tools/example/generations/generation-1/uploads").mock(
+        return_value=httpx.Response(201, json=session)
+    )
+    upload = respx.put(UPLOAD).mock(return_value=httpx.Response(200))
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(TamarindError, match="generated contract"):
+            client.custom_tools.get("example").build(tmp_path)
+
+    assert not upload.called
+
+
 @respx.mock
 def test_version_pages_preserve_and_accept_cursors() -> None:
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
