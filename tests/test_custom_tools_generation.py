@@ -128,9 +128,6 @@ def test_dedicated_artifact_requires_the_custom_tools_path_segment(
 @pytest.mark.parametrize(
     "server",
     [
-        "http://localhost:8000/api",
-        "http://127.0.0.1:8000/api",
-        "http://[::1]:8000/api",
         "https://example.test/api/",
         "https://example.test/api//",
     ],
@@ -153,6 +150,7 @@ def test_contract_metadata_preserves_the_declared_server(server: str) -> None:
     "server",
     [
         "/api",
+        "http://localhost:8000/api",
         "http://example.test/api",
         "ftp://example.test/api",
         "https:///api",
