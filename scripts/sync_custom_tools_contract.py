@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 from tempfile import TemporaryDirectory
 from typing import NoReturn
 
@@ -31,8 +32,10 @@ def main() -> None:
     _verify_committed_source(args.source_checkout, args.source_commit, args.source_path, raw)
     document = _load_contract(raw)
     paths = document.get("paths")
-    if not isinstance(paths, dict) or not paths or not all(
-        isinstance(path, str) and path.startswith("/custom-tools") for path in paths
+    if (
+        not isinstance(paths, dict)
+        or not paths
+        or not all(_is_custom_tools_path(path) for path in paths)
     ):
         parser.error("source is not the dedicated Custom Tools artifact")
 
@@ -83,6 +86,7 @@ def main() -> None:
         cache = generated / ".ruff_cache"
         if cache.exists():
             shutil.rmtree(cache)
+        _verify_generated_facade(args.root, generated, staged_metadata, staging)
         _install_staged(
             staging,
             (
@@ -99,6 +103,10 @@ def _validate_provenance(repository: str, commit: str, path: str) -> None:
         raise SystemExit("unsupported Custom Tools producer")
     if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit):
         raise SystemExit("source commit must be a full lowercase Git SHA")
+
+
+def _is_custom_tools_path(path: object) -> bool:
+    return isinstance(path, str) and (path == "/custom-tools" or path.startswith("/custom-tools/"))
 
 
 def _reject_json_constant(value: str) -> NoReturn:
@@ -166,7 +174,30 @@ def _contract_metadata(document: dict[str, object]) -> str:
         raise SystemExit("Custom Tools contract default server must be a non-empty URL")
     return (
         '"""Generated metadata from the backend-owned Custom Tools contract."""\n\n'
-        f"OPENAPI_SERVER_URL = {server.rstrip('/') + '/'!r}\n"
+        f"OPENAPI_SERVER_URL = {server!r}\n"
+    )
+
+
+def _verify_generated_facade(root: Path, generated: Path, metadata: Path, staging: Path) -> None:
+    import_root = staging / "facade-import"
+    package = import_root / "tamarind"
+    shutil.copytree(
+        root / "src/tamarind",
+        package,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    generated_target = package / "custom_tools/_generated"
+    shutil.rmtree(generated_target)
+    shutil.copytree(generated, generated_target)
+    shutil.copyfile(metadata, package / "custom_tools/_contract.py")
+    environment = os.environ.copy()
+    python_path = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = str(import_root) + (os.pathsep + python_path if python_path else "")
+    subprocess.run(
+        [sys.executable, "-c", "import tamarind.custom_tools.transport"],
+        check=True,
+        cwd=staging,
+        env=environment,
     )
 
 

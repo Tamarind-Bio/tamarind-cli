@@ -586,12 +586,15 @@ def _tool_from_wire(collection: CustomTools, wire: PublicCustomTool) -> CustomTo
 def _version_from_wire(
     collection: CustomTools, tool_name: str, tool_generation: str, wire: PublicVersion
 ) -> Version:
+    terminal = wire["terminal"]
+    if not isinstance(terminal, bool):
+        raise TamarindError("Custom Tools response did not match the generated contract")
     return Version(
         name=wire["name"],
         source_revision=wire["sourceRevision"],
         source_digest=wire["sourceDigest"],
         status=PublicVersionStatus(wire["status"]),
-        terminal=wire["terminal"],
+        terminal=terminal,
         origin=wire["origin"],
         created_at=wire["createdAt"],
         started_at=wire["startedAt"],

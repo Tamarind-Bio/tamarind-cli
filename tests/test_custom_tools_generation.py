@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -13,9 +14,11 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 
 def test_vendored_contract_is_the_dedicated_backend_artifact() -> None:
+    from sync_custom_tools_contract import _is_custom_tools_path
+
     document = json.loads((ROOT / "openapi/public-v1.json").read_text())
     assert document["paths"]
-    assert all(path.startswith("/custom-tools") for path in document["paths"])
+    assert all(_is_custom_tools_path(path) for path in document["paths"])
     assert not any(
         parameter.get("name") == "If-Match"
         for path, item in document["paths"].items()
@@ -69,6 +72,40 @@ def test_sync_rejects_duplicate_json_members() -> None:
 
     with pytest.raises(ValueError, match="duplicate JSON object member 'paths'"):
         _load_contract(b'{"paths": {}, "paths": {}}')
+
+
+@pytest.mark.parametrize(
+    ("path", "accepted"),
+    [
+        ("/custom-tools", True),
+        ("/custom-tools/example", True),
+        ("/custom-tools-admin", False),
+        ("/custom-tool", False),
+    ],
+)
+def test_dedicated_artifact_requires_the_custom_tools_path_segment(
+    path: str, accepted: bool
+) -> None:
+    from sync_custom_tools_contract import _is_custom_tools_path
+
+    assert _is_custom_tools_path(path) is accepted
+
+
+@pytest.mark.parametrize(
+    "server",
+    [
+        "https://example.test/api",
+        "https://example.test/api/",
+        "https://example.test/api//",
+    ],
+)
+def test_contract_metadata_preserves_the_declared_server(server: str) -> None:
+    from sync_custom_tools_contract import _contract_metadata
+
+    assert _contract_metadata({"servers": [{"url": server}]}) == (
+        '"""Generated metadata from the backend-owned Custom Tools contract."""\n\n'
+        f"OPENAPI_SERVER_URL = {server!r}\n"
+    )
 
 
 def test_sync_provenance_reads_the_declared_git_object(tmp_path: Path) -> None:
@@ -126,3 +163,24 @@ def test_contract_install_restores_the_previous_complete_generation(
         sync._install_staged(staging, tuple(zip(staged, destinations, strict=True)))
 
     assert [path.read_text() for path in destinations] == previous
+
+
+def test_contract_sync_rejects_a_generated_package_incompatible_with_the_facade(
+    tmp_path: Path,
+) -> None:
+    from sync_custom_tools_contract import _verify_generated_facade
+
+    staging = tmp_path / "staging"
+    generated = staging / "generated"
+    staging.mkdir()
+    source = ROOT / "src/tamarind/custom_tools/_generated"
+    shutil.copytree(source, generated)
+    (generated / "models/public_version.py").unlink()
+
+    with pytest.raises(subprocess.CalledProcessError):
+        _verify_generated_facade(
+            ROOT,
+            generated,
+            ROOT / "src/tamarind/custom_tools/_contract.py",
+            staging,
+        )

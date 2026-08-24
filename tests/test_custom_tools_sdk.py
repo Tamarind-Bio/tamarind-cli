@@ -365,6 +365,20 @@ def test_version_preserves_the_server_terminal_marker() -> None:
 
 
 @respx.mock
+def test_version_rejects_a_non_boolean_terminal_marker() -> None:
+    malformed = _version(status="Running")
+    malformed["terminal"] = "false"
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/generations/generation-1/versions/v1").mock(
+        return_value=httpx.Response(200, json=malformed)
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(TamarindError, match="generated contract"):
+            client.custom_tools.get("example").get_version("v1")
+
+
+@respx.mock
 def test_version_does_not_interpret_wire_timestamps() -> None:
     wire = {
         **_version(status="Complete"),
