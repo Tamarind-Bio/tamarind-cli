@@ -8,14 +8,18 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
 from typing import NoReturn
+from urllib.parse import unquote, urlsplit
 
 EXPECTED_REPOSITORY = "Tamarind-Bio/tamarind-website"
 EXPECTED_PATH = "backend/app/public_api/openapi/custom-tools-v1.generated.json"
+_PATH_SEGMENT = re.compile(r"(?:[A-Za-z0-9_-]+|\{[A-Za-z_][A-Za-z0-9_]*\})")
+_MALFORMED_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 
 
 def main() -> None:
@@ -31,13 +35,7 @@ def main() -> None:
     raw = args.source.read_bytes()
     _verify_committed_source(args.source_checkout, args.source_commit, args.source_path, raw)
     document = _load_contract(raw)
-    paths = document.get("paths")
-    if (
-        not isinstance(paths, dict)
-        or not paths
-        or not all(_is_custom_tools_path(path) for path in paths)
-    ):
-        parser.error("source is not the dedicated Custom Tools artifact")
+    _validate_contract(document)
 
     spec_path = args.root / "openapi/public-v1.json"
     lock_path = args.root / "openapi/public-v1.lock.json"
@@ -106,7 +104,25 @@ def _validate_provenance(repository: str, commit: str, path: str) -> None:
 
 
 def _is_custom_tools_path(path: object) -> bool:
-    return isinstance(path, str) and (path == "/custom-tools" or path.startswith("/custom-tools/"))
+    if not isinstance(path, str):
+        return False
+    segments = path.split("/")
+    return (
+        len(segments) >= 2
+        and segments[:2] == ["", "custom-tools"]
+        and all(_PATH_SEGMENT.fullmatch(segment) for segment in segments[2:])
+    )
+
+
+def _validate_contract(document: dict[str, object]) -> str:
+    paths = document.get("paths")
+    if (
+        not isinstance(paths, dict)
+        or not paths
+        or not all(_is_custom_tools_path(path) for path in paths)
+    ):
+        raise SystemExit("source is not the dedicated Custom Tools artifact")
+    return _default_server_url(document)
 
 
 def _reject_json_constant(value: str) -> NoReturn:
@@ -165,13 +181,54 @@ def _repository_slug(origin: str) -> str:
     return ""
 
 
-def _contract_metadata(document: dict[str, object]) -> str:
+def _default_server_url(document: dict[str, object]) -> str:
     servers = document.get("servers")
     if not isinstance(servers, list) or not servers or not isinstance(servers[0], dict):
         raise SystemExit("Custom Tools contract must declare a default server")
     server = servers[0].get("url")
     if not isinstance(server, str) or not server:
         raise SystemExit("Custom Tools contract default server must be a non-empty URL")
+    if any(ord(character) <= 32 or ord(character) == 127 for character in server):
+        raise SystemExit(
+            "Custom Tools contract default server must be a usable absolute HTTP(S) URL"
+        )
+    try:
+        parsed = urlsplit(server)
+        parsed.port
+    except ValueError:
+        raise SystemExit(
+            "Custom Tools contract default server must be a usable absolute HTTP(S) URL"
+        ) from None
+    if (
+        parsed.scheme not in {"http", "https"}
+        or parsed.hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or "%" in parsed.netloc
+        or "{" in server
+        or "}" in server
+        or _MALFORMED_ESCAPE.search(server)
+    ):
+        raise SystemExit(
+            "Custom Tools contract default server must be a usable absolute HTTP(S) URL"
+        )
+    for segment in parsed.path.split("/"):
+        decoded = unquote(segment)
+        if (
+            decoded in {".", ".."}
+            or any(delimiter in decoded for delimiter in "/\\?#")
+            or any(ord(character) <= 32 or ord(character) == 127 for character in decoded)
+        ):
+            raise SystemExit(
+                "Custom Tools contract default server must be a usable absolute HTTP(S) URL"
+            )
+    return server
+
+
+def _contract_metadata(document: dict[str, object]) -> str:
+    server = _validate_contract(document)
     return (
         '"""Generated metadata from the backend-owned Custom Tools contract."""\n\n'
         f"OPENAPI_SERVER_URL = {server!r}\n"

@@ -135,6 +135,16 @@ def test_delete_uses_the_tool_generation() -> None:
 
 
 @respx.mock
+def test_delete_requires_the_contract_no_content_status() -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.delete(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(202))
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(TamarindError, match="generated contract"):
+            client.custom_tools.get("example").delete()
+
+
+@respx.mock
 def test_refresh_rejects_a_reused_tool_name() -> None:
     route = respx.get(f"{BASE}custom-tools/example").mock(
         side_effect=[

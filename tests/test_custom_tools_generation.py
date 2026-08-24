@@ -81,6 +81,16 @@ def test_sync_rejects_duplicate_json_members() -> None:
         ("/custom-tools/example", True),
         ("/custom-tools-admin", False),
         ("/custom-tool", False),
+        ("/custom-tools/../admin", False),
+        ("/custom-tools/%2e%2e/admin", False),
+        ("/custom-tools/%ZZ", False),
+        ("/custom-tools//admin", False),
+        ("/custom-tools/admin;scope=all", False),
+        ("/custom-tools/admin?scope=all", False),
+        ("/custom-tools/admin#fragment", False),
+        (r"/custom-tools/admin\escape", False),
+        ("/custom-tools/{valid_name}", True),
+        ("/custom-tools/{invalid-name}", False),
     ],
 )
 def test_dedicated_artifact_requires_the_custom_tools_path_segment(
@@ -94,7 +104,7 @@ def test_dedicated_artifact_requires_the_custom_tools_path_segment(
 @pytest.mark.parametrize(
     "server",
     [
-        "https://example.test/api",
+        "http://localhost:8000/api",
         "https://example.test/api/",
         "https://example.test/api//",
     ],
@@ -102,10 +112,43 @@ def test_dedicated_artifact_requires_the_custom_tools_path_segment(
 def test_contract_metadata_preserves_the_declared_server(server: str) -> None:
     from sync_custom_tools_contract import _contract_metadata
 
-    assert _contract_metadata({"servers": [{"url": server}]}) == (
+    assert _contract_metadata(
+        {
+            "paths": {"/custom-tools": {}},
+            "servers": [{"url": server}],
+        }
+    ) == (
         '"""Generated metadata from the backend-owned Custom Tools contract."""\n\n'
         f"OPENAPI_SERVER_URL = {server!r}\n"
     )
+
+
+@pytest.mark.parametrize(
+    "server",
+    [
+        "/api",
+        "ftp://example.test/api",
+        "https:///api",
+        "https://user:secret@example.test/api",
+        "https://example.test/api?tenant=one",
+        "https://example.test/api#fragment",
+        "https://example.test/api/../admin",
+        "https://example.test/api/%2e%2e/admin",
+        "https://example.test/api/%ZZ",
+        "https://example.test/api path",
+        "https://example.test/{base}",
+    ],
+)
+def test_contract_metadata_rejects_an_unusable_default_server(server: str) -> None:
+    from sync_custom_tools_contract import _contract_metadata
+
+    with pytest.raises(SystemExit, match="usable absolute HTTP"):
+        _contract_metadata(
+            {
+                "paths": {"/custom-tools": {}},
+                "servers": [{"url": server}],
+            }
+        )
 
 
 def test_sync_provenance_reads_the_declared_git_object(tmp_path: Path) -> None:

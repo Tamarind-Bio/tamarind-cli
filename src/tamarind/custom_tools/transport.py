@@ -117,10 +117,12 @@ class GeneratedCustomToolsTransport:
     def delete_custom_tool(
         self, name: str, generation: str, *, timeout: float | None = None
     ) -> None:
-        self._client.request(
+        response = self._client.request(
             timeout=timeout,
             **_http_kwargs(delete_custom_tool._get_kwargs(name, if_match=_etag(generation))),
         )
+        if response.status_code != 204:
+            raise TamarindError("Custom Tools response did not match the generated contract")
 
     def get_custom_tool(self, name: str, *, timeout: float | None = None) -> PublicCustomTool:
         return self._sync(get_custom_tool, get_custom_tool._get_kwargs(name), timeout)
