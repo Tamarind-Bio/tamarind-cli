@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import subprocess
+import sys
 
 import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
 
 
 def test_vendored_contract_is_the_dedicated_backend_artifact() -> None:
@@ -63,7 +65,7 @@ def test_generator_is_exactly_pinned() -> None:
 
 
 def test_sync_provenance_reads_the_declared_git_object(tmp_path: Path) -> None:
-    from scripts.sync_custom_tools_contract import EXPECTED_PATH, _verify_committed_source
+    from sync_custom_tools_contract import EXPECTED_PATH, _verify_committed_source
 
     artifact = tmp_path / EXPECTED_PATH
     artifact.parent.mkdir(parents=True)
@@ -91,7 +93,7 @@ def test_sync_provenance_reads_the_declared_git_object(tmp_path: Path) -> None:
 def test_contract_install_restores_the_previous_complete_generation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from scripts import sync_custom_tools_contract as sync
+    import sync_custom_tools_contract as sync
 
     staging = tmp_path / "staging"
     staging.mkdir()
