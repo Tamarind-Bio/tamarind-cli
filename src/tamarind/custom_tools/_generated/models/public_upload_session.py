@@ -1,20 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Literal,
-    TypeVar,
-    cast,
-)
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 
 from attrs import define as _attrs_define
 
 if TYPE_CHECKING:
-    from ..models.public_upload_session_uploadheaders import (
-        PublicUploadSessionUploadheaders,
-    )
+    from ..models.public_upload_session_uploadheaders import PublicUploadSessionUploadheaders
 
 
 T = TypeVar("T", bound="PublicUploadSession")
@@ -70,26 +62,20 @@ class PublicUploadSession:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.public_upload_session_uploadheaders import (
-            PublicUploadSessionUploadheaders,
-        )
+        from ..models.public_upload_session_uploadheaders import PublicUploadSessionUploadheaders
 
         d = dict(src_dict)
         expires_at = d.pop("expiresAt")
 
         max_bytes = d.pop("maxBytes")
 
-        upload_headers = PublicUploadSessionUploadheaders.from_dict(
-            d.pop("uploadHeaders")
-        )
+        upload_headers = PublicUploadSessionUploadheaders.from_dict(d.pop("uploadHeaders"))
 
         upload_id = d.pop("uploadId")
 
         upload_method = cast(Literal["PUT"], d.pop("uploadMethod"))
         if upload_method != "PUT":
-            raise ValueError(
-                f"uploadMethod must match const 'PUT', got '{upload_method}'"
-            )
+            raise ValueError(f"uploadMethod must match const 'PUT', got '{upload_method}'")
 
         upload_url = d.pop("uploadUrl")
 

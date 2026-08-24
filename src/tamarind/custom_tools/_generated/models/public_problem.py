@@ -81,9 +81,7 @@ class PublicProblem:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.public_problem_errors_type_0_item import (
-            PublicProblemErrorsType0Item,
-        )
+        from ..models.public_problem_errors_type_0_item import PublicProblemErrorsType0Item
 
         d = dict(src_dict)
         code = d.pop("code")
@@ -103,9 +101,7 @@ class PublicProblem:
 
         detail = _parse_detail(d.pop("detail", UNSET))
 
-        def _parse_errors(
-            data: object,
-        ) -> list[PublicProblemErrorsType0Item] | None | Unset:
+        def _parse_errors(data: object) -> list[PublicProblemErrorsType0Item] | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):

@@ -10,9 +10,13 @@ from dataclasses import dataclass, field
 import math
 from pathlib import Path
 import time
-from typing import Awaitable, BinaryIO, Callable, Generic, Literal, TypeVar, cast
+from typing import Awaitable, BinaryIO, Callable, Generic, TypeAlias, TypeVar, cast
 
 import httpx
+
+from tamarind.custom_tools._generated.models.public_build_result_action import (
+    PublicBuildResultAction,
+)
 
 from tamarind.custom_tools.transport import (
     GeneratedCustomToolsTransport,
@@ -52,7 +56,7 @@ from tamarind.http import DEFAULT_TIMEOUT
 
 T = TypeVar("T")
 EventCallback = Callable[["BuildEvent"], None]
-BuildAction = Literal["build", "reuse_image", "unchanged"]
+BuildAction: TypeAlias = PublicBuildResultAction
 _clock = time.monotonic
 
 
@@ -557,9 +561,9 @@ def _tool_from_wire(collection: CustomTools, wire: PublicCustomTool) -> CustomTo
         display_name=wire["displayName"],
         description=wire["description"],
         functions=tuple(wire["functions"]),
-        status=wire["status"],
-        gpu_type=wire["gpuType"],
-        memory=wire["memory"],
+        status=PublicCustomToolStatus(wire["status"]),
+        gpu_type=GpuType(wire["gpuType"]),
+        memory=MemorySize(wire["memory"]),
         cpu=wire["cpu"],
         home_disk_gi=wire["homeDiskGi"],
         max_runtime_seconds=wire["maxRuntimeSeconds"],
@@ -587,7 +591,7 @@ def _version_from_wire(
         name=wire["name"],
         source_revision=wire["sourceRevision"],
         source_digest=wire["sourceDigest"],
-        status=wire["status"],
+        status=PublicVersionStatus(wire["status"]),
         terminal=wire["terminal"],
         origin=wire["origin"],
         created_at=wire["createdAt"],
@@ -607,7 +611,7 @@ def _build_result_from_wire(
     wire: PublicBuildResult,
 ) -> BuildResult:
     return BuildResult(
-        action=wire["action"],
+        action=BuildAction(wire["action"]),
         version=_version_from_wire(collection, tool_name, tool_generation, wire["version"]),
     )
 
@@ -617,7 +621,7 @@ def _log_page_from_wire(wire: PublicBuildLogPage) -> BuildLogPage:
     return BuildLogPage(
         items=tuple(BuildEvent(item["message"], item["timestamp"]) for item in wire["items"]),
         next_cursor=wire["nextCursor"],
-        status=wire["status"],
+        status=PublicVersionStatus(wire["status"]),
         error=BuildError(error["code"], error["message"]) if error else None,
     )
 

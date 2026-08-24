@@ -244,9 +244,7 @@ class PublicUpdateCustomToolRequest:
 
         home_disk_gi = _parse_home_disk_gi(d.pop("homeDiskGi", UNSET))
 
-        def _parse_memory(
-            data: object,
-        ) -> None | PublicUpdateCustomToolRequestMemoryType0 | Unset:
+        def _parse_memory(data: object) -> None | PublicUpdateCustomToolRequestMemoryType0 | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):

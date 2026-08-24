@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, TypeAlias, cast
+from typing import Any, TypeAlias, cast
 
 from tamarind.custom_tools._generated.client import Client as GeneratedClient
 from tamarind.custom_tools._generated.models.public_create_custom_tool_request import (
@@ -10,6 +10,12 @@ from tamarind.custom_tools._generated.models.public_create_custom_tool_request i
 )
 from tamarind.custom_tools._generated.models.public_create_version_request import (
     PublicCreateVersionRequest as CreateVersionModel,
+)
+from tamarind.custom_tools._generated.models.public_custom_tool_gputype import (
+    PublicCustomToolGputype as GeneratedGpuType,
+)
+from tamarind.custom_tools._generated.models.public_custom_tool_memory import (
+    PublicCustomToolMemory as GeneratedMemorySize,
 )
 from tamarind.custom_tools._generated.models.public_custom_tool_status import (
     PublicCustomToolStatus as GeneratedToolStatus,
@@ -38,12 +44,10 @@ from ._generated.api.custom_tools import (
     update_custom_tool,
 )
 
-GpuType: TypeAlias = Literal["None", "T4", "L4", "L40S", "A10", "A100"]
-MemorySize: TypeAlias = Literal[
-    "8Gi", "12Gi", "24Gi", "32Gi", "48Gi", "64Gi", "90Gi", "96Gi", "180Gi"
-]
-PublicCustomToolStatus: TypeAlias = Literal["Draft", "Building", "Deployed"]
-PublicVersionStatus: TypeAlias = Literal["Queued", "Running", "Complete", "Stopped"]
+GpuType: TypeAlias = GeneratedGpuType
+MemorySize: TypeAlias = GeneratedMemorySize
+PublicCustomToolStatus: TypeAlias = GeneratedToolStatus
+PublicVersionStatus: TypeAlias = GeneratedVersionStatus
 PublicCreateCustomToolRequest: TypeAlias = dict[str, Any]
 PublicUpdateCustomToolRequest: TypeAlias = dict[str, Any]
 PublicCreateVersionRequest: TypeAlias = dict[str, Any]
@@ -51,7 +55,6 @@ PublicCustomTool: TypeAlias = dict[str, Any]
 PublicVersion: TypeAlias = dict[str, Any]
 PublicBuildResult: TypeAlias = dict[str, Any]
 PublicBuildLogPage: TypeAlias = dict[str, Any]
-OPENAPI_SERVER_URL = "https://app.tamarind.bio/api/"
 
 
 class GeneratedCustomToolsTransport:
@@ -63,19 +66,24 @@ class GeneratedCustomToolsTransport:
 
     def _sync(self, endpoint: Any, kwargs: dict[str, Any], timeout: float | None = None) -> Any:
         response = self._client.request(timeout=timeout, **_http_kwargs(kwargs))
-        parsed = endpoint._parse_response(client=self._parser, response=response)
-        if parsed is None or not hasattr(parsed, "to_dict"):
-            raise TamarindError("Custom Tools response did not match the generated contract")
-        return parsed.to_dict()
+        return self._parse(endpoint, response)
 
     async def _async(
         self, endpoint: Any, kwargs: dict[str, Any], timeout: float | None = None
     ) -> Any:
         response = await self._client.request_async(timeout=timeout, **_http_kwargs(kwargs))
-        parsed = endpoint._parse_response(client=self._parser, response=response)
+        return self._parse(endpoint, response)
+
+    def _parse(self, endpoint: Any, response: Any) -> dict[str, Any]:
+        try:
+            parsed = endpoint._parse_response(client=self._parser, response=response)
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise TamarindError(
+                "Custom Tools response did not match the generated contract"
+            ) from exc
         if parsed is None or not hasattr(parsed, "to_dict"):
             raise TamarindError("Custom Tools response did not match the generated contract")
-        return parsed.to_dict()
+        return cast(dict[str, Any], parsed.to_dict())
 
     def list_custom_tools(
         self,
@@ -91,7 +99,7 @@ class GeneratedCustomToolsTransport:
             list_custom_tools._get_kwargs(
                 status=GeneratedToolStatus(status) if status is not None else None,
                 published=published,
-                limit=limit or 50,
+                limit=50 if limit is None else limit,
                 cursor=cursor,
             ),
             timeout,
@@ -158,7 +166,7 @@ class GeneratedCustomToolsTransport:
                 name,
                 generation,
                 status=GeneratedVersionStatus(status) if status is not None else None,
-                limit=limit or 50,
+                limit=50 if limit is None else limit,
                 cursor=cursor,
             ),
             timeout,

@@ -6,12 +6,8 @@ from .public_build_log_page import PublicBuildLogPage
 from .public_build_result import PublicBuildResult
 from .public_build_result_action import PublicBuildResultAction
 from .public_create_custom_tool_request import PublicCreateCustomToolRequest
-from .public_create_custom_tool_request_gputype import (
-    PublicCreateCustomToolRequestGputype,
-)
-from .public_create_custom_tool_request_memory import (
-    PublicCreateCustomToolRequestMemory,
-)
+from .public_create_custom_tool_request_gputype import PublicCreateCustomToolRequestGputype
+from .public_create_custom_tool_request_memory import PublicCreateCustomToolRequestMemory
 from .public_create_version_request import PublicCreateVersionRequest
 from .public_custom_tool import PublicCustomTool
 from .public_custom_tool_gputype import PublicCustomToolGputype

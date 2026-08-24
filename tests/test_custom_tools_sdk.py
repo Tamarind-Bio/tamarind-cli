@@ -16,6 +16,7 @@ from tamarind.errors import (
     CustomToolNotFoundError,
     CustomToolUploadError,
     StaleCustomToolError,
+    TamarindError,
     ValidationError,
 )
 
@@ -162,6 +163,19 @@ def test_custom_tools_transport_owns_plain_404_classification() -> None:
 
 
 @respx.mock
+def test_generated_response_shape_failures_use_the_sdk_error_boundary() -> None:
+    respx.get(f"{BASE}custom-tools/broken").mock(
+        return_value=httpx.Response(200, json={"name": "broken"})
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(TamarindError, match="generated contract") as raised:
+            client.custom_tools.get("broken")
+
+    assert isinstance(raised.value.__cause__, KeyError)
+
+
+@respx.mock
 def test_custom_tools_not_found_classification_ignores_api_mount_prefix() -> None:
     prefixed_base = f"{BASE}api/"
     respx.get(f"{prefixed_base}custom-tools/example").mock(
@@ -284,6 +298,24 @@ def test_version_pages_preserve_and_accept_cursors() -> None:
         "limit": "1",
         "cursor": "versions-page-1",
     }
+
+
+@respx.mock
+def test_list_operations_preserve_an_explicit_zero_limit() -> None:
+    tools = respx.get(f"{BASE}custom-tools").mock(
+        return_value=httpx.Response(200, json={"items": [], "nextCursor": None})
+    )
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    versions = respx.get(f"{BASE}custom-tools/example/generations/generation-1/versions").mock(
+        return_value=httpx.Response(200, json={"items": [], "nextCursor": None})
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        client.custom_tools.list(limit=0)
+        client.custom_tools.get("example").versions(limit=0)
+
+    assert tools.calls.last.request.url.params["limit"] == "0"
+    assert versions.calls.last.request.url.params["limit"] == "0"
 
 
 @respx.mock

@@ -5,12 +5,8 @@ from typing import Any, TypeVar
 
 from attrs import define as _attrs_define
 
-from ..models.public_create_custom_tool_request_gputype import (
-    PublicCreateCustomToolRequestGputype,
-)
-from ..models.public_create_custom_tool_request_memory import (
-    PublicCreateCustomToolRequestMemory,
-)
+from ..models.public_create_custom_tool_request_gputype import PublicCreateCustomToolRequestGputype
+from ..models.public_create_custom_tool_request_memory import PublicCreateCustomToolRequestMemory
 from ..types import UNSET, Unset
 
 T = TypeVar("T", bound="PublicCreateCustomToolRequest")

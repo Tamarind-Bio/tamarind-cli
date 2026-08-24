@@ -19,7 +19,8 @@ jobs:
       - name: Verify backend provenance and generated client freshness
         run: |
           uv run --extra dev python scripts/check_custom_tools_provenance.py
-          tmp_dir=$(mktemp -d)
+          tmp_dir=$(mktemp -d .custom-tools-generated.XXXXXX)
+          trap 'rm -rf "$tmp_dir"' EXIT
           uv run --extra dev openapi-python-client generate --path openapi/public-v1.json \
             --config openapi/openapi-python-client.json --meta none \
             --output-path "$tmp_dir/generated" --overwrite
