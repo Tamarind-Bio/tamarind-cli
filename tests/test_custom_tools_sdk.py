@@ -330,6 +330,7 @@ def test_build_rejects_archive_larger_than_upload_session_limit(tmp_path: Path) 
     [
         ("uploadId", 1),
         ("uploadUrl", 1),
+        ("uploadUrl", "http://uploads.test/source.zip"),
         ("uploadMethod", "POST"),
         ("uploadHeaders", {"Content-Type": 1}),
         ("expiresAt", 1),

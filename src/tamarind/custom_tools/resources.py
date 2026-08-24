@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from ipaddress import ip_address
 import math
 from pathlib import Path
 import time
@@ -562,6 +563,14 @@ def _upload_session_from_wire(wire: object) -> _UploadSession:
         or max_bytes < 0
     ):
         raise TamarindError("Custom Tools response did not match the generated contract")
+    try:
+        parsed_upload_url = httpx.URL(upload_url)
+    except httpx.InvalidURL:
+        raise TamarindError("Custom Tools response did not match the generated contract") from None
+    if parsed_upload_url.scheme != "https" and not (
+        parsed_upload_url.scheme == "http" and _is_loopback_host(parsed_upload_url.host)
+    ):
+        raise TamarindError("Custom Tools response did not match the generated contract")
     return _UploadSession(
         upload_id=upload_id,
         upload_url=upload_url,
@@ -570,6 +579,15 @@ def _upload_session_from_wire(wire: object) -> _UploadSession:
         expires_at=expires_at,
         max_bytes=max_bytes,
     )
+
+
+def _is_loopback_host(host: str) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        return ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _upload_archive(

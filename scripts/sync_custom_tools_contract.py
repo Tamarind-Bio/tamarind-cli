@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from hashlib import sha256
+from ipaddress import ip_address
 import json
 import os
 from pathlib import Path
@@ -215,6 +216,10 @@ def _default_server_url(document: dict[str, object]) -> str:
         raise SystemExit(
             "Custom Tools contract default server must be a usable absolute HTTP(S) URL"
         )
+    if parsed.scheme == "http" and not _is_loopback_host(parsed.hostname):
+        raise SystemExit(
+            "Custom Tools contract default server must be a usable absolute HTTPS URL except for loopback HTTP development"
+        )
     for segment in parsed.path.split("/"):
         decoded = unquote(segment)
         if (
@@ -226,6 +231,15 @@ def _default_server_url(document: dict[str, object]) -> str:
                 "Custom Tools contract default server must be a usable absolute HTTP(S) URL"
             )
     return server
+
+
+def _is_loopback_host(host: str) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        return ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _contract_metadata(document: dict[str, object]) -> str:
