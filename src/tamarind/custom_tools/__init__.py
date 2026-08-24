@@ -1,6 +1,6 @@
 """Custom Tools Python SDK."""
 
-from tamarind.custom_tools.generated import GpuType, MemorySize
+from tamarind.custom_tools.transport import GpuType, MemorySize
 from tamarind.custom_tools.resources import (
     BuildAction,
     BuildError,

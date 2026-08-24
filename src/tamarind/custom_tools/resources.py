@@ -14,7 +14,7 @@ from typing import Awaitable, BinaryIO, Callable, Generic, Literal, TypeVar, cas
 
 import httpx
 
-from tamarind.custom_tools.generated import (
+from tamarind.custom_tools.transport import (
     GeneratedCustomToolsTransport,
     GpuType,
     MemorySize,

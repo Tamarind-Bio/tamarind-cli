@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from tamarind.config import load_config
-from tamarind.custom_tools.generated import GeneratedCustomToolsTransport
+from tamarind.custom_tools.transport import GeneratedCustomToolsTransport
 from tamarind.custom_tools.resources import CustomTools
 from tamarind.http import DEFAULT_TIMEOUT, HTTPClient
 

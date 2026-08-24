@@ -20,7 +20,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from tamarind.custom_tools.generated import OPENAPI_SERVER_URL
+from tamarind.custom_tools.transport import OPENAPI_SERVER_URL
 
 DEFAULT_API_BASE = OPENAPI_SERVER_URL
 # Discovery (tools/schema/modalities/functions) is served by the catalog

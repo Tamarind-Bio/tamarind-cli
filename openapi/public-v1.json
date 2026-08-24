@@ -21,6 +21,16 @@
         },
         "description": "The addressed resource does not exist, or is not visible to your tenant."
       },
+      "PreconditionFailed": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/PublicProblem"
+            }
+          }
+        },
+        "description": "The supplied current-resource validator is stale."
+      },
       "Unauthorized": {
         "content": {
           "application/problem+json": {
@@ -296,7 +306,7 @@
             "type": "array"
           },
           "generation": {
-            "description": "The current tool generation. Send this value in the `If-Match` header when updating the tool, uploading source, building a version, or canceling a build.",
+            "description": "The immutable generation identity. Current Tool mutations use its quoted `ETag`; generation-owned uploads and Versions carry this value in their URI.",
             "title": "Generation",
             "type": "string"
           },
@@ -1042,12 +1052,12 @@
             }
           },
           {
-            "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
+            "description": "The strong ETag returned by `GET /custom-tools/{name}`, including its double quotes.",
             "in": "header",
             "name": "If-Match",
             "required": true,
             "schema": {
-              "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
+              "description": "The strong ETag returned by `GET /custom-tools/{name}`, including its double quotes.",
               "minLength": 1,
               "title": "If-Match",
               "type": "string"
@@ -1063,6 +1073,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
           },
           "422": {
             "$ref": "#/components/responses/ValidationProblem"
@@ -1105,7 +1118,16 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "The current Tool generation.",
+            "headers": {
+              "ETag": {
+                "description": "Quoted strong validator for PATCH and DELETE.",
+                "schema": {
+                  "example": "\"01JABCDEF0123456789XYZ\"",
+                  "type": "string"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -1145,12 +1167,12 @@
             }
           },
           {
-            "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
+            "description": "The strong ETag returned by `GET /custom-tools/{name}`, including its double quotes.",
             "in": "header",
             "name": "If-Match",
             "required": true,
             "schema": {
-              "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
+              "description": "The strong ETag returned by `GET /custom-tools/{name}`, including its double quotes.",
               "minLength": 1,
               "title": "If-Match",
               "type": "string"
@@ -1184,6 +1206,9 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
           "422": {
             "$ref": "#/components/responses/ValidationProblem"
           },
@@ -1198,7 +1223,7 @@
         "x-doc-group": "Custom Tools"
       }
     },
-    "/custom-tools/{name}/uploads": {
+    "/custom-tools/{name}/generations/{generation}/uploads": {
       "post": {
         "description": "Create a temporary upload for a source archive.\n\nUpload the file to `uploadUrl` using `uploadMethod` and every value in `uploadHeaders`, then use\n`uploadId` to build a version.",
         "operationId": "createCustomToolUpload",
@@ -1218,14 +1243,15 @@
             }
           },
           {
-            "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
-            "in": "header",
-            "name": "If-Match",
+            "description": "The immutable Tool generation identifier.",
+            "in": "path",
+            "name": "generation",
             "required": true,
             "schema": {
-              "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
+              "description": "The immutable Tool generation identifier.",
+              "maxLength": 128,
               "minLength": 1,
-              "title": "If-Match",
+              "title": "Generation",
               "type": "string"
             }
           }
@@ -1261,7 +1287,7 @@
         "x-doc-group": "Custom Tools"
       }
     },
-    "/custom-tools/{name}/versions": {
+    "/custom-tools/{name}/generations/{generation}/versions": {
       "get": {
         "description": "List versions of a custom tool.\n\nFilter by build status. Paginated \u2014 follow `nextCursor` until it is null.",
         "operationId": "listCustomToolVersions",
@@ -1277,6 +1303,19 @@
               "minLength": 3,
               "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
               "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The immutable Tool generation identifier.",
+            "in": "path",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "description": "The immutable Tool generation identifier.",
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Generation",
               "type": "string"
             }
           },
@@ -1330,18 +1369,6 @@
               "description": "Pagination token from the previous response's `nextCursor`.",
               "title": "Cursor"
             }
-          },
-          {
-            "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
-            "in": "header",
-            "name": "If-Match",
-            "required": true,
-            "schema": {
-              "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
-              "minLength": 1,
-              "title": "If-Match",
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -1393,14 +1420,15 @@
             }
           },
           {
-            "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
-            "in": "header",
-            "name": "If-Match",
+            "description": "The immutable Tool generation identifier.",
+            "in": "path",
+            "name": "generation",
             "required": true,
             "schema": {
-              "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
+              "description": "The immutable Tool generation identifier.",
+              "maxLength": 128,
               "minLength": 1,
-              "title": "If-Match",
+              "title": "Generation",
               "type": "string"
             }
           }
@@ -1446,7 +1474,7 @@
         "x-doc-group": "Custom Tools"
       }
     },
-    "/custom-tools/{name}/versions/{version_name}": {
+    "/custom-tools/{name}/generations/{generation}/versions/{version_name}": {
       "get": {
         "description": "Get a version's source, build status, and error details.",
         "operationId": "getCustomToolVersion",
@@ -1466,6 +1494,19 @@
             }
           },
           {
+            "description": "The immutable Tool generation identifier.",
+            "in": "path",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "description": "The immutable Tool generation identifier.",
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Generation",
+              "type": "string"
+            }
+          },
+          {
             "description": "A numbered version handle, such as `v3`.",
             "in": "path",
             "name": "version_name",
@@ -1476,18 +1517,6 @@
               "minLength": 2,
               "pattern": "^v[1-9][0-9]*$",
               "title": "Version Name",
-              "type": "string"
-            }
-          },
-          {
-            "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
-            "in": "header",
-            "name": "If-Match",
-            "required": true,
-            "schema": {
-              "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
-              "minLength": 1,
-              "title": "If-Match",
               "type": "string"
             }
           }
@@ -1523,7 +1552,7 @@
         "x-doc-group": "Custom Tools"
       }
     },
-    "/custom-tools/{name}/versions/{version_name}/cancel": {
+    "/custom-tools/{name}/generations/{generation}/versions/{version_name}/cancel": {
       "post": {
         "description": "Request cancellation of an active build.\n\nCompleted and stopped builds cannot be canceled.",
         "operationId": "cancelCustomToolBuild",
@@ -1543,6 +1572,19 @@
             }
           },
           {
+            "description": "The immutable Tool generation identifier.",
+            "in": "path",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "description": "The immutable Tool generation identifier.",
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Generation",
+              "type": "string"
+            }
+          },
+          {
             "description": "A numbered version handle, such as `v3`.",
             "in": "path",
             "name": "version_name",
@@ -1553,18 +1595,6 @@
               "minLength": 2,
               "pattern": "^v[1-9][0-9]*$",
               "title": "Version Name",
-              "type": "string"
-            }
-          },
-          {
-            "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
-            "in": "header",
-            "name": "If-Match",
-            "required": true,
-            "schema": {
-              "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
-              "minLength": 1,
-              "title": "If-Match",
               "type": "string"
             }
           }
@@ -1600,7 +1630,7 @@
         "x-doc-group": "Custom Tools"
       }
     },
-    "/custom-tools/{name}/versions/{version_name}/logs": {
+    "/custom-tools/{name}/generations/{generation}/versions/{version_name}/logs": {
       "get": {
         "description": "List build log events for a version.\n\nPaginated \u2014 follow `nextCursor` until it is null.",
         "operationId": "listCustomToolBuildLogs",
@@ -1616,6 +1646,19 @@
               "minLength": 3,
               "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
               "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The immutable Tool generation identifier.",
+            "in": "path",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "description": "The immutable Tool generation identifier.",
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Generation",
               "type": "string"
             }
           },
@@ -1651,18 +1694,6 @@
               "description": "Pagination token from the previous response's `nextCursor`.",
               "title": "Cursor"
             }
-          },
-          {
-            "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
-            "in": "header",
-            "name": "If-Match",
-            "required": true,
-            "schema": {
-              "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
-              "minLength": 1,
-              "title": "If-Match",
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -1696,7 +1727,7 @@
         "x-doc-group": "Custom Tools"
       }
     },
-    "/custom-tools/{name}/versions/{version_name}/publish": {
+    "/custom-tools/{name}/generations/{generation}/versions/{version_name}/publish": {
       "post": {
         "description": "Make a completed version the tool's published runtime version.\n\nThis also supports an explicit rollback to an older completed version.",
         "operationId": "publishCustomToolVersion",
@@ -1716,6 +1747,19 @@
             }
           },
           {
+            "description": "The immutable Tool generation identifier.",
+            "in": "path",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "description": "The immutable Tool generation identifier.",
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Generation",
+              "type": "string"
+            }
+          },
+          {
             "description": "A numbered version handle, such as `v3`.",
             "in": "path",
             "name": "version_name",
@@ -1726,18 +1770,6 @@
               "minLength": 2,
               "pattern": "^v[1-9][0-9]*$",
               "title": "Version Name",
-              "type": "string"
-            }
-          },
-          {
-            "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
-            "in": "header",
-            "name": "If-Match",
-            "required": true,
-            "schema": {
-              "description": "The `generation` returned by `GET /custom-tools/{name}`. Send it without quotes.",
-              "minLength": 1,
-              "title": "If-Match",
               "type": "string"
             }
           }

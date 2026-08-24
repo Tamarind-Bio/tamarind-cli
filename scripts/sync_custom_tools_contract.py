@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vendor a backend-produced contract, record provenance, and regenerate transport code."""
+"""Vendor the backend-owned slice and regenerate with the pinned mature generator."""
 
 from __future__ import annotations
 
@@ -7,17 +7,12 @@ import argparse
 from hashlib import sha256
 import json
 from pathlib import Path
+import shutil
+import subprocess
 from tempfile import TemporaryDirectory
 
-from generate_custom_tools_transport import write_generated_transport
-from tamarind_codegen.custom_tools.json_loader import load_json_document
-from tamarind_codegen.custom_tools.profile import validate_profile
-from tamarind_codegen.custom_tools.project import project_custom_tools
-from tamarind_codegen.custom_tools.provenance import (
-    SOURCE_PATH,
-    validate_source_provenance,
-    verify_source_checkout,
-)
+EXPECTED_REPOSITORY = "Tamarind-Bio/tamarind-website"
+EXPECTED_PATH = "backend/app/public_api/openapi/custom-tools-v1.generated.json"
 
 
 def main() -> None:
@@ -26,40 +21,30 @@ def main() -> None:
     parser.add_argument("--source-checkout", required=True, type=Path)
     parser.add_argument("--source-repository", required=True)
     parser.add_argument("--source-commit", required=True)
-    parser.add_argument(
-        "--source-path",
-        default=SOURCE_PATH,
-    )
+    parser.add_argument("--source-path", default=EXPECTED_PATH)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     args = parser.parse_args()
-
-    try:
-        validate_source_provenance(
-            args.source_repository,
-            args.source_commit,
-            args.source_path,
-        )
-    except ValueError as exc:
-        parser.error(str(exc))
-
+    _validate_provenance(args.source_repository, args.source_commit, args.source_path)
+    checkout_file = args.source_checkout / args.source_path
     raw = args.source.read_bytes()
-    try:
-        verify_source_checkout(args.source_checkout, args.source_commit, raw)
-    except ValueError as exc:
-        parser.error(str(exc))
-    document = load_json_document(raw)
-    projection = project_custom_tools(document)
-    validate_profile(projection)
-    projected = (json.dumps(projection, indent=2, sort_keys=True) + "\n").encode()
+    if checkout_file.read_bytes() != raw:
+        parser.error("source bytes do not match the declared producer checkout")
+    document = json.loads(raw)
+    if not document.get("paths") or not all(
+        path.startswith("/custom-tools") for path in document["paths"]
+    ):
+        parser.error("source is not the dedicated Custom Tools artifact")
 
-    spec_path = args.root / "openapi" / "public-v1.json"
-    lock_path = args.root / "openapi" / "public-v1.lock.json"
-    generated_path = args.root / "src" / "tamarind" / "custom_tools" / "generated.py"
-    lock = (
+    spec_path = args.root / "openapi/public-v1.json"
+    lock_path = args.root / "openapi/public-v1.lock.json"
+    target = args.root / "src/tamarind/custom_tools/_generated"
+    spec_path.write_bytes(raw)
+    lock_path.write_text(
         json.dumps(
             {
-                "artifactSha256": sha256(projected).hexdigest(),
-                "schemaVersion": 1,
+                "artifactSha256": sha256(raw).hexdigest(),
+                "generator": "openapi-python-client==0.28.4",
+                "schemaVersion": 2,
                 "sourceCommit": args.source_commit,
                 "sourcePath": args.source_path,
                 "sourceRepository": args.source_repository,
@@ -69,16 +54,35 @@ def main() -> None:
         )
         + "\n"
     )
-    with TemporaryDirectory() as staging_dir:
-        staged_generated = Path(staging_dir) / "generated.py"
-        write_generated_transport(projection, staged_generated)
-        generated = staged_generated.read_text(encoding="utf-8")
+    with TemporaryDirectory() as directory:
+        generated = Path(directory) / "generated"
+        subprocess.run(
+            [
+                "openapi-python-client",
+                "generate",
+                "--path",
+                str(spec_path),
+                "--config",
+                str(args.root / "openapi/openapi-python-client.json"),
+                "--meta",
+                "none",
+                "--output-path",
+                str(generated),
+                "--overwrite",
+            ],
+            check=True,
+            cwd=args.root,
+        )
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(generated, target, ignore=shutil.ignore_patterns(".ruff_cache"))
 
-    spec_path.parent.mkdir(parents=True, exist_ok=True)
-    generated_path.parent.mkdir(parents=True, exist_ok=True)
-    spec_path.write_bytes(projected)
-    lock_path.write_text(lock, encoding="utf-8")
-    generated_path.write_text(generated, encoding="utf-8")
+
+def _validate_provenance(repository: str, commit: str, path: str) -> None:
+    if repository != EXPECTED_REPOSITORY or path != EXPECTED_PATH:
+        raise SystemExit("unsupported Custom Tools producer")
+    if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit):
+        raise SystemExit("source commit must be a full lowercase Git SHA")
 
 
 if __name__ == "__main__":

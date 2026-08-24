@@ -118,7 +118,7 @@ def test_create_list_and_update_wrap_public_routes() -> None:
     assert page.next_cursor == "tools-page-2"
     assert listed_route.calls.last.request.url.params["limit"] == "1"
     assert json.loads(update.calls.last.request.content) == {"description": "updated"}
-    assert update.calls.last.request.headers["If-Match"] == "generation-1"
+    assert update.calls.last.request.headers["If-Match"] == '"generation-1"'
     assert changed.description == "updated"
 
 
@@ -130,7 +130,7 @@ def test_delete_uses_the_tool_generation() -> None:
     with Tamarind(api_key="key", api_base=BASE) as client:
         client.custom_tools.get("example").delete()
 
-    assert delete.calls.last.request.headers["If-Match"] == "generation-1"
+    assert delete.calls.last.request.headers["If-Match"] == '"generation-1"'
 
 
 @respx.mock
@@ -167,7 +167,7 @@ def test_custom_tools_not_found_classification_ignores_api_mount_prefix() -> Non
     respx.get(f"{prefixed_base}custom-tools/example").mock(
         return_value=httpx.Response(200, json=_tool())
     )
-    respx.get(f"{prefixed_base}custom-tools/example/versions/v1").mock(
+    respx.get(f"{prefixed_base}custom-tools/example/generations/generation-1/versions/v1").mock(
         return_value=httpx.Response(404, json={"detail": "Not Found"})
     )
 
@@ -196,7 +196,7 @@ def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> 
     _source(tmp_path)
     digest = _archive_digest(tmp_path)
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
-    create_upload = respx.post(f"{BASE}custom-tools/example/uploads").mock(
+    respx.post(f"{BASE}custom-tools/example/generations/generation-1/uploads").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -210,7 +210,7 @@ def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> 
         )
     )
     upload = respx.put(UPLOAD).mock(return_value=httpx.Response(200))
-    build = respx.post(f"{BASE}custom-tools/example/versions").mock(
+    build = respx.post(f"{BASE}custom-tools/example/generations/generation-1/versions").mock(
         return_value=httpx.Response(
             202,
             json={"action": "reuse_image", "version": _version(source_digest=digest)},
@@ -225,8 +225,6 @@ def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> 
     assert upload.calls.last.request.headers["Content-Length"] == str(
         len(upload.calls.last.request.content)
     )
-    assert create_upload.calls.last.request.headers["If-Match"] == "generation-1"
-    assert build.calls.last.request.headers["If-Match"] == "generation-1"
     assert json.loads(build.calls.last.request.content) == {
         "uploadId": "upload-1",
         "expectedSourceDigest": digest,
@@ -240,7 +238,7 @@ def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> 
 def test_build_rejects_archive_larger_than_upload_session_limit(tmp_path: Path) -> None:
     _source(tmp_path)
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
-    respx.post(f"{BASE}custom-tools/example/uploads").mock(
+    respx.post(f"{BASE}custom-tools/example/generations/generation-1/uploads").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -265,7 +263,7 @@ def test_build_rejects_archive_larger_than_upload_session_limit(tmp_path: Path) 
 @respx.mock
 def test_version_pages_preserve_and_accept_cursors() -> None:
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
-    versions = respx.get(f"{BASE}custom-tools/example/versions").mock(
+    versions = respx.get(f"{BASE}custom-tools/example/generations/generation-1/versions").mock(
         return_value=httpx.Response(
             200,
             json={"items": [_version()], "nextCursor": "versions-page-2"},
@@ -286,14 +284,13 @@ def test_version_pages_preserve_and_accept_cursors() -> None:
         "limit": "1",
         "cursor": "versions-page-1",
     }
-    assert versions.calls.last.request.headers["If-Match"] == "generation-1"
 
 
 @respx.mock
 def test_version_preserves_wire_timestamps_and_stable_error_code() -> None:
     failed = _version(status="Stopped", error="Docker build failed")
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
-    get_version = respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+    respx.get(f"{BASE}custom-tools/example/generations/generation-1/versions/v1").mock(
         return_value=httpx.Response(200, json=failed)
     )
 
@@ -306,13 +303,12 @@ def test_version_preserves_wire_timestamps_and_stable_error_code() -> None:
     assert version.error is not None
     assert version.error.code == "build_failed"
     assert version.error.message == "Docker build failed"
-    assert get_version.calls.last.request.headers["If-Match"] == "generation-1"
 
 
 @respx.mock
 def test_version_preserves_the_server_terminal_marker() -> None:
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
-    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+    respx.get(f"{BASE}custom-tools/example/generations/generation-1/versions/v1").mock(
         return_value=httpx.Response(200, json=_version(status="Running", terminal=True))
     )
 
@@ -331,7 +327,7 @@ def test_version_does_not_interpret_wire_timestamps() -> None:
         "completedAt": "completed by server",
     }
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
-    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+    respx.get(f"{BASE}custom-tools/example/generations/generation-1/versions/v1").mock(
         return_value=httpx.Response(200, json=wire)
     )
 
@@ -415,7 +411,7 @@ def test_build_constructs_archive_before_creating_upload_session(
 def test_build_fails_closed_when_generation_changes(tmp_path: Path) -> None:
     _source(tmp_path)
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
-    respx.post(f"{BASE}custom-tools/example/uploads").mock(
+    respx.post(f"{BASE}custom-tools/example/generations/generation-1/uploads").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -429,7 +425,7 @@ def test_build_fails_closed_when_generation_changes(tmp_path: Path) -> None:
         )
     )
     respx.put(UPLOAD).mock(return_value=httpx.Response(200))
-    build = respx.post(f"{BASE}custom-tools/example/versions").mock(
+    respx.post(f"{BASE}custom-tools/example/generations/generation-1/versions").mock(
         return_value=httpx.Response(
             409,
             json={
@@ -445,18 +441,16 @@ def test_build_fails_closed_when_generation_changes(tmp_path: Path) -> None:
         with pytest.raises(StaleCustomToolError, match="refresh and retry"):
             client.custom_tools.get("example").build(tmp_path)
 
-    assert build.calls.last.request.headers["If-Match"] == "generation-1"
-
 
 @respx.mock
 def test_version_logs_cancel_and_publish_use_version_routes() -> None:
     get_tool = respx.get(f"{BASE}custom-tools/example").mock(
         return_value=httpx.Response(200, json=_tool())
     )
-    get_version = respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+    respx.get(f"{BASE}custom-tools/example/generations/generation-1/versions/v1").mock(
         return_value=httpx.Response(200, json=_version())
     )
-    logs = respx.get(f"{BASE}custom-tools/example/versions/v1/logs").mock(
+    respx.get(f"{BASE}custom-tools/example/generations/generation-1/versions/v1/logs").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -467,10 +461,10 @@ def test_version_logs_cancel_and_publish_use_version_routes() -> None:
             },
         )
     )
-    cancel = respx.post(f"{BASE}custom-tools/example/versions/v1/cancel").mock(
+    respx.post(f"{BASE}custom-tools/example/generations/generation-1/versions/v1/cancel").mock(
         return_value=httpx.Response(200, json=_version(status="Stopped", error="cancelled by user"))
     )
-    publish = respx.post(f"{BASE}custom-tools/example/versions/v1/publish").mock(
+    respx.post(f"{BASE}custom-tools/example/generations/generation-1/versions/v1/publish").mock(
         return_value=httpx.Response(
             200, json={**_tool(source=True), "published": True, "defaultVersion": "v1"}
         )
@@ -482,17 +476,13 @@ def test_version_logs_cancel_and_publish_use_version_routes() -> None:
         assert version.cancel().status == "Stopped"
         assert version.publish().default_version == "v1"
 
-    assert cancel.calls.last.request.headers["If-Match"] == "generation-1"
-    assert publish.calls.last.request.headers["If-Match"] == "generation-1"
-    assert get_version.calls.last.request.headers["If-Match"] == "generation-1"
-    assert logs.calls.last.request.headers["If-Match"] == "generation-1"
     assert get_tool.call_count == 1
 
 
 @respx.mock
 def test_terminal_failure_raises_typed_error() -> None:
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
-    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+    respx.get(f"{BASE}custom-tools/example/generations/generation-1/versions/v1").mock(
         return_value=httpx.Response(
             200, json=_version(status="Stopped", error="Docker build failed")
         )
@@ -507,7 +497,7 @@ def test_terminal_failure_raises_typed_error() -> None:
 @respx.mock
 def test_non_complete_terminal_version_raises_typed_error() -> None:
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
-    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+    respx.get(f"{BASE}custom-tools/example/generations/generation-1/versions/v1").mock(
         return_value=httpx.Response(200, json=_version(status="Running", terminal=True))
     )
 
