@@ -586,7 +586,6 @@ def _tool_from_wire(collection: CustomTools, wire: PublicCustomTool) -> CustomTo
 def _version_from_wire(
     collection: CustomTools, tool_name: str, tool_generation: str, wire: PublicVersion
 ) -> Version:
-    error = wire["error"]
     return Version(
         name=wire["name"],
         source_revision=wire["sourceRevision"],
@@ -597,7 +596,7 @@ def _version_from_wire(
         created_at=wire["createdAt"],
         started_at=wire["startedAt"],
         completed_at=wire["completedAt"],
-        error=BuildError(error["code"], error["message"]) if error else None,
+        error=_build_error_from_wire(wire["error"]),
         tool_name=tool_name,
         tool_generation=tool_generation,
         _collection=collection,
@@ -617,13 +616,24 @@ def _build_result_from_wire(
 
 
 def _log_page_from_wire(wire: PublicBuildLogPage) -> BuildLogPage:
-    error = wire["error"]
     return BuildLogPage(
         items=tuple(BuildEvent(item["message"], item["timestamp"]) for item in wire["items"]),
         next_cursor=wire["nextCursor"],
         status=PublicVersionStatus(wire["status"]),
-        error=BuildError(error["code"], error["message"]) if error else None,
+        error=_build_error_from_wire(wire["error"]),
     )
+
+
+def _build_error_from_wire(error: object) -> BuildError | None:
+    if error is None:
+        return None
+    if not isinstance(error, dict):
+        raise TamarindError("Custom Tools response did not match the generated contract")
+    code = error.get("code")
+    message = error.get("message")
+    if not isinstance(code, str) or not isinstance(message, str):
+        raise TamarindError("Custom Tools response did not match the generated contract")
+    return BuildError(code, message)
 
 
 def _require_success(version: Version) -> Version:

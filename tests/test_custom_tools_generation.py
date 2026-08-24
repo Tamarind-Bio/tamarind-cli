@@ -64,6 +64,13 @@ def test_generator_is_exactly_pinned() -> None:
     assert lock["generator"] == "openapi-python-client==0.28.4"
 
 
+def test_sync_rejects_duplicate_json_members() -> None:
+    from sync_custom_tools_contract import _load_contract
+
+    with pytest.raises(ValueError, match="duplicate JSON object member 'paths'"):
+        _load_contract(b'{"paths": {}, "paths": {}}')
+
+
 def test_sync_provenance_reads_the_declared_git_object(tmp_path: Path) -> None:
     from sync_custom_tools_contract import EXPECTED_PATH, _verify_committed_source
 

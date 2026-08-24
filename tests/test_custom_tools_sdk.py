@@ -176,6 +176,20 @@ def test_generated_response_shape_failures_use_the_sdk_error_boundary() -> None:
 
 
 @respx.mock
+def test_malformed_nested_build_errors_use_the_sdk_error_boundary() -> None:
+    malformed = _version()
+    malformed["error"] = "not-an-error-object"
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/generations/generation-1/versions/v1").mock(
+        return_value=httpx.Response(200, json=malformed)
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(TamarindError, match="generated contract"):
+            client.custom_tools.get("example").get_version("v1")
+
+
+@respx.mock
 def test_custom_tools_not_found_classification_ignores_api_mount_prefix() -> None:
     prefixed_base = f"{BASE}api/"
     respx.get(f"{prefixed_base}custom-tools/example").mock(

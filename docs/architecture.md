@@ -40,21 +40,23 @@ detail that can change without any client change and without drift.
 ### 3. Custom Tools surface — source of truth: the public OpenAPI artifact
 
 Custom Tool creation, source upload, build, Versions, logs, and cancellation
-are generated from the website backend's public
-OpenAPI artifact through a deliberately small compiler pipeline:
+are generated from the website backend's dedicated public OpenAPI artifact:
 
 ```text
-complete backend OpenAPI -> pinned Custom Tools projection -> Tamarind profile validation -> normalized IR -> Python transport
+backend-owned custom-tools-v1.generated.json
+  -> Git-object provenance verification
+  -> vendored spec + lock
+  -> openapi-python-client==0.28.4
+  -> generated models/endpoints
+  -> thin Tamarind transport and resource adapters
 ```
 
-The profile and ownership boundaries are documented in
-[`custom-tools-openapi-profile.md`](custom-tools-openapi-profile.md). The
-language-neutral IR prevents the Python emitter from accumulating OpenAPI
-parsing, reference-resolution, and compatibility policy.
-
-The CLI vendors only the deterministic `custom-tools` tag projection with immutable
-provenance. The sync boundary computes the referenced component closure once; CI validates
-and regenerates the typed transport from that pinned projection and rejects drift.
+The Website owns the projection and its referenced-component closure. The CLI sync
+verifies the exact producer repository, commit, path, and bytes before atomically
+installing the spec, provenance lock, generated server metadata, and generated package.
+CI regenerates with the pinned mature generator and rejects drift. The handwritten
+layer contains only HTTP/error normalization and ergonomic resource composition; it
+does not parse OpenAPI or maintain a second schema IR/compiler.
 
 The SDK owns archive-local concerns that only the client can decide safely:
 deterministic ZIP construction, symlink and junction rejection, upload limits,

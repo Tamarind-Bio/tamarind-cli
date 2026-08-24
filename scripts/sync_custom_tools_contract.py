@@ -11,6 +11,7 @@ from pathlib import Path
 import shutil
 import subprocess
 from tempfile import TemporaryDirectory
+from typing import NoReturn
 
 EXPECTED_REPOSITORY = "Tamarind-Bio/tamarind-website"
 EXPECTED_PATH = "backend/app/public_api/openapi/custom-tools-v1.generated.json"
@@ -28,9 +29,10 @@ def main() -> None:
     _validate_provenance(args.source_repository, args.source_commit, args.source_path)
     raw = args.source.read_bytes()
     _verify_committed_source(args.source_checkout, args.source_commit, args.source_path, raw)
-    document = json.loads(raw)
-    if not document.get("paths") or not all(
-        path.startswith("/custom-tools") for path in document["paths"]
+    document = _load_contract(raw)
+    paths = document.get("paths")
+    if not isinstance(paths, dict) or not paths or not all(
+        isinstance(path, str) and path.startswith("/custom-tools") for path in paths
     ):
         parser.error("source is not the dedicated Custom Tools artifact")
 
@@ -97,6 +99,30 @@ def _validate_provenance(repository: str, commit: str, path: str) -> None:
         raise SystemExit("unsupported Custom Tools producer")
     if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit):
         raise SystemExit("source commit must be a full lowercase Git SHA")
+
+
+def _reject_json_constant(value: str) -> NoReturn:
+    raise ValueError(f"non-standard JSON constant {value!r}")
+
+
+def _object_without_duplicate_members(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for name, member in pairs:
+        if name in value:
+            raise ValueError(f"duplicate JSON object member {name!r}")
+        value[name] = member
+    return value
+
+
+def _load_contract(raw: bytes) -> dict[str, object]:
+    parsed = json.loads(
+        raw,
+        parse_constant=_reject_json_constant,
+        object_pairs_hook=_object_without_duplicate_members,
+    )
+    if not isinstance(parsed, dict):
+        raise ValueError("Custom Tools contract must be a JSON object")
+    return parsed
 
 
 def _verify_committed_source(checkout: Path, commit: str, path: str, raw: bytes) -> None:
