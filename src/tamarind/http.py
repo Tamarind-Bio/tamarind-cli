@@ -16,8 +16,16 @@ from .errors import (
     APIError,
     AuthError,
     BudgetError,
+    CustomToolBuildInProgressError,
+    CustomToolBuildNotInProgressError,
+    CustomToolExistsError,
+    CustomToolNotFoundError,
+    CustomToolNotDeployableError,
+    CustomToolUploadError,
+    CustomToolValidationError,
     NotFoundError,
     RateLimitError,
+    StaleCustomToolError,
     TamarindError,
     ValidationError,
 )
@@ -38,6 +46,7 @@ class HTTPClient:
     ):
         self.base_url = base_url
         self.api_key = api_key
+        self._timeout = timeout
         headers = {
             "Accept": "application/json",
             # Brotli is still decoded transparently by httpx; we just don't want
@@ -47,6 +56,7 @@ class HTTPClient:
         }
         if api_key:
             headers["x-api-key"] = api_key
+        self._headers = headers
         self._client = httpx.Client(base_url=base_url, headers=headers, timeout=timeout)
 
     # -- lifecycle ---------------------------------------------------------
@@ -66,6 +76,7 @@ class HTTPClient:
         path: str,
         *,
         params: dict[str, Any] | None = None,
+        headers: dict[str, str | None] | None = None,
         json: Any | None = None,
         timeout: float | None = None,
     ) -> httpx.Response:
@@ -74,15 +85,14 @@ class HTTPClient:
                 "No API key configured. Set TAMARIND_API_KEY, pass --api-key, "
                 "or run `tamarind auth login`."
             )
-        # Drop None-valued query params so we don't send `?x=None`.
-        clean_params = (
-            {k: v for k, v in params.items() if v is not None} if params else None
-        )
+        clean_params = _without_none_values(params)
+        clean_headers = _without_none_values(headers)
         try:
             resp = self._client.request(
                 method,
                 path.lstrip("/"),
                 params=clean_params,
+                headers=clean_headers,
                 json=json,
                 timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
             )
@@ -91,7 +101,50 @@ class HTTPClient:
 
         if resp.is_success:
             return resp
-        raise _map_error(resp)
+        raise _map_error(resp, request_path=path)
+
+    async def request_async(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str | None] | None = None,
+        json: Any | None = None,
+        timeout: float | None = None,
+    ) -> httpx.Response:
+        """Perform one cancellable request for a wall-clock-bounded operation.
+
+        The client is scoped to the coroutine so cancellation closes its socket
+        before returning. Synchronous calls keep their pooled client above.
+        """
+        if not self.api_key:
+            raise AuthError(
+                "No API key configured. Set TAMARIND_API_KEY, pass --api-key, "
+                "or run `tamarind auth login`."
+            )
+        clean_params = _without_none_values(params)
+        clean_headers = _without_none_values(headers)
+        try:
+            async with httpx.AsyncClient(
+                base_url=self.base_url,
+                headers=self._headers,
+                timeout=self._timeout,
+            ) as client:
+                resp = await client.request(
+                    method,
+                    path.lstrip("/"),
+                    params=clean_params,
+                    headers=clean_headers,
+                    json=json,
+                    timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
+                )
+        except httpx.HTTPError as exc:
+            raise TamarindError(f"Network error talking to {self.base_url}: {exc}") from exc
+
+        if resp.is_success:
+            return resp
+        raise _map_error(resp, request_path=path)
 
     def get_json(
         self,
@@ -122,13 +175,26 @@ def _parse_json(resp: httpx.Response) -> Any:
         return text
 
 
-def _extract_message(resp: httpx.Response) -> str:
+def _without_none_values(values: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Omit absent optional wire values before handing them to HTTPX."""
+    if not values:
+        return None
+    retained = {key: value for key, value in values.items() if value is not None}
+    return retained or None
+
+
+def _error_body(resp: httpx.Response) -> tuple[object | None, bool]:
     try:
-        body = resp.json()
+        return resp.json(), True
     except ValueError:
+        return None, False
+
+
+def _extract_message(resp: httpx.Response, body: object | None, *, is_json: bool) -> str:
+    if not is_json:
         return resp.text.strip() or resp.reason_phrase or f"HTTP {resp.status_code}"
     if isinstance(body, dict):
-        for key in ("error", "message", "detail"):
+        for key in ("error", "message", "detail", "title"):
             if body.get(key):
                 return str(body[key])
     if isinstance(body, str):
@@ -136,9 +202,37 @@ def _extract_message(resp: httpx.Response) -> str:
     return resp.reason_phrase or f"HTTP {resp.status_code}"
 
 
-def _map_error(resp: httpx.Response) -> TamarindError:
-    msg = _extract_message(resp)
+def _map_error(resp: httpx.Response, *, request_path: str) -> TamarindError:
+    body, is_json = _error_body(resp)
+    detail = body if is_json else None
+    msg = _extract_message(resp, body, is_json=is_json)
     code = resp.status_code
+    problem_code = _problem_code(detail)
+    relative_path = "/" + request_path.lstrip("/")
+    not_found_error = (
+        CustomToolNotFoundError
+        if relative_path == "/custom-tools" or relative_path.startswith("/custom-tools/")
+        else NotFoundError
+    )
+    if problem_code == "custom_tool_not_found" or problem_code == "custom_tool_version_not_found":
+        return CustomToolNotFoundError(msg, detail=detail)
+    if problem_code == "custom_tool_name_taken":
+        return CustomToolExistsError(msg, detail=detail)
+    if problem_code == "custom_tool_not_deployable":
+        return CustomToolNotDeployableError(msg, detail=detail)
+    if problem_code == "invalid_custom_tool_config" or problem_code == "invalid_custom_tool_source":
+        return CustomToolValidationError(msg, detail=detail)
+    if problem_code in {"custom_tool_generation_mismatch", "custom_tool_source_changed"}:
+        return StaleCustomToolError(msg, detail=detail)
+    if (
+        problem_code == "custom_tool_source_digest_mismatch"
+        or problem_code == "custom_tool_upload_not_found"
+    ):
+        return CustomToolUploadError(msg, detail=detail)
+    if problem_code == "custom_tool_build_in_progress":
+        return CustomToolBuildInProgressError(msg, detail=detail)
+    if problem_code == "custom_tool_build_not_cancellable":
+        return CustomToolBuildNotInProgressError(msg, detail=detail)
     ml = msg.lower()
     auth_ish = "api key" in ml or "api-key" in ml or "apikey" in ml or "unauthorized" in ml
     resource = (
@@ -157,27 +251,34 @@ def _map_error(resp: httpx.Response) -> TamarindError:
     )
     notfound_ish = "not found" in ml or "does not exist" in ml or "no such" in ml
     if code == 401:
-        return AuthError(f"Unauthorized: {msg}")
+        return AuthError(f"Unauthorized: {msg}", detail=detail)
     if code == 403:
         if auth_ish:
-            return AuthError(f"Access denied: {msg}")
+            return AuthError(f"Access denied: {msg}", detail=detail)
         if budget_ish:
-            return BudgetError(f"Budget or quota rejected the request: {msg}")
-        return APIError(f"Access denied: {msg}", status_code=code)
+            return BudgetError(f"Budget or quota rejected the request: {msg}", detail=detail)
+        return APIError(f"Access denied: {msg}", status_code=code, detail=detail)
     if code == 404:
-        return NotFoundError(msg)
+        return not_found_error(msg, detail=detail)
     if code == 400:
         # The API uses 400 for several distinct failures; classify by message so
         # exit codes are consistent: bad/missing key -> auth (3), missing job/file
         # -> not-found (4), otherwise a genuine validation error (5).
         if auth_ish:
-            return AuthError(f"Unauthorized: {msg}")
+            return AuthError(f"Unauthorized: {msg}", detail=detail)
         if notfound_ish:
-            return NotFoundError(msg)
-        return ValidationError(msg)
+            return not_found_error(msg, detail=detail)
+        return ValidationError(msg, detail=detail)
     if code == 429:
-        return RateLimitError(f"Rate limited: {msg}")
-    return APIError(msg, status_code=code)
+        return RateLimitError(f"Rate limited: {msg}", detail=detail)
+    if code == 422:
+        return ValidationError(msg, detail=detail)
+    return APIError(msg, status_code=code, detail=detail)
+
+
+def _problem_code(body: object | None) -> str | None:
+    value = body.get("code") if isinstance(body, dict) else None
+    return str(value) if value else None
 
 
 def _version() -> str:

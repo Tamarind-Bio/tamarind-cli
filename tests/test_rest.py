@@ -9,8 +9,16 @@ from tamarind.errors import (
     APIError,
     AuthError,
     BudgetError,
+    CustomToolBuildInProgressError,
+    CustomToolBuildNotInProgressError,
+    CustomToolExistsError,
+    CustomToolNotFoundError,
+    CustomToolNotDeployableError,
+    CustomToolUploadError,
+    CustomToolValidationError,
     NotFoundError,
     RateLimitError,
+    StaleCustomToolError,
     ValidationError,
 )
 from tamarind.http import HTTPClient
@@ -25,7 +33,9 @@ def client(base=BASE):
 
 @respx.mock
 def test_submit_job_body():
-    route = respx.post(f"{BASE}submit-job").mock(return_value=httpx.Response(200, json={"ok": True}))
+    route = respx.post(f"{BASE}submit-job").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
     rest.submit_job(client(), job_name="run1", job_type="boltz", settings={"sequence": "ABC"})
     body = json.loads(route.calls.last.request.content)
     # jobSource="CLI" is stamped on every submission for usage tracking.
@@ -40,7 +50,9 @@ def test_submit_job_body():
 
 @respx.mock
 def test_submit_batch_body():
-    route = respx.post(f"{BASE}submit-batch").mock(return_value=httpx.Response(200, json={"ok": True}))
+    route = respx.post(f"{BASE}submit-batch").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
     rest.submit_batch(
         client(),
         batch_name="b1",
@@ -56,7 +68,9 @@ def test_submit_batch_body():
 @respx.mock
 def test_validate_job_not_tagged():
     # Validation never creates a job, so it carries no jobSource.
-    route = respx.post(f"{BASE}validate-job").mock(return_value=httpx.Response(200, json={"valid": True}))
+    route = respx.post(f"{BASE}validate-job").mock(
+        return_value=httpx.Response(200, json={"valid": True})
+    )
     rest.validate_job(client(), job_name="x", job_type="boltz", settings={})
     assert "jobSource" not in json.loads(route.calls.last.request.content)
 
@@ -71,6 +85,21 @@ def test_get_jobs_param_handling():
     # None and False-as-absent params are dropped, not sent as "None"/"false"
     assert "jobName" not in params
     assert "includeSubjobs" not in params
+
+
+@respx.mock
+def test_http_client_omits_absent_optional_headers():
+    route = respx.get(f"{BASE}headers").mock(return_value=httpx.Response(200, json={}))
+
+    client().request(
+        "GET",
+        "headers",
+        headers={"X-Required": "present", "X-Optional": None},
+    )
+
+    headers = route.calls.last.request.headers
+    assert headers["X-Required"] == "present"
+    assert "X-Optional" not in headers
 
 
 @respx.mock
@@ -92,7 +121,9 @@ def test_result_returns_presigned_string():
 
 @respx.mock
 def test_delete_job_uses_delete_verb():
-    route = respx.delete(f"{BASE}delete-job").mock(return_value=httpx.Response(200, json={"message": "ok"}))
+    route = respx.delete(f"{BASE}delete-job").mock(
+        return_value=httpx.Response(200, json={"message": "ok"})
+    )
     rest.delete_job(client(), job_name="x")
     assert route.calls.last.request.method == "DELETE"
     assert json.loads(route.calls.last.request.content) == {"jobName": "x"}
@@ -109,7 +140,13 @@ def test_delete_job_tolerates_string_response():
 @respx.mock
 @pytest.mark.parametrize(
     "status,exc",
-    [(401, AuthError), (403, APIError), (404, NotFoundError), (400, ValidationError), (429, RateLimitError)],
+    [
+        (401, AuthError),
+        (403, APIError),
+        (404, NotFoundError),
+        (400, ValidationError),
+        (429, RateLimitError),
+    ],
 )
 def test_error_mapping(status, exc):
     respx.get(f"{BASE}jobs").mock(return_value=httpx.Response(status, json={"error": "boom"}))
@@ -118,13 +155,79 @@ def test_error_mapping(status, exc):
 
 
 @respx.mock
+def test_422_preserves_structured_validation_problem() -> None:
+    problem = {
+        "code": "validation_error",
+        "message": "Request validation failed",
+        "errors": [{"field": "name", "message": "invalid"}],
+    }
+    respx.get(f"{BASE}custom-tools").mock(return_value=httpx.Response(422, json=problem))
+
+    with pytest.raises(ValidationError) as raised:
+        client().get_json("custom-tools")
+
+    assert raised.value.detail == problem
+
+
+@respx.mock
+def test_422_uses_problem_title_when_detail_is_absent() -> None:
+    problem = {
+        "type": "about:blank",
+        "title": "Request validation failed",
+        "status": 422,
+        "detail": None,
+    }
+    respx.get(f"{BASE}custom-tools").mock(return_value=httpx.Response(422, json=problem))
+
+    with pytest.raises(ValidationError, match="Request validation failed") as raised:
+        client().get_json("custom-tools")
+
+    assert raised.value.detail == problem
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "code,exc",
+    [
+        ("custom_tool_not_found", CustomToolNotFoundError),
+        ("custom_tool_version_not_found", CustomToolNotFoundError),
+        ("custom_tool_name_taken", CustomToolExistsError),
+        ("custom_tool_not_deployable", CustomToolNotDeployableError),
+        ("invalid_custom_tool_config", CustomToolValidationError),
+        ("invalid_custom_tool_source", CustomToolValidationError),
+        ("custom_tool_generation_mismatch", StaleCustomToolError),
+        ("custom_tool_source_changed", StaleCustomToolError),
+        ("custom_tool_source_digest_mismatch", CustomToolUploadError),
+        ("custom_tool_upload_not_found", CustomToolUploadError),
+        ("custom_tool_build_in_progress", CustomToolBuildInProgressError),
+        ("custom_tool_build_not_cancellable", CustomToolBuildNotInProgressError),
+    ],
+)
+def test_custom_tool_problem_codes_have_stable_error_types(code, exc) -> None:
+    problem = {
+        "type": f"https://app.tamarind.bio/errors/{code}",
+        "title": "Custom Tool request failed",
+        "status": 409,
+        "code": code,
+        "detail": "actionable detail",
+        "errors": [{"field": "config.json", "message": "specific diagnosis"}],
+    }
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(409, json=problem))
+
+    with pytest.raises(exc, match="actionable detail") as raised:
+        client().get_json("custom-tools/example")
+
+    assert raised.value.detail == problem
+
+
+@respx.mock
 @pytest.mark.parametrize(
     "message,exc",
     [
-        ("Missing or incorrect API key", AuthError),       # bad key -> auth (3)
-        ("Job 'x' not found", NotFoundError),               # -> not-found (4)
-        ("file does not exist", NotFoundError),             # -> not-found (4)
-        ("Unrecognized setting: foo", ValidationError),     # genuine -> validation (5)
+        ("Missing or incorrect API key", AuthError),  # bad key -> auth (3)
+        ("Job 'x' not found", NotFoundError),  # -> not-found (4)
+        ("file does not exist", NotFoundError),  # -> not-found (4)
+        ("Unrecognized setting: foo", ValidationError),  # genuine -> validation (5)
     ],
 )
 def test_400_subtype_classification(message, exc):
@@ -148,9 +251,7 @@ def test_400_subtype_classification(message, exc):
     ],
 )
 def test_403_subtype_classification(message, exc):
-    respx.get(f"{BASE}jobs").mock(
-        return_value=httpx.Response(403, json={"error": message})
-    )
+    respx.get(f"{BASE}jobs").mock(return_value=httpx.Response(403, json={"error": message}))
     with pytest.raises(exc):
         rest.get_jobs(client())
 
@@ -166,9 +267,7 @@ def test_403_subtype_classification(message, exc):
     ],
 )
 def test_403_resource_words_without_exhaustion_are_not_budget_errors(message):
-    respx.get(f"{BASE}jobs").mock(
-        return_value=httpx.Response(403, json={"error": message})
-    )
+    respx.get(f"{BASE}jobs").mock(return_value=httpx.Response(403, json={"error": message}))
     with pytest.raises(APIError):
         rest.get_jobs(client())
 
@@ -215,8 +314,12 @@ def test_catalog_schema_path():
 
 @respx.mock
 def test_catalog_tools_filters():
-    route = respx.get(f"{CAT}catalog/tools").mock(return_value=httpx.Response(200, json={"tools": []}))
-    catalog.list_tools(client(CAT), modality="protein", function="structure-prediction", custom=True)
+    route = respx.get(f"{CAT}catalog/tools").mock(
+        return_value=httpx.Response(200, json={"tools": []})
+    )
+    catalog.list_tools(
+        client(CAT), modality="protein", function="structure-prediction", custom=True
+    )
     params = route.calls.last.request.url.params
     assert params["modality"] == "protein"
     assert params["function"] == "structure-prediction"

@@ -9,6 +9,41 @@ permissions:
   contents: read
 
 jobs:
+  generated:
+    name: Generated transport is current
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Verify backend provenance and generated client freshness
+        run: |
+          uv run --extra dev python scripts/check_custom_tools_provenance.py
+          tmp_dir=$(mktemp -d .custom-tools-generated.XXXXXX)
+          trap 'rm -rf "$tmp_dir"' EXIT
+          uv run --extra dev openapi-python-client generate --path openapi/public-v1.json \
+            --config openapi/openapi-python-client.json --meta none \
+            --output-path "$tmp_dir/generated" --overwrite
+          diff -ru --exclude=.ruff_cache src/tamarind/custom_tools/_generated "$tmp_dir/generated"
+
+  typecheck:
+    name: Custom Tools type check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Check the public SDK and transport boundary
+        run: >-
+          uv run --extra dev mypy
+          src/tamarind/custom_tools
+          src/tamarind/http.py
+          src/tamarind/errors.py
+          scripts/sync_custom_tools_contract.py
+
   package:
     name: Build release artifacts
     runs-on: ubuntu-latest

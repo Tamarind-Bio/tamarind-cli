@@ -78,6 +78,40 @@ tamarind submit boltz \
   --name quick-fold
 ```
 
+## Python SDK
+
+The package also exposes a typed Custom Tools SDK. It checks archive-local
+safety, packages a folder, uploads it directly to object storage, and submits the
+digest-checked build request. The server
+remains authoritative for source readiness, Versions, logs, and the evolving
+`config.json` contract.
+
+```python
+from tamarind import Tamarind
+from tamarind.errors import CustomToolNotFoundError
+
+with Tamarind() as client:
+    try:
+        tool = client.custom_tools.get("my-esmfold")
+    except CustomToolNotFoundError:
+        tool = client.custom_tools.create("my-esmfold", display_name="My ESMFold")
+
+    result = tool.build("./my-esmfold")
+    print(result.action)  # build, reuse_image, or unchanged
+    version = result.version
+    if not version.terminal:
+        version = version.monitor(timeout=1800, on_event=print)
+```
+
+`build()` returns a typed result describing what the request did and the durable
+Version it produced. It is convenience orchestration, not a durable request
+object. If the connection is lost during the build response, fetch the tool's
+versions before retrying. Interrupting `monitor()` stops local monitoring; it
+does not cancel the remote build.
+
+Custom Tool CLI commands are not part of this release. Existing CLI commands
+remain unchanged.
+
 ## Output for agents
 
 Every command emits JSON when stdout is not a TTY, or with `--json`. Result

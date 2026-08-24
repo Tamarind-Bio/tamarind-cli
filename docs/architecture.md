@@ -2,10 +2,10 @@
 
 The CLI, the [MCP server](https://mcp.tamarind.bio), and the web app are all
 **thin clients** over the same platform. The CLI never re-implements business
-logic; it only knows how to call two well-defined surfaces. This is what keeps
+logic; it only knows how to call three well-defined surfaces. This is what keeps
 the CLI and the MCP from drifting as the platform evolves.
 
-## Two surfaces, two single sources of truth
+## Three surfaces, three single sources of truth
 
 ### 1. Job/file REST surface — source of truth: the OpenAPI spec
 
@@ -36,6 +36,43 @@ implementation**, so a tool looks identical no matter which client you use.
 Because the logic lives in one module, *where* discovery is hosted (the MCP host
 today; potentially the main API or a dedicated service later) is a deployment
 detail that can change without any client change and without drift.
+
+### 3. Custom Tools surface — source of truth: the public OpenAPI artifact
+
+Custom Tool creation, source upload, build, Versions, logs, and cancellation
+are generated from the website backend's dedicated public OpenAPI artifact:
+
+```text
+backend-owned custom-tools-v1.generated.json
+  -> Git-object provenance verification
+  -> vendored spec + lock
+  -> openapi-python-client==0.28.4
+  -> generated models/endpoints
+  -> thin Tamarind transport and resource adapters
+```
+
+The Website owns the projection and its referenced-component closure. The CLI sync
+verifies the exact producer repository, commit, path, and bytes before atomically
+installing the spec, provenance lock, generated server metadata, and generated package.
+CI regenerates with the pinned mature generator and rejects drift. The handwritten
+layer contains only HTTP/error normalization and ergonomic resource composition; it
+does not parse OpenAPI or maintain a second schema IR/compiler.
+
+The SDK owns archive-local concerns that only the client can decide safely:
+deterministic ZIP construction, symlink and junction rejection, upload limits,
+JSON parseability and top-level object shape, and warnings about the networkless
+runtime. Archives use stored ZIP entries so source digests do not depend on a
+platform zlib build. Modes are also platform-stable: `run.sh` and files beginning
+with a shebang are executable, while all other files are regular. The backend owns
+the evolving `config.json` business contract and
+validates it before accepting a build. The SDK deliberately does not maintain a
+second list of configuration fields, enums, or cross-field rules.
+
+`CustomTool.build()` composes the existing requests: create upload, PUT the archive,
+submit the digest-checked build request, and return a typed result containing the server's
+action plus its durable Version. It adds no server-side
+BuildRequest, queue, lease, claim, or repair state. An ambiguous build response
+is therefore handled honestly by listing Versions before a manual retry.
 
 ## Why not a single binary that re-encodes the API?
 

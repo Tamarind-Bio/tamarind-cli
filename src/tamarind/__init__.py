@@ -1,6 +1,6 @@
 """Tamarind Bio CLI and Python client.
 
-This package is a thin client over the Tamarind platform. Two surfaces:
+This package is a thin client over the Tamarind platform. Its surfaces are:
 
 - REST passthrough (``tamarind.rest``): submit/validate/batch, jobs, result,
   files, cancel, delete — these hit the Tamarind API directly with an API key.
@@ -11,9 +11,16 @@ This package is a thin client over the Tamarind platform. Two surfaces:
   catalog lives behind per-org visibility logic that runs server-side, so the
   CLI consumes it over HTTP (the ``/catalog/*`` routes) rather than reading the
   database directly.
+
+- Custom Tools (``Tamarind().custom_tools``): typed resources for validating,
+  packaging, building, and monitoring user-authored Custom Tool Versions.
 """
 
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+from tamarind.custom_tools.client import Tamarind
+
+__all__ = ["Tamarind", "__version__"]
 
 try:
     # Single source of truth: the installed package version (pyproject.toml),
