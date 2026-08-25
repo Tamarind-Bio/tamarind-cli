@@ -12,17 +12,20 @@ from ...types import Response
 
 def _get_kwargs(
     name: str,
-    generation: str,
+    *,
+    x_tamarind_tool_generation: str,
 ) -> dict[str, Any]:
+    headers: dict[str, Any] = {}
+    headers["X-Tamarind-Tool-Generation"] = x_tamarind_tool_generation
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/custom-tools/{name}/generations/{generation}/uploads".format(
+        "url": "/custom-tools/{name}/uploads".format(
             name=quote(str(name), safe=""),
-            generation=quote(str(generation), safe=""),
         ),
     }
 
+    _kwargs["headers"] = headers
     return _kwargs
 
 
@@ -67,9 +70,9 @@ def _build_response(
 
 def sync_detailed(
     name: str,
-    generation: str,
     *,
     client: AuthenticatedClient | Client,
+    x_tamarind_tool_generation: str,
 ) -> Response[PublicProblem | PublicUploadSession]:
     """Create a source upload
 
@@ -80,7 +83,9 @@ def sync_detailed(
 
     Args:
         name (str): The custom tool name.
-        generation (str): The immutable Tool generation identifier.
+        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
+            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
+            with the same name.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -92,7 +97,7 @@ def sync_detailed(
 
     kwargs = _get_kwargs(
         name=name,
-        generation=generation,
+        x_tamarind_tool_generation=x_tamarind_tool_generation,
     )
 
     response = client.get_httpx_client().request(
@@ -104,9 +109,9 @@ def sync_detailed(
 
 def sync(
     name: str,
-    generation: str,
     *,
     client: AuthenticatedClient | Client,
+    x_tamarind_tool_generation: str,
 ) -> PublicProblem | PublicUploadSession | None:
     """Create a source upload
 
@@ -117,7 +122,9 @@ def sync(
 
     Args:
         name (str): The custom tool name.
-        generation (str): The immutable Tool generation identifier.
+        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
+            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
+            with the same name.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -129,16 +136,16 @@ def sync(
 
     return sync_detailed(
         name=name,
-        generation=generation,
         client=client,
+        x_tamarind_tool_generation=x_tamarind_tool_generation,
     ).parsed
 
 
 async def asyncio_detailed(
     name: str,
-    generation: str,
     *,
     client: AuthenticatedClient | Client,
+    x_tamarind_tool_generation: str,
 ) -> Response[PublicProblem | PublicUploadSession]:
     """Create a source upload
 
@@ -149,7 +156,9 @@ async def asyncio_detailed(
 
     Args:
         name (str): The custom tool name.
-        generation (str): The immutable Tool generation identifier.
+        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
+            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
+            with the same name.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -161,7 +170,7 @@ async def asyncio_detailed(
 
     kwargs = _get_kwargs(
         name=name,
-        generation=generation,
+        x_tamarind_tool_generation=x_tamarind_tool_generation,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -171,9 +180,9 @@ async def asyncio_detailed(
 
 async def asyncio(
     name: str,
-    generation: str,
     *,
     client: AuthenticatedClient | Client,
+    x_tamarind_tool_generation: str,
 ) -> PublicProblem | PublicUploadSession | None:
     """Create a source upload
 
@@ -184,7 +193,9 @@ async def asyncio(
 
     Args:
         name (str): The custom tool name.
-        generation (str): The immutable Tool generation identifier.
+        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
+            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
+            with the same name.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -197,7 +208,7 @@ async def asyncio(
     return (
         await asyncio_detailed(
             name=name,
-            generation=generation,
             client=client,
+            x_tamarind_tool_generation=x_tamarind_tool_generation,
         )
     ).parsed

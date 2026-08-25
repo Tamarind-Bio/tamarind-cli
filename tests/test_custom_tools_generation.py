@@ -20,14 +20,20 @@ def test_vendored_contract_is_the_dedicated_backend_artifact() -> None:
     document = json.loads((ROOT / "openapi/public-v1.json").read_text())
     assert document["paths"]
     assert all(_is_custom_tools_path(path) for path in document["paths"])
-    assert not any(
-        parameter.get("name") == "If-Match"
-        for path, item in document["paths"].items()
-        if "/generations/{generation}/" in path
-        for operation in item.values()
-        if isinstance(operation, dict)
-        for parameter in operation.get("parameters", [])
-    )
+    assert all("/generations/" not in path for path in document["paths"])
+    for path, item in document["paths"].items():
+        if not path.startswith("/custom-tools/{name}/"):
+            continue
+        for operation in item.values():
+            if not isinstance(operation, dict):
+                continue
+            headers = [
+                parameter
+                for parameter in operation.get("parameters", [])
+                if parameter.get("in") == "header"
+            ]
+            assert [header["name"] for header in headers] == ["X-Tamarind-Tool-Generation"]
+            assert headers[0]["required"] is True
 
 
 def test_generated_client_contains_sync_async_endpoints_and_attrs_models() -> None:
@@ -114,7 +120,9 @@ def test_sync_rejects_duplicate_json_members() -> None:
         ("/custom-tools/admin#fragment", False),
         (r"/custom-tools/admin\escape", False),
         ("/custom-tools/{valid_name}", True),
+        ("/custom-tools/{valid_name}:publish", True),
         ("/custom-tools/{invalid-name}", False),
+        ("/custom-tools/{valid_name}:9invalid", False),
     ],
 )
 def test_dedicated_artifact_requires_the_custom_tools_path_segment(
@@ -299,8 +307,8 @@ def test_contract_sync_exercises_generated_endpoint_signatures(
     endpoint = generated / "api/custom_tools/list_custom_tool_versions.py"
     endpoint.write_text(
         endpoint.read_text().replace(
-            "    cursor: None | str | Unset = UNSET,\n) -> dict[str, Any]:",
-            "    cursor: None | str | Unset = UNSET,\n    required_probe: str,\n) -> dict[str, Any]:",
+            "    x_tamarind_tool_generation: str,\n) -> dict[str, Any]:",
+            "    x_tamarind_tool_generation: str,\n    required_probe: str,\n) -> dict[str, Any]:",
             1,
         )
     )
