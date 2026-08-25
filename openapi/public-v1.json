@@ -306,7 +306,7 @@
             "type": "array"
           },
           "generation": {
-            "description": "The immutable generation identity. Current Tool mutations use its quoted `ETag`; generation-owned uploads and Versions carry this value in their URI.",
+            "description": "The immutable generation identity. Current Tool mutations use its quoted `ETag`; generation-owned upload and Version requests send it in `X-Tamarind-Tool-Generation`.",
             "title": "Generation",
             "type": "string"
           },
@@ -1223,7 +1223,7 @@
         "x-doc-group": "Custom Tools"
       }
     },
-    "/custom-tools/{name}/generations/{generation}/uploads": {
+    "/custom-tools/{name}/uploads": {
       "post": {
         "description": "Create a temporary upload for a source archive.\n\nUpload the file to `uploadUrl` using `uploadMethod` and every value in `uploadHeaders`, then use\n`uploadId` to build a version.",
         "operationId": "createCustomToolUpload",
@@ -1243,15 +1243,15 @@
             }
           },
           {
-            "description": "The immutable Tool generation identifier.",
-            "in": "path",
-            "name": "generation",
+            "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
+            "in": "header",
+            "name": "X-Tamarind-Tool-Generation",
             "required": true,
             "schema": {
-              "description": "The immutable Tool generation identifier.",
+              "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
               "maxLength": 128,
               "minLength": 1,
-              "title": "Generation",
+              "title": "X-Tamarind-Tool-Generation",
               "type": "string"
             }
           }
@@ -1287,7 +1287,7 @@
         "x-doc-group": "Custom Tools"
       }
     },
-    "/custom-tools/{name}/generations/{generation}/versions": {
+    "/custom-tools/{name}/versions": {
       "get": {
         "description": "List versions of a custom tool.\n\nFilter by build status. Paginated \u2014 follow `nextCursor` until it is null.",
         "operationId": "listCustomToolVersions",
@@ -1303,19 +1303,6 @@
               "minLength": 3,
               "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
               "title": "Name",
-              "type": "string"
-            }
-          },
-          {
-            "description": "The immutable Tool generation identifier.",
-            "in": "path",
-            "name": "generation",
-            "required": true,
-            "schema": {
-              "description": "The immutable Tool generation identifier.",
-              "maxLength": 128,
-              "minLength": 1,
-              "title": "Generation",
               "type": "string"
             }
           },
@@ -1369,6 +1356,19 @@
               "description": "Pagination token from the previous response's `nextCursor`.",
               "title": "Cursor"
             }
+          },
+          {
+            "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
+            "in": "header",
+            "name": "X-Tamarind-Tool-Generation",
+            "required": true,
+            "schema": {
+              "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "X-Tamarind-Tool-Generation",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1420,15 +1420,15 @@
             }
           },
           {
-            "description": "The immutable Tool generation identifier.",
-            "in": "path",
-            "name": "generation",
+            "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
+            "in": "header",
+            "name": "X-Tamarind-Tool-Generation",
             "required": true,
             "schema": {
-              "description": "The immutable Tool generation identifier.",
+              "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
               "maxLength": 128,
               "minLength": 1,
-              "title": "Generation",
+              "title": "X-Tamarind-Tool-Generation",
               "type": "string"
             }
           }
@@ -1474,7 +1474,7 @@
         "x-doc-group": "Custom Tools"
       }
     },
-    "/custom-tools/{name}/generations/{generation}/versions/{version_name}": {
+    "/custom-tools/{name}/versions/{version_name}": {
       "get": {
         "description": "Get a version's source, build status, and error details.",
         "operationId": "getCustomToolVersion",
@@ -1494,19 +1494,6 @@
             }
           },
           {
-            "description": "The immutable Tool generation identifier.",
-            "in": "path",
-            "name": "generation",
-            "required": true,
-            "schema": {
-              "description": "The immutable Tool generation identifier.",
-              "maxLength": 128,
-              "minLength": 1,
-              "title": "Generation",
-              "type": "string"
-            }
-          },
-          {
             "description": "A numbered version handle, such as `v3`.",
             "in": "path",
             "name": "version_name",
@@ -1517,6 +1504,19 @@
               "minLength": 2,
               "pattern": "^v[1-9][0-9]*$",
               "title": "Version Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
+            "in": "header",
+            "name": "X-Tamarind-Tool-Generation",
+            "required": true,
+            "schema": {
+              "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "X-Tamarind-Tool-Generation",
               "type": "string"
             }
           }
@@ -1552,85 +1552,7 @@
         "x-doc-group": "Custom Tools"
       }
     },
-    "/custom-tools/{name}/generations/{generation}/versions/{version_name}/cancel": {
-      "post": {
-        "description": "Request cancellation of an active build.\n\nCompleted and stopped builds cannot be canceled.",
-        "operationId": "cancelCustomToolBuild",
-        "parameters": [
-          {
-            "description": "The custom tool name.",
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "description": "The custom tool name.",
-              "maxLength": 50,
-              "minLength": 3,
-              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
-              "title": "Name",
-              "type": "string"
-            }
-          },
-          {
-            "description": "The immutable Tool generation identifier.",
-            "in": "path",
-            "name": "generation",
-            "required": true,
-            "schema": {
-              "description": "The immutable Tool generation identifier.",
-              "maxLength": 128,
-              "minLength": 1,
-              "title": "Generation",
-              "type": "string"
-            }
-          },
-          {
-            "description": "A numbered version handle, such as `v3`.",
-            "in": "path",
-            "name": "version_name",
-            "required": true,
-            "schema": {
-              "description": "A numbered version handle, such as `v3`.",
-              "maxLength": 200,
-              "minLength": 2,
-              "pattern": "^v[1-9][0-9]*$",
-              "title": "Version Name",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PublicVersion"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationProblem"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "summary": "Cancel a custom tool build",
-        "tags": [
-          "custom-tools"
-        ],
-        "x-doc-group": "Custom Tools"
-      }
-    },
-    "/custom-tools/{name}/generations/{generation}/versions/{version_name}/logs": {
+    "/custom-tools/{name}/versions/{version_name}/logs": {
       "get": {
         "description": "List build log events for a version.\n\nPaginated \u2014 follow `nextCursor` until it is null.",
         "operationId": "listCustomToolBuildLogs",
@@ -1646,19 +1568,6 @@
               "minLength": 3,
               "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
               "title": "Name",
-              "type": "string"
-            }
-          },
-          {
-            "description": "The immutable Tool generation identifier.",
-            "in": "path",
-            "name": "generation",
-            "required": true,
-            "schema": {
-              "description": "The immutable Tool generation identifier.",
-              "maxLength": 128,
-              "minLength": 1,
-              "title": "Generation",
               "type": "string"
             }
           },
@@ -1694,6 +1603,19 @@
               "description": "Pagination token from the previous response's `nextCursor`.",
               "title": "Cursor"
             }
+          },
+          {
+            "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
+            "in": "header",
+            "name": "X-Tamarind-Tool-Generation",
+            "required": true,
+            "schema": {
+              "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "X-Tamarind-Tool-Generation",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1727,7 +1649,85 @@
         "x-doc-group": "Custom Tools"
       }
     },
-    "/custom-tools/{name}/generations/{generation}/versions/{version_name}/publish": {
+    "/custom-tools/{name}/versions/{version_name}:cancel": {
+      "post": {
+        "description": "Request cancellation of an active build.\n\nCompleted and stopped builds cannot be canceled.",
+        "operationId": "cancelCustomToolBuild",
+        "parameters": [
+          {
+            "description": "The custom tool name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The custom tool name.",
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A numbered version handle, such as `v3`.",
+            "in": "path",
+            "name": "version_name",
+            "required": true,
+            "schema": {
+              "description": "A numbered version handle, such as `v3`.",
+              "maxLength": 200,
+              "minLength": 2,
+              "pattern": "^v[1-9][0-9]*$",
+              "title": "Version Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
+            "in": "header",
+            "name": "X-Tamarind-Tool-Generation",
+            "required": true,
+            "schema": {
+              "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "X-Tamarind-Tool-Generation",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicVersion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Cancel a custom tool build",
+        "tags": [
+          "custom-tools"
+        ],
+        "x-doc-group": "Custom Tools"
+      }
+    },
+    "/custom-tools/{name}/versions/{version_name}:publish": {
       "post": {
         "description": "Make a completed version the tool's published runtime version.\n\nThis also supports an explicit rollback to an older completed version.",
         "operationId": "publishCustomToolVersion",
@@ -1747,19 +1747,6 @@
             }
           },
           {
-            "description": "The immutable Tool generation identifier.",
-            "in": "path",
-            "name": "generation",
-            "required": true,
-            "schema": {
-              "description": "The immutable Tool generation identifier.",
-              "maxLength": 128,
-              "minLength": 1,
-              "title": "Generation",
-              "type": "string"
-            }
-          },
-          {
             "description": "A numbered version handle, such as `v3`.",
             "in": "path",
             "name": "version_name",
@@ -1770,6 +1757,19 @@
               "minLength": 2,
               "pattern": "^v[1-9][0-9]*$",
               "title": "Version Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
+            "in": "header",
+            "name": "X-Tamarind-Tool-Generation",
+            "required": true,
+            "schema": {
+              "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "X-Tamarind-Tool-Generation",
               "type": "string"
             }
           }

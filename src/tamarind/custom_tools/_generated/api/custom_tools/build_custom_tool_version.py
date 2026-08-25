@@ -13,17 +13,17 @@ from ...types import Response
 
 def _get_kwargs(
     name: str,
-    generation: str,
     *,
     body: PublicCreateVersionRequest,
+    x_tamarind_tool_generation: str,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
+    headers["X-Tamarind-Tool-Generation"] = x_tamarind_tool_generation
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/custom-tools/{name}/generations/{generation}/versions".format(
+        "url": "/custom-tools/{name}/versions".format(
             name=quote(str(name), safe=""),
-            generation=quote(str(generation), safe=""),
         ),
     }
 
@@ -76,10 +76,10 @@ def _build_response(
 
 def sync_detailed(
     name: str,
-    generation: str,
     *,
     client: AuthenticatedClient | Client,
     body: PublicCreateVersionRequest,
+    x_tamarind_tool_generation: str,
 ) -> Response[PublicBuildResult | PublicProblem]:
     """Build a custom tool version
 
@@ -89,7 +89,9 @@ def sync_detailed(
 
     Args:
         name (str): The custom tool name.
-        generation (str): The immutable Tool generation identifier.
+        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
+            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
+            with the same name.
         body (PublicCreateVersionRequest):
 
     Raises:
@@ -102,8 +104,8 @@ def sync_detailed(
 
     kwargs = _get_kwargs(
         name=name,
-        generation=generation,
         body=body,
+        x_tamarind_tool_generation=x_tamarind_tool_generation,
     )
 
     response = client.get_httpx_client().request(
@@ -115,10 +117,10 @@ def sync_detailed(
 
 def sync(
     name: str,
-    generation: str,
     *,
     client: AuthenticatedClient | Client,
     body: PublicCreateVersionRequest,
+    x_tamarind_tool_generation: str,
 ) -> PublicBuildResult | PublicProblem | None:
     """Build a custom tool version
 
@@ -128,7 +130,9 @@ def sync(
 
     Args:
         name (str): The custom tool name.
-        generation (str): The immutable Tool generation identifier.
+        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
+            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
+            with the same name.
         body (PublicCreateVersionRequest):
 
     Raises:
@@ -141,18 +145,18 @@ def sync(
 
     return sync_detailed(
         name=name,
-        generation=generation,
         client=client,
         body=body,
+        x_tamarind_tool_generation=x_tamarind_tool_generation,
     ).parsed
 
 
 async def asyncio_detailed(
     name: str,
-    generation: str,
     *,
     client: AuthenticatedClient | Client,
     body: PublicCreateVersionRequest,
+    x_tamarind_tool_generation: str,
 ) -> Response[PublicBuildResult | PublicProblem]:
     """Build a custom tool version
 
@@ -162,7 +166,9 @@ async def asyncio_detailed(
 
     Args:
         name (str): The custom tool name.
-        generation (str): The immutable Tool generation identifier.
+        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
+            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
+            with the same name.
         body (PublicCreateVersionRequest):
 
     Raises:
@@ -175,8 +181,8 @@ async def asyncio_detailed(
 
     kwargs = _get_kwargs(
         name=name,
-        generation=generation,
         body=body,
+        x_tamarind_tool_generation=x_tamarind_tool_generation,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -186,10 +192,10 @@ async def asyncio_detailed(
 
 async def asyncio(
     name: str,
-    generation: str,
     *,
     client: AuthenticatedClient | Client,
     body: PublicCreateVersionRequest,
+    x_tamarind_tool_generation: str,
 ) -> PublicBuildResult | PublicProblem | None:
     """Build a custom tool version
 
@@ -199,7 +205,9 @@ async def asyncio(
 
     Args:
         name (str): The custom tool name.
-        generation (str): The immutable Tool generation identifier.
+        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
+            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
+            with the same name.
         body (PublicCreateVersionRequest):
 
     Raises:
@@ -213,8 +221,8 @@ async def asyncio(
     return (
         await asyncio_detailed(
             name=name,
-            generation=generation,
             client=client,
             body=body,
+            x_tamarind_tool_generation=x_tamarind_tool_generation,
         )
     ).parsed

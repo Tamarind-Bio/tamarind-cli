@@ -18,7 +18,9 @@ from urllib.parse import unquote, urlsplit
 
 EXPECTED_REPOSITORY = "Tamarind-Bio/tamarind-website"
 EXPECTED_PATH = "backend/app/public_api/openapi/custom-tools-v1.generated.json"
-_PATH_SEGMENT = re.compile(r"(?:[A-Za-z0-9_-]+|\{[A-Za-z_][A-Za-z0-9_]*\})")
+_PATH_SEGMENT = re.compile(
+    r"(?:[A-Za-z0-9_-]+|\{[A-Za-z_][A-Za-z0-9_]*\})(?::[A-Za-z][A-Za-z0-9_-]*)?"
+)
 _MALFORMED_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 
 

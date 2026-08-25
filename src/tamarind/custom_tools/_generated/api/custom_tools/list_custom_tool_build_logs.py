@@ -12,11 +12,13 @@ from ...types import UNSET, Response, Unset
 
 def _get_kwargs(
     name: str,
-    generation: str,
     version_name: str,
     *,
     cursor: None | str | Unset = UNSET,
+    x_tamarind_tool_generation: str,
 ) -> dict[str, Any]:
+    headers: dict[str, Any] = {}
+    headers["X-Tamarind-Tool-Generation"] = x_tamarind_tool_generation
 
     params: dict[str, Any] = {}
 
@@ -31,14 +33,14 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/custom-tools/{name}/generations/{generation}/versions/{version_name}/logs".format(
+        "url": "/custom-tools/{name}/versions/{version_name}/logs".format(
             name=quote(str(name), safe=""),
-            generation=quote(str(generation), safe=""),
             version_name=quote(str(version_name), safe=""),
         ),
         "params": params,
     }
 
+    _kwargs["headers"] = headers
     return _kwargs
 
 
@@ -83,11 +85,11 @@ def _build_response(
 
 def sync_detailed(
     name: str,
-    generation: str,
     version_name: str,
     *,
     client: AuthenticatedClient | Client,
     cursor: None | str | Unset = UNSET,
+    x_tamarind_tool_generation: str,
 ) -> Response[PublicBuildLogPage | PublicProblem]:
     """List build logs
 
@@ -97,9 +99,11 @@ def sync_detailed(
 
     Args:
         name (str): The custom tool name.
-        generation (str): The immutable Tool generation identifier.
         version_name (str): A numbered version handle, such as `v3`.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
+        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
+            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
+            with the same name.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -111,9 +115,9 @@ def sync_detailed(
 
     kwargs = _get_kwargs(
         name=name,
-        generation=generation,
         version_name=version_name,
         cursor=cursor,
+        x_tamarind_tool_generation=x_tamarind_tool_generation,
     )
 
     response = client.get_httpx_client().request(
@@ -125,11 +129,11 @@ def sync_detailed(
 
 def sync(
     name: str,
-    generation: str,
     version_name: str,
     *,
     client: AuthenticatedClient | Client,
     cursor: None | str | Unset = UNSET,
+    x_tamarind_tool_generation: str,
 ) -> PublicBuildLogPage | PublicProblem | None:
     """List build logs
 
@@ -139,9 +143,11 @@ def sync(
 
     Args:
         name (str): The custom tool name.
-        generation (str): The immutable Tool generation identifier.
         version_name (str): A numbered version handle, such as `v3`.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
+        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
+            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
+            with the same name.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -153,20 +159,20 @@ def sync(
 
     return sync_detailed(
         name=name,
-        generation=generation,
         version_name=version_name,
         client=client,
         cursor=cursor,
+        x_tamarind_tool_generation=x_tamarind_tool_generation,
     ).parsed
 
 
 async def asyncio_detailed(
     name: str,
-    generation: str,
     version_name: str,
     *,
     client: AuthenticatedClient | Client,
     cursor: None | str | Unset = UNSET,
+    x_tamarind_tool_generation: str,
 ) -> Response[PublicBuildLogPage | PublicProblem]:
     """List build logs
 
@@ -176,9 +182,11 @@ async def asyncio_detailed(
 
     Args:
         name (str): The custom tool name.
-        generation (str): The immutable Tool generation identifier.
         version_name (str): A numbered version handle, such as `v3`.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
+        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
+            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
+            with the same name.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -190,9 +198,9 @@ async def asyncio_detailed(
 
     kwargs = _get_kwargs(
         name=name,
-        generation=generation,
         version_name=version_name,
         cursor=cursor,
+        x_tamarind_tool_generation=x_tamarind_tool_generation,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -202,11 +210,11 @@ async def asyncio_detailed(
 
 async def asyncio(
     name: str,
-    generation: str,
     version_name: str,
     *,
     client: AuthenticatedClient | Client,
     cursor: None | str | Unset = UNSET,
+    x_tamarind_tool_generation: str,
 ) -> PublicBuildLogPage | PublicProblem | None:
     """List build logs
 
@@ -216,9 +224,11 @@ async def asyncio(
 
     Args:
         name (str): The custom tool name.
-        generation (str): The immutable Tool generation identifier.
         version_name (str): A numbered version handle, such as `v3`.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
+        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
+            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
+            with the same name.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -231,9 +241,9 @@ async def asyncio(
     return (
         await asyncio_detailed(
             name=name,
-            generation=generation,
             version_name=version_name,
             client=client,
             cursor=cursor,
+            x_tamarind_tool_generation=x_tamarind_tool_generation,
         )
     ).parsed

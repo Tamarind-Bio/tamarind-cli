@@ -192,7 +192,9 @@ class GeneratedCustomToolsTransport:
     ) -> dict[str, Any]:
         return self._sync(
             _CREATE_CUSTOM_TOOL_UPLOAD,
-            create_custom_tool_upload._get_kwargs(name=name, generation=generation),
+            create_custom_tool_upload._get_kwargs(
+                name=name, x_tamarind_tool_generation=generation
+            ),
             timeout,
         )
 
@@ -210,7 +212,7 @@ class GeneratedCustomToolsTransport:
             _LIST_CUSTOM_TOOL_VERSIONS,
             list_custom_tool_versions._get_kwargs(
                 name=name,
-                generation=generation,
+                x_tamarind_tool_generation=generation,
                 status=GeneratedVersionStatus(status) if status is not None else None,
                 limit=50 if limit is None else limit,
                 cursor=cursor,
@@ -229,7 +231,9 @@ class GeneratedCustomToolsTransport:
         return self._sync(
             _BUILD_CUSTOM_TOOL_VERSION,
             build_custom_tool_version._get_kwargs(
-                name=name, generation=generation, body=CreateVersionModel.from_dict(body)
+                name=name,
+                x_tamarind_tool_generation=generation,
+                body=CreateVersionModel.from_dict(body),
             ),
             timeout,
         )
@@ -240,7 +244,9 @@ class GeneratedCustomToolsTransport:
         return self._sync(
             _GET_CUSTOM_TOOL_VERSION,
             get_custom_tool_version._get_kwargs(
-                name=name, generation=generation, version_name=version_name
+                name=name,
+                x_tamarind_tool_generation=generation,
+                version_name=version_name,
             ),
             timeout,
         )
@@ -251,7 +257,9 @@ class GeneratedCustomToolsTransport:
         return self._sync(
             _CANCEL_CUSTOM_TOOL_BUILD,
             cancel_custom_tool_build._get_kwargs(
-                name=name, generation=generation, version_name=version_name
+                name=name,
+                x_tamarind_tool_generation=generation,
+                version_name=version_name,
             ),
             timeout,
         )
@@ -268,7 +276,10 @@ class GeneratedCustomToolsTransport:
         return self._sync(
             _LIST_CUSTOM_TOOL_BUILD_LOGS,
             list_custom_tool_build_logs._get_kwargs(
-                name=name, generation=generation, version_name=version_name, cursor=cursor
+                name=name,
+                x_tamarind_tool_generation=generation,
+                version_name=version_name,
+                cursor=cursor,
             ),
             timeout,
         )
@@ -279,7 +290,9 @@ class GeneratedCustomToolsTransport:
         return self._sync(
             _PUBLISH_CUSTOM_TOOL_VERSION,
             publish_custom_tool_version._get_kwargs(
-                name=name, generation=generation, version_name=version_name
+                name=name,
+                x_tamarind_tool_generation=generation,
+                version_name=version_name,
             ),
             timeout,
         )
@@ -290,7 +303,9 @@ class GeneratedCustomToolsTransport:
         return await self._async(
             _GET_CUSTOM_TOOL_VERSION,
             get_custom_tool_version._get_kwargs(
-                name=name, generation=generation, version_name=version_name
+                name=name,
+                x_tamarind_tool_generation=generation,
+                version_name=version_name,
             ),
             timeout,
         )
@@ -307,7 +322,10 @@ class GeneratedCustomToolsTransport:
         return await self._async(
             _LIST_CUSTOM_TOOL_BUILD_LOGS,
             list_custom_tool_build_logs._get_kwargs(
-                name=name, generation=generation, version_name=version_name, cursor=cursor
+                name=name,
+                x_tamarind_tool_generation=generation,
+                version_name=version_name,
+                cursor=cursor,
             ),
             timeout,
         )
