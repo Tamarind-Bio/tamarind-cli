@@ -104,6 +104,9 @@ def test_create_list_and_update_wrap_public_routes() -> None:
     listed_route = respx.get(f"{BASE}custom-tools").mock(
         return_value=httpx.Response(200, json={"items": [_tool()], "nextCursor": "tools-page-2"})
     )
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"opaque-validator"'})
+    )
     update = respx.patch(f"{BASE}custom-tools/example").mock(
         return_value=httpx.Response(200, json={**_tool(), "description": "updated"})
     )
@@ -119,24 +122,28 @@ def test_create_list_and_update_wrap_public_routes() -> None:
     assert page.next_cursor == "tools-page-2"
     assert listed_route.calls.last.request.url.params["limit"] == "1"
     assert json.loads(update.calls.last.request.content) == {"description": "updated"}
-    assert update.calls.last.request.headers["If-Match"] == '"generation-1"'
+    assert update.calls.last.request.headers["X-Tamarind-If-Match"] == '"opaque-validator"'
     assert changed.description == "updated"
 
 
 @respx.mock
-def test_delete_uses_the_tool_generation() -> None:
-    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+def test_delete_uses_the_tool_etag() -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"opaque-validator"'})
+    )
     delete = respx.delete(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(204))
 
     with Tamarind(api_key="key", api_base=BASE) as client:
         client.custom_tools.get("example").delete()
 
-    assert delete.calls.last.request.headers["If-Match"] == '"generation-1"'
+    assert delete.calls.last.request.headers["X-Tamarind-If-Match"] == '"opaque-validator"'
 
 
 @respx.mock
 def test_delete_requires_the_contract_no_content_status() -> None:
-    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"opaque-validator"'})
+    )
     respx.delete(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(202))
 
     with Tamarind(api_key="key", api_base=BASE) as client:
