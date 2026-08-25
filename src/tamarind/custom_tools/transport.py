@@ -119,7 +119,11 @@ class GeneratedCustomToolsTransport:
             ) from exc
         if parsed is None or not hasattr(parsed, "to_dict"):
             raise TamarindError("Custom Tools response did not match the generated contract")
-        return cast(dict[str, Any], parsed.to_dict())
+        wire = cast(dict[str, Any], parsed.to_dict())
+        etag = response.headers.get("ETag")
+        if etag is not None:
+            wire["_etag"] = etag
+        return wire
 
     def list_custom_tools(
         self,
@@ -151,11 +155,13 @@ class GeneratedCustomToolsTransport:
         )
 
     def delete_custom_tool(
-        self, name: str, generation: str, *, timeout: float | None = None
+        self, name: str, etag: str, *, timeout: float | None = None
     ) -> None:
         response = self._client.request(
             timeout=timeout,
-            **_http_kwargs(delete_custom_tool._get_kwargs(name=name, if_match=_etag(generation))),
+            **_http_kwargs(
+                delete_custom_tool._get_kwargs(name=name, x_tamarind_if_match=etag)
+            ),
         )
         if response.status_code != 204:
             raise TamarindError("Custom Tools response did not match the generated contract")
@@ -166,7 +172,7 @@ class GeneratedCustomToolsTransport:
     def update_custom_tool(
         self,
         name: str,
-        generation: str,
+        etag: str,
         body: PublicUpdateCustomToolRequest,
         *,
         timeout: float | None = None,
@@ -174,7 +180,9 @@ class GeneratedCustomToolsTransport:
         return self._sync(
             _UPDATE_CUSTOM_TOOL,
             update_custom_tool._get_kwargs(
-                name=name, body=UpdateModel.from_dict(body), if_match=_etag(generation)
+                name=name,
+                body=UpdateModel.from_dict(body),
+                x_tamarind_if_match=etag,
             ),
             timeout,
         )
@@ -303,10 +311,6 @@ class GeneratedCustomToolsTransport:
             ),
             timeout,
         )
-
-
-def _etag(generation: str) -> str:
-    return f'"{generation}"'
 
 
 def _http_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:

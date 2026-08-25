@@ -161,6 +161,7 @@ class CustomTool:
     updated_at: str
     can_edit: bool
     can_build: bool
+    _etag: str | None = field(repr=False, compare=False)
     _collection: "CustomTools" = field(repr=False, compare=False)
 
     def refresh(self) -> "CustomTool":
@@ -206,11 +207,11 @@ class CustomTool:
         body = cast(
             PublicUpdateCustomToolRequest, {k: v for k, v in values.items() if v is not _UNSET}
         )
-        return self._collection._update(self.name, self.generation, body)
+        return self._collection._update(self, body)
 
     def delete(self) -> None:
         """Delete this exact tool generation and release its name for reuse."""
-        self._collection._delete(self.name, self.generation)
+        self._collection._delete(self)
 
     def validate(self, folder: str | Path) -> ValidationReport:
         return validate_folder(folder)
@@ -453,13 +454,27 @@ class CustomTools:
             next_cursor=wire["nextCursor"],
         )
 
-    def _update(
-        self, name: str, generation: str, body: PublicUpdateCustomToolRequest
-    ) -> CustomTool:
-        return _tool_from_wire(self, self._transport.update_custom_tool(name, generation, body))
+    def _validator(self, tool: CustomTool) -> str:
+        if tool._etag is not None:
+            return tool._etag
+        current = self._get(tool.name, request_timeout=None)
+        if current.generation != tool.generation or current.updated_at != tool.updated_at:
+            raise StaleCustomToolError(
+                f"Custom Tool {tool.name!r} changed since it was listed; "
+                "fetch it again before mutating it."
+            )
+        if current._etag is None:
+            raise TamarindError("Custom Tools response did not include the required ETag")
+        return current._etag
 
-    def _delete(self, name: str, generation: str) -> None:
-        self._transport.delete_custom_tool(name, generation)
+    def _update(self, tool: CustomTool, body: PublicUpdateCustomToolRequest) -> CustomTool:
+        return _tool_from_wire(
+            self,
+            self._transport.update_custom_tool(tool.name, self._validator(tool), body),
+        )
+
+    def _delete(self, tool: CustomTool) -> None:
+        self._transport.delete_custom_tool(tool.name, self._validator(tool))
 
     def _build(self, tool: CustomTool, tree: SourceTree, *, source_timeout: float) -> BuildResult:
         timeout, _ = _validate_monitor_options(timeout=source_timeout, interval=1.0)
@@ -630,6 +645,7 @@ def _tool_from_wire(collection: CustomTools, wire: PublicCustomTool) -> CustomTo
         updated_at=wire["updatedAt"],
         can_edit=wire["canEdit"],
         can_build=wire["canBuild"],
+        _etag=cast(str | None, wire.get("_etag")),
         _collection=collection,
     )
 

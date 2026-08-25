@@ -1052,14 +1052,14 @@
             }
           },
           {
-            "description": "The strong ETag returned by `GET /custom-tools/{name}`, including its double quotes.",
+            "description": "The strong ETag returned by `GET /custom-tools/{name}`, including its double quotes. This product-specific header preserves `If-Match` semantics across the public CDN edge.",
             "in": "header",
-            "name": "If-Match",
+            "name": "X-Tamarind-If-Match",
             "required": true,
             "schema": {
-              "description": "The strong ETag returned by `GET /custom-tools/{name}`, including its double quotes.",
+              "description": "The strong ETag returned by `GET /custom-tools/{name}`, including its double quotes. This product-specific header preserves `If-Match` semantics across the public CDN edge.",
               "minLength": 1,
-              "title": "If-Match",
+              "title": "X-Tamarind-If-Match",
               "type": "string"
             }
           }
@@ -1167,14 +1167,14 @@
             }
           },
           {
-            "description": "The strong ETag returned by `GET /custom-tools/{name}`, including its double quotes.",
+            "description": "The strong ETag returned by `GET /custom-tools/{name}`, including its double quotes. This product-specific header preserves `If-Match` semantics across the public CDN edge.",
             "in": "header",
-            "name": "If-Match",
+            "name": "X-Tamarind-If-Match",
             "required": true,
             "schema": {
-              "description": "The strong ETag returned by `GET /custom-tools/{name}`, including its double quotes.",
+              "description": "The strong ETag returned by `GET /custom-tools/{name}`, including its double quotes. This product-specific header preserves `If-Match` semantics across the public CDN edge.",
               "minLength": 1,
-              "title": "If-Match",
+              "title": "X-Tamarind-If-Match",
               "type": "string"
             }
           }
