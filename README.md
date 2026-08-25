@@ -80,7 +80,20 @@ tamarind submit boltz \
 
 ## Python SDK
 
-The package also exposes a typed Custom Tools SDK. It checks archive-local
+The package exposes typed Pipelines and Custom Tools resources. Pipeline runs use
+the same node-run terminology as the web app and public REST API:
+
+```python
+from tamarind import Tamarind
+
+with Tamarind() as client:
+    run = client.pipelines.get_run("run-id")
+    for node_run in run.node_runs:
+        page = node_run.molecules(limit=100)
+        print(node_run.label, page.items)
+```
+
+The Custom Tools resource checks archive-local
 safety, packages a folder, uploads it directly to object storage, and submits the
 digest-checked build request. The server
 remains authoritative for source readiness, Versions, logs, and the evolving

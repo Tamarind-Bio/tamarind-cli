@@ -14,6 +14,8 @@ This package is a thin client over the Tamarind platform. Its surfaces are:
 
 - Custom Tools (``Tamarind().custom_tools``): typed resources for validating,
   packaging, building, and monitoring user-authored Custom Tool Versions.
+
+- Pipelines (``Tamarind().pipelines``): typed run and node-run result reads.
 """
 
 from importlib.metadata import PackageNotFoundError, version as _pkg_version

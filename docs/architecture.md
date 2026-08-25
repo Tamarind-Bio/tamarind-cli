@@ -2,10 +2,10 @@
 
 The CLI, the [MCP server](https://mcp.tamarind.bio), and the web app are all
 **thin clients** over the same platform. The CLI never re-implements business
-logic; it only knows how to call three well-defined surfaces. This is what keeps
+logic; it only knows how to call four well-defined surfaces. This is what keeps
 the CLI and the MCP from drifting as the platform evolves.
 
-## Three surfaces, three single sources of truth
+## Four surfaces, four single sources of truth
 
 ### 1. Job/file REST surface — source of truth: the OpenAPI spec
 
@@ -73,6 +73,19 @@ submit the digest-checked build request, and return a typed result containing th
 action plus its durable Version. It adds no server-side
 BuildRequest, queue, lease, claim, or repair state. An ambiguous build response
 is therefore handled honestly by listing Versions before a manual retry.
+
+### 4. Pipelines read surface — source of truth: the public OpenAPI artifact
+
+`Tamarind().pipelines` reads a run and pages through the molecules produced by one
+of its node runs. The sync script selects only those operations and their referenced
+schemas from the website backend's frozen public OpenAPI artifact, verifies the exact
+producer Git object, and records that commit in a dedicated lock. Keeping this
+projection separate prevents Pipelines changes from broadening or perturbing the
+Custom Tools contract.
+
+Generated endpoint code owns URL encoding and wire-model parsing. A small resource
+adapter adds strict runtime checks and composes `PipelineRun` → `NodeRun` → molecule
+pages without introducing another public vocabulary.
 
 ## Why not a single binary that re-encodes the API?
 
