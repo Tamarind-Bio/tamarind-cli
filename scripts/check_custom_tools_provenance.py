@@ -35,6 +35,19 @@ def main() -> None:
     if metadata.read_text() != expected_metadata:
         raise SystemExit("runtime contract metadata is stale")
 
+    pipelines_spec = root / "openapi/pipelines-v1.json"
+    pipelines_lock = json.loads((root / "openapi/pipelines-v1.lock.json").read_text())
+    if set(pipelines_lock) != expected or pipelines_lock["schemaVersion"] != 1:
+        raise SystemExit("pipelines-v1.lock.json has an unsupported shape")
+    if pipelines_lock["generator"] != "openapi-python-client==0.28.4":
+        raise SystemExit("Pipelines client does not use the pinned generator")
+    if pipelines_lock["sourceRepository"] != "Tamarind-Bio/tamarind-website" or pipelines_lock[
+        "sourcePath"
+    ] != "backend/app/public_api/openapi/public-v1.generated.json":
+        raise SystemExit("unsupported Pipelines producer")
+    if sha256(pipelines_spec.read_bytes()).hexdigest() != pipelines_lock["artifactSha256"]:
+        raise SystemExit("pipelines-v1.json does not match its provenance lock")
+
 
 if __name__ == "__main__":
     main()

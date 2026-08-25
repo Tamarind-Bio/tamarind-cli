@@ -25,9 +25,13 @@ jobs:
             --config openapi/openapi-python-client.json --meta none \
             --output-path "$tmp_dir/generated" --overwrite
           diff -ru --exclude=.ruff_cache src/tamarind/custom_tools/_generated "$tmp_dir/generated"
+          uv run --extra dev openapi-python-client generate --path openapi/pipelines-v1.json \
+            --config openapi/pipelines-openapi-python-client.json --meta none \
+            --output-path "$tmp_dir/pipelines-generated" --overwrite
+          diff -ru --exclude=.ruff_cache src/tamarind/pipelines/_generated "$tmp_dir/pipelines-generated"
 
   typecheck:
-    name: Custom Tools type check
+    name: SDK type check
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -40,9 +44,11 @@ jobs:
         run: >-
           uv run --extra dev mypy
           src/tamarind/custom_tools
+          src/tamarind/pipelines
           src/tamarind/http.py
           src/tamarind/errors.py
           scripts/sync_custom_tools_contract.py
+          scripts/sync_pipelines_contract.py
 
   package:
     name: Build release artifacts
