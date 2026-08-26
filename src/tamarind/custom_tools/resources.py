@@ -493,7 +493,7 @@ class CustomTools:
         tool: CustomTool,
         tree: SourceTree,
         *,
-        idempotency_key: str | None,
+        idempotency_key: str | None = None,
         source_timeout: float,
     ) -> BuildResult:
         timeout, _ = _validate_monitor_options(timeout=source_timeout, interval=1.0)
