@@ -219,6 +219,7 @@ class CustomTool:
         self,
         folder: str | Path,
         *,
+        idempotency_key: str | None = None,
         source_timeout: float = 180.0,
     ) -> BuildResult:
         """Upload source and return what the server did plus the durable Version."""
@@ -232,7 +233,12 @@ class CustomTool:
         report = validate_source_tree(tree)
         if not report.valid:
             raise ValidationError("Custom Tool source validation failed", detail=report)
-        return self._collection._build(self, tree, source_timeout=source_timeout)
+        return self._collection._build(
+            self,
+            tree,
+            idempotency_key=idempotency_key,
+            source_timeout=source_timeout,
+        )
 
     def get_version(self, version_id: str) -> "Version":
         """Get one exact Version by its opaque ``id``."""
@@ -482,7 +488,14 @@ class CustomTools:
     def _delete(self, tool: CustomTool) -> None:
         self._transport.delete_custom_tool(tool.name, self._validator(tool))
 
-    def _build(self, tool: CustomTool, tree: SourceTree, *, source_timeout: float) -> BuildResult:
+    def _build(
+        self,
+        tool: CustomTool,
+        tree: SourceTree,
+        *,
+        idempotency_key: str | None,
+        source_timeout: float,
+    ) -> BuildResult:
         timeout, _ = _validate_monitor_options(timeout=source_timeout, interval=1.0)
         archive = build_source_tree_archive(tree, max_bytes=MAX_TOOL_SOURCE_BYTES)
         try:
@@ -512,6 +525,7 @@ class CustomTools:
                         "expectedSourceDigest": archive.digest,
                     },
                 ),
+                idempotency_key=idempotency_key,
                 timeout=timeout,
             )
         finally:

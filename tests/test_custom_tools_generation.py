@@ -37,9 +37,10 @@ def test_vendored_contract_is_the_dedicated_backend_artifact() -> None:
                 for parameter in operation.get("parameters", [])
                 if parameter.get("in") == "header"
             ]
-            expected = ["If-Match"] if (path, method) in conditional_operations else []
-            assert [header["name"] for header in headers] == expected
-            assert all(header["required"] is True for header in headers)
+            expected = [("If-Match", True)] if (path, method) in conditional_operations else []
+            if (path, method) == ("/custom-tools/{name}/versions", "post"):
+                expected = [("Idempotency-Key", False), *expected]
+            assert [(header["name"], header["required"]) for header in headers] == expected
 
     serialized = json.dumps(document)
     assert "X-Tamarind-If-Match" not in serialized

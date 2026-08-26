@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, NamedTuple, TypeAlias, cast
 
 from tamarind.custom_tools._generated.client import Client as GeneratedClient
+from tamarind.custom_tools._generated.types import UNSET
 from tamarind.custom_tools._generated.models.public_create_custom_tool_request import (
     PublicCreateCustomToolRequest as CreateModel,
 )
@@ -218,6 +219,7 @@ class GeneratedCustomToolsTransport:
         etag: str,
         body: PublicCreateVersionRequest,
         *,
+        idempotency_key: str | None = None,
         timeout: float | None = None,
     ) -> PublicBuildResult:
         return self._sync(
@@ -225,6 +227,7 @@ class GeneratedCustomToolsTransport:
             build_custom_tool_version._get_kwargs(
                 name=name,
                 if_match=etag,
+                idempotency_key=UNSET if idempotency_key is None else idempotency_key,
                 body=CreateVersionModel.from_dict(body),
             ),
             timeout,

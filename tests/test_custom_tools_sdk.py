@@ -333,7 +333,7 @@ def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> 
     )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
-        result = client.custom_tools.get("example").build(tmp_path)
+        result = client.custom_tools.get("example").build(tmp_path, idempotency_key="release-1")
 
     assert upload.calls.last.request.content.startswith(b"PK")
     assert upload.calls.last.request.headers["Content-Type"] == "application/zip"
@@ -342,6 +342,7 @@ def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> 
     )
     assert "X-Tamarind-Tool-Generation" not in upload_session.calls.last.request.headers
     assert build.calls.last.request.headers["If-Match"] == '"opaque-validator"'
+    assert build.calls.last.request.headers["Idempotency-Key"] == "release-1"
     assert json.loads(build.calls.last.request.content) == {
         "uploadId": "upload-1",
         "expectedSourceDigest": digest,

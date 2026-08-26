@@ -94,8 +94,7 @@ def sync_detailed(
 
     Args:
         name (str): The custom tool name.
-        version (str): The opaque Version `id` returned in a Version representation. Numbered
-            names such as `v3` remain accepted for migration compatibility.
+        version (str): The opaque Version `id` returned in a Version representation.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
 
     Raises:
@@ -134,8 +133,7 @@ def sync(
 
     Args:
         name (str): The custom tool name.
-        version (str): The opaque Version `id` returned in a Version representation. Numbered
-            names such as `v3` remain accepted for migration compatibility.
+        version (str): The opaque Version `id` returned in a Version representation.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
 
     Raises:
@@ -169,8 +167,7 @@ async def asyncio_detailed(
 
     Args:
         name (str): The custom tool name.
-        version (str): The opaque Version `id` returned in a Version representation. Numbered
-            names such as `v3` remain accepted for migration compatibility.
+        version (str): The opaque Version `id` returned in a Version representation.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
 
     Raises:
@@ -207,8 +204,7 @@ async def asyncio(
 
     Args:
         name (str): The custom tool name.
-        version (str): The opaque Version `id` returned in a Version representation. Numbered
-            names such as `v3` remain accepted for migration compatibility.
+        version (str): The opaque Version `id` returned in a Version representation.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
 
     Raises:

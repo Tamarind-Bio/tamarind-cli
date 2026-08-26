@@ -316,7 +316,7 @@
             "type": "array"
           },
           "generation": {
-            "description": "The immutable lifetime identity of this Tool name. Clients use the Tool's quoted `ETag` with standard `If-Match`; versions remain numbered handles such as `v3`.",
+            "description": "The immutable lifetime identity of this Tool name. Clients use the Tool's quoted `ETag` with standard `If-Match`; exact Version operations use each Version's opaque `id`.",
             "title": "Generation",
             "type": "string"
           },
@@ -1430,6 +1430,23 @@
             }
           },
           {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
             "description": "The quoted strong ETag returned with the Tool resource. It prevents stale requests from acting on a changed, deleted, or recreated Tool with the same name.",
             "in": "header",
             "name": "If-Match",
@@ -1523,15 +1540,15 @@
             }
           },
           {
-            "description": "The opaque Version `id` returned in a Version representation. Numbered names such as `v3` remain accepted for migration compatibility.",
+            "description": "The opaque Version `id` returned in a Version representation.",
             "in": "path",
             "name": "version",
             "required": true,
             "schema": {
-              "description": "The opaque Version `id` returned in a Version representation. Numbered names such as `v3` remain accepted for migration compatibility.",
+              "description": "The opaque Version `id` returned in a Version representation.",
               "maxLength": 512,
               "minLength": 2,
-              "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
+              "pattern": "^ver_[A-Za-z0-9_-]+$",
               "title": "Version",
               "type": "string"
             }
@@ -1597,15 +1614,15 @@
             }
           },
           {
-            "description": "The opaque Version `id` returned in a Version representation. Numbered names such as `v3` remain accepted for migration compatibility.",
+            "description": "The opaque Version `id` returned in a Version representation.",
             "in": "path",
             "name": "version",
             "required": true,
             "schema": {
-              "description": "The opaque Version `id` returned in a Version representation. Numbered names such as `v3` remain accepted for migration compatibility.",
+              "description": "The opaque Version `id` returned in a Version representation.",
               "maxLength": 512,
               "minLength": 2,
-              "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
+              "pattern": "^ver_[A-Za-z0-9_-]+$",
               "title": "Version",
               "type": "string"
             }
@@ -1681,15 +1698,15 @@
             }
           },
           {
-            "description": "The opaque Version `id` returned in a Version representation. Numbered names such as `v3` remain accepted for migration compatibility.",
+            "description": "The opaque Version `id` returned in a Version representation.",
             "in": "path",
             "name": "version",
             "required": true,
             "schema": {
-              "description": "The opaque Version `id` returned in a Version representation. Numbered names such as `v3` remain accepted for migration compatibility.",
+              "description": "The opaque Version `id` returned in a Version representation.",
               "maxLength": 512,
               "minLength": 2,
-              "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
+              "pattern": "^ver_[A-Za-z0-9_-]+$",
               "title": "Version",
               "type": "string"
             }
@@ -1771,15 +1788,15 @@
             }
           },
           {
-            "description": "The opaque Version `id` returned in a Version representation. Numbered names such as `v3` remain accepted for migration compatibility.",
+            "description": "The opaque Version `id` returned in a Version representation.",
             "in": "path",
             "name": "version",
             "required": true,
             "schema": {
-              "description": "The opaque Version `id` returned in a Version representation. Numbered names such as `v3` remain accepted for migration compatibility.",
+              "description": "The opaque Version `id` returned in a Version representation.",
               "maxLength": 512,
               "minLength": 2,
-              "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
+              "pattern": "^ver_[A-Za-z0-9_-]+$",
               "title": "Version",
               "type": "string"
             }

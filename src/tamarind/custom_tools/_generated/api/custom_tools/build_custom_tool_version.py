@@ -8,16 +8,20 @@ from ...client import AuthenticatedClient, Client
 from ...models.public_build_result import PublicBuildResult
 from ...models.public_create_version_request import PublicCreateVersionRequest
 from ...models.public_problem import PublicProblem
-from ...types import Response
+from ...types import UNSET, Response, Unset
 
 
 def _get_kwargs(
     name: str,
     *,
     body: PublicCreateVersionRequest,
+    idempotency_key: None | str | Unset = UNSET,
     if_match: str,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
+    if not isinstance(idempotency_key, Unset):
+        headers["Idempotency-Key"] = idempotency_key
+
     headers["If-Match"] = if_match
 
     _kwargs: dict[str, Any] = {
@@ -89,6 +93,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: PublicCreateVersionRequest,
+    idempotency_key: None | str | Unset = UNSET,
     if_match: str,
 ) -> Response[PublicBuildResult | PublicProblem]:
     """Build a custom tool version
@@ -99,6 +104,7 @@ def sync_detailed(
 
     Args:
         name (str): The custom tool name.
+        idempotency_key (None | str | Unset):
         if_match (str):
         body (PublicCreateVersionRequest):
 
@@ -113,6 +119,7 @@ def sync_detailed(
     kwargs = _get_kwargs(
         name=name,
         body=body,
+        idempotency_key=idempotency_key,
         if_match=if_match,
     )
 
@@ -128,6 +135,7 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
     body: PublicCreateVersionRequest,
+    idempotency_key: None | str | Unset = UNSET,
     if_match: str,
 ) -> PublicBuildResult | PublicProblem | None:
     """Build a custom tool version
@@ -138,6 +146,7 @@ def sync(
 
     Args:
         name (str): The custom tool name.
+        idempotency_key (None | str | Unset):
         if_match (str):
         body (PublicCreateVersionRequest):
 
@@ -153,6 +162,7 @@ def sync(
         name=name,
         client=client,
         body=body,
+        idempotency_key=idempotency_key,
         if_match=if_match,
     ).parsed
 
@@ -162,6 +172,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: PublicCreateVersionRequest,
+    idempotency_key: None | str | Unset = UNSET,
     if_match: str,
 ) -> Response[PublicBuildResult | PublicProblem]:
     """Build a custom tool version
@@ -172,6 +183,7 @@ async def asyncio_detailed(
 
     Args:
         name (str): The custom tool name.
+        idempotency_key (None | str | Unset):
         if_match (str):
         body (PublicCreateVersionRequest):
 
@@ -186,6 +198,7 @@ async def asyncio_detailed(
     kwargs = _get_kwargs(
         name=name,
         body=body,
+        idempotency_key=idempotency_key,
         if_match=if_match,
     )
 
@@ -199,6 +212,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
     body: PublicCreateVersionRequest,
+    idempotency_key: None | str | Unset = UNSET,
     if_match: str,
 ) -> PublicBuildResult | PublicProblem | None:
     """Build a custom tool version
@@ -209,6 +223,7 @@ async def asyncio(
 
     Args:
         name (str): The custom tool name.
+        idempotency_key (None | str | Unset):
         if_match (str):
         body (PublicCreateVersionRequest):
 
@@ -225,6 +240,7 @@ async def asyncio(
             name=name,
             client=client,
             body=body,
+            idempotency_key=idempotency_key,
             if_match=if_match,
         )
     ).parsed

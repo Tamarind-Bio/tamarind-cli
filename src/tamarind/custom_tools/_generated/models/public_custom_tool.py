@@ -27,7 +27,7 @@ class PublicCustomTool:
         est_time (str):
         functions (list[str]):
         generation (str): The immutable lifetime identity of this Tool name. Clients use the Tool's quoted `ETag` with
-            standard `If-Match`; versions remain numbered handles such as `v3`.
+            standard `If-Match`; exact Version operations use each Version's opaque `id`.
         gpu_type (PublicCustomToolGputype):
         has_source (bool):
         home_disk_gi (int):

@@ -109,7 +109,7 @@ with Tamarind() as client:
     except CustomToolNotFoundError:
         tool = client.custom_tools.create("my-esmfold", display_name="My ESMFold")
 
-    result = tool.build("./my-esmfold")
+    result = tool.build("./my-esmfold", idempotency_key="release-2026-08-26")
     print(result.action)  # build, reuse_image, or unchanged
     version = result.version
     print(version.id, version.name)  # opaque machine identity, human-facing label
@@ -119,8 +119,9 @@ with Tamarind() as client:
 
 `build()` returns a typed result describing what the request did and the durable
 Version it produced. It is convenience orchestration, not a durable request
-object. If the connection is lost during the build response, fetch the tool's
-versions before retrying. Interrupting `monitor()` stops local monitoring; it
+object. Reuse `idempotency_key` when retrying an ambiguous build response; the
+server returns the already admitted Version. If no key was supplied, fetch the
+tool's versions before retrying. Interrupting `monitor()` stops local monitoring; it
 does not cancel the remote build.
 
 Exact Version operations use `version.id`; `version.name` is display-only. If a
