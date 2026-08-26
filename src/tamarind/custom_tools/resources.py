@@ -169,13 +169,11 @@ class CustomTool:
         return self._refresh(request_timeout=None)
 
     def _refresh(self, *, request_timeout: float | None) -> "CustomTool":
-        refreshed = self._collection._get(self.name, request_timeout=request_timeout)
-        if refreshed.generation != self.generation:
-            raise StaleCustomToolError(
-                f"Custom Tool {self.name!r} now refers to a different generation; "
-                "fetch it again explicitly to select the replacement."
-            )
-        return refreshed
+        return self._collection._current_tool(
+            self.name,
+            self.generation,
+            request_timeout=request_timeout,
+        )
 
     def update(
         self,
@@ -238,11 +236,7 @@ class CustomTool:
 
     def get_version(self, version_id: str) -> "Version":
         """Get one exact Version by its opaque ``id``."""
-        return self._collection._get_version(
-            self.name,
-            self.generation,
-            _require_opaque_version_id(version_id),
-        )
+        return self._collection._get_version_for_tool(self, _require_opaque_version_id(version_id))
 
     def versions(
         self,
@@ -252,8 +246,7 @@ class CustomTool:
         cursor: str | None = None,
     ) -> Page["Version"]:
         return self._collection._versions(
-            self.name,
-            self.generation,
+            self,
             status=status,
             limit=limit,
             cursor=cursor,
@@ -452,11 +445,26 @@ class CustomTools:
             next_cursor=wire["nextCursor"],
         )
 
+    def _current_tool(
+        self,
+        tool_name: str,
+        expected_generation: str,
+        *,
+        request_timeout: float | None = None,
+    ) -> CustomTool:
+        current = self._get(tool_name, request_timeout=request_timeout)
+        if current.generation != expected_generation:
+            raise StaleCustomToolError(
+                f"Custom Tool {tool_name!r} now refers to a different generation; "
+                "fetch it again explicitly to select the replacement."
+            )
+        return current
+
     def _validator(self, tool: CustomTool) -> str:
         if tool._etag is not None:
             return tool._etag
-        current = self._get(tool.name, request_timeout=None)
-        if current.generation != tool.generation or current.updated_at != tool.updated_at:
+        current = self._current_tool(tool.name, tool.generation)
+        if current.updated_at != tool.updated_at:
             raise StaleCustomToolError(
                 f"Custom Tool {tool.name!r} changed since it was listed; "
                 "fetch it again before mutating it."
@@ -512,8 +520,7 @@ class CustomTools:
 
     def _versions(
         self,
-        tool_name: str,
-        tool_generation: str,
+        tool: CustomTool,
         *,
         status: PublicVersionStatus | None,
         limit: int,
@@ -521,18 +528,43 @@ class CustomTools:
         request_timeout: float | None = None,
     ) -> Page[Version]:
         wire = self._transport.list_custom_tool_versions(
-            tool_name,
+            tool.name,
             status=status,
             limit=limit,
             cursor=cursor,
             timeout=request_timeout,
         )
+        self._current_tool(
+            tool.name,
+            tool.generation,
+            request_timeout=request_timeout,
+        )
         return Page(
             items=tuple(
-                _version_from_wire(self, tool_name, tool_generation, item) for item in wire["items"]
+                _version_from_wire(self, tool.name, tool.generation, item) for item in wire["items"]
             ),
             next_cursor=wire["nextCursor"],
         )
+
+    def _get_version_for_tool(
+        self,
+        tool: CustomTool,
+        version_id: str,
+        *,
+        request_timeout: float | None = None,
+    ) -> Version:
+        version = self._get_version(
+            tool.name,
+            tool.generation,
+            version_id,
+            request_timeout=request_timeout,
+        )
+        self._current_tool(
+            tool.name,
+            tool.generation,
+            request_timeout=request_timeout,
+        )
+        return version
 
     def _get_version(
         self,
@@ -570,12 +602,10 @@ class CustomTools:
         return _version_from_wire(self, version.tool_name, version.tool_generation, wire)
 
     def _publish_version(self, version: Version) -> CustomTool:
-        tool = self._get(version.tool_name, request_timeout=None)
-        if tool.generation != version.tool_generation:
-            raise StaleCustomToolError(
-                f"Custom Tool {version.tool_name!r} now refers to a different generation; "
-                "fetch the replacement explicitly before publishing."
-            )
+        tool = self._current_tool(
+            version.tool_name,
+            version.tool_generation,
+        )
         wire = self._transport.publish_custom_tool_version(
             version.tool_name,
             version.id,

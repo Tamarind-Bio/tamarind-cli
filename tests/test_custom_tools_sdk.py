@@ -177,6 +177,35 @@ def test_refresh_rejects_a_reused_tool_name() -> None:
     assert route.call_count == 2
 
 
+@pytest.mark.parametrize("operation", ["get_version", "versions"])
+@respx.mock
+def test_tool_scoped_version_reads_reject_a_reused_tool_name(operation: str) -> None:
+    tool_route = respx.get(f"{BASE}custom-tools/example").mock(
+        side_effect=[
+            httpx.Response(200, json=_tool()),
+            httpx.Response(200, json=_tool(generation="generation-2")),
+        ]
+    )
+    if operation == "get_version":
+        respx.get(f"{BASE}custom-tools/example/versions/{VERSION_ID}").mock(
+            return_value=httpx.Response(200, json=_version())
+        )
+    else:
+        respx.get(f"{BASE}custom-tools/example/versions").mock(
+            return_value=httpx.Response(200, json={"items": [_version()], "nextCursor": None})
+        )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        selected = client.custom_tools.get("example")
+        with pytest.raises(StaleCustomToolError, match="different generation"):
+            if operation == "get_version":
+                selected.get_version(VERSION_ID)
+            else:
+                selected.versions()
+
+    assert tool_route.call_count == 2
+
+
 @respx.mock
 def test_custom_tools_transport_owns_plain_404_classification() -> None:
     respx.get(f"{BASE}custom-tools/missing").mock(
@@ -644,7 +673,7 @@ def test_version_logs_cancel_and_publish_use_version_routes() -> None:
         assert version.cancel().status == "Stopped"
         assert version.publish().default_version == "v1"
 
-    assert get_tool.call_count == 2
+    assert get_tool.call_count == 3
     assert cancel.calls.last.request.headers["If-Match"] == '"version-etag"'
     assert publish.calls.last.request.headers["If-Match"] == '"opaque-validator"'
     for route in (get_version, logs, cancel, publish):
