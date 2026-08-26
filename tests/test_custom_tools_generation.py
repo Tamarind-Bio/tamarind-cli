@@ -315,13 +315,14 @@ def test_contract_sync_exercises_generated_endpoint_signatures(
     source = ROOT / "src/tamarind/custom_tools/_generated"
     shutil.copytree(source, generated)
     endpoint = generated / "api/custom_tools/list_custom_tool_versions.py"
-    endpoint.write_text(
-        endpoint.read_text().replace(
-            "    x_tamarind_tool_generation: str,\n) -> dict[str, Any]:",
-            "    x_tamarind_tool_generation: str,\n    required_probe: str,\n) -> dict[str, Any]:",
-            1,
-        )
+    original = endpoint.read_text()
+    mutated = original.replace(
+        "    name: str,\n    *,",
+        "    name: str,\n    required_probe: str,\n    *,",
+        1,
     )
+    assert mutated != original
+    endpoint.write_text(mutated)
 
     with pytest.raises(subprocess.CalledProcessError):
         _verify_generated_facade(
