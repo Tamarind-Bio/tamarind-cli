@@ -74,6 +74,11 @@ action plus its durable Version. It adds no server-side
 BuildRequest, queue, lease, claim, or repair state. An ambiguous build response
 is therefore handled honestly by listing Versions before a manual retry.
 
+The resource layer treats the returned opaque `Version.id` as the sole machine
+selector for exact reads, logs, cancellation, and publication. The numbered
+`Version.name` remains presentation metadata and is never reconstructed into an
+endpoint path. Tool and Version ETags remain the mutation validators.
+
 ### 4. Pipelines read surface — source of truth: the public OpenAPI artifact
 
 `Tamarind().pipelines` reads a run and pages through the molecules produced by one

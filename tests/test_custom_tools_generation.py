@@ -21,10 +21,15 @@ def test_vendored_contract_is_the_dedicated_backend_artifact() -> None:
     assert document["paths"]
     assert all(_is_custom_tools_path(path) for path in document["paths"])
     assert all("/generations/" not in path for path in document["paths"])
+    conditional_operations = {
+        ("/custom-tools/{name}", "delete"),
+        ("/custom-tools/{name}", "patch"),
+        ("/custom-tools/{name}/versions", "post"),
+        ("/custom-tools/{name}/versions/{version}:cancel", "post"),
+        ("/custom-tools/{name}/versions/{version}:publish", "post"),
+    }
     for path, item in document["paths"].items():
-        if not path.startswith("/custom-tools/{name}/"):
-            continue
-        for operation in item.values():
+        for method, operation in item.items():
             if not isinstance(operation, dict):
                 continue
             headers = [
@@ -32,8 +37,13 @@ def test_vendored_contract_is_the_dedicated_backend_artifact() -> None:
                 for parameter in operation.get("parameters", [])
                 if parameter.get("in") == "header"
             ]
-            assert [header["name"] for header in headers] == ["X-Tamarind-Tool-Generation"]
-            assert headers[0]["required"] is True
+            expected = ["If-Match"] if (path, method) in conditional_operations else []
+            assert [header["name"] for header in headers] == expected
+            assert all(header["required"] is True for header in headers)
+
+    serialized = json.dumps(document)
+    assert "X-Tamarind-If-Match" not in serialized
+    assert "X-Tamarind-Tool-Generation" not in serialized
 
 
 def test_generated_client_contains_sync_async_endpoints_and_attrs_models() -> None:

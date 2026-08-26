@@ -22,12 +22,20 @@ from tamarind.errors import (
 
 BASE = "https://api.test/"
 UPLOAD = "https://uploads.test/source.zip"
+VERSION_ID = "ver_opaque"
 
 
 @pytest.mark.parametrize("value", [10**400, -(10**400)])
 def test_custom_tool_timeouts_reject_integers_outside_the_float_range(value: int) -> None:
     with pytest.raises(ValidationError, match="finite number greater than zero"):
         resources._positive_finite_number(value, "timeout")
+
+
+def test_numbered_version_names_are_not_accepted_as_sdk_selectors() -> None:
+    with pytest.raises(ValidationError, match="opaque Version.id"):
+        resources._require_opaque_version_id("v1")
+
+    assert resources._require_opaque_version_id(VERSION_ID) == VERSION_ID
 
 
 def _tool(
@@ -75,6 +83,7 @@ def _version(
     source_digest: str = "sha256:" + "a" * 64,
 ) -> dict:
     return {
+        "id": VERSION_ID,
         "name": "v1",
         "sourceRevision": "a" * 40,
         "sourceDigest": source_digest,
@@ -122,7 +131,7 @@ def test_create_list_and_update_wrap_public_routes() -> None:
     assert page.next_cursor == "tools-page-2"
     assert listed_route.calls.last.request.url.params["limit"] == "1"
     assert json.loads(update.calls.last.request.content) == {"description": "updated"}
-    assert update.calls.last.request.headers["X-Tamarind-If-Match"] == '"opaque-validator"'
+    assert update.calls.last.request.headers["If-Match"] == '"opaque-validator"'
     assert changed.description == "updated"
 
 
@@ -136,7 +145,7 @@ def test_delete_uses_the_tool_etag() -> None:
     with Tamarind(api_key="key", api_base=BASE) as client:
         client.custom_tools.get("example").delete()
 
-    assert delete.calls.last.request.headers["X-Tamarind-If-Match"] == '"opaque-validator"'
+    assert delete.calls.last.request.headers["If-Match"] == '"opaque-validator"'
 
 
 @respx.mock
@@ -223,14 +232,16 @@ def test_every_model_operation_rejects_undocumented_2xx_problem_responses(
 def test_malformed_nested_build_errors_use_the_sdk_error_boundary() -> None:
     malformed = _version()
     malformed["error"] = "not-an-error-object"
-    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
-    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"opaque-validator"'})
+    )
+    respx.get(f"{BASE}custom-tools/example/versions/{VERSION_ID}").mock(
         return_value=httpx.Response(200, json=malformed)
     )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
         with pytest.raises(TamarindError, match="generated contract"):
-            client.custom_tools.get("example").get_version("v1")
+            client.custom_tools.get("example").get_version(VERSION_ID)
 
 
 @respx.mock
@@ -239,13 +250,13 @@ def test_custom_tools_not_found_classification_ignores_api_mount_prefix() -> Non
     respx.get(f"{prefixed_base}custom-tools/example").mock(
         return_value=httpx.Response(200, json=_tool())
     )
-    respx.get(f"{prefixed_base}custom-tools/example/versions/v1").mock(
+    respx.get(f"{prefixed_base}custom-tools/example/versions/{VERSION_ID}").mock(
         return_value=httpx.Response(404, json={"detail": "Not Found"})
     )
 
     with Tamarind(api_key="key", api_base=prefixed_base) as client:
         with pytest.raises(CustomToolNotFoundError, match="Not Found"):
-            client.custom_tools.get("example").get_version("v1")
+            client.custom_tools.get("example").get_version(VERSION_ID)
 
 
 @respx.mock
@@ -267,7 +278,9 @@ def test_non_custom_tool_route_with_matching_segment_keeps_generic_404() -> None
 def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> None:
     _source(tmp_path)
     digest = _archive_digest(tmp_path)
-    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"opaque-validator"'})
+    )
     upload_session = respx.post(f"{BASE}custom-tools/example/uploads").mock(
         return_value=httpx.Response(
             201,
@@ -286,6 +299,7 @@ def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> 
         return_value=httpx.Response(
             202,
             json={"action": "reuse_image", "version": _version(source_digest=digest)},
+            headers={"ETag": '"version-etag"', "Location": f"./versions/{VERSION_ID}"},
         )
     )
 
@@ -297,13 +311,15 @@ def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> 
     assert upload.calls.last.request.headers["Content-Length"] == str(
         len(upload.calls.last.request.content)
     )
-    assert upload_session.calls.last.request.headers["X-Tamarind-Tool-Generation"] == "generation-1"
-    assert build.calls.last.request.headers["X-Tamarind-Tool-Generation"] == "generation-1"
+    assert "X-Tamarind-Tool-Generation" not in upload_session.calls.last.request.headers
+    assert build.calls.last.request.headers["If-Match"] == '"opaque-validator"'
     assert json.loads(build.calls.last.request.content) == {
         "uploadId": "upload-1",
         "expectedSourceDigest": digest,
     }
     assert result.action == "reuse_image"
+    assert result.version.id == VERSION_ID
+    assert result.version._etag == '"version-etag"'
     assert result.version.name == "v1"
     assert result.version.source_digest == digest
 
@@ -311,7 +327,9 @@ def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> 
 @respx.mock
 def test_build_rejects_archive_larger_than_upload_session_limit(tmp_path: Path) -> None:
     _source(tmp_path)
-    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"opaque-validator"'})
+    )
     respx.post(f"{BASE}custom-tools/example/uploads").mock(
         return_value=httpx.Response(
             201,
@@ -424,12 +442,12 @@ def test_list_operations_preserve_an_explicit_zero_limit() -> None:
 def test_version_preserves_wire_timestamps_and_stable_error_code() -> None:
     failed = _version(status="Stopped", error="Docker build failed")
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
-    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+    respx.get(f"{BASE}custom-tools/example/versions/{VERSION_ID}").mock(
         return_value=httpx.Response(200, json=failed)
     )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
-        version = client.custom_tools.get("example").get_version("v1")
+        version = client.custom_tools.get("example").get_version(VERSION_ID)
 
     assert version.created_at == failed["createdAt"]
     assert version.started_at == failed["startedAt"]
@@ -442,12 +460,12 @@ def test_version_preserves_wire_timestamps_and_stable_error_code() -> None:
 @respx.mock
 def test_version_preserves_the_server_terminal_marker() -> None:
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
-    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+    respx.get(f"{BASE}custom-tools/example/versions/{VERSION_ID}").mock(
         return_value=httpx.Response(200, json=_version(status="Running", terminal=True))
     )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
-        version = client.custom_tools.get("example").get_version("v1")
+        version = client.custom_tools.get("example").get_version(VERSION_ID)
 
     assert version.terminal is True
 
@@ -457,13 +475,13 @@ def test_version_rejects_a_non_boolean_terminal_marker() -> None:
     malformed = _version(status="Running")
     malformed["terminal"] = "false"
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
-    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+    respx.get(f"{BASE}custom-tools/example/versions/{VERSION_ID}").mock(
         return_value=httpx.Response(200, json=malformed)
     )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
         with pytest.raises(TamarindError, match="generated contract"):
-            client.custom_tools.get("example").get_version("v1")
+            client.custom_tools.get("example").get_version(VERSION_ID)
 
 
 @respx.mock
@@ -475,12 +493,12 @@ def test_version_does_not_interpret_wire_timestamps() -> None:
         "completedAt": "completed by server",
     }
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
-    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+    respx.get(f"{BASE}custom-tools/example/versions/{VERSION_ID}").mock(
         return_value=httpx.Response(200, json=wire)
     )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
-        version = client.custom_tools.get("example").get_version("v1")
+        version = client.custom_tools.get("example").get_version(VERSION_ID)
 
     assert (version.created_at, version.started_at, version.completed_at) == (
         "created by server",
@@ -494,7 +512,7 @@ def test_build_caps_archive_at_the_server_source_limit(tmp_path: Path, monkeypat
     observed_limit = None
 
     class Transport:
-        def create_custom_tool_upload(self, _name, _generation):
+        def create_custom_tool_upload(self, _name):
             return {"uploadUrl": UPLOAD, "uploadId": "upload-1"}
 
     def capture_limit(_tree, *, max_bytes):
@@ -532,7 +550,7 @@ def test_build_constructs_archive_before_creating_upload_session(
             events.append("close")
 
     class Transport:
-        def create_custom_tool_upload(self, _name, _generation):
+        def create_custom_tool_upload(self, _name):
             events.append("session")
             raise RuntimeError("session failed")
 
@@ -558,7 +576,9 @@ def test_build_constructs_archive_before_creating_upload_session(
 @respx.mock
 def test_build_fails_closed_when_generation_changes(tmp_path: Path) -> None:
     _source(tmp_path)
-    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"opaque-validator"'})
+    )
     respx.post(f"{BASE}custom-tools/example/uploads").mock(
         return_value=httpx.Response(
             201,
@@ -575,12 +595,12 @@ def test_build_fails_closed_when_generation_changes(tmp_path: Path) -> None:
     respx.put(UPLOAD).mock(return_value=httpx.Response(200))
     respx.post(f"{BASE}custom-tools/example/versions").mock(
         return_value=httpx.Response(
-            409,
+            412,
             json={
-                "type": "https://app.tamarind.bio/errors/custom_tool_source_changed",
-                "title": "Custom Tool source changed",
-                "status": 409,
-                "code": "custom_tool_source_changed",
+                "type": "https://app.tamarind.bio/errors/precondition_failed",
+                "title": "Precondition failed",
+                "status": 412,
+                "code": "precondition_failed",
                 "detail": "refresh and retry",
             },
         )
@@ -593,12 +613,12 @@ def test_build_fails_closed_when_generation_changes(tmp_path: Path) -> None:
 @respx.mock
 def test_version_logs_cancel_and_publish_use_version_routes() -> None:
     get_tool = respx.get(f"{BASE}custom-tools/example").mock(
-        return_value=httpx.Response(200, json=_tool())
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"opaque-validator"'})
     )
-    get_version = respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
-        return_value=httpx.Response(200, json=_version())
+    get_version = respx.get(f"{BASE}custom-tools/example/versions/{VERSION_ID}").mock(
+        return_value=httpx.Response(200, json=_version(), headers={"ETag": '"version-etag"'})
     )
-    logs = respx.get(f"{BASE}custom-tools/example/versions/v1/logs").mock(
+    logs = respx.get(f"{BASE}custom-tools/example/versions/{VERSION_ID}/logs").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -609,37 +629,39 @@ def test_version_logs_cancel_and_publish_use_version_routes() -> None:
             },
         )
     )
-    cancel = respx.post(f"{BASE}custom-tools/example/versions/v1:cancel").mock(
+    cancel = respx.post(f"{BASE}custom-tools/example/versions/{VERSION_ID}:cancel").mock(
         return_value=httpx.Response(200, json=_version(status="Stopped", error="cancelled by user"))
     )
-    publish = respx.post(f"{BASE}custom-tools/example/versions/v1:publish").mock(
+    publish = respx.post(f"{BASE}custom-tools/example/versions/{VERSION_ID}:publish").mock(
         return_value=httpx.Response(
             200, json={**_tool(source=True), "published": True, "defaultVersion": "v1"}
         )
     )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
-        version = client.custom_tools.get("example").get_version("v1")
+        version = client.custom_tools.get("example").get_version(VERSION_ID)
         assert version.logs().items[0].message == "building"
         assert version.cancel().status == "Stopped"
         assert version.publish().default_version == "v1"
 
-    assert get_tool.call_count == 1
+    assert get_tool.call_count == 2
+    assert cancel.calls.last.request.headers["If-Match"] == '"version-etag"'
+    assert publish.calls.last.request.headers["If-Match"] == '"opaque-validator"'
     for route in (get_version, logs, cancel, publish):
-        assert route.calls.last.request.headers["X-Tamarind-Tool-Generation"] == "generation-1"
+        assert "X-Tamarind-Tool-Generation" not in route.calls.last.request.headers
 
 
 @respx.mock
 def test_terminal_failure_raises_typed_error() -> None:
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
-    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+    respx.get(f"{BASE}custom-tools/example/versions/{VERSION_ID}").mock(
         return_value=httpx.Response(
             200, json=_version(status="Stopped", error="Docker build failed")
         )
     )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
-        version = client.custom_tools.get("example").get_version("v1")
+        version = client.custom_tools.get("example").get_version(VERSION_ID)
         with pytest.raises(CustomToolBuildFailedError, match="Docker build failed"):
             version.monitor(timeout=1)
 
@@ -647,12 +669,12 @@ def test_terminal_failure_raises_typed_error() -> None:
 @respx.mock
 def test_non_complete_terminal_version_raises_typed_error() -> None:
     respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
-    respx.get(f"{BASE}custom-tools/example/versions/v1").mock(
+    respx.get(f"{BASE}custom-tools/example/versions/{VERSION_ID}").mock(
         return_value=httpx.Response(200, json=_version(status="Running", terminal=True))
     )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
-        version = client.custom_tools.get("example").get_version("v1")
+        version = client.custom_tools.get("example").get_version(VERSION_ID)
         with pytest.raises(CustomToolBuildFailedError, match="status Running"):
             version.monitor(timeout=1)
 
@@ -673,6 +695,7 @@ def test_monitor_recomputes_the_deadline_after_log_poll(monkeypatch) -> None:
     monkeypatch.setattr(resources.Version, "_logs_async", logs)
     monkeypatch.setattr(resources.Version, "_refresh_async", refresh)
     version = resources.Version(
+        id=VERSION_ID,
         name="v1",
         source_revision="a" * 40,
         source_digest="sha256:" + "a" * 64,
@@ -706,6 +729,7 @@ def test_monitor_does_not_dispatch_logs_after_the_deadline(monkeypatch) -> None:
 
     monkeypatch.setattr(resources.Version, "_logs_async", logs)
     version = resources.Version(
+        id=VERSION_ID,
         name="v1",
         source_revision="a" * 40,
         source_digest="sha256:" + "a" * 64,
@@ -755,6 +779,7 @@ def test_monitor_without_callback_does_not_fetch_logs(monkeypatch) -> None:
 
     async def refresh(version, **_kwargs):
         return resources.Version(
+            id=version.id,
             name=version.name,
             source_revision=version.source_revision,
             source_digest=version.source_digest,
@@ -773,6 +798,7 @@ def test_monitor_without_callback_does_not_fetch_logs(monkeypatch) -> None:
     monkeypatch.setattr(resources.Version, "_logs_async", logs)
     monkeypatch.setattr(resources.Version, "_refresh_async", refresh)
     version = resources.Version(
+        id=VERSION_ID,
         name="v1",
         source_revision="a" * 40,
         source_digest="sha256:" + "a" * 64,
@@ -799,6 +825,7 @@ def test_monitor_rechecks_deadline_after_terminal_refresh(monkeypatch) -> None:
 
     async def refresh(version, **_kwargs):
         return resources.Version(
+            id=version.id,
             name=version.name,
             source_revision=version.source_revision,
             source_digest=version.source_digest,
@@ -816,6 +843,7 @@ def test_monitor_rechecks_deadline_after_terminal_refresh(monkeypatch) -> None:
 
     monkeypatch.setattr(resources.Version, "_refresh_async", refresh)
     version = resources.Version(
+        id=VERSION_ID,
         name="v1",
         source_revision="a" * 40,
         source_digest="sha256:" + "a" * 64,
@@ -846,6 +874,7 @@ def test_monitor_without_callback_polls_until_complete(monkeypatch) -> None:
         refreshes += 1
         status = "Complete" if refreshes == 2 else "Running"
         return resources.Version(
+            id=version.id,
             name=version.name,
             source_revision=version.source_revision,
             source_digest=version.source_digest,
@@ -864,6 +893,7 @@ def test_monitor_without_callback_polls_until_complete(monkeypatch) -> None:
     monkeypatch.setattr(resources.Version, "_logs_async", logs)
     monkeypatch.setattr(resources.Version, "_refresh_async", refresh)
     version = resources.Version(
+        id=VERSION_ID,
         name="v1",
         source_revision="a" * 40,
         source_digest="sha256:" + "a" * 64,
@@ -902,6 +932,7 @@ def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> N
 
     async def refresh(version, **_kwargs):
         return resources.Version(
+            id=version.id,
             name=version.name,
             source_revision=version.source_revision,
             source_digest=version.source_digest,
@@ -920,6 +951,7 @@ def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> N
     monkeypatch.setattr(resources.Version, "_logs_async", logs)
     monkeypatch.setattr(resources.Version, "_refresh_async", refresh)
     version = resources.Version(
+        id=VERSION_ID,
         name="v1",
         source_revision="a" * 40,
         source_digest="sha256:" + "a" * 64,
@@ -953,6 +985,7 @@ def test_monitor_rechecks_deadline_after_terminal_log_fetch(monkeypatch) -> None
 
     monkeypatch.setattr(resources.Version, "_logs_async", logs)
     version = resources.Version(
+        id=VERSION_ID,
         name="v1",
         source_revision="a" * 40,
         source_digest="sha256:" + "a" * 64,

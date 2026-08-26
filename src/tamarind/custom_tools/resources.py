@@ -9,6 +9,7 @@ import asyncio
 from dataclasses import dataclass, field
 import math
 from pathlib import Path
+import re
 import time
 from typing import Awaitable, BinaryIO, Callable, Generic, TypeAlias, TypeVar, cast
 
@@ -235,8 +236,13 @@ class CustomTool:
             raise ValidationError("Custom Tool source validation failed", detail=report)
         return self._collection._build(self, tree, source_timeout=source_timeout)
 
-    def get_version(self, name: str) -> "Version":
-        return self._collection._get_version(self.name, self.generation, name)
+    def get_version(self, version_id: str) -> "Version":
+        """Get one exact Version by its opaque ``id``."""
+        return self._collection._get_version(
+            self.name,
+            self.generation,
+            _require_opaque_version_id(version_id),
+        )
 
     def versions(
         self,
@@ -256,6 +262,7 @@ class CustomTool:
 
 @dataclass(frozen=True)
 class Version:
+    id: str
     name: str
     source_revision: str | None
     source_digest: str | None
@@ -269,6 +276,7 @@ class Version:
     tool_name: str
     tool_generation: str
     _collection: "CustomTools" = field(repr=False, compare=False)
+    _etag: str | None = field(default=None, repr=False, compare=False)
 
     def refresh(self) -> "Version":
         return self._refresh(request_timeout=None)
@@ -276,8 +284,7 @@ class Version:
     def _refresh(self, *, request_timeout: float | None) -> "Version":
         wire = self._collection._transport.get_custom_tool_version(
             self.tool_name,
-            self.name,
-            self.tool_generation,
+            self.id,
             timeout=request_timeout,
         )
         return _version_from_wire(self._collection, self.tool_name, self.tool_generation, wire)
@@ -285,8 +292,7 @@ class Version:
     async def _refresh_async(self, *, request_timeout: float | None) -> "Version":
         wire = await self._collection._transport.get_custom_tool_version_async(
             self.tool_name,
-            self.name,
-            self.tool_generation,
+            self.id,
             timeout=request_timeout,
         )
         return _version_from_wire(self._collection, self.tool_name, self.tool_generation, wire)
@@ -297,8 +303,7 @@ class Version:
     def _logs(self, *, cursor: str | None, request_timeout: float | None) -> BuildLogPage:
         wire = self._collection._transport.list_custom_tool_build_logs(
             self.tool_name,
-            self.name,
-            self.tool_generation,
+            self.id,
             cursor=cursor,
             timeout=request_timeout,
         )
@@ -309,24 +314,17 @@ class Version:
     ) -> BuildLogPage:
         wire = await self._collection._transport.list_custom_tool_build_logs_async(
             self.tool_name,
-            self.name,
-            self.tool_generation,
+            self.id,
             cursor=cursor,
             timeout=request_timeout,
         )
         return _log_page_from_wire(wire)
 
     def cancel(self) -> "Version":
-        wire = self._collection._transport.cancel_custom_tool_build(
-            self.tool_name, self.name, self.tool_generation
-        )
-        return _version_from_wire(self._collection, self.tool_name, self.tool_generation, wire)
+        return self._collection._cancel_version(self)
 
     def publish(self) -> CustomTool:
-        wire = self._collection._transport.publish_custom_tool_version(
-            self.tool_name, self.name, self.tool_generation
-        )
-        return _tool_from_wire(self._collection, wire)
+        return self._collection._publish_version(self)
 
     def monitor(
         self, *, timeout: float | None, interval: float = 2.0, on_event: EventCallback | None = None
@@ -481,7 +479,7 @@ class CustomTools:
         archive = build_source_tree_archive(tree, max_bytes=MAX_TOOL_SOURCE_BYTES)
         try:
             session = _upload_session_from_wire(
-                self._transport.create_custom_tool_upload(tool.name, tool.generation)
+                self._transport.create_custom_tool_upload(tool.name)
             )
             if archive.size > session.max_bytes:
                 raise CustomToolUploadError(
@@ -498,7 +496,7 @@ class CustomTools:
             )
             result = self._transport.build_custom_tool_version(
                 tool.name,
-                tool.generation,
+                self._validator(tool),
                 cast(
                     PublicCreateVersionRequest,
                     {
@@ -524,7 +522,6 @@ class CustomTools:
     ) -> Page[Version]:
         wire = self._transport.list_custom_tool_versions(
             tool_name,
-            tool_generation,
             status=status,
             limit=limit,
             cursor=cursor,
@@ -541,17 +538,50 @@ class CustomTools:
         self,
         tool_name: str,
         tool_generation: str,
-        version_name: str,
+        version_id: str,
         *,
         request_timeout: float | None = None,
     ) -> Version:
         wire = self._transport.get_custom_tool_version(
             tool_name,
-            version_name,
-            tool_generation,
+            version_id,
             timeout=request_timeout,
         )
         return _version_from_wire(self, tool_name, tool_generation, wire)
+
+    def _version_validator(self, version: Version) -> str:
+        if version._etag is not None:
+            return version._etag
+        current = self._get_version(version.tool_name, version.tool_generation, version.id)
+        if current.id != version.id:
+            raise StaleCustomToolError(
+                f"Custom Tool Version {version.tool_name}/{version.name} changed identity; fetch it again."
+            )
+        if current._etag is None:
+            raise TamarindError("Custom Tools response did not include the required Version ETag")
+        return current._etag
+
+    def _cancel_version(self, version: Version) -> Version:
+        wire = self._transport.cancel_custom_tool_build(
+            version.tool_name,
+            version.id,
+            self._version_validator(version),
+        )
+        return _version_from_wire(self, version.tool_name, version.tool_generation, wire)
+
+    def _publish_version(self, version: Version) -> CustomTool:
+        tool = self._get(version.tool_name, request_timeout=None)
+        if tool.generation != version.tool_generation:
+            raise StaleCustomToolError(
+                f"Custom Tool {version.tool_name!r} now refers to a different generation; "
+                "fetch the replacement explicitly before publishing."
+            )
+        wire = self._transport.publish_custom_tool_version(
+            version.tool_name,
+            version.id,
+            self._validator(tool),
+        )
+        return _tool_from_wire(self, wire)
 
 
 def _upload_session_from_wire(wire: object) -> _UploadSession:
@@ -657,6 +687,7 @@ def _version_from_wire(
     if not isinstance(terminal, bool):
         raise TamarindError("Custom Tools response did not match the generated contract")
     return Version(
+        id=wire["id"],
         name=wire["name"],
         source_revision=wire["sourceRevision"],
         source_digest=wire["sourceDigest"],
@@ -669,6 +700,7 @@ def _version_from_wire(
         error=_build_error_from_wire(wire["error"]),
         tool_name=tool_name,
         tool_generation=tool_generation,
+        _etag=cast(str | None, wire.get("_etag")),
         _collection=collection,
     )
 
@@ -679,9 +711,12 @@ def _build_result_from_wire(
     tool_generation: str,
     wire: PublicBuildResult,
 ) -> BuildResult:
+    version = dict(wire["version"])
+    if "_etag" in wire:
+        version["_etag"] = wire["_etag"]
     return BuildResult(
         action=BuildAction(wire["action"]),
-        version=_version_from_wire(collection, tool_name, tool_generation, wire["version"]),
+        version=_version_from_wire(collection, tool_name, tool_generation, version),
     )
 
 
@@ -753,3 +788,9 @@ def _positive_finite_number(value: object, label: str) -> float:
     if not math.isfinite(normalized) or normalized <= 0:
         raise ValidationError(f"{label} must be a finite number greater than zero")
     return normalized
+
+
+def _require_opaque_version_id(value: str) -> str:
+    if re.fullmatch(r"v[1-9][0-9]*", value):
+        raise ValidationError("get_version requires the opaque Version.id, not its numbered name")
+    return value

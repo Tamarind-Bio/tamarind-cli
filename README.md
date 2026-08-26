@@ -112,6 +112,7 @@ with Tamarind() as client:
     result = tool.build("./my-esmfold")
     print(result.action)  # build, reuse_image, or unchanged
     version = result.version
+    print(version.id, version.name)  # opaque machine identity, human-facing label
     if not version.terminal:
         version = version.monitor(timeout=1800, on_event=print)
 ```
@@ -121,6 +122,10 @@ Version it produced. It is convenience orchestration, not a durable request
 object. If the connection is lost during the build response, fetch the tool's
 versions before retrying. Interrupting `monitor()` stops local monitoring; it
 does not cancel the remote build.
+
+Exact Version operations use `version.id`; `version.name` is display-only. If a
+mutation reports `412 Precondition Failed`, refetch the affected Tool or Version,
+confirm the mutation is still desired, and retry using the refreshed resource.
 
 Custom Tool CLI commands are not part of this release. Existing CLI commands
 remain unchanged.
