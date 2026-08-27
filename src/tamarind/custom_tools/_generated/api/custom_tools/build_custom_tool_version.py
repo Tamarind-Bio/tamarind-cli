@@ -8,17 +8,21 @@ from ...client import AuthenticatedClient, Client
 from ...models.public_build_result import PublicBuildResult
 from ...models.public_create_version_request import PublicCreateVersionRequest
 from ...models.public_problem import PublicProblem
-from ...types import Response
+from ...types import UNSET, Response, Unset
 
 
 def _get_kwargs(
     name: str,
     *,
     body: PublicCreateVersionRequest,
-    x_tamarind_tool_generation: str,
+    idempotency_key: None | str | Unset = UNSET,
+    if_match: str,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    headers["X-Tamarind-Tool-Generation"] = x_tamarind_tool_generation
+    if not isinstance(idempotency_key, Unset):
+        headers["Idempotency-Key"] = idempotency_key
+
+    headers["If-Match"] = if_match
 
     _kwargs: dict[str, Any] = {
         "method": "post",
@@ -53,10 +57,25 @@ def _parse_response(
 
         return response_404
 
+    if response.status_code == 409:
+        response_409 = PublicProblem.from_dict(response.json())
+
+        return response_409
+
+    if response.status_code == 412:
+        response_412 = PublicProblem.from_dict(response.json())
+
+        return response_412
+
     if response.status_code == 422:
         response_422 = PublicProblem.from_dict(response.json())
 
         return response_422
+
+    if response.status_code == 428:
+        response_428 = PublicProblem.from_dict(response.json())
+
+        return response_428
 
     response_default = PublicProblem.from_dict(response.json())
 
@@ -79,7 +98,8 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: PublicCreateVersionRequest,
-    x_tamarind_tool_generation: str,
+    idempotency_key: None | str | Unset = UNSET,
+    if_match: str,
 ) -> Response[PublicBuildResult | PublicProblem]:
     """Build a custom tool version
 
@@ -89,9 +109,9 @@ def sync_detailed(
 
     Args:
         name (str): The custom tool name.
-        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
-            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
-            with the same name.
+        idempotency_key (None | str | Unset): Retries the same build request without admitting
+            duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.
+        if_match (str):
         body (PublicCreateVersionRequest):
 
     Raises:
@@ -105,7 +125,8 @@ def sync_detailed(
     kwargs = _get_kwargs(
         name=name,
         body=body,
-        x_tamarind_tool_generation=x_tamarind_tool_generation,
+        idempotency_key=idempotency_key,
+        if_match=if_match,
     )
 
     response = client.get_httpx_client().request(
@@ -120,7 +141,8 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
     body: PublicCreateVersionRequest,
-    x_tamarind_tool_generation: str,
+    idempotency_key: None | str | Unset = UNSET,
+    if_match: str,
 ) -> PublicBuildResult | PublicProblem | None:
     """Build a custom tool version
 
@@ -130,9 +152,9 @@ def sync(
 
     Args:
         name (str): The custom tool name.
-        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
-            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
-            with the same name.
+        idempotency_key (None | str | Unset): Retries the same build request without admitting
+            duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.
+        if_match (str):
         body (PublicCreateVersionRequest):
 
     Raises:
@@ -147,7 +169,8 @@ def sync(
         name=name,
         client=client,
         body=body,
-        x_tamarind_tool_generation=x_tamarind_tool_generation,
+        idempotency_key=idempotency_key,
+        if_match=if_match,
     ).parsed
 
 
@@ -156,7 +179,8 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: PublicCreateVersionRequest,
-    x_tamarind_tool_generation: str,
+    idempotency_key: None | str | Unset = UNSET,
+    if_match: str,
 ) -> Response[PublicBuildResult | PublicProblem]:
     """Build a custom tool version
 
@@ -166,9 +190,9 @@ async def asyncio_detailed(
 
     Args:
         name (str): The custom tool name.
-        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
-            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
-            with the same name.
+        idempotency_key (None | str | Unset): Retries the same build request without admitting
+            duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.
+        if_match (str):
         body (PublicCreateVersionRequest):
 
     Raises:
@@ -182,7 +206,8 @@ async def asyncio_detailed(
     kwargs = _get_kwargs(
         name=name,
         body=body,
-        x_tamarind_tool_generation=x_tamarind_tool_generation,
+        idempotency_key=idempotency_key,
+        if_match=if_match,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -195,7 +220,8 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
     body: PublicCreateVersionRequest,
-    x_tamarind_tool_generation: str,
+    idempotency_key: None | str | Unset = UNSET,
+    if_match: str,
 ) -> PublicBuildResult | PublicProblem | None:
     """Build a custom tool version
 
@@ -205,9 +231,9 @@ async def asyncio(
 
     Args:
         name (str): The custom tool name.
-        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
-            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
-            with the same name.
+        idempotency_key (None | str | Unset): Retries the same build request without admitting
+            duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.
+        if_match (str):
         body (PublicCreateVersionRequest):
 
     Raises:
@@ -223,6 +249,7 @@ async def asyncio(
             name=name,
             client=client,
             body=body,
-            x_tamarind_tool_generation=x_tamarind_tool_generation,
+            idempotency_key=idempotency_key,
+            if_match=if_match,
         )
     ).parsed

@@ -26,8 +26,8 @@ class PublicCustomTool:
         display_name (str):
         est_time (str):
         functions (list[str]):
-        generation (str): The immutable generation identity. Current Tool mutations use its quoted `ETag`; generation-
-            owned upload and Version requests send it in `X-Tamarind-Tool-Generation`.
+        generation (str): The immutable lifetime identity of this Tool name. Clients use the Tool's quoted `ETag` with
+            standard `If-Match`; exact Version operations use each Version's opaque `id`.
         gpu_type (PublicCustomToolGputype):
         has_source (bool):
         home_disk_gi (int):

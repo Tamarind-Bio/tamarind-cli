@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, NamedTuple, TypeAlias, cast
 
 from tamarind.custom_tools._generated.client import Client as GeneratedClient
+from tamarind.custom_tools._generated.types import UNSET
 from tamarind.custom_tools._generated.models.public_create_custom_tool_request import (
     PublicCreateCustomToolRequest as CreateModel,
 )
@@ -154,14 +155,10 @@ class GeneratedCustomToolsTransport:
             timeout,
         )
 
-    def delete_custom_tool(
-        self, name: str, etag: str, *, timeout: float | None = None
-    ) -> None:
+    def delete_custom_tool(self, name: str, etag: str, *, timeout: float | None = None) -> None:
         response = self._client.request(
             timeout=timeout,
-            **_http_kwargs(
-                delete_custom_tool._get_kwargs(name=name, x_tamarind_if_match=etag)
-            ),
+            **_http_kwargs(delete_custom_tool._get_kwargs(name=name, if_match=etag)),
         )
         if response.status_code != 204:
             raise TamarindError("Custom Tools response did not match the generated contract")
@@ -182,26 +179,23 @@ class GeneratedCustomToolsTransport:
             update_custom_tool._get_kwargs(
                 name=name,
                 body=UpdateModel.from_dict(body),
-                x_tamarind_if_match=etag,
+                if_match=etag,
             ),
             timeout,
         )
 
     def create_custom_tool_upload(
-        self, name: str, generation: str, *, timeout: float | None = None
+        self, name: str, *, timeout: float | None = None
     ) -> dict[str, Any]:
         return self._sync(
             _CREATE_CUSTOM_TOOL_UPLOAD,
-            create_custom_tool_upload._get_kwargs(
-                name=name, x_tamarind_tool_generation=generation
-            ),
+            create_custom_tool_upload._get_kwargs(name=name),
             timeout,
         )
 
     def list_custom_tool_versions(
         self,
         name: str,
-        generation: str,
         status: PublicVersionStatus | None = None,
         limit: int | None = None,
         cursor: str | None = None,
@@ -212,7 +206,6 @@ class GeneratedCustomToolsTransport:
             _LIST_CUSTOM_TOOL_VERSIONS,
             list_custom_tool_versions._get_kwargs(
                 name=name,
-                x_tamarind_tool_generation=generation,
                 status=GeneratedVersionStatus(status) if status is not None else None,
                 limit=50 if limit is None else limit,
                 cursor=cursor,
@@ -223,43 +216,44 @@ class GeneratedCustomToolsTransport:
     def build_custom_tool_version(
         self,
         name: str,
-        generation: str,
+        etag: str,
         body: PublicCreateVersionRequest,
         *,
+        idempotency_key: str | None = None,
         timeout: float | None = None,
     ) -> PublicBuildResult:
         return self._sync(
             _BUILD_CUSTOM_TOOL_VERSION,
             build_custom_tool_version._get_kwargs(
                 name=name,
-                x_tamarind_tool_generation=generation,
+                if_match=etag,
+                idempotency_key=UNSET if idempotency_key is None else idempotency_key,
                 body=CreateVersionModel.from_dict(body),
             ),
             timeout,
         )
 
     def get_custom_tool_version(
-        self, name: str, version_name: str, generation: str, *, timeout: float | None = None
+        self, name: str, version_id: str, *, timeout: float | None = None
     ) -> PublicVersion:
         return self._sync(
             _GET_CUSTOM_TOOL_VERSION,
             get_custom_tool_version._get_kwargs(
                 name=name,
-                x_tamarind_tool_generation=generation,
-                version_name=version_name,
+                version=version_id,
             ),
             timeout,
         )
 
     def cancel_custom_tool_build(
-        self, name: str, version_name: str, generation: str, *, timeout: float | None = None
+        self, name: str, version_id: str, etag: str, *, timeout: float | None = None
     ) -> PublicVersion:
         return self._sync(
             _CANCEL_CUSTOM_TOOL_BUILD,
             cancel_custom_tool_build._get_kwargs(
                 name=name,
-                x_tamarind_tool_generation=generation,
-                version_name=version_name,
+                version=version_id,
+                if_match=etag,
             ),
             timeout,
         )
@@ -267,8 +261,7 @@ class GeneratedCustomToolsTransport:
     def list_custom_tool_build_logs(
         self,
         name: str,
-        version_name: str,
-        generation: str,
+        version_id: str,
         cursor: str | None = None,
         *,
         timeout: float | None = None,
@@ -277,35 +270,33 @@ class GeneratedCustomToolsTransport:
             _LIST_CUSTOM_TOOL_BUILD_LOGS,
             list_custom_tool_build_logs._get_kwargs(
                 name=name,
-                x_tamarind_tool_generation=generation,
-                version_name=version_name,
+                version=version_id,
                 cursor=cursor,
             ),
             timeout,
         )
 
     def publish_custom_tool_version(
-        self, name: str, version_name: str, generation: str, *, timeout: float | None = None
+        self, name: str, version_id: str, etag: str, *, timeout: float | None = None
     ) -> PublicCustomTool:
         return self._sync(
             _PUBLISH_CUSTOM_TOOL_VERSION,
             publish_custom_tool_version._get_kwargs(
                 name=name,
-                x_tamarind_tool_generation=generation,
-                version_name=version_name,
+                version=version_id,
+                if_match=etag,
             ),
             timeout,
         )
 
     async def get_custom_tool_version_async(
-        self, name: str, version_name: str, generation: str, *, timeout: float | None = None
+        self, name: str, version_id: str, *, timeout: float | None = None
     ) -> PublicVersion:
         return await self._async(
             _GET_CUSTOM_TOOL_VERSION,
             get_custom_tool_version._get_kwargs(
                 name=name,
-                x_tamarind_tool_generation=generation,
-                version_name=version_name,
+                version=version_id,
             ),
             timeout,
         )
@@ -313,8 +304,7 @@ class GeneratedCustomToolsTransport:
     async def list_custom_tool_build_logs_async(
         self,
         name: str,
-        version_name: str,
-        generation: str,
+        version_id: str,
         cursor: str | None = None,
         *,
         timeout: float | None = None,
@@ -323,8 +313,7 @@ class GeneratedCustomToolsTransport:
             _LIST_CUSTOM_TOOL_BUILD_LOGS,
             list_custom_tool_build_logs._get_kwargs(
                 name=name,
-                x_tamarind_tool_generation=generation,
-                version_name=version_name,
+                version=version_id,
                 cursor=cursor,
             ),
             timeout,

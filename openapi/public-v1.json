@@ -1,6 +1,16 @@
 {
   "components": {
     "responses": {
+      "Conflict": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/PublicProblem"
+            }
+          }
+        },
+        "description": "The request conflicts with current resource state."
+      },
       "Error": {
         "content": {
           "application/problem+json": {
@@ -29,7 +39,17 @@
             }
           }
         },
-        "description": "The supplied current-resource validator is stale."
+        "description": "The supplied current-resource validator is stale. Refetch the affected resource, confirm the mutation is still desired, and retry with its new ETag."
+      },
+      "PreconditionRequired": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/PublicProblem"
+            }
+          }
+        },
+        "description": "A required current-resource validator was omitted."
       },
       "Unauthorized": {
         "content": {
@@ -306,7 +326,7 @@
             "type": "array"
           },
           "generation": {
-            "description": "The immutable generation identity. Current Tool mutations use its quoted `ETag`; generation-owned upload and Version requests send it in `X-Tamarind-Tool-Generation`.",
+            "description": "The immutable lifetime identity of this Tool name. Clients use the Tool's quoted `ETag` with standard `If-Match`; exact Version operations use each Version's opaque `id`.",
             "title": "Generation",
             "type": "string"
           },
@@ -770,6 +790,11 @@
               }
             ]
           },
+          "id": {
+            "description": "Opaque immutable identifier used in exact Version endpoint paths.",
+            "title": "Id",
+            "type": "string"
+          },
           "name": {
             "description": "The numbered version handle, such as `v3`.",
             "title": "Name",
@@ -817,6 +842,7 @@
           }
         },
         "required": [
+          "id",
           "name",
           "sourceRevision",
           "sourceDigest",
@@ -1013,7 +1039,16 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "The created Tool.",
+            "headers": {
+              "ETag": {
+                "description": "Quoted strong validator for requests that target this Tool.",
+                "schema": {
+                  "example": "\"01JABCDEF0123456789XYZ\"",
+                  "type": "string"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -1052,14 +1087,12 @@
             }
           },
           {
-            "description": "The strong ETag returned by `GET /custom-tools/{name}`, including its double quotes. This product-specific header preserves `If-Match` semantics across the public CDN edge.",
+            "description": "One or more entity-tags using standard If-Match syntax, or `*` to match any existing Tool. Only strong validators can match. The ETag returned with the Tool prevents stale requests from acting on a changed, deleted, or recreated Tool with the same name.",
             "in": "header",
-            "name": "X-Tamarind-If-Match",
+            "name": "If-Match",
             "required": true,
             "schema": {
-              "description": "The strong ETag returned by `GET /custom-tools/{name}`, including its double quotes. This product-specific header preserves `If-Match` semantics across the public CDN edge.",
               "minLength": 1,
-              "title": "X-Tamarind-If-Match",
               "type": "string"
             }
           }
@@ -1079,6 +1112,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationProblem"
+          },
+          "428": {
+            "$ref": "#/components/responses/PreconditionRequired"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -1121,7 +1157,7 @@
             "description": "The current Tool generation.",
             "headers": {
               "ETag": {
-                "description": "Quoted strong validator for PATCH and DELETE.",
+                "description": "Quoted strong validator for requests that target this Tool.",
                 "schema": {
                   "example": "\"01JABCDEF0123456789XYZ\"",
                   "type": "string"
@@ -1167,14 +1203,12 @@
             }
           },
           {
-            "description": "The strong ETag returned by `GET /custom-tools/{name}`, including its double quotes. This product-specific header preserves `If-Match` semantics across the public CDN edge.",
+            "description": "One or more entity-tags using standard If-Match syntax, or `*` to match any existing Tool. Only strong validators can match. The ETag returned with the Tool prevents stale requests from acting on a changed, deleted, or recreated Tool with the same name.",
             "in": "header",
-            "name": "X-Tamarind-If-Match",
+            "name": "If-Match",
             "required": true,
             "schema": {
-              "description": "The strong ETag returned by `GET /custom-tools/{name}`, including its double quotes. This product-specific header preserves `If-Match` semantics across the public CDN edge.",
               "minLength": 1,
-              "title": "X-Tamarind-If-Match",
               "type": "string"
             }
           }
@@ -1198,7 +1232,16 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "The updated Tool.",
+            "headers": {
+              "ETag": {
+                "description": "Quoted strong validator for requests that target this Tool.",
+                "schema": {
+                  "example": "\"01JABCDEF0123456789XYZ\"",
+                  "type": "string"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -1211,6 +1254,9 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationProblem"
+          },
+          "428": {
+            "$ref": "#/components/responses/PreconditionRequired"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -1239,19 +1285,6 @@
               "minLength": 3,
               "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
               "title": "Name",
-              "type": "string"
-            }
-          },
-          {
-            "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
-            "in": "header",
-            "name": "X-Tamarind-Tool-Generation",
-            "required": true,
-            "schema": {
-              "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
-              "maxLength": 128,
-              "minLength": 1,
-              "title": "X-Tamarind-Tool-Generation",
               "type": "string"
             }
           }
@@ -1356,19 +1389,6 @@
               "description": "Pagination token from the previous response's `nextCursor`.",
               "title": "Cursor"
             }
-          },
-          {
-            "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
-            "in": "header",
-            "name": "X-Tamarind-Tool-Generation",
-            "required": true,
-            "schema": {
-              "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
-              "maxLength": 128,
-              "minLength": 1,
-              "title": "X-Tamarind-Tool-Generation",
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -1420,15 +1440,31 @@
             }
           },
           {
-            "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
+            "description": "Retries the same build request without admitting duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.",
             "in": "header",
-            "name": "X-Tamarind-Tool-Generation",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Retries the same build request without admitting duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.",
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "description": "One or more entity-tags using standard If-Match syntax, or `*` to match any existing Tool. Only strong validators can match. The ETag returned with the Tool prevents stale requests from acting on a changed, deleted, or recreated Tool with the same name.",
+            "in": "header",
+            "name": "If-Match",
             "required": true,
             "schema": {
-              "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
-              "maxLength": 128,
               "minLength": 1,
-              "title": "X-Tamarind-Tool-Generation",
               "type": "string"
             }
           }
@@ -1452,7 +1488,23 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "The admitted Version.",
+            "headers": {
+              "ETag": {
+                "description": "Quoted strong validator for requests that target this Version.",
+                "schema": {
+                  "example": "\"eyJvcGFxdWUiOiJ2ZXJzaW9uIn0\"",
+                  "type": "string"
+                }
+              },
+              "Location": {
+                "description": "Relative URL of the exact Version admitted or reused by this request.",
+                "schema": {
+                  "example": "./versions/ver_eyJvcGFxdWUiOiJ2ZXJzaW9uIn0",
+                  "type": "string"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -1460,8 +1512,17 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
           "422": {
             "$ref": "#/components/responses/ValidationProblem"
+          },
+          "428": {
+            "$ref": "#/components/responses/PreconditionRequired"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -1474,7 +1535,7 @@
         "x-doc-group": "Custom Tools"
       }
     },
-    "/custom-tools/{name}/versions/{version_name}": {
+    "/custom-tools/{name}/versions/{version}": {
       "get": {
         "description": "Get a version's source, build status, and error details.",
         "operationId": "getCustomToolVersion",
@@ -1494,29 +1555,16 @@
             }
           },
           {
-            "description": "A numbered version handle, such as `v3`.",
+            "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
             "in": "path",
-            "name": "version_name",
+            "name": "version",
             "required": true,
             "schema": {
-              "description": "A numbered version handle, such as `v3`.",
-              "maxLength": 200,
+              "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
+              "maxLength": 512,
               "minLength": 2,
-              "pattern": "^v[1-9][0-9]*$",
-              "title": "Version Name",
-              "type": "string"
-            }
-          },
-          {
-            "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
-            "in": "header",
-            "name": "X-Tamarind-Tool-Generation",
-            "required": true,
-            "schema": {
-              "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
-              "maxLength": 128,
-              "minLength": 1,
-              "title": "X-Tamarind-Tool-Generation",
+              "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
+              "title": "Version",
               "type": "string"
             }
           }
@@ -1530,7 +1578,16 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "The exact Version.",
+            "headers": {
+              "ETag": {
+                "description": "Quoted strong validator for requests that target this Version.",
+                "schema": {
+                  "example": "\"eyJvcGFxdWUiOiJ2ZXJzaW9uIn0\"",
+                  "type": "string"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -1552,7 +1609,7 @@
         "x-doc-group": "Custom Tools"
       }
     },
-    "/custom-tools/{name}/versions/{version_name}/logs": {
+    "/custom-tools/{name}/versions/{version}/logs": {
       "get": {
         "description": "List build log events for a version.\n\nPaginated \u2014 follow `nextCursor` until it is null.",
         "operationId": "listCustomToolBuildLogs",
@@ -1572,16 +1629,16 @@
             }
           },
           {
-            "description": "A numbered version handle, such as `v3`.",
+            "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
             "in": "path",
-            "name": "version_name",
+            "name": "version",
             "required": true,
             "schema": {
-              "description": "A numbered version handle, such as `v3`.",
-              "maxLength": 200,
+              "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
+              "maxLength": 512,
               "minLength": 2,
-              "pattern": "^v[1-9][0-9]*$",
-              "title": "Version Name",
+              "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
+              "title": "Version",
               "type": "string"
             }
           },
@@ -1602,19 +1659,6 @@
               ],
               "description": "Pagination token from the previous response's `nextCursor`.",
               "title": "Cursor"
-            }
-          },
-          {
-            "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
-            "in": "header",
-            "name": "X-Tamarind-Tool-Generation",
-            "required": true,
-            "schema": {
-              "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
-              "maxLength": 128,
-              "minLength": 1,
-              "title": "X-Tamarind-Tool-Generation",
-              "type": "string"
             }
           }
         ],
@@ -1649,9 +1693,9 @@
         "x-doc-group": "Custom Tools"
       }
     },
-    "/custom-tools/{name}/versions/{version_name}:cancel": {
+    "/custom-tools/{name}/versions/{version}:cancel": {
       "post": {
-        "description": "Request cancellation of an active build.\n\nCompleted and stopped builds cannot be canceled.",
+        "description": "Request cancellation of an active build.\n\nSend the current ETag from the build response or exact Version GET. Completed and stopped\nbuilds cannot be canceled.",
         "operationId": "cancelCustomToolBuild",
         "parameters": [
           {
@@ -1669,29 +1713,26 @@
             }
           },
           {
-            "description": "A numbered version handle, such as `v3`.",
+            "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
             "in": "path",
-            "name": "version_name",
+            "name": "version",
             "required": true,
             "schema": {
-              "description": "A numbered version handle, such as `v3`.",
-              "maxLength": 200,
+              "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
+              "maxLength": 512,
               "minLength": 2,
-              "pattern": "^v[1-9][0-9]*$",
-              "title": "Version Name",
+              "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
+              "title": "Version",
               "type": "string"
             }
           },
           {
-            "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
+            "description": "One or more entity-tags using standard If-Match syntax, or `*` to match any existing Version. Only strong validators can match. The ETag returned with the exact Version prevents a delayed request from cancelling a changed Version or the same numbered Version of a recreated Tool.",
             "in": "header",
-            "name": "X-Tamarind-Tool-Generation",
+            "name": "If-Match",
             "required": true,
             "schema": {
-              "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
-              "maxLength": 128,
               "minLength": 1,
-              "title": "X-Tamarind-Tool-Generation",
               "type": "string"
             }
           }
@@ -1705,7 +1746,16 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "The Version with cancellation requested.",
+            "headers": {
+              "ETag": {
+                "description": "Quoted strong validator for requests that target this Version.",
+                "schema": {
+                  "example": "\"eyJvcGFxdWUiOiJ2ZXJzaW9uIn0\"",
+                  "type": "string"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -1713,8 +1763,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
           "422": {
             "$ref": "#/components/responses/ValidationProblem"
+          },
+          "428": {
+            "$ref": "#/components/responses/PreconditionRequired"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -1727,7 +1783,7 @@
         "x-doc-group": "Custom Tools"
       }
     },
-    "/custom-tools/{name}/versions/{version_name}:publish": {
+    "/custom-tools/{name}/versions/{version}:publish": {
       "post": {
         "description": "Make a completed version the tool's published runtime version.\n\nThis also supports an explicit rollback to an older completed version.",
         "operationId": "publishCustomToolVersion",
@@ -1747,29 +1803,26 @@
             }
           },
           {
-            "description": "A numbered version handle, such as `v3`.",
+            "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
             "in": "path",
-            "name": "version_name",
+            "name": "version",
             "required": true,
             "schema": {
-              "description": "A numbered version handle, such as `v3`.",
-              "maxLength": 200,
+              "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
+              "maxLength": 512,
               "minLength": 2,
-              "pattern": "^v[1-9][0-9]*$",
-              "title": "Version Name",
+              "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
+              "title": "Version",
               "type": "string"
             }
           },
           {
-            "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
+            "description": "One or more entity-tags using standard If-Match syntax, or `*` to match any existing Tool. Only strong validators can match. The ETag returned with the Tool prevents stale requests from acting on a changed, deleted, or recreated Tool with the same name.",
             "in": "header",
-            "name": "X-Tamarind-Tool-Generation",
+            "name": "If-Match",
             "required": true,
             "schema": {
-              "description": "The immutable generation returned as `generation` by the Tool resource. It prevents a stale request from acting on a deleted and recreated Tool with the same name.",
-              "maxLength": 128,
               "minLength": 1,
-              "title": "X-Tamarind-Tool-Generation",
               "type": "string"
             }
           }
@@ -1783,7 +1836,16 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "The Tool with its published version updated.",
+            "headers": {
+              "ETag": {
+                "description": "Quoted strong validator for requests that target this Tool.",
+                "schema": {
+                  "example": "\"01JABCDEF0123456789XYZ\"",
+                  "type": "string"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -1791,8 +1853,14 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
           "422": {
             "$ref": "#/components/responses/ValidationProblem"
+          },
+          "428": {
+            "$ref": "#/components/responses/PreconditionRequired"
           },
           "default": {
             "$ref": "#/components/responses/Error"

@@ -72,7 +72,13 @@ second list of configuration fields, enums, or cross-field rules.
 submit the digest-checked build request, and return a typed result containing the server's
 action plus its durable Version. It adds no server-side
 BuildRequest, queue, lease, claim, or repair state. An ambiguous build response
-is therefore handled honestly by listing Versions before a manual retry.
+is retried with the same caller-selected `Idempotency-Key`, or handled by listing Versions when
+the caller did not supply one.
+
+The resource layer treats the returned opaque `Version.id` as the sole machine
+selector for exact reads, logs, cancellation, and publication. The numbered
+`Version.name` remains presentation metadata and is never reconstructed into an
+endpoint path. Tool and Version ETags remain the mutation validators.
 
 ### 4. Pipelines read surface — source of truth: the public OpenAPI artifact
 

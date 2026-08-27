@@ -21,10 +21,15 @@ def test_vendored_contract_is_the_dedicated_backend_artifact() -> None:
     assert document["paths"]
     assert all(_is_custom_tools_path(path) for path in document["paths"])
     assert all("/generations/" not in path for path in document["paths"])
+    conditional_operations = {
+        ("/custom-tools/{name}", "delete"),
+        ("/custom-tools/{name}", "patch"),
+        ("/custom-tools/{name}/versions", "post"),
+        ("/custom-tools/{name}/versions/{version}:cancel", "post"),
+        ("/custom-tools/{name}/versions/{version}:publish", "post"),
+    }
     for path, item in document["paths"].items():
-        if not path.startswith("/custom-tools/{name}/"):
-            continue
-        for operation in item.values():
+        for method, operation in item.items():
             if not isinstance(operation, dict):
                 continue
             headers = [
@@ -32,8 +37,14 @@ def test_vendored_contract_is_the_dedicated_backend_artifact() -> None:
                 for parameter in operation.get("parameters", [])
                 if parameter.get("in") == "header"
             ]
-            assert [header["name"] for header in headers] == ["X-Tamarind-Tool-Generation"]
-            assert headers[0]["required"] is True
+            expected = [("If-Match", True)] if (path, method) in conditional_operations else []
+            if (path, method) == ("/custom-tools/{name}/versions", "post"):
+                expected = [("Idempotency-Key", False), *expected]
+            assert [(header["name"], header["required"]) for header in headers] == expected
+
+    serialized = json.dumps(document)
+    assert "X-Tamarind-If-Match" not in serialized
+    assert "X-Tamarind-Tool-Generation" not in serialized
 
 
 def test_generated_client_contains_sync_async_endpoints_and_attrs_models() -> None:
@@ -305,13 +316,14 @@ def test_contract_sync_exercises_generated_endpoint_signatures(
     source = ROOT / "src/tamarind/custom_tools/_generated"
     shutil.copytree(source, generated)
     endpoint = generated / "api/custom_tools/list_custom_tool_versions.py"
-    endpoint.write_text(
-        endpoint.read_text().replace(
-            "    x_tamarind_tool_generation: str,\n) -> dict[str, Any]:",
-            "    x_tamarind_tool_generation: str,\n    required_probe: str,\n) -> dict[str, Any]:",
-            1,
-        )
+    original = endpoint.read_text()
+    mutated = original.replace(
+        "    name: str,\n    *,",
+        "    name: str,\n    required_probe: str,\n    *,",
+        1,
     )
+    assert mutated != original
+    endpoint.write_text(mutated)
 
     with pytest.raises(subprocess.CalledProcessError):
         _verify_generated_facade(

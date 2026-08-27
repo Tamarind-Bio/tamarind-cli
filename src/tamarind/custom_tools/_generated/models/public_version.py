@@ -21,6 +21,7 @@ class PublicVersion:
         completed_at (None | str):
         created_at (str):
         error (None | PublicBuildError):
+        id (str): Opaque immutable identifier used in exact Version endpoint paths.
         name (str): The numbered version handle, such as `v3`.
         origin (str):
         source_digest (None | str): SHA-256 digest of this version's source archive. Null when source is hidden.
@@ -33,6 +34,7 @@ class PublicVersion:
     completed_at: None | str
     created_at: str
     error: None | PublicBuildError
+    id: str
     name: str
     origin: str
     source_digest: None | str
@@ -54,6 +56,8 @@ class PublicVersion:
             error = self.error.to_dict()
         else:
             error = self.error
+
+        id = self.id
 
         name = self.name
 
@@ -78,6 +82,7 @@ class PublicVersion:
                 "completedAt": completed_at,
                 "createdAt": created_at,
                 "error": error,
+                "id": id,
                 "name": name,
                 "origin": origin,
                 "sourceDigest": source_digest,
@@ -120,6 +125,8 @@ class PublicVersion:
 
         error = _parse_error(d.pop("error"))
 
+        id = d.pop("id")
+
         name = d.pop("name")
 
         origin = d.pop("origin")
@@ -148,6 +155,7 @@ class PublicVersion:
             completed_at=completed_at,
             created_at=created_at,
             error=error,
+            id=id,
             name=name,
             origin=origin,
             source_digest=source_digest,

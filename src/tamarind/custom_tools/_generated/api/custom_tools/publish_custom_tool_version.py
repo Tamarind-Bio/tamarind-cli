@@ -12,18 +12,18 @@ from ...types import Response
 
 def _get_kwargs(
     name: str,
-    version_name: str,
+    version: str,
     *,
-    x_tamarind_tool_generation: str,
+    if_match: str,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    headers["X-Tamarind-Tool-Generation"] = x_tamarind_tool_generation
+    headers["If-Match"] = if_match
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/custom-tools/{name}/versions/{version_name}:publish".format(
+        "url": "/custom-tools/{name}/versions/{version}:publish".format(
             name=quote(str(name), safe=""),
-            version_name=quote(str(version_name), safe=""),
+            version=quote(str(version), safe=""),
         ),
     }
 
@@ -49,10 +49,20 @@ def _parse_response(
 
         return response_404
 
+    if response.status_code == 412:
+        response_412 = PublicProblem.from_dict(response.json())
+
+        return response_412
+
     if response.status_code == 422:
         response_422 = PublicProblem.from_dict(response.json())
 
         return response_422
+
+    if response.status_code == 428:
+        response_428 = PublicProblem.from_dict(response.json())
+
+        return response_428
 
     response_default = PublicProblem.from_dict(response.json())
 
@@ -72,10 +82,10 @@ def _build_response(
 
 def sync_detailed(
     name: str,
-    version_name: str,
+    version: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tamarind_tool_generation: str,
+    if_match: str,
 ) -> Response[PublicCustomTool | PublicProblem]:
     """Publish a custom tool version
 
@@ -85,10 +95,10 @@ def sync_detailed(
 
     Args:
         name (str): The custom tool name.
-        version_name (str): A numbered version handle, such as `v3`.
-        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
-            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
-            with the same name.
+        version (str): The opaque Version `id` returned in a Version representation. Numbered
+            names remain accepted for previously generated v1 clients when paired with their
+            generation header.
+        if_match (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -100,8 +110,8 @@ def sync_detailed(
 
     kwargs = _get_kwargs(
         name=name,
-        version_name=version_name,
-        x_tamarind_tool_generation=x_tamarind_tool_generation,
+        version=version,
+        if_match=if_match,
     )
 
     response = client.get_httpx_client().request(
@@ -113,10 +123,10 @@ def sync_detailed(
 
 def sync(
     name: str,
-    version_name: str,
+    version: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tamarind_tool_generation: str,
+    if_match: str,
 ) -> PublicCustomTool | PublicProblem | None:
     """Publish a custom tool version
 
@@ -126,10 +136,10 @@ def sync(
 
     Args:
         name (str): The custom tool name.
-        version_name (str): A numbered version handle, such as `v3`.
-        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
-            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
-            with the same name.
+        version (str): The opaque Version `id` returned in a Version representation. Numbered
+            names remain accepted for previously generated v1 clients when paired with their
+            generation header.
+        if_match (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -141,18 +151,18 @@ def sync(
 
     return sync_detailed(
         name=name,
-        version_name=version_name,
+        version=version,
         client=client,
-        x_tamarind_tool_generation=x_tamarind_tool_generation,
+        if_match=if_match,
     ).parsed
 
 
 async def asyncio_detailed(
     name: str,
-    version_name: str,
+    version: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tamarind_tool_generation: str,
+    if_match: str,
 ) -> Response[PublicCustomTool | PublicProblem]:
     """Publish a custom tool version
 
@@ -162,10 +172,10 @@ async def asyncio_detailed(
 
     Args:
         name (str): The custom tool name.
-        version_name (str): A numbered version handle, such as `v3`.
-        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
-            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
-            with the same name.
+        version (str): The opaque Version `id` returned in a Version representation. Numbered
+            names remain accepted for previously generated v1 clients when paired with their
+            generation header.
+        if_match (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -177,8 +187,8 @@ async def asyncio_detailed(
 
     kwargs = _get_kwargs(
         name=name,
-        version_name=version_name,
-        x_tamarind_tool_generation=x_tamarind_tool_generation,
+        version=version,
+        if_match=if_match,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -188,10 +198,10 @@ async def asyncio_detailed(
 
 async def asyncio(
     name: str,
-    version_name: str,
+    version: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tamarind_tool_generation: str,
+    if_match: str,
 ) -> PublicCustomTool | PublicProblem | None:
     """Publish a custom tool version
 
@@ -201,10 +211,10 @@ async def asyncio(
 
     Args:
         name (str): The custom tool name.
-        version_name (str): A numbered version handle, such as `v3`.
-        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
-            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
-            with the same name.
+        version (str): The opaque Version `id` returned in a Version representation. Numbered
+            names remain accepted for previously generated v1 clients when paired with their
+            generation header.
+        if_match (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -217,8 +227,8 @@ async def asyncio(
     return (
         await asyncio_detailed(
             name=name,
-            version_name=version_name,
+            version=version,
             client=client,
-            x_tamarind_tool_generation=x_tamarind_tool_generation,
+            if_match=if_match,
         )
     ).parsed

@@ -12,10 +12,10 @@ from ...types import Response
 def _get_kwargs(
     name: str,
     *,
-    x_tamarind_if_match: str,
+    if_match: str,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    headers["X-Tamarind-If-Match"] = x_tamarind_if_match
+    headers["If-Match"] = if_match
 
     _kwargs: dict[str, Any] = {
         "method": "delete",
@@ -55,6 +55,11 @@ def _parse_response(
 
         return response_422
 
+    if response.status_code == 428:
+        response_428 = PublicProblem.from_dict(response.json())
+
+        return response_428
+
     response_default = PublicProblem.from_dict(response.json())
 
     return response_default
@@ -75,7 +80,7 @@ def sync_detailed(
     name: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tamarind_if_match: str,
+    if_match: str,
 ) -> Response[Any | PublicProblem]:
     """Delete a custom tool
 
@@ -83,9 +88,7 @@ def sync_detailed(
 
     Args:
         name (str): The custom tool name.
-        x_tamarind_if_match (str): The strong ETag returned by `GET /custom-tools/{name}`,
-            including its double quotes. This product-specific header preserves `If-Match` semantics
-            across the public CDN edge.
+        if_match (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -97,7 +100,7 @@ def sync_detailed(
 
     kwargs = _get_kwargs(
         name=name,
-        x_tamarind_if_match=x_tamarind_if_match,
+        if_match=if_match,
     )
 
     response = client.get_httpx_client().request(
@@ -111,7 +114,7 @@ def sync(
     name: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tamarind_if_match: str,
+    if_match: str,
 ) -> Any | PublicProblem | None:
     """Delete a custom tool
 
@@ -119,9 +122,7 @@ def sync(
 
     Args:
         name (str): The custom tool name.
-        x_tamarind_if_match (str): The strong ETag returned by `GET /custom-tools/{name}`,
-            including its double quotes. This product-specific header preserves `If-Match` semantics
-            across the public CDN edge.
+        if_match (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -134,7 +135,7 @@ def sync(
     return sync_detailed(
         name=name,
         client=client,
-        x_tamarind_if_match=x_tamarind_if_match,
+        if_match=if_match,
     ).parsed
 
 
@@ -142,7 +143,7 @@ async def asyncio_detailed(
     name: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tamarind_if_match: str,
+    if_match: str,
 ) -> Response[Any | PublicProblem]:
     """Delete a custom tool
 
@@ -150,9 +151,7 @@ async def asyncio_detailed(
 
     Args:
         name (str): The custom tool name.
-        x_tamarind_if_match (str): The strong ETag returned by `GET /custom-tools/{name}`,
-            including its double quotes. This product-specific header preserves `If-Match` semantics
-            across the public CDN edge.
+        if_match (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -164,7 +163,7 @@ async def asyncio_detailed(
 
     kwargs = _get_kwargs(
         name=name,
-        x_tamarind_if_match=x_tamarind_if_match,
+        if_match=if_match,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -176,7 +175,7 @@ async def asyncio(
     name: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tamarind_if_match: str,
+    if_match: str,
 ) -> Any | PublicProblem | None:
     """Delete a custom tool
 
@@ -184,9 +183,7 @@ async def asyncio(
 
     Args:
         name (str): The custom tool name.
-        x_tamarind_if_match (str): The strong ETag returned by `GET /custom-tools/{name}`,
-            including its double quotes. This product-specific header preserves `If-Match` semantics
-            across the public CDN edge.
+        if_match (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -200,6 +197,6 @@ async def asyncio(
         await asyncio_detailed(
             name=name,
             client=client,
-            x_tamarind_if_match=x_tamarind_if_match,
+            if_match=if_match,
         )
     ).parsed

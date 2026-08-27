@@ -17,10 +17,7 @@ def _get_kwargs(
     status: None | PublicVersionStatus | Unset = UNSET,
     limit: int | Unset = 50,
     cursor: None | str | Unset = UNSET,
-    x_tamarind_tool_generation: str,
 ) -> dict[str, Any]:
-    headers: dict[str, Any] = {}
-    headers["X-Tamarind-Tool-Generation"] = x_tamarind_tool_generation
 
     params: dict[str, Any] = {}
 
@@ -52,7 +49,6 @@ def _get_kwargs(
         "params": params,
     }
 
-    _kwargs["headers"] = headers
     return _kwargs
 
 
@@ -102,7 +98,6 @@ def sync_detailed(
     status: None | PublicVersionStatus | Unset = UNSET,
     limit: int | Unset = 50,
     cursor: None | str | Unset = UNSET,
-    x_tamarind_tool_generation: str,
 ) -> Response[PublicProblem | PublicVersionPage]:
     """List custom tool versions
 
@@ -115,9 +110,6 @@ def sync_detailed(
         status (None | PublicVersionStatus | Unset): Filter by build status.
         limit (int | Unset): Maximum number of versions to return in one page. Default: 50.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
-        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
-            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
-            with the same name.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -132,7 +124,6 @@ def sync_detailed(
         status=status,
         limit=limit,
         cursor=cursor,
-        x_tamarind_tool_generation=x_tamarind_tool_generation,
     )
 
     response = client.get_httpx_client().request(
@@ -149,7 +140,6 @@ def sync(
     status: None | PublicVersionStatus | Unset = UNSET,
     limit: int | Unset = 50,
     cursor: None | str | Unset = UNSET,
-    x_tamarind_tool_generation: str,
 ) -> PublicProblem | PublicVersionPage | None:
     """List custom tool versions
 
@@ -162,9 +152,6 @@ def sync(
         status (None | PublicVersionStatus | Unset): Filter by build status.
         limit (int | Unset): Maximum number of versions to return in one page. Default: 50.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
-        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
-            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
-            with the same name.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -180,7 +167,6 @@ def sync(
         status=status,
         limit=limit,
         cursor=cursor,
-        x_tamarind_tool_generation=x_tamarind_tool_generation,
     ).parsed
 
 
@@ -191,7 +177,6 @@ async def asyncio_detailed(
     status: None | PublicVersionStatus | Unset = UNSET,
     limit: int | Unset = 50,
     cursor: None | str | Unset = UNSET,
-    x_tamarind_tool_generation: str,
 ) -> Response[PublicProblem | PublicVersionPage]:
     """List custom tool versions
 
@@ -204,9 +189,6 @@ async def asyncio_detailed(
         status (None | PublicVersionStatus | Unset): Filter by build status.
         limit (int | Unset): Maximum number of versions to return in one page. Default: 50.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
-        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
-            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
-            with the same name.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -221,7 +203,6 @@ async def asyncio_detailed(
         status=status,
         limit=limit,
         cursor=cursor,
-        x_tamarind_tool_generation=x_tamarind_tool_generation,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -236,7 +217,6 @@ async def asyncio(
     status: None | PublicVersionStatus | Unset = UNSET,
     limit: int | Unset = 50,
     cursor: None | str | Unset = UNSET,
-    x_tamarind_tool_generation: str,
 ) -> PublicProblem | PublicVersionPage | None:
     """List custom tool versions
 
@@ -249,9 +229,6 @@ async def asyncio(
         status (None | PublicVersionStatus | Unset): Filter by build status.
         limit (int | Unset): Maximum number of versions to return in one page. Default: 50.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
-        x_tamarind_tool_generation (str): The immutable generation returned as `generation` by the
-            Tool resource. It prevents a stale request from acting on a deleted and recreated Tool
-            with the same name.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -268,6 +245,5 @@ async def asyncio(
             status=status,
             limit=limit,
             cursor=cursor,
-            x_tamarind_tool_generation=x_tamarind_tool_generation,
         )
     ).parsed
