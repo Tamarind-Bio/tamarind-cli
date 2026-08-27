@@ -94,7 +94,9 @@ def sync_detailed(
 
     Args:
         name (str): The custom tool name.
-        version (str): The opaque Version `id` returned in a Version representation.
+        version (str): The opaque Version `id` returned in a Version representation. Numbered
+            names remain accepted for previously generated v1 clients when paired with their
+            generation header.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
 
     Raises:
@@ -133,7 +135,9 @@ def sync(
 
     Args:
         name (str): The custom tool name.
-        version (str): The opaque Version `id` returned in a Version representation.
+        version (str): The opaque Version `id` returned in a Version representation. Numbered
+            names remain accepted for previously generated v1 clients when paired with their
+            generation header.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
 
     Raises:
@@ -167,7 +171,9 @@ async def asyncio_detailed(
 
     Args:
         name (str): The custom tool name.
-        version (str): The opaque Version `id` returned in a Version representation.
+        version (str): The opaque Version `id` returned in a Version representation. Numbered
+            names remain accepted for previously generated v1 clients when paired with their
+            generation header.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
 
     Raises:
@@ -204,7 +210,9 @@ async def asyncio(
 
     Args:
         name (str): The custom tool name.
-        version (str): The opaque Version `id` returned in a Version representation.
+        version (str): The opaque Version `id` returned in a Version representation. Numbered
+            names remain accepted for previously generated v1 clients when paired with their
+            generation header.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
 
     Raises:

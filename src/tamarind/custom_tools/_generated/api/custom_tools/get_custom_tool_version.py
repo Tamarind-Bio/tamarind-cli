@@ -77,7 +77,9 @@ def sync_detailed(
 
     Args:
         name (str): The custom tool name.
-        version (str): The opaque Version `id` returned in a Version representation.
+        version (str): The opaque Version `id` returned in a Version representation. Numbered
+            names remain accepted for previously generated v1 clients when paired with their
+            generation header.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -111,7 +113,9 @@ def sync(
 
     Args:
         name (str): The custom tool name.
-        version (str): The opaque Version `id` returned in a Version representation.
+        version (str): The opaque Version `id` returned in a Version representation. Numbered
+            names remain accepted for previously generated v1 clients when paired with their
+            generation header.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -140,7 +144,9 @@ async def asyncio_detailed(
 
     Args:
         name (str): The custom tool name.
-        version (str): The opaque Version `id` returned in a Version representation.
+        version (str): The opaque Version `id` returned in a Version representation. Numbered
+            names remain accepted for previously generated v1 clients when paired with their
+            generation header.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -172,7 +178,9 @@ async def asyncio(
 
     Args:
         name (str): The custom tool name.
-        version (str): The opaque Version `id` returned in a Version representation.
+        version (str): The opaque Version `id` returned in a Version representation. Numbered
+            names remain accepted for previously generated v1 clients when paired with their
+            generation header.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

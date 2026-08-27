@@ -57,6 +57,11 @@ def _parse_response(
 
         return response_404
 
+    if response.status_code == 409:
+        response_409 = PublicProblem.from_dict(response.json())
+
+        return response_409
+
     if response.status_code == 412:
         response_412 = PublicProblem.from_dict(response.json())
 
@@ -104,7 +109,8 @@ def sync_detailed(
 
     Args:
         name (str): The custom tool name.
-        idempotency_key (None | str | Unset):
+        idempotency_key (None | str | Unset): Retries the same build request without admitting
+            duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.
         if_match (str):
         body (PublicCreateVersionRequest):
 
@@ -146,7 +152,8 @@ def sync(
 
     Args:
         name (str): The custom tool name.
-        idempotency_key (None | str | Unset):
+        idempotency_key (None | str | Unset): Retries the same build request without admitting
+            duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.
         if_match (str):
         body (PublicCreateVersionRequest):
 
@@ -183,7 +190,8 @@ async def asyncio_detailed(
 
     Args:
         name (str): The custom tool name.
-        idempotency_key (None | str | Unset):
+        idempotency_key (None | str | Unset): Retries the same build request without admitting
+            duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.
         if_match (str):
         body (PublicCreateVersionRequest):
 
@@ -223,7 +231,8 @@ async def asyncio(
 
     Args:
         name (str): The custom tool name.
-        idempotency_key (None | str | Unset):
+        idempotency_key (None | str | Unset): Retries the same build request without admitting
+            duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.
         if_match (str):
         body (PublicCreateVersionRequest):
 

@@ -1,6 +1,16 @@
 {
   "components": {
     "responses": {
+      "Conflict": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/PublicProblem"
+            }
+          }
+        },
+        "description": "The request conflicts with current resource state."
+      },
       "Error": {
         "content": {
           "application/problem+json": {
@@ -1077,7 +1087,7 @@
             }
           },
           {
-            "description": "The quoted strong ETag returned with the Tool resource. It prevents stale requests from acting on a changed, deleted, or recreated Tool with the same name.",
+            "description": "One or more entity-tags using standard If-Match syntax, or `*` to match any existing Tool. Only strong validators can match. The ETag returned with the Tool prevents stale requests from acting on a changed, deleted, or recreated Tool with the same name.",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -1193,7 +1203,7 @@
             }
           },
           {
-            "description": "The quoted strong ETag returned with the Tool resource. It prevents stale requests from acting on a changed, deleted, or recreated Tool with the same name.",
+            "description": "One or more entity-tags using standard If-Match syntax, or `*` to match any existing Tool. Only strong validators can match. The ETag returned with the Tool prevents stale requests from acting on a changed, deleted, or recreated Tool with the same name.",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -1430,6 +1440,7 @@
             }
           },
           {
+            "description": "Retries the same build request without admitting duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.",
             "in": "header",
             "name": "Idempotency-Key",
             "required": false,
@@ -1443,11 +1454,12 @@
                   "type": "null"
                 }
               ],
+              "description": "Retries the same build request without admitting duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.",
               "title": "Idempotency-Key"
             }
           },
           {
-            "description": "The quoted strong ETag returned with the Tool resource. It prevents stale requests from acting on a changed, deleted, or recreated Tool with the same name.",
+            "description": "One or more entity-tags using standard If-Match syntax, or `*` to match any existing Tool. Only strong validators can match. The ETag returned with the Tool prevents stale requests from acting on a changed, deleted, or recreated Tool with the same name.",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -1500,6 +1512,9 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
           "412": {
             "$ref": "#/components/responses/PreconditionFailed"
           },
@@ -1540,15 +1555,15 @@
             }
           },
           {
-            "description": "The opaque Version `id` returned in a Version representation.",
+            "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
             "in": "path",
             "name": "version",
             "required": true,
             "schema": {
-              "description": "The opaque Version `id` returned in a Version representation.",
+              "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
               "maxLength": 512,
               "minLength": 2,
-              "pattern": "^ver_[A-Za-z0-9_-]+$",
+              "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
               "title": "Version",
               "type": "string"
             }
@@ -1614,15 +1629,15 @@
             }
           },
           {
-            "description": "The opaque Version `id` returned in a Version representation.",
+            "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
             "in": "path",
             "name": "version",
             "required": true,
             "schema": {
-              "description": "The opaque Version `id` returned in a Version representation.",
+              "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
               "maxLength": 512,
               "minLength": 2,
-              "pattern": "^ver_[A-Za-z0-9_-]+$",
+              "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
               "title": "Version",
               "type": "string"
             }
@@ -1698,21 +1713,21 @@
             }
           },
           {
-            "description": "The opaque Version `id` returned in a Version representation.",
+            "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
             "in": "path",
             "name": "version",
             "required": true,
             "schema": {
-              "description": "The opaque Version `id` returned in a Version representation.",
+              "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
               "maxLength": 512,
               "minLength": 2,
-              "pattern": "^ver_[A-Za-z0-9_-]+$",
+              "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
               "title": "Version",
               "type": "string"
             }
           },
           {
-            "description": "The quoted strong ETag returned with the exact Version resource. It prevents a delayed request from cancelling a changed Version or the same numbered Version of a recreated Tool.",
+            "description": "One or more entity-tags using standard If-Match syntax, or `*` to match any existing Version. Only strong validators can match. The ETag returned with the exact Version prevents a delayed request from cancelling a changed Version or the same numbered Version of a recreated Tool.",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -1788,21 +1803,21 @@
             }
           },
           {
-            "description": "The opaque Version `id` returned in a Version representation.",
+            "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
             "in": "path",
             "name": "version",
             "required": true,
             "schema": {
-              "description": "The opaque Version `id` returned in a Version representation.",
+              "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
               "maxLength": 512,
               "minLength": 2,
-              "pattern": "^ver_[A-Za-z0-9_-]+$",
+              "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
               "title": "Version",
               "type": "string"
             }
           },
           {
-            "description": "The quoted strong ETag returned with the Tool resource. It prevents stale requests from acting on a changed, deleted, or recreated Tool with the same name.",
+            "description": "One or more entity-tags using standard If-Match syntax, or `*` to match any existing Tool. Only strong validators can match. The ETag returned with the Tool prevents stale requests from acting on a changed, deleted, or recreated Tool with the same name.",
             "in": "header",
             "name": "If-Match",
             "required": true,
