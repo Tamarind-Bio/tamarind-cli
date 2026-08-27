@@ -321,6 +321,19 @@ class GeneratedCustomToolsTransport:
 
 
 def _http_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Adapt generated requests to the current public-edge transport contract.
+
+    Vercel evaluates an incoming ``If-Match`` against the mutation response after
+    the backend has committed it, which replaces a successful response carrying
+    the new ETag with an edge-generated 412. The backend accepts this private
+    spelling for the forwarded precondition, while generated code and public SDK
+    signatures remain synchronized to the standard OpenAPI field.
+    """
     values = dict(kwargs)
+    headers = values.get("headers")
+    if isinstance(headers, dict) and "If-Match" in headers:
+        forwarded_headers = dict(headers)
+        forwarded_headers["X-Tamarind-If-Match"] = forwarded_headers.pop("If-Match")
+        values["headers"] = forwarded_headers
     values["path"] = values.pop("url")
     return cast(dict[str, Any], values)

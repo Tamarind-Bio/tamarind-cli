@@ -107,6 +107,32 @@ def _archive_digest(root: Path) -> str:
     return build_source_tree_archive(inspect_source_tree(root)).digest
 
 
+def test_transport_bridge_preserves_generated_kwargs_and_sibling_headers() -> None:
+    from tamarind.custom_tools.transport import _http_kwargs
+
+    generated = {
+        "method": "patch",
+        "url": "/custom-tools/example",
+        "headers": {
+            "If-Match": '"opaque-validator"',
+            "Content-Type": "application/json",
+        },
+    }
+
+    forwarded = _http_kwargs(generated)
+
+    assert generated["headers"] == {
+        "If-Match": '"opaque-validator"',
+        "Content-Type": "application/json",
+    }
+    assert forwarded["path"] == "/custom-tools/example"
+    assert "url" not in forwarded
+    assert forwarded["headers"] == {
+        "X-Tamarind-If-Match": '"opaque-validator"',
+        "Content-Type": "application/json",
+    }
+
+
 @respx.mock
 def test_create_list_and_update_wrap_public_routes() -> None:
     create = respx.post(f"{BASE}custom-tools").mock(return_value=httpx.Response(201, json=_tool()))
@@ -131,7 +157,8 @@ def test_create_list_and_update_wrap_public_routes() -> None:
     assert page.next_cursor == "tools-page-2"
     assert listed_route.calls.last.request.url.params["limit"] == "1"
     assert json.loads(update.calls.last.request.content) == {"description": "updated"}
-    assert update.calls.last.request.headers["If-Match"] == '"opaque-validator"'
+    assert update.calls.last.request.headers["X-Tamarind-If-Match"] == '"opaque-validator"'
+    assert "If-Match" not in update.calls.last.request.headers
     assert changed.description == "updated"
 
 
@@ -145,7 +172,8 @@ def test_delete_uses_the_tool_etag() -> None:
     with Tamarind(api_key="key", api_base=BASE) as client:
         client.custom_tools.get("example").delete()
 
-    assert delete.calls.last.request.headers["If-Match"] == '"opaque-validator"'
+    assert delete.calls.last.request.headers["X-Tamarind-If-Match"] == '"opaque-validator"'
+    assert "If-Match" not in delete.calls.last.request.headers
 
 
 @respx.mock
@@ -341,7 +369,8 @@ def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> 
         len(upload.calls.last.request.content)
     )
     assert "X-Tamarind-Tool-Generation" not in upload_session.calls.last.request.headers
-    assert build.calls.last.request.headers["If-Match"] == '"opaque-validator"'
+    assert build.calls.last.request.headers["X-Tamarind-If-Match"] == '"opaque-validator"'
+    assert "If-Match" not in build.calls.last.request.headers
     assert build.calls.last.request.headers["Idempotency-Key"] == "release-1"
     assert json.loads(build.calls.last.request.content) == {
         "uploadId": "upload-1",
@@ -675,8 +704,10 @@ def test_version_logs_cancel_and_publish_use_version_routes() -> None:
         assert version.publish().default_version == "v1"
 
     assert get_tool.call_count == 3
-    assert cancel.calls.last.request.headers["If-Match"] == '"version-etag"'
-    assert publish.calls.last.request.headers["If-Match"] == '"opaque-validator"'
+    assert cancel.calls.last.request.headers["X-Tamarind-If-Match"] == '"version-etag"'
+    assert "If-Match" not in cancel.calls.last.request.headers
+    assert publish.calls.last.request.headers["X-Tamarind-If-Match"] == '"opaque-validator"'
+    assert "If-Match" not in publish.calls.last.request.headers
     for route in (get_version, logs, cancel, publish):
         assert "X-Tamarind-Tool-Generation" not in route.calls.last.request.headers
 
