@@ -80,6 +80,13 @@ selector for exact reads, logs, cancellation, and publication. The numbered
 `Version.name` remains presentation metadata and is never reconstructed into an
 endpoint path. Tool and Version ETags remain the mutation validators.
 
+The generated contract and public SDK signatures use standard `If-Match`. At the
+final HTTP adapter boundary, the CLI forwards that value as
+`X-Tamarind-If-Match`: Vercel otherwise evaluates the original request field
+against the post-mutation response ETag and can replace a committed success with
+an edge-generated 412. This transport-only compatibility spelling does not change
+the validator or stale-write semantics and is deliberately absent from OpenAPI.
+
 ### 4. Pipelines read surface — source of truth: the public OpenAPI artifact
 
 `Tamarind().pipelines` reads a run and pages through the molecules produced by one
