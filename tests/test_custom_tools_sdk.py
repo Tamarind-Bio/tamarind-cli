@@ -375,6 +375,29 @@ def test_github_connection_returns_none_when_disconnected() -> None:
 
 
 @respx.mock
+def test_github_connection_rejects_a_tool_name_reused_during_the_read() -> None:
+    replaced = False
+
+    def read_tool(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json=_tool(generation="generation-2" if replaced else "generation-1")
+        )
+
+    def read_connection(_request: httpx.Request) -> httpx.Response:
+        nonlocal replaced
+        replaced = True
+        return httpx.Response(200, json=_github_connection(status="connected", commit="a" * 40))
+
+    respx.get(f"{BASE}custom-tools/example").mock(side_effect=read_tool)
+    respx.get(f"{BASE}custom-tools/example/github").mock(side_effect=read_connection)
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        tool = client.custom_tools.get("example")
+        with pytest.raises(StaleCustomToolError, match="different generation"):
+            tool.github_connection()
+
+
+@respx.mock
 def test_github_connection_surfaces_failed_materialization() -> None:
     respx.get(f"{BASE}custom-tools/example").mock(
         return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"validator"'})
@@ -395,6 +418,24 @@ def test_github_connection_surfaces_failed_materialization() -> None:
             connection.monitor(timeout=1, interval=0.001)
 
     assert raised.value.detail is not None
+
+
+@respx.mock
+def test_github_connection_failed_without_detail_uses_the_documented_fallback() -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"validator"'})
+    )
+    respx.post(f"{BASE}custom-tools/example/github").mock(
+        return_value=httpx.Response(202, json=_github_connection())
+    )
+    respx.get(f"{BASE}custom-tools/example/github").mock(
+        return_value=httpx.Response(200, json=_github_connection(status="failed", error=None))
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        connection = client.custom_tools.get("example").connect_github("acme/example")
+        with pytest.raises(CustomToolGitHubConnectionFailedError, match="unknown error"):
+            connection.monitor(timeout=1, interval=0.001)
 
 
 @respx.mock
@@ -448,7 +489,6 @@ def test_github_connection_monitor_enforces_the_deadline() -> None:
         {**_github_connection(status="connected"), "repo": 42},
         {**_github_connection(status="connected"), "autoPublish": "yes"},
         {**_github_connection(status="disconnected"), "repo": "acme/example"},
-        _github_connection(status="failed", error=None),
         _github_connection(status="connected", error="stale error"),
     ],
 )

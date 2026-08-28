@@ -653,11 +653,11 @@ class CustomTools:
         *,
         request_timeout: float | None = None,
     ) -> GitHubConnection | None:
-        self._current_tool(tool_name, tool_generation, request_timeout=request_timeout)
         wire = self._transport.get_custom_tool_github_connection(
             tool_name,
             timeout=request_timeout,
         )
+        self._current_tool(tool_name, tool_generation, request_timeout=request_timeout)
         return _github_connection_from_wire(self, tool_name, tool_generation, wire)
 
     async def _github_connection_async(
@@ -956,7 +956,6 @@ def _github_connection_from_wire(
         or not isinstance(branch, str)
         or not branch
         or (error is not None and not isinstance(error, str))
-        or (parsed_status == PublicGitHubConnectionStatus.FAILED and not error)
         or (parsed_status != PublicGitHubConnectionStatus.FAILED and error is not None)
     ):
         raise TamarindError("Custom Tools response did not match the generated contract")
