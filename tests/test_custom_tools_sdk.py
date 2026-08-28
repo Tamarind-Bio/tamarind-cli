@@ -263,8 +263,35 @@ def test_github_connection_primary_happy_path() -> None:
     }
     assert connect.calls.last.request.headers["X-Tamarind-If-Match"] == '"current-validator"'
     assert disconnect.calls.last.request.headers["X-Tamarind-If-Match"] == '"current-validator"'
-    assert tool_route.call_count == 4
+    assert tool_route.call_count == 3
     assert connection_route.call_count == 2
+
+
+@respx.mock
+def test_github_disconnect_preserves_the_selected_tool_etag() -> None:
+    tool_route = respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"selected-validator"'})
+    )
+    disconnect = respx.delete(f"{BASE}custom-tools/example/github").mock(
+        return_value=httpx.Response(
+            412,
+            json={
+                "type": "https://app.tamarind.bio/errors/precondition_failed",
+                "title": "Precondition failed",
+                "status": 412,
+                "code": "precondition_failed",
+                "detail": "refresh and retry",
+            },
+        )
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        tool = client.custom_tools.get("example")
+        with pytest.raises(StaleCustomToolError, match="refresh and retry"):
+            tool.disconnect_github()
+
+    assert tool_route.call_count == 1
+    assert disconnect.calls.last.request.headers["X-Tamarind-If-Match"] == '"selected-validator"'
 
 
 @respx.mock

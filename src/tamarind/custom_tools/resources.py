@@ -684,10 +684,9 @@ class CustomTools:
         return _github_connection_from_wire(self, tool_name, tool_generation, wire)
 
     def _disconnect_github(self, tool: CustomTool) -> None:
-        current = self._current_tool(tool.name, tool.generation)
         self._transport.disconnect_custom_tool_github(
-            current.name,
-            self._validator(current),
+            tool.name,
+            self._validator(tool),
         )
 
     def _build(
