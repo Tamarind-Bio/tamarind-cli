@@ -22,9 +22,9 @@ class Page(Generic[T]):
 
 @dataclass(frozen=True)
 class NodeRunMolecule:
-    complex_id: str
+    id: str
     name: str
-    molecule_type: str | None
+    type: str | None
     sequence: str | None
     scores: Mapping[str, Any]
     has_structure: bool
@@ -146,9 +146,9 @@ def _node_run_from_wire(collection: Pipelines, run_id: str, wire: dict[str, Any]
 
 def _molecule_from_wire(wire: dict[str, Any]) -> NodeRunMolecule:
     return NodeRunMolecule(
-        complex_id=_string(wire, "complexId"),
+        id=_string(wire, "id"),
         name=_string(wire, "name"),
-        molecule_type=_optional_string(wire, "moleculeType"),
+        type=_optional_string(wire, "type"),
         sequence=_optional_string(wire, "sequence"),
         scores=_object(wire, "scores"),
         has_structure=_boolean(wire, "hasStructure"),

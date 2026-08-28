@@ -19,8 +19,8 @@ from sync_custom_tools_contract import (
 
 EXPECTED_PATH = "backend/app/public_api/openapi/public-v1.generated.json"
 PIPELINE_PATHS = (
-    "/pipelines/runs/{run_id}",
-    "/pipelines/runs/{run_id}/node-runs/{node_run_id}/molecules",
+    "/pipelines/runs/{runId}",
+    "/pipelines/runs/{runId}/node-runs/{nodeRunId}/molecules",
 )
 EXPECTED_OPERATIONS = {"getRun", "listNodeRunMolecules"}
 

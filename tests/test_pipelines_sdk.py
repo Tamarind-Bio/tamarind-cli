@@ -47,9 +47,9 @@ def _page() -> dict[str, object]:
     return {
         "molecules": [
             {
-                "complexId": "complex-1",
+                "id": "molecule-1",
                 "name": "candidate-1",
-                "moleculeType": "protein",
+                "type": "protein",
                 "sequence": "MKT",
                 "scores": {"dock": {"score": -8.2}},
                 "hasStructure": True,
@@ -79,7 +79,8 @@ def test_get_run_exposes_node_runs_and_their_molecule_pages() -> None:
     assert run.node_runs[0].node_type == "tool"
     assert run.node_runs[0].status is NodeRunStatus.FINISHED
     assert page.next_cursor == "page-2"
-    assert page.items[0].complex_id == "complex-1"
+    assert page.items[0].id == "molecule-1"
+    assert page.items[0].type == "protein"
     assert page.items[0].scores == {"dock": {"score": -8.2}}
     assert run_route.called
     assert molecule_route.called
@@ -119,9 +120,7 @@ def test_get_run_rejects_malformed_contract_values(
 @pytest.mark.parametrize("limit", [0, 101, True, 1.5])
 @respx.mock
 def test_node_run_molecules_validates_page_size_before_request(limit: object) -> None:
-    respx.get(f"{BASE}pipelines/runs/run%2Fone").mock(
-        return_value=httpx.Response(200, json=_run())
-    )
+    respx.get(f"{BASE}pipelines/runs/run%2Fone").mock(return_value=httpx.Response(200, json=_run()))
     with Tamarind(api_key="key", api_base=BASE) as client:
         node_run = client.pipelines.get_run("run/one").node_runs[0]
         with pytest.raises(ValueError, match="1 to 100"):
@@ -130,14 +129,12 @@ def test_node_run_molecules_validates_page_size_before_request(limit: object) ->
 
 @respx.mock
 def test_node_run_molecules_rejects_malformed_page() -> None:
-    respx.get(f"{BASE}pipelines/runs/run%2Fone").mock(
-        return_value=httpx.Response(200, json=_run())
-    )
+    respx.get(f"{BASE}pipelines/runs/run%2Fone").mock(return_value=httpx.Response(200, json=_run()))
     malformed = _page()
     malformed["nextCursor"] = 2
-    respx.get(
-        f"{BASE}pipelines/runs/run%2Fone/node-runs/node%2Frun%20one/molecules"
-    ).mock(return_value=httpx.Response(200, json=malformed))
+    respx.get(f"{BASE}pipelines/runs/run%2Fone/node-runs/node%2Frun%20one/molecules").mock(
+        return_value=httpx.Response(200, json=malformed)
+    )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
         with pytest.raises(TamarindError, match="generated contract"):
@@ -154,13 +151,13 @@ def test_vendored_pipelines_contract_is_exactly_scoped_and_pinned() -> None:
     lock = json.loads((root / "openapi/pipelines-v1.lock.json").read_text())
 
     assert tuple(document["paths"]) == (
-        "/pipelines/runs/{run_id}",
-        "/pipelines/runs/{run_id}/node-runs/{node_run_id}/molecules",
+        "/pipelines/runs/{runId}",
+        "/pipelines/runs/{runId}/node-runs/{nodeRunId}/molecules",
     )
     # Git may materialize text files with CRLF on Windows; the lock hashes the
     # canonical LF bytes produced by the sync script.
     assert sha256(raw.replace(b"\r\n", b"\n")).hexdigest() == lock["artifactSha256"]
     assert lock["sourceRepository"] == "Tamarind-Bio/tamarind-website"
-    assert lock["sourceCommit"] == "e066765502ef29a09ee26cc86e58e69ba66cf958"
+    assert lock["sourceCommit"] == "2be38e2bd91c0ed5eac576883da7e12e16f6d5cc"
     assert lock["sourcePath"] == "backend/app/public_api/openapi/public-v1.generated.json"
     assert lock["generator"] == "openapi-python-client==0.28.4"
