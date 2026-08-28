@@ -51,6 +51,7 @@ from tamarind.custom_tools.validation import (
 from tamarind.errors import (
     CustomToolBuildFailedError,
     CustomToolBuildTimeoutError,
+    CustomToolGitHubAuthorizationRequiredError,
     CustomToolGitHubConnectionFailedError,
     CustomToolGitHubConnectionTimeoutError,
     CustomToolUploadError,
@@ -614,15 +615,32 @@ class CustomTools:
         repo: str,
         branch: str,
         auto_publish: bool,
+        authorization_token: str | None = None,
     ) -> GitHubConnection:
-        wire = self._transport.connect_custom_tool_github(
-            tool.name,
-            self._validator(tool),
-            cast(
-                PublicConnectGitHubRequest,
-                {"repo": repo, "branch": branch, "autoPublish": auto_publish},
-            ),
-        )
+        body: dict[str, object] = {
+            "repo": repo,
+            "branch": branch,
+            "autoPublish": auto_publish,
+        }
+        if authorization_token is not None:
+            body["authorizationToken"] = authorization_token
+        try:
+            wire = self._transport.connect_custom_tool_github(
+                tool.name,
+                self._validator(tool),
+                cast(PublicConnectGitHubRequest, body),
+            )
+        except CustomToolGitHubAuthorizationRequiredError as exc:
+            resume_token = exc.resume_token
+            raise exc.bind_resume(
+                lambda: self._connect_github(
+                    tool,
+                    repo=repo,
+                    branch=branch,
+                    auto_publish=auto_publish,
+                    authorization_token=resume_token,
+                )
+            ) from None
         connection = _github_connection_from_wire(self, tool.name, tool.generation, wire)
         if connection is None:
             raise TamarindError("Custom Tools response did not match the generated contract")

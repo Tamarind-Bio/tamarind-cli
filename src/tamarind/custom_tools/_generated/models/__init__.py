@@ -19,6 +19,7 @@ from .public_git_hub_connection import PublicGitHubConnection
 from .public_git_hub_connection_status import PublicGitHubConnectionStatus
 from .public_problem import PublicProblem
 from .public_problem_errors_type_0_item import PublicProblemErrorsType0Item
+from .public_recovery_action import PublicRecoveryAction
 from .public_update_custom_tool_request import PublicUpdateCustomToolRequest
 from .public_update_custom_tool_request_gpu_type_type_0 import (
     PublicUpdateCustomToolRequestGpuTypeType0,
@@ -52,6 +53,7 @@ __all__ = (
     "PublicGitHubConnectionStatus",
     "PublicProblem",
     "PublicProblemErrorsType0Item",
+    "PublicRecoveryAction",
     "PublicUpdateCustomToolRequest",
     "PublicUpdateCustomToolRequestGpuTypeType0",
     "PublicUpdateCustomToolRequestMemoryType0",

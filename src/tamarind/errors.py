@@ -16,6 +16,9 @@ Exit codes are stable so agents and CI can branch on them:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 
 class ExitCode:
     OK = 0
@@ -137,3 +140,42 @@ class CustomToolGitHubConnectionTimeoutError(CustomToolError):
     """Local GitHub connection monitoring timed out without cancelling remote work."""
 
     exit_code = ExitCode.TIMEOUT
+
+
+class CustomToolGitHubAuthorizationRequiredError(CustomToolError):
+    """The GitHub App needs one browser authorization before the request can resume."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        authorization_url: str,
+        resume_token: str,
+        expires_at: str,
+        detail: object | None = None,
+        resume: Callable[[], Any] | None = None,
+    ):
+        super().__init__(message, detail=detail)
+        self.authorization_url = authorization_url
+        self.resume_token = resume_token
+        self.expires_at = expires_at
+        self._resume = resume
+
+    def bind_resume(
+        self, resume: Callable[[], Any]
+    ) -> "CustomToolGitHubAuthorizationRequiredError":
+        """Return this authorization request with its exact retry operation bound."""
+        return type(self)(
+            self.message,
+            authorization_url=self.authorization_url,
+            resume_token=self.resume_token,
+            expires_at=self.expires_at,
+            detail=self.detail,
+            resume=resume,
+        )
+
+    def resume(self) -> Any:
+        """Retry the exact operation that produced this authorization request."""
+        if self._resume is None:
+            raise TamarindError("GitHub authorization cannot be resumed from this context")
+        return self._resume()

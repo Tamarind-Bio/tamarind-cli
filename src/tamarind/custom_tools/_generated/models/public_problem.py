@@ -9,6 +9,7 @@ from ..types import UNSET, Unset
 
 if TYPE_CHECKING:
     from ..models.public_problem_errors_type_0_item import PublicProblemErrorsType0Item
+    from ..models.public_recovery_action import PublicRecoveryAction
 
 
 T = TypeVar("T", bound="PublicProblem")
@@ -23,6 +24,7 @@ class PublicProblem:
         status (int): The HTTP status code, duplicated in the body per RFC 9457.
         title (str): A short, human-readable summary of the error kind.
         type_ (str): A URI identifying the error kind (dereferenceable docs).
+        action (None | PublicRecoveryAction | Unset): A structured recovery action the caller may present or automate.
         detail (None | str | Unset): Instance-specific human explanation.
         errors (list[PublicProblemErrorsType0Item] | None | Unset): Structured per-item detail (request-validation
             fields OR pipeline diagnostics).
@@ -32,10 +34,13 @@ class PublicProblem:
     status: int
     title: str
     type_: str
+    action: None | PublicRecoveryAction | Unset = UNSET
     detail: None | str | Unset = UNSET
     errors: list[PublicProblemErrorsType0Item] | None | Unset = UNSET
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.public_recovery_action import PublicRecoveryAction
+
         code = self.code
 
         status = self.status
@@ -43,6 +48,14 @@ class PublicProblem:
         title = self.title
 
         type_ = self.type_
+
+        action: dict[str, Any] | None | Unset
+        if isinstance(self.action, Unset):
+            action = UNSET
+        elif isinstance(self.action, PublicRecoveryAction):
+            action = self.action.to_dict()
+        else:
+            action = self.action
 
         detail: None | str | Unset
         if isinstance(self.detail, Unset):
@@ -72,6 +85,8 @@ class PublicProblem:
                 "type": type_,
             }
         )
+        if action is not UNSET:
+            field_dict["action"] = action
         if detail is not UNSET:
             field_dict["detail"] = detail
         if errors is not UNSET:
@@ -82,6 +97,7 @@ class PublicProblem:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.public_problem_errors_type_0_item import PublicProblemErrorsType0Item
+        from ..models.public_recovery_action import PublicRecoveryAction
 
         d = dict(src_dict)
         code = d.pop("code")
@@ -91,6 +107,23 @@ class PublicProblem:
         title = d.pop("title")
 
         type_ = d.pop("type")
+
+        def _parse_action(data: object) -> None | PublicRecoveryAction | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                action_type_0 = PublicRecoveryAction.from_dict(data)
+
+                return action_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | PublicRecoveryAction | Unset, data)
+
+        action = _parse_action(d.pop("action", UNSET))
 
         def _parse_detail(data: object) -> None | str | Unset:
             if data is None:
@@ -130,6 +163,7 @@ class PublicProblem:
             status=status,
             title=title,
             type_=type_,
+            action=action,
             detail=detail,
             errors=errors,
         )

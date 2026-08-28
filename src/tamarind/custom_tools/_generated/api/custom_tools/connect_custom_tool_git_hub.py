@@ -48,6 +48,11 @@ def _parse_response(
 
         return response_401
 
+    if response.status_code == 403:
+        response_403 = PublicProblem.from_dict(response.json())
+
+        return response_403
+
     if response.status_code == 404:
         response_404 = PublicProblem.from_dict(response.json())
 
@@ -93,7 +98,7 @@ def sync_detailed(
 ) -> Response[PublicGitHubConnection | PublicProblem]:
     """Connect a custom tool to GitHub
 
-     Connect an already-installed GitHub App repository and begin importing its branch.
+     Connect a GitHub repository, returning a resumable authorization action when consent is needed.
 
     Args:
         name (str): The custom tool name.
@@ -130,7 +135,7 @@ def sync(
 ) -> PublicGitHubConnection | PublicProblem | None:
     """Connect a custom tool to GitHub
 
-     Connect an already-installed GitHub App repository and begin importing its branch.
+     Connect a GitHub repository, returning a resumable authorization action when consent is needed.
 
     Args:
         name (str): The custom tool name.
@@ -162,7 +167,7 @@ async def asyncio_detailed(
 ) -> Response[PublicGitHubConnection | PublicProblem]:
     """Connect a custom tool to GitHub
 
-     Connect an already-installed GitHub App repository and begin importing its branch.
+     Connect a GitHub repository, returning a resumable authorization action when consent is needed.
 
     Args:
         name (str): The custom tool name.
@@ -197,7 +202,7 @@ async def asyncio(
 ) -> PublicGitHubConnection | PublicProblem | None:
     """Connect a custom tool to GitHub
 
-     Connect an already-installed GitHub App repository and begin importing its branch.
+     Connect a GitHub repository, returning a resumable authorization action when consent is needed.
 
     Args:
         name (str): The custom tool name.

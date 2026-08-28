@@ -21,6 +21,16 @@
         },
         "description": "An error occurred (RFC 9457 problem+json). Switch on the stable `code`, not on prose."
       },
+      "Forbidden": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/PublicProblem"
+            }
+          }
+        },
+        "description": "The authenticated API key is not allowed to use this operation."
+      },
       "NotFound": {
         "content": {
           "application/problem+json": {
@@ -184,6 +194,20 @@
       "PublicConnectGitHubRequest": {
         "additionalProperties": false,
         "properties": {
+          "authorizationToken": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque token returned by a prior `github_authorization_required` response.",
+            "title": "Authorizationtoken"
+          },
           "autoPublish": {
             "default": false,
             "title": "Autopublish",
@@ -590,9 +614,54 @@
         "type": "string"
       },
       "PublicProblem": {
+        "$defs": {
+          "PublicRecoveryAction": {
+            "additionalProperties": false,
+            "description": "A safe, machine-readable action that can move a failed request forward.",
+            "properties": {
+              "authorizationUrl": {
+                "title": "Authorizationurl",
+                "type": "string"
+              },
+              "expiresAt": {
+                "title": "Expiresat",
+                "type": "string"
+              },
+              "resumeToken": {
+                "title": "Resumetoken",
+                "type": "string"
+              },
+              "type": {
+                "const": "authorize_github",
+                "title": "Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "authorizationUrl",
+              "resumeToken",
+              "expiresAt"
+            ],
+            "title": "PublicRecoveryAction",
+            "type": "object"
+          }
+        },
         "additionalProperties": false,
         "description": "RFC 9457 problem detail. Serialized as `application/problem+json` on every public error.",
         "properties": {
+          "action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicRecoveryAction"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A structured recovery action the caller may present or automate."
+          },
           "code": {
             "description": "A stable machine-readable slug; switch on THIS, not prose.",
             "title": "Code",
@@ -651,6 +720,37 @@
           "code"
         ],
         "title": "PublicProblem",
+        "type": "object"
+      },
+      "PublicRecoveryAction": {
+        "additionalProperties": false,
+        "description": "A safe, machine-readable action that can move a failed request forward.",
+        "properties": {
+          "authorizationUrl": {
+            "title": "Authorizationurl",
+            "type": "string"
+          },
+          "expiresAt": {
+            "title": "Expiresat",
+            "type": "string"
+          },
+          "resumeToken": {
+            "title": "Resumetoken",
+            "type": "string"
+          },
+          "type": {
+            "const": "authorize_github",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "authorizationUrl",
+          "resumeToken",
+          "expiresAt"
+        ],
+        "title": "PublicRecoveryAction",
         "type": "object"
       },
       "PublicUpdateCustomToolRequest": {
@@ -1484,7 +1584,7 @@
         "x-doc-group": "Custom Tools"
       },
       "post": {
-        "description": "Connect an already-installed GitHub App repository and begin importing its branch.",
+        "description": "Connect a GitHub repository, returning a resumable authorization action when consent is needed.",
         "operationId": "connectCustomToolGitHub",
         "parameters": [
           {
@@ -1544,6 +1644,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"

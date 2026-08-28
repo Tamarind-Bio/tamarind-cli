@@ -12,7 +12,9 @@ from tamarind import Tamarind
 from tamarind.custom_tools import resources
 from tamarind.custom_tools.packaging import build_source_tree_archive, inspect_source_tree
 from tamarind.errors import (
+    APIError,
     CustomToolBuildFailedError,
+    CustomToolGitHubAuthorizationRequiredError,
     CustomToolGitHubConnectionFailedError,
     CustomToolGitHubConnectionTimeoutError,
     CustomToolNotFoundError,
@@ -113,6 +115,24 @@ def _github_connection(
         "autoPublish": connected,
         "status": status,
         "error": error if connected else None,
+    }
+
+
+def _github_authorization_problem(*, action: object | None = None) -> dict:
+    return {
+        "type": "https://app.tamarind.bio/errors/github_authorization_required",
+        "title": "GitHub authorization required",
+        "status": 403,
+        "code": "github_authorization_required",
+        "detail": "Authorize the Tamarind GitHub App, then resume the connection.",
+        "action": action
+        if action is not None
+        else {
+            "type": "authorize_github",
+            "authorizationUrl": "https://github.com/apps/tamarind-bio/installations/new?state=opaque",
+            "resumeToken": "r" * 43,
+            "expiresAt": "2026-08-29T18:00:00Z",
+        },
     }
 
 
@@ -245,6 +265,102 @@ def test_github_connection_primary_happy_path() -> None:
     assert disconnect.calls.last.request.headers["X-Tamarind-If-Match"] == '"current-validator"'
     assert tool_route.call_count == 4
     assert connection_route.call_count == 2
+
+
+@respx.mock
+def test_github_connection_authorization_can_resume_the_exact_request() -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"current-validator"'})
+    )
+    connect = respx.post(f"{BASE}custom-tools/example/github").mock(
+        side_effect=[
+            httpx.Response(403, json=_github_authorization_problem()),
+            httpx.Response(202, json=_github_connection()),
+        ]
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        tool = client.custom_tools.get("example")
+        with pytest.raises(CustomToolGitHubAuthorizationRequiredError) as raised:
+            tool.connect_github("acme/example", branch="release", auto_publish=True)
+
+        authorization = raised.value
+        assert authorization.authorization_url.startswith("https://github.com/apps/")
+        assert authorization.resume_token == "r" * 43
+        assert authorization.expires_at == "2026-08-29T18:00:00Z"
+        connection = authorization.resume()
+
+    assert connection.status == "connecting"
+    assert connect.call_count == 2
+    assert json.loads(connect.calls[0].request.content) == {
+        "repo": "acme/example",
+        "branch": "release",
+        "autoPublish": True,
+    }
+    assert json.loads(connect.calls[1].request.content) == {
+        "repo": "acme/example",
+        "branch": "release",
+        "autoPublish": True,
+        "authorizationToken": "r" * 43,
+    }
+    assert all(
+        call.request.headers["X-Tamarind-If-Match"] == '"current-validator"'
+        for call in connect.calls
+    )
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        {},
+        {
+            "type": "open_browser",
+            "authorizationUrl": "https://github.com/apps/tamarind-bio/installations/new",
+            "resumeToken": "r" * 43,
+            "expiresAt": "2026-08-29T18:00:00Z",
+        },
+        {
+            "type": "authorize_github",
+            "authorizationUrl": "javascript:alert(1)",
+            "resumeToken": "r" * 43,
+            "expiresAt": "2026-08-29T18:00:00Z",
+        },
+        {
+            "type": "authorize_github",
+            "authorizationUrl": "https://github.com/apps/tamarind-bio/installations/new",
+            "resumeToken": "short",
+            "expiresAt": "2026-08-29T18:00:00Z",
+        },
+        {
+            "type": "authorize_github",
+            "authorizationUrl": "https://github.com/apps/tamarind-bio/installations/new",
+            "resumeToken": "r" * 43,
+            "expiresAt": "not-a-timestamp",
+        },
+        {
+            "type": "authorize_github",
+            "authorizationUrl": "https://github.com/apps/tamarind-bio/installations/new",
+            "resumeToken": "r" * 43,
+            "expiresAt": "2026-08-29T18:00:00Z",
+            "unexpected": True,
+        },
+    ],
+)
+@respx.mock
+def test_github_connection_rejects_malformed_authorization_actions(action: object) -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"validator"'})
+    )
+    respx.post(f"{BASE}custom-tools/example/github").mock(
+        return_value=httpx.Response(403, json=_github_authorization_problem(action=action))
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(APIError) as raised:
+            client.custom_tools.get("example").connect_github("acme/example")
+
+    assert raised.value.status_code == 403
+    assert not isinstance(raised.value, CustomToolGitHubAuthorizationRequiredError)
 
 
 @respx.mock
