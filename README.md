@@ -124,6 +124,27 @@ server returns the already admitted Version. If no key was supplied, fetch the
 tool's versions before retrying. Interrupting `monitor()` stops local monitoring; it
 does not cancel the remote build.
 
+To use a repository already visible through your organization's Tamarind GitHub
+App installation, connect it as the tool's source and wait for the initial import:
+
+```python
+connection = tool.connect_github(
+    "acme/my-esmfold",
+    branch="main",
+    auto_publish=True,
+)
+connection = connection.monitor(timeout=600)
+print(connection.commit)
+
+current = tool.github_connection()  # None when disconnected
+tool.disconnect_github()            # imported source and Versions remain
+```
+
+Future pushes to the selected branch synchronize and build automatically. The
+SDK does not install or administer the GitHub App; complete that account-level
+step in the web app first. A monitoring timeout stops only the local wait, not
+the server-side import.
+
 Exact Version operations use `version.id`; `version.name` is display-only. If a
 mutation reports `412 Precondition Failed`, refetch the affected Tool or Version,
 confirm the mutation is still desired, and retry using the refreshed resource.

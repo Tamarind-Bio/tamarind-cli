@@ -13,6 +13,8 @@ from tamarind.custom_tools import resources
 from tamarind.custom_tools.packaging import build_source_tree_archive, inspect_source_tree
 from tamarind.errors import (
     CustomToolBuildFailedError,
+    CustomToolGitHubConnectionFailedError,
+    CustomToolGitHubConnectionTimeoutError,
     CustomToolNotFoundError,
     CustomToolUploadError,
     StaleCustomToolError,
@@ -94,6 +96,23 @@ def _version(
         "completedAt": "2026-08-15T00:01:00Z" if status in {"Complete", "Stopped"} else None,
         "terminal": status in {"Complete", "Stopped"} if terminal is None else terminal,
         "error": {"code": "build_failed", "message": error} if error else None,
+    }
+
+
+def _github_connection(
+    *,
+    status: str = "connecting",
+    error: str | None = None,
+    commit: str | None = None,
+) -> dict:
+    connected = status != "disconnected"
+    return {
+        "repo": "acme/example" if connected else None,
+        "branch": "main" if connected else None,
+        "commit": commit if connected else None,
+        "autoPublish": connected,
+        "status": status,
+        "error": error if connected else None,
     }
 
 
@@ -186,6 +205,147 @@ def test_delete_requires_the_contract_no_content_status() -> None:
     with Tamarind(api_key="key", api_base=BASE) as client:
         with pytest.raises(TamarindError, match="generated contract"):
             client.custom_tools.get("example").delete()
+
+
+@respx.mock
+def test_github_connection_primary_happy_path() -> None:
+    tool_route = respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"current-validator"'})
+    )
+    connect = respx.post(f"{BASE}custom-tools/example/github").mock(
+        return_value=httpx.Response(202, json=_github_connection())
+    )
+    connection_route = respx.get(f"{BASE}custom-tools/example/github").mock(
+        return_value=httpx.Response(
+            200,
+            json=_github_connection(status="connected", commit="a" * 40),
+        )
+    )
+    disconnect = respx.delete(f"{BASE}custom-tools/example/github").mock(
+        return_value=httpx.Response(204)
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        tool = client.custom_tools.get("example")
+        pending = tool.connect_github("acme/example", branch="main", auto_publish=True)
+        connected = pending.monitor(timeout=1, interval=0.001)
+        current = tool.github_connection()
+        tool.disconnect_github()
+
+    assert pending.status == "connecting"
+    assert connected.status == "connected"
+    assert connected.commit == "a" * 40
+    assert current is not None and current.repo == "acme/example"
+    assert json.loads(connect.calls.last.request.content) == {
+        "repo": "acme/example",
+        "branch": "main",
+        "autoPublish": True,
+    }
+    assert connect.calls.last.request.headers["X-Tamarind-If-Match"] == '"current-validator"'
+    assert disconnect.calls.last.request.headers["X-Tamarind-If-Match"] == '"current-validator"'
+    assert tool_route.call_count == 4
+    assert connection_route.call_count == 2
+
+
+@respx.mock
+def test_github_connection_returns_none_when_disconnected() -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/github").mock(
+        return_value=httpx.Response(200, json=_github_connection(status="disconnected"))
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        assert client.custom_tools.get("example").github_connection() is None
+
+
+@respx.mock
+def test_github_connection_surfaces_failed_materialization() -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"validator"'})
+    )
+    respx.post(f"{BASE}custom-tools/example/github").mock(
+        return_value=httpx.Response(202, json=_github_connection())
+    )
+    respx.get(f"{BASE}custom-tools/example/github").mock(
+        return_value=httpx.Response(
+            200,
+            json=_github_connection(status="failed", error="clone failed"),
+        )
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        connection = client.custom_tools.get("example").connect_github("acme/example")
+        with pytest.raises(CustomToolGitHubConnectionFailedError, match="clone failed") as raised:
+            connection.monitor(timeout=1, interval=0.001)
+
+    assert raised.value.detail is not None
+
+
+@respx.mock
+def test_github_connect_maps_a_stale_tool_etag() -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"stale-validator"'})
+    )
+    respx.post(f"{BASE}custom-tools/example/github").mock(
+        return_value=httpx.Response(
+            412,
+            json={
+                "type": "https://app.tamarind.bio/errors/precondition_failed",
+                "title": "Precondition failed",
+                "status": 412,
+                "code": "precondition_failed",
+                "detail": "refresh and retry",
+            },
+        )
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(StaleCustomToolError, match="refresh and retry"):
+            client.custom_tools.get("example").connect_github("acme/example")
+
+
+def test_github_connection_monitor_enforces_the_deadline() -> None:
+    class Collection:
+        async def _github_connection_async(self, *_args, **_kwargs):
+            await asyncio.sleep(1)
+            raise AssertionError("deadline did not cancel the request")
+
+    connection = resources.GitHubConnection(
+        repo="acme/example",
+        branch="main",
+        commit=None,
+        auto_publish=False,
+        status="connecting",
+        error=None,
+        tool_name="example",
+        tool_generation="generation-1",
+        _collection=Collection(),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(CustomToolGitHubConnectionTimeoutError, match="timed out"):
+        connection.monitor(timeout=0.001, interval=0.001)
+
+
+@pytest.mark.parametrize(
+    "wire",
+    [
+        {**_github_connection(status="connected"), "repo": 42},
+        {**_github_connection(status="connected"), "autoPublish": "yes"},
+        {**_github_connection(status="disconnected"), "repo": "acme/example"},
+        _github_connection(status="failed", error=None),
+        _github_connection(status="connected", error="stale error"),
+    ],
+)
+@respx.mock
+def test_github_connection_rejects_malformed_contract_responses(wire: dict) -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/github").mock(
+        return_value=httpx.Response(200, json=wire)
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(TamarindError, match="generated contract"):
+            client.custom_tools.get("example").github_connection()
 
 
 @respx.mock

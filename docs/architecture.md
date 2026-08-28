@@ -39,7 +39,7 @@ detail that can change without any client change and without drift.
 
 ### 3. Custom Tools surface — source of truth: the public OpenAPI artifact
 
-Custom Tool creation, source upload, build, Versions, logs, and cancellation
+Custom Tool creation, source upload, GitHub source connection, build, Versions, logs, and cancellation
 are generated from the website backend's dedicated public OpenAPI artifact:
 
 ```text

@@ -24,6 +24,8 @@ def test_vendored_contract_is_the_dedicated_backend_artifact() -> None:
     conditional_operations = {
         ("/custom-tools/{name}", "delete"),
         ("/custom-tools/{name}", "patch"),
+        ("/custom-tools/{name}/github", "delete"),
+        ("/custom-tools/{name}/github", "post"),
         ("/custom-tools/{name}/versions", "post"),
         ("/custom-tools/{name}/versions/{version}:cancel", "post"),
         ("/custom-tools/{name}/versions/{version}:publish", "post"),
@@ -85,7 +87,14 @@ def test_transport_declares_the_success_status_of_every_model_operation() -> Non
     expected: dict[str, int] = {}
     for path_item in document["paths"].values():
         for operation in path_item.values():
-            if not isinstance(operation, dict) or operation["operationId"] == "deleteCustomTool":
+            if not isinstance(operation, dict):
+                continue
+            success_responses = [
+                response
+                for status, response in operation["responses"].items()
+                if status.startswith("2")
+            ]
+            if len(success_responses) == 1 and "content" not in success_responses[0]:
                 continue
             name = re.sub(r"(?<!^)(?=[A-Z])", "_", operation["operationId"]).lower()
             success_statuses = [

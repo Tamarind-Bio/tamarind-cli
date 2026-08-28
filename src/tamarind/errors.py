@@ -127,3 +127,13 @@ class CustomToolBuildTimeoutError(CustomToolError):
     """Local monitoring timed out without cancelling the remote build."""
 
     exit_code = ExitCode.TIMEOUT
+
+
+class CustomToolGitHubConnectionFailedError(CustomToolError):
+    """A GitHub source connection reached a failed or disconnected state."""
+
+
+class CustomToolGitHubConnectionTimeoutError(CustomToolError):
+    """Local GitHub connection monitoring timed out without cancelling remote work."""
+
+    exit_code = ExitCode.TIMEOUT
