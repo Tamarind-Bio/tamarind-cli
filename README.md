@@ -144,7 +144,7 @@ connection = connection.monitor(timeout=600)
 print(connection.commit)
 
 current = tool.github_connection()  # None when disconnected
-tool.disconnect_github()            # imported source and Versions remain
+tool.refresh().disconnect_github()  # imported source and Versions remain
 ```
 
 If the Tamarind GitHub App already has access, `connect_github()` returns

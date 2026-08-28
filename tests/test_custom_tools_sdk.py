@@ -230,7 +230,12 @@ def test_delete_requires_the_contract_no_content_status() -> None:
 @respx.mock
 def test_github_connection_primary_happy_path() -> None:
     tool_route = respx.get(f"{BASE}custom-tools/example").mock(
-        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"current-validator"'})
+        side_effect=[
+            httpx.Response(200, json=_tool(), headers={"ETag": '"selected-validator"'}),
+            httpx.Response(200, json=_tool(), headers={"ETag": '"current-validator"'}),
+            httpx.Response(200, json=_tool(), headers={"ETag": '"current-validator"'}),
+            httpx.Response(200, json=_tool(), headers={"ETag": '"current-validator"'}),
+        ]
     )
     connect = respx.post(f"{BASE}custom-tools/example/github").mock(
         return_value=httpx.Response(202, json=_github_connection())
@@ -250,7 +255,7 @@ def test_github_connection_primary_happy_path() -> None:
         pending = tool.connect_github("acme/example", branch="main", auto_publish=True)
         connected = pending.monitor(timeout=1, interval=0.001)
         current = tool.github_connection()
-        tool.disconnect_github()
+        tool.refresh().disconnect_github()
 
     assert pending.status == "connecting"
     assert connected.status == "connected"
@@ -261,9 +266,9 @@ def test_github_connection_primary_happy_path() -> None:
         "branch": "main",
         "autoPublish": True,
     }
-    assert connect.calls.last.request.headers["X-Tamarind-If-Match"] == '"current-validator"'
+    assert connect.calls.last.request.headers["X-Tamarind-If-Match"] == '"selected-validator"'
     assert disconnect.calls.last.request.headers["X-Tamarind-If-Match"] == '"current-validator"'
-    assert tool_route.call_count == 3
+    assert tool_route.call_count == 4
     assert connection_route.call_count == 2
 
 
