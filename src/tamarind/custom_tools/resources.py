@@ -25,10 +25,13 @@ from tamarind.custom_tools.transport import (
     MemorySize,
     PublicBuildResult,
     PublicBuildLogPage,
+    PublicConnectGitHubRequest,
     PublicCreateCustomToolRequest,
     PublicCreateVersionRequest,
     PublicCustomTool,
     PublicCustomToolStatus,
+    PublicGitHubConnection,
+    PublicGitHubConnectionStatus,
     PublicUpdateCustomToolRequest,
     PublicVersion,
     PublicVersionStatus,
@@ -48,6 +51,9 @@ from tamarind.custom_tools.validation import (
 from tamarind.errors import (
     CustomToolBuildFailedError,
     CustomToolBuildTimeoutError,
+    CustomToolGitHubAuthorizationRequiredError,
+    CustomToolGitHubConnectionFailedError,
+    CustomToolGitHubConnectionTimeoutError,
     CustomToolUploadError,
     StaleCustomToolError,
     TamarindError,
@@ -100,6 +106,97 @@ class BuildResult:
 
     action: BuildAction
     version: "Version"
+
+
+@dataclass(frozen=True)
+class GitHubConnection:
+    repo: str
+    branch: str
+    commit: str | None
+    auto_publish: bool
+    status: PublicGitHubConnectionStatus
+    error: str | None
+    tool_name: str
+    tool_generation: str
+    _collection: "CustomTools" = field(repr=False, compare=False)
+
+    def refresh(self) -> "GitHubConnection | None":
+        return self._refresh(request_timeout=None)
+
+    def _refresh(self, *, request_timeout: float | None) -> "GitHubConnection | None":
+        return self._collection._github_connection(
+            self.tool_name,
+            self.tool_generation,
+            request_timeout=request_timeout,
+        )
+
+    async def _refresh_async(self, *, request_timeout: float | None) -> "GitHubConnection | None":
+        return await self._collection._github_connection_async(
+            self.tool_name,
+            self.tool_generation,
+            request_timeout=request_timeout,
+        )
+
+    def monitor(self, *, timeout: float | None, interval: float = 2.0) -> "GitHubConnection":
+        timeout, interval = _validate_monitor_options(timeout=timeout, interval=interval)
+        return asyncio.run(self._monitor(timeout=timeout, interval=interval))
+
+    async def monitor_async(
+        self, *, timeout: float | None, interval: float = 2.0
+    ) -> "GitHubConnection":
+        timeout, interval = _validate_monitor_options(timeout=timeout, interval=interval)
+        return await self._monitor(timeout=timeout, interval=interval)
+
+    async def _monitor(self, *, timeout: float | None, interval: float) -> "GitHubConnection":
+        deadline = None if timeout is None else _clock() + timeout
+        current: GitHubConnection | None = self
+        while current is not None and current.status == PublicGitHubConnectionStatus.CONNECTING:
+            remaining = None if deadline is None else deadline - _clock()
+            if remaining is not None and remaining <= 0:
+                raise _github_connection_timeout(self.tool_name, current)
+            try:
+                refresh = current._refresh_async(request_timeout=remaining)
+                current = (
+                    await refresh
+                    if remaining is None
+                    else await asyncio.wait_for(refresh, remaining)
+                )
+            except asyncio.TimeoutError:
+                raise _github_connection_timeout(self.tool_name, current) from None
+            except TamarindError as exc:
+                if remaining is not None and isinstance(exc.__cause__, httpx.TimeoutException):
+                    raise _github_connection_timeout(self.tool_name, current) from None
+                raise
+            if current is not None and current.status == PublicGitHubConnectionStatus.CONNECTING:
+                remaining = None if deadline is None else deadline - _clock()
+                if remaining is not None and remaining <= 0:
+                    raise _github_connection_timeout(self.tool_name, current)
+                await asyncio.sleep(interval if remaining is None else min(interval, remaining))
+        if current is None:
+            raise CustomToolGitHubConnectionFailedError(
+                f"Custom Tool {self.tool_name!r} was disconnected before GitHub setup completed"
+            )
+        if current.status == PublicGitHubConnectionStatus.FAILED:
+            raise CustomToolGitHubConnectionFailedError(
+                f"Custom Tool {self.tool_name!r} GitHub connection failed: "
+                f"{current.error or 'unknown error'}",
+                detail=current,
+            )
+        if current.status != PublicGitHubConnectionStatus.CONNECTED:
+            raise CustomToolGitHubConnectionFailedError(
+                f"Custom Tool {self.tool_name!r} GitHub connection ended in status {current.status}",
+                detail=current,
+            )
+        return current
+
+
+def _github_connection_timeout(
+    tool_name: str, current: GitHubConnection | None
+) -> CustomToolGitHubConnectionTimeoutError:
+    return CustomToolGitHubConnectionTimeoutError(
+        f"Custom Tool {tool_name!r} GitHub connection timed out while connecting",
+        detail=current,
+    )
 
 
 @dataclass(frozen=True)
@@ -239,6 +336,29 @@ class CustomTool:
             idempotency_key=idempotency_key,
             source_timeout=source_timeout,
         )
+
+    def connect_github(
+        self,
+        repo: str,
+        *,
+        branch: str = "main",
+        auto_publish: bool = False,
+    ) -> GitHubConnection:
+        """Connect an accessible GitHub App repository as this tool's source."""
+        return self._collection._connect_github(
+            self,
+            repo=repo,
+            branch=branch,
+            auto_publish=auto_publish,
+        )
+
+    def github_connection(self) -> GitHubConnection | None:
+        """Return the current GitHub source connection, or ``None`` when disconnected."""
+        return self._collection._github_connection(self.name, self.generation)
+
+    def disconnect_github(self) -> None:
+        """Disconnect GitHub while preserving already-imported source and versions."""
+        self._collection._disconnect_github(self)
 
     def get_version(self, version_id: str) -> "Version":
         """Get one exact Version by its opaque ``id``."""
@@ -488,6 +608,87 @@ class CustomTools:
     def _delete(self, tool: CustomTool) -> None:
         self._transport.delete_custom_tool(tool.name, self._validator(tool))
 
+    def _connect_github(
+        self,
+        tool: CustomTool,
+        *,
+        repo: str,
+        branch: str,
+        auto_publish: bool,
+        authorization_token: str | None = None,
+    ) -> GitHubConnection:
+        body: dict[str, object] = {
+            "repo": repo,
+            "branch": branch,
+            "autoPublish": auto_publish,
+        }
+        if authorization_token is not None:
+            body["authorizationToken"] = authorization_token
+        try:
+            wire = self._transport.connect_custom_tool_github(
+                tool.name,
+                self._validator(tool),
+                cast(PublicConnectGitHubRequest, body),
+            )
+        except CustomToolGitHubAuthorizationRequiredError as exc:
+            resume_token = exc.resume_token
+            raise exc.bind_resume(
+                lambda: self._connect_github(
+                    tool,
+                    repo=repo,
+                    branch=branch,
+                    auto_publish=auto_publish,
+                    authorization_token=resume_token,
+                )
+            ) from None
+        connection = _github_connection_from_wire(self, tool.name, tool.generation, wire)
+        if connection is None:
+            raise TamarindError("Custom Tools response did not match the generated contract")
+        return connection
+
+    def _github_connection(
+        self,
+        tool_name: str,
+        tool_generation: str,
+        *,
+        request_timeout: float | None = None,
+    ) -> GitHubConnection | None:
+        wire = self._transport.get_custom_tool_github_connection(
+            tool_name,
+            timeout=request_timeout,
+        )
+        self._current_tool(tool_name, tool_generation, request_timeout=request_timeout)
+        return _github_connection_from_wire(self, tool_name, tool_generation, wire)
+
+    async def _github_connection_async(
+        self,
+        tool_name: str,
+        tool_generation: str,
+        *,
+        request_timeout: float | None = None,
+    ) -> GitHubConnection | None:
+        wire = await self._transport.get_custom_tool_github_connection_async(
+            tool_name,
+            timeout=request_timeout,
+        )
+        current_wire = await self._transport.get_custom_tool_async(
+            tool_name,
+            timeout=request_timeout,
+        )
+        current = _tool_from_wire(self, current_wire)
+        if current.generation != tool_generation:
+            raise StaleCustomToolError(
+                f"Custom Tool {tool_name!r} now refers to a different generation; "
+                "fetch it again explicitly to select the replacement."
+            )
+        return _github_connection_from_wire(self, tool_name, tool_generation, wire)
+
+    def _disconnect_github(self, tool: CustomTool) -> None:
+        self._transport.disconnect_custom_tool_github(
+            tool.name,
+            self._validator(tool),
+        )
+
     def _build(
         self,
         tool: CustomTool,
@@ -720,6 +921,52 @@ def _tool_from_wire(collection: CustomTools, wire: PublicCustomTool) -> CustomTo
         can_edit=wire["canEdit"],
         can_build=wire["canBuild"],
         _etag=cast(str | None, wire.get("_etag")),
+        _collection=collection,
+    )
+
+
+def _github_connection_from_wire(
+    collection: CustomTools,
+    tool_name: str,
+    tool_generation: str,
+    wire: PublicGitHubConnection,
+) -> GitHubConnection | None:
+    if not isinstance(wire, dict):
+        raise TamarindError("Custom Tools response did not match the generated contract")
+    repo = wire.get("repo")
+    branch = wire.get("branch")
+    commit = wire.get("commit")
+    auto_publish = wire.get("autoPublish")
+    status = wire.get("status")
+    error = wire.get("error")
+    try:
+        parsed_status = PublicGitHubConnectionStatus(status)
+    except (TypeError, ValueError):
+        raise TamarindError("Custom Tools response did not match the generated contract") from None
+    if type(auto_publish) is not bool or (commit is not None and not isinstance(commit, str)):
+        raise TamarindError("Custom Tools response did not match the generated contract")
+    if parsed_status == PublicGitHubConnectionStatus.DISCONNECTED:
+        if any(value is not None for value in (repo, branch, commit, error)) or auto_publish:
+            raise TamarindError("Custom Tools response did not match the generated contract")
+        return None
+    if (
+        not isinstance(repo, str)
+        or not repo
+        or not isinstance(branch, str)
+        or not branch
+        or (error is not None and not isinstance(error, str))
+        or (parsed_status != PublicGitHubConnectionStatus.FAILED and error is not None)
+    ):
+        raise TamarindError("Custom Tools response did not match the generated contract")
+    return GitHubConnection(
+        repo=repo,
+        branch=branch,
+        commit=commit,
+        auto_publish=auto_publish,
+        status=parsed_status,
+        error=error,
+        tool_name=tool_name,
+        tool_generation=tool_generation,
         _collection=collection,
     )
 

@@ -282,7 +282,14 @@ transport.list_custom_tools()
 transport.create_custom_tool({"name": "contract-probe"})
 transport.delete_custom_tool("contract-probe", '"tool-etag"')
 transport.get_custom_tool("contract-probe")
+transport.get_custom_tool_github_connection("contract-probe")
 transport.update_custom_tool("contract-probe", '"tool-etag"', {})
+transport.connect_custom_tool_github(
+    "contract-probe",
+    '"tool-etag"',
+    {"repo": "acme/contract-probe", "branch": "main", "autoPublish": False},
+)
+transport.disconnect_custom_tool_github("contract-probe", '"tool-etag"')
 transport.create_custom_tool_upload("contract-probe")
 transport.list_custom_tool_versions("contract-probe")
 transport.build_custom_tool_version(
@@ -300,6 +307,8 @@ transport.publish_custom_tool_version("contract-probe", "ver_opaque", '"tool-eta
 
 
 async def exercise_async_facade():
+    await transport.get_custom_tool_async("contract-probe")
+    await transport.get_custom_tool_github_connection_async("contract-probe")
     await transport.get_custom_tool_version_async(
         "contract-probe", "ver_opaque"
     )

@@ -6,6 +6,9 @@ from typing import Any, NamedTuple, TypeAlias, cast
 
 from tamarind.custom_tools._generated.client import Client as GeneratedClient
 from tamarind.custom_tools._generated.types import UNSET
+from tamarind.custom_tools._generated.models.public_connect_git_hub_request import (
+    PublicConnectGitHubRequest as ConnectGitHubModel,
+)
 from tamarind.custom_tools._generated.models.public_create_custom_tool_request import (
     PublicCreateCustomToolRequest as CreateModel,
 )
@@ -21,6 +24,9 @@ from tamarind.custom_tools._generated.models.public_custom_tool_memory import (
 from tamarind.custom_tools._generated.models.public_custom_tool_status import (
     PublicCustomToolStatus as GeneratedToolStatus,
 )
+from tamarind.custom_tools._generated.models.public_git_hub_connection_status import (
+    PublicGitHubConnectionStatus as GeneratedGitHubConnectionStatus,
+)
 from tamarind.custom_tools._generated.models.public_update_custom_tool_request import (
     PublicUpdateCustomToolRequest as UpdateModel,
 )
@@ -33,10 +39,13 @@ from tamarind.http import HTTPClient
 from ._generated.api.custom_tools import (
     build_custom_tool_version,
     cancel_custom_tool_build,
+    connect_custom_tool_git_hub,
     create_custom_tool,
     create_custom_tool_upload,
     delete_custom_tool,
+    disconnect_custom_tool_git_hub,
     get_custom_tool,
+    get_custom_tool_git_hub_connection,
     get_custom_tool_version,
     list_custom_tool_build_logs,
     list_custom_tool_versions,
@@ -49,6 +58,8 @@ GpuType: TypeAlias = GeneratedGpuType
 MemorySize: TypeAlias = GeneratedMemorySize
 PublicCustomToolStatus: TypeAlias = GeneratedToolStatus
 PublicVersionStatus: TypeAlias = GeneratedVersionStatus
+PublicGitHubConnectionStatus: TypeAlias = GeneratedGitHubConnectionStatus
+PublicConnectGitHubRequest: TypeAlias = dict[str, Any]
 PublicCreateCustomToolRequest: TypeAlias = dict[str, Any]
 PublicUpdateCustomToolRequest: TypeAlias = dict[str, Any]
 PublicCreateVersionRequest: TypeAlias = dict[str, Any]
@@ -56,6 +67,7 @@ PublicCustomTool: TypeAlias = dict[str, Any]
 PublicVersion: TypeAlias = dict[str, Any]
 PublicBuildResult: TypeAlias = dict[str, Any]
 PublicBuildLogPage: TypeAlias = dict[str, Any]
+PublicGitHubConnection: TypeAlias = dict[str, Any]
 
 
 class _Operation(NamedTuple):
@@ -67,6 +79,8 @@ _LIST_CUSTOM_TOOLS = _Operation(list_custom_tools, 200)
 _CREATE_CUSTOM_TOOL = _Operation(create_custom_tool, 201)
 _GET_CUSTOM_TOOL = _Operation(get_custom_tool, 200)
 _UPDATE_CUSTOM_TOOL = _Operation(update_custom_tool, 200)
+_GET_CUSTOM_TOOL_GITHUB_CONNECTION = _Operation(get_custom_tool_git_hub_connection, 200)
+_CONNECT_CUSTOM_TOOL_GITHUB = _Operation(connect_custom_tool_git_hub, 202)
 _CREATE_CUSTOM_TOOL_UPLOAD = _Operation(create_custom_tool_upload, 201)
 _LIST_CUSTOM_TOOL_VERSIONS = _Operation(list_custom_tool_versions, 200)
 _BUILD_CUSTOM_TOOL_VERSION = _Operation(build_custom_tool_version, 202)
@@ -80,6 +94,8 @@ _MODEL_OPERATIONS = (
     _CREATE_CUSTOM_TOOL,
     _GET_CUSTOM_TOOL,
     _UPDATE_CUSTOM_TOOL,
+    _GET_CUSTOM_TOOL_GITHUB_CONNECTION,
+    _CONNECT_CUSTOM_TOOL_GITHUB,
     _CREATE_CUSTOM_TOOL_UPLOAD,
     _LIST_CUSTOM_TOOL_VERSIONS,
     _BUILD_CUSTOM_TOOL_VERSION,
@@ -166,6 +182,11 @@ class GeneratedCustomToolsTransport:
     def get_custom_tool(self, name: str, *, timeout: float | None = None) -> PublicCustomTool:
         return self._sync(_GET_CUSTOM_TOOL, get_custom_tool._get_kwargs(name=name), timeout)
 
+    async def get_custom_tool_async(
+        self, name: str, *, timeout: float | None = None
+    ) -> PublicCustomTool:
+        return await self._async(_GET_CUSTOM_TOOL, get_custom_tool._get_kwargs(name=name), timeout)
+
     def update_custom_tool(
         self,
         name: str,
@@ -183,6 +204,52 @@ class GeneratedCustomToolsTransport:
             ),
             timeout,
         )
+
+    def get_custom_tool_github_connection(
+        self, name: str, *, timeout: float | None = None
+    ) -> PublicGitHubConnection:
+        return self._sync(
+            _GET_CUSTOM_TOOL_GITHUB_CONNECTION,
+            get_custom_tool_git_hub_connection._get_kwargs(name=name),
+            timeout,
+        )
+
+    async def get_custom_tool_github_connection_async(
+        self, name: str, *, timeout: float | None = None
+    ) -> PublicGitHubConnection:
+        return await self._async(
+            _GET_CUSTOM_TOOL_GITHUB_CONNECTION,
+            get_custom_tool_git_hub_connection._get_kwargs(name=name),
+            timeout,
+        )
+
+    def connect_custom_tool_github(
+        self,
+        name: str,
+        etag: str,
+        body: PublicConnectGitHubRequest,
+        *,
+        timeout: float | None = None,
+    ) -> PublicGitHubConnection:
+        return self._sync(
+            _CONNECT_CUSTOM_TOOL_GITHUB,
+            connect_custom_tool_git_hub._get_kwargs(
+                name=name,
+                if_match=etag,
+                body=ConnectGitHubModel.from_dict(body),
+            ),
+            timeout,
+        )
+
+    def disconnect_custom_tool_github(
+        self, name: str, etag: str, *, timeout: float | None = None
+    ) -> None:
+        response = self._client.request(
+            timeout=timeout,
+            **_http_kwargs(disconnect_custom_tool_git_hub._get_kwargs(name=name, if_match=etag)),
+        )
+        if response.status_code != 204:
+            raise TamarindError("Custom Tools response did not match the generated contract")
 
     def create_custom_tool_upload(
         self, name: str, *, timeout: float | None = None

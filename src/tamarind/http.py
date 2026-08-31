@@ -7,8 +7,10 @@ callers (and the CLI's exit codes) get consistent behaviour.
 
 from __future__ import annotations
 
+from datetime import datetime
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -19,6 +21,7 @@ from .errors import (
     CustomToolBuildInProgressError,
     CustomToolBuildNotInProgressError,
     CustomToolExistsError,
+    CustomToolGitHubAuthorizationRequiredError,
     CustomToolNotFoundError,
     CustomToolNotDeployableError,
     CustomToolUploadError,
@@ -236,6 +239,16 @@ def _map_error(resp: httpx.Response, *, request_path: str) -> TamarindError:
         return CustomToolBuildInProgressError(msg, detail=detail)
     if problem_code == "custom_tool_build_not_cancellable":
         return CustomToolBuildNotInProgressError(msg, detail=detail)
+    if problem_code == "github_authorization_required":
+        action = _github_authorization_action(detail)
+        if action is not None:
+            return CustomToolGitHubAuthorizationRequiredError(
+                msg,
+                authorization_url=action["authorizationUrl"],
+                resume_token=action["resumeToken"],
+                expires_at=action["expiresAt"],
+                detail=detail,
+            )
     ml = msg.lower()
     auth_ish = "api key" in ml or "api-key" in ml or "apikey" in ml or "unauthorized" in ml
     resource = (
@@ -277,6 +290,51 @@ def _map_error(resp: httpx.Response, *, request_path: str) -> TamarindError:
     if code == 422:
         return ValidationError(msg, detail=detail)
     return APIError(msg, status_code=code, detail=detail)
+
+
+def _github_authorization_action(detail: object | None) -> dict[str, str] | None:
+    """Validate recovery data before exposing it as executable SDK state."""
+    if not isinstance(detail, dict):
+        return None
+    action = detail.get("action")
+    if not isinstance(action, dict) or set(action) != {
+        "type",
+        "authorizationUrl",
+        "resumeToken",
+        "expiresAt",
+    }:
+        return None
+    action_type = action.get("type")
+    authorization_url = action.get("authorizationUrl")
+    resume_token = action.get("resumeToken")
+    expires_at = action.get("expiresAt")
+    if (
+        action_type != "authorize_github"
+        or not isinstance(authorization_url, str)
+        or not isinstance(resume_token, str)
+        or not isinstance(expires_at, str)
+        or not 32 <= len(resume_token) <= 128
+        or any(character.isspace() for character in resume_token)
+    ):
+        return None
+    try:
+        parsed_url = urlsplit(authorization_url)
+        parsed_expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if (
+        parsed_url.scheme != "https"
+        or not parsed_url.hostname
+        or parsed_url.username is not None
+        or parsed_url.password is not None
+        or parsed_expiry.tzinfo is None
+    ):
+        return None
+    return {
+        "authorizationUrl": authorization_url,
+        "resumeToken": resume_token,
+        "expiresAt": expires_at,
+    }
 
 
 def _problem_code(body: object | None) -> str | None:

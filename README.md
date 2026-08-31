@@ -124,6 +124,37 @@ server returns the already admitted Version. If no key was supplied, fetch the
 tool's versions before retrying. Interrupting `monitor()` stops local monitoring; it
 does not cancel the remote build.
 
+Connect a GitHub repository as the tool's source and wait for the initial import:
+
+```python
+from tamarind.errors import CustomToolGitHubAuthorizationRequiredError
+
+try:
+    connection = tool.connect_github(
+        "acme/my-esmfold",
+        branch="main",
+        auto_publish=True,
+    )
+except CustomToolGitHubAuthorizationRequiredError as authorization:
+    print(f"Authorize GitHub in your browser: {authorization.authorization_url}")
+    input("Press Enter after authorization completes...")
+    connection = authorization.resume()
+
+connection = connection.monitor(timeout=600)
+print(connection.commit)
+
+current = tool.github_connection()  # None when disconnected
+tool.refresh().disconnect_github()  # imported source and Versions remain
+```
+
+If the Tamarind GitHub App already has access, `connect_github()` returns
+immediately without the authorization step. Otherwise the exception contains a
+short-lived, opaque resume token bound to the exact Tool generation, repository,
+branch, options, organization, and API identity. `resume()` retries only that
+original operation; it does not require an installation ID or expose one to the
+caller. Future pushes to the selected branch synchronize and build automatically.
+A monitoring timeout stops only the local wait, not the server-side import.
+
 Exact Version operations use `version.id`; `version.name` is display-only. If a
 mutation reports `412 Precondition Failed`, refetch the affected Tool or Version,
 confirm the mutation is still desired, and retry using the refreshed resource.

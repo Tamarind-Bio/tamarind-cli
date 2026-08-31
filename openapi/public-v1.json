@@ -21,6 +21,16 @@
         },
         "description": "An error occurred (RFC 9457 problem+json). Switch on the stable `code`, not on prose."
       },
+      "Forbidden": {
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/PublicProblem"
+            }
+          }
+        },
+        "description": "The authenticated API key is not allowed to use this operation."
+      },
       "NotFound": {
         "content": {
           "application/problem+json": {
@@ -179,6 +189,50 @@
           "version"
         ],
         "title": "PublicBuildResult",
+        "type": "object"
+      },
+      "PublicConnectGitHubRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "authorizationToken": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque token returned by a prior `github_authorization_required` response.",
+            "title": "Authorizationtoken"
+          },
+          "autoPublish": {
+            "default": false,
+            "title": "Autopublish",
+            "type": "boolean"
+          },
+          "branch": {
+            "default": "main",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Branch",
+            "type": "string"
+          },
+          "repo": {
+            "description": "GitHub repository in `owner/repo` form.",
+            "maxLength": 200,
+            "minLength": 3,
+            "pattern": "^[^/\\s]+/[^/\\s]+$",
+            "title": "Repo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo"
+        ],
+        "title": "PublicConnectGitHubRequest",
         "type": "object"
       },
       "PublicCreateCustomToolRequest": {
@@ -483,10 +537,131 @@
         "title": "PublicCustomToolStatus",
         "type": "string"
       },
+      "PublicGitHubConnection": {
+        "additionalProperties": false,
+        "properties": {
+          "autoPublish": {
+            "title": "Autopublish",
+            "type": "boolean"
+          },
+          "branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Branch"
+          },
+          "commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "repo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PublicGitHubConnectionStatus"
+          }
+        },
+        "required": [
+          "repo",
+          "branch",
+          "commit",
+          "autoPublish",
+          "status",
+          "error"
+        ],
+        "title": "PublicGitHubConnection",
+        "type": "object"
+      },
+      "PublicGitHubConnectionStatus": {
+        "enum": [
+          "disconnected",
+          "connecting",
+          "connected",
+          "failed"
+        ],
+        "title": "PublicGitHubConnectionStatus",
+        "type": "string"
+      },
       "PublicProblem": {
+        "$defs": {
+          "PublicRecoveryAction": {
+            "additionalProperties": false,
+            "description": "A safe, machine-readable action that can move a failed request forward.",
+            "properties": {
+              "authorizationUrl": {
+                "title": "Authorizationurl",
+                "type": "string"
+              },
+              "expiresAt": {
+                "title": "Expiresat",
+                "type": "string"
+              },
+              "resumeToken": {
+                "title": "Resumetoken",
+                "type": "string"
+              },
+              "type": {
+                "const": "authorize_github",
+                "title": "Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "authorizationUrl",
+              "resumeToken",
+              "expiresAt"
+            ],
+            "title": "PublicRecoveryAction",
+            "type": "object"
+          }
+        },
         "additionalProperties": false,
         "description": "RFC 9457 problem detail. Serialized as `application/problem+json` on every public error.",
         "properties": {
+          "action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicRecoveryAction"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A structured recovery action the caller may present or automate."
+          },
           "code": {
             "description": "A stable machine-readable slug; switch on THIS, not prose.",
             "title": "Code",
@@ -545,6 +720,37 @@
           "code"
         ],
         "title": "PublicProblem",
+        "type": "object"
+      },
+      "PublicRecoveryAction": {
+        "additionalProperties": false,
+        "description": "A safe, machine-readable action that can move a failed request forward.",
+        "properties": {
+          "authorizationUrl": {
+            "title": "Authorizationurl",
+            "type": "string"
+          },
+          "expiresAt": {
+            "title": "Expiresat",
+            "type": "string"
+          },
+          "resumeToken": {
+            "title": "Resumetoken",
+            "type": "string"
+          },
+          "type": {
+            "const": "authorize_github",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "authorizationUrl",
+          "resumeToken",
+          "expiresAt"
+        ],
+        "title": "PublicRecoveryAction",
         "type": "object"
       },
       "PublicUpdateCustomToolRequest": {
@@ -1263,6 +1469,202 @@
           }
         },
         "summary": "Update a custom tool",
+        "tags": [
+          "custom-tools"
+        ],
+        "x-doc-group": "Custom Tools"
+      }
+    },
+    "/custom-tools/{name}/github": {
+      "delete": {
+        "description": "Disconnect GitHub without deleting the tool or its already-imported source.",
+        "operationId": "disconnectCustomToolGitHub",
+        "parameters": [
+          {
+            "description": "The custom tool name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The custom tool name.",
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "One or more entity-tags using standard If-Match syntax, or `*` to match any existing Tool. Only strong validators can match. The ETag returned with the Tool prevents stale requests from acting on a changed, deleted, or recreated Tool with the same name.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "428": {
+            "$ref": "#/components/responses/PreconditionRequired"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Disconnect a custom tool from GitHub",
+        "tags": [
+          "custom-tools"
+        ],
+        "x-doc-group": "Custom Tools"
+      },
+      "get": {
+        "description": "Get the current GitHub source connection, including asynchronous setup status.",
+        "operationId": "getCustomToolGitHubConnection",
+        "parameters": [
+          {
+            "description": "The custom tool name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The custom tool name.",
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicGitHubConnection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Get a custom tool GitHub connection",
+        "tags": [
+          "custom-tools"
+        ],
+        "x-doc-group": "Custom Tools"
+      },
+      "post": {
+        "description": "Connect a GitHub repository, returning a resumable authorization action when consent is needed.",
+        "operationId": "connectCustomToolGitHub",
+        "parameters": [
+          {
+            "description": "The custom tool name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The custom tool name.",
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "One or more entity-tags using standard If-Match syntax, or `*` to match any existing Tool. Only strong validators can match. The ETag returned with the Tool prevents stale requests from acting on a changed, deleted, or recreated Tool with the same name.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicConnectGitHubRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicGitHubConnection"
+                }
+              }
+            },
+            "description": "GitHub connection registered.",
+            "headers": {
+              "ETag": {
+                "description": "Quoted strong validator for requests that target this Tool.",
+                "schema": {
+                  "example": "\"01JABCDEF0123456789XYZ\"",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "428": {
+            "$ref": "#/components/responses/PreconditionRequired"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Connect a custom tool to GitHub",
         "tags": [
           "custom-tools"
         ],

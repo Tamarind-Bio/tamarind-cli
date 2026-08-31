@@ -1,6 +1,12 @@
 """Custom Tools Python SDK."""
 
-from tamarind.custom_tools.transport import GpuType, MemorySize
+from tamarind.errors import CustomToolGitHubAuthorizationRequiredError
+
+from tamarind.custom_tools.transport import (
+    GpuType,
+    MemorySize,
+    PublicGitHubConnectionStatus as GitHubConnectionStatus,
+)
 from tamarind.custom_tools.resources import (
     BuildAction,
     BuildError,
@@ -9,6 +15,7 @@ from tamarind.custom_tools.resources import (
     BuildResult,
     CustomTool,
     CustomTools,
+    GitHubConnection,
     Page,
     Version,
 )
@@ -21,7 +28,10 @@ __all__ = [
     "BuildLogPage",
     "BuildResult",
     "CustomTool",
+    "CustomToolGitHubAuthorizationRequiredError",
     "CustomTools",
+    "GitHubConnection",
+    "GitHubConnectionStatus",
     "GpuType",
     "MemorySize",
     "Page",
