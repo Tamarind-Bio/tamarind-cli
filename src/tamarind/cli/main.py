@@ -23,12 +23,14 @@ from .. import __version__
 from ..config import Config, load_config
 from ..errors import ExitCode, TamarindError
 from ..http import HTTPClient
+from ..custom_tools.client import Tamarind
 from . import output
 from .output import OutputMode
 from .commands import auth as auth_cmds
 from .commands import catalog as catalog_cmds
 from .commands import files as files_cmds
 from .commands import jobs as jobs_cmds
+from .commands import custom_tools as custom_tools_cmds
 
 
 # The callback updates this before any command runs. Keeping the resolved mode
@@ -38,7 +40,7 @@ from .commands import jobs as jobs_cmds
 _active_output_mode = OutputMode(json=not output.is_tty(), quiet=False)
 _GLOBAL_VALUE_OPTIONS = {"--api-key", "--api-base", "--catalog-base", "--profile"}
 _GLOBAL_FLAG_OPTIONS = {"--json", "--no-json", "--quiet", "-q"}
-_COMMAND_GROUPS = {"auth", "files"}
+_COMMAND_GROUPS = {"auth", "custom-tools", "files"}
 
 
 def _missing_command_message(argv: list[str]) -> str | None:
@@ -88,6 +90,11 @@ class State:
     def catalog_client(self) -> HTTPClient:
         cfg = self.config()
         return HTTPClient(cfg.catalog_base, cfg.api_key)
+
+    def sdk_client(self) -> Tamarind:
+        """Build the shared SDK with this invocation's resolved credentials."""
+        cfg = self.config()
+        return Tamarind(api_key=cfg.api_key, api_base=cfg.api_base, profile=cfg.profile)
 
 
 app = typer.Typer(
@@ -148,6 +155,11 @@ def main(
 
 # Sub-apps (grouped commands)
 app.add_typer(auth_cmds.app, name="auth", help="Manage credentials.")
+app.add_typer(
+    custom_tools_cmds.app,
+    name="custom-tools",
+    help="Create, build, publish, and inspect organization Custom Tools.",
+)
 app.add_typer(files_cmds.app, name="files", help="List, upload, and delete workspace files.")
 
 # Flat commands
