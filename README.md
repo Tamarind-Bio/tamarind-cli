@@ -144,6 +144,9 @@ Pass the opaque ID to `version`, `logs`, `cancel`, and `publish`. A local wait
 timeout does not cancel the remote build; reattach with
 `tamarind custom-tools version NAME VERSION_ID --wait`.
 
+For the complete CLI workflow, source layout, build monitoring, publishing, and
+rollback examples, see the [Custom Tools CLI guide](docs/custom-tools.md).
+
 ## Output for agents
 
 Every command emits JSON when stdout is not a TTY, or with `--json`. Result
