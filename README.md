@@ -128,8 +128,21 @@ Exact Version operations use `version.id`; `version.name` is display-only. If a
 mutation reports `412 Precondition Failed`, refetch the affected Tool or Version,
 confirm the mutation is still desired, and retry using the refreshed resource.
 
-Custom Tool CLI commands are not part of this release. Existing CLI commands
-remain unchanged.
+The same lifecycle is available through the unified CLI. A typical release is:
+
+```bash
+tamarind custom-tools validate ./my-esmfold
+tamarind custom-tools create my-esmfold --display-name "My ESMFold"
+tamarind custom-tools build my-esmfold ./my-esmfold \
+  --idempotency-key release-2026-08-31 --wait --timeout 1800
+tamarind custom-tools versions my-esmfold
+tamarind custom-tools publish my-esmfold <opaque-version-id>
+```
+
+Build responses contain both a display name such as `v3` and an opaque `id`.
+Pass the opaque ID to `version`, `logs`, `cancel`, and `publish`. A local wait
+timeout does not cancel the remote build; reattach with
+`tamarind custom-tools version NAME VERSION_ID --wait`.
 
 ## Output for agents
 
@@ -175,6 +188,7 @@ place them before the command name.
 | Submit | `validate`, `submit`, `batch` |
 | Monitor | `jobs`, `status`, `wait`, `results`, `logs` |
 | Files | `files list`, `files stats`, `files upload`, `files delete`, `files folders` |
+| Custom Tools | `custom-tools list`, `get`, `create`, `update`, `validate`, `build`, `versions`, `version`, `logs`, `cancel`, `publish`, `delete` |
 | Lifecycle | `cancel`, `delete` |
 | Auth | `auth login`, `auth status`, `auth logout` |
 
