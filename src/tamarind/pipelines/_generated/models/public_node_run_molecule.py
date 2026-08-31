@@ -25,29 +25,26 @@ class PublicNodeRunMolecule:
     "produced nothing" for exactly the node runs that produced the most interesting thing.
 
         Attributes:
-            complex_id (str):
             has_structure (bool):
-            molecule_type (None | str):
+            id (str):
             name (str):
             scores (PublicNodeRunMoleculeScores): Per-tool scores keyed by tool.
             sequence (None | str): The ':'-joined chain sequences.
+            type_ (None | str):
     """
 
-    complex_id: str
     has_structure: bool
-    molecule_type: None | str
+    id: str
     name: str
     scores: PublicNodeRunMoleculeScores
     sequence: None | str
+    type_: None | str
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        complex_id = self.complex_id
-
         has_structure = self.has_structure
 
-        molecule_type: None | str
-        molecule_type = self.molecule_type
+        id = self.id
 
         name = self.name
 
@@ -56,16 +53,19 @@ class PublicNodeRunMolecule:
         sequence: None | str
         sequence = self.sequence
 
+        type_: None | str
+        type_ = self.type_
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update(
             {
-                "complexId": complex_id,
                 "hasStructure": has_structure,
-                "moleculeType": molecule_type,
+                "id": id,
                 "name": name,
                 "scores": scores,
                 "sequence": sequence,
+                "type": type_,
             }
         )
 
@@ -76,16 +76,9 @@ class PublicNodeRunMolecule:
         from ..models.public_node_run_molecule_scores import PublicNodeRunMoleculeScores
 
         d = dict(src_dict)
-        complex_id = d.pop("complexId")
-
         has_structure = d.pop("hasStructure")
 
-        def _parse_molecule_type(data: object) -> None | str:
-            if data is None:
-                return data
-            return cast(None | str, data)
-
-        molecule_type = _parse_molecule_type(d.pop("moleculeType"))
+        id = d.pop("id")
 
         name = d.pop("name")
 
@@ -98,13 +91,20 @@ class PublicNodeRunMolecule:
 
         sequence = _parse_sequence(d.pop("sequence"))
 
+        def _parse_type_(data: object) -> None | str:
+            if data is None:
+                return data
+            return cast(None | str, data)
+
+        type_ = _parse_type_(d.pop("type"))
+
         public_node_run_molecule = cls(
-            complex_id=complex_id,
             has_structure=has_structure,
-            molecule_type=molecule_type,
+            id=id,
             name=name,
             scores=scores,
             sequence=sequence,
+            type_=type_,
         )
 
         public_node_run_molecule.additional_properties = d

@@ -152,24 +152,13 @@
       "PublicNodeRunMolecule": {
         "description": "One molecule a node run produced.\n\nRead from the node run's passing outputs directly, NOT from `PublicNodeRun.outputGroup` \u2014 which\nis why this exists. A node run's `outputGroup` is the group the node minted, and a node that enriches its\ninputs in place (scoring, structure prediction) mints none: its molecules never moved, so they\nstay in the group they came from and `outputGroup` is correctly null. A filter node has no group\neither \u2014 its survivors exist only as outputs. Reading results by group therefore reports\n\"produced nothing\" for exactly the node runs that produced the most interesting thing.",
         "properties": {
-          "complexId": {
-            "title": "Complexid",
-            "type": "string"
-          },
           "hasStructure": {
             "title": "Hasstructure",
             "type": "boolean"
           },
-          "moleculeType": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Moleculetype"
+          "id": {
+            "title": "Id",
+            "type": "string"
           },
           "name": {
             "title": "Name",
@@ -192,12 +181,23 @@
             ],
             "description": "The ':'-joined chain sequences.",
             "title": "Sequence"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
           }
         },
         "required": [
-          "complexId",
+          "id",
           "name",
-          "moleculeType",
+          "type",
           "sequence",
           "scores",
           "hasStructure"
@@ -411,17 +411,17 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/pipelines/runs/{run_id}": {
+    "/pipelines/runs/{runId}": {
       "get": {
         "description": "Query a run for its status overall and per-node, along with output results.",
         "operationId": "getRun",
         "parameters": [
           {
             "in": "path",
-            "name": "run_id",
+            "name": "runId",
             "required": true,
             "schema": {
-              "title": "Run Id",
+              "title": "Runid",
               "type": "string"
             }
           }
@@ -457,26 +457,26 @@
         "x-doc-group": "Pipelines"
       }
     },
-    "/pipelines/runs/{run_id}/node-runs/{node_run_id}/molecules": {
+    "/pipelines/runs/{runId}/node-runs/{nodeRunId}/molecules": {
       "get": {
-        "description": "The molecules one node run produced, with their scores.\n\nRead a node run's results through this, not through `PublicNodeRun.outputGroup`. `outputGroup` is the group a node MINTED, and two common kinds of node mint none: a node that enriches its inputs in place (scoring, structure prediction) leaves its molecules in the group they came from, and a filter node's survivors exist only as node-run outputs. For both, `outputGroup` is correctly `null` \u2014 reading results by group reports 'produced nothing' for exactly the node runs whose output you asked for. This endpoint answers for every kind of node.\n\n`node_run_id` is the `id` of an entry in the run's `nodeRuns`.",
+        "description": "The molecules one node run produced, with their scores.\n\nRead a node run's results through this, not through `PublicNodeRun.outputGroup`. `outputGroup` is the group a node MINTED, and two common kinds of node mint none: a node that enriches its inputs in place (scoring, structure prediction) leaves its molecules in the group they came from, and a filter node's survivors exist only as node-run outputs. For both, `outputGroup` is correctly `null` \u2014 reading results by group reports 'produced nothing' for exactly the node runs whose output you asked for. This endpoint answers for every kind of node.\n\n`nodeRunId` is the `id` of an entry in the run's `nodeRuns`.",
         "operationId": "listNodeRunMolecules",
         "parameters": [
           {
             "in": "path",
-            "name": "run_id",
+            "name": "runId",
             "required": true,
             "schema": {
-              "title": "Run Id",
+              "title": "Runid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "node_run_id",
+            "name": "nodeRunId",
             "required": true,
             "schema": {
-              "title": "Node Run Id",
+              "title": "Noderunid",
               "type": "string"
             }
           },

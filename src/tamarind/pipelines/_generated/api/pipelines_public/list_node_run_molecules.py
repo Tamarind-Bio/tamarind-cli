@@ -101,7 +101,7 @@ def sync_detailed(
     reading results by group reports 'produced nothing' for exactly the node runs whose output you asked
     for. This endpoint answers for every kind of node.
 
-    `node_run_id` is the `id` of an entry in the run's `nodeRuns`.
+    `nodeRunId` is the `id` of an entry in the run's `nodeRuns`.
 
     Args:
         run_id (str):
@@ -150,7 +150,7 @@ def sync(
     reading results by group reports 'produced nothing' for exactly the node runs whose output you asked
     for. This endpoint answers for every kind of node.
 
-    `node_run_id` is the `id` of an entry in the run's `nodeRuns`.
+    `nodeRunId` is the `id` of an entry in the run's `nodeRuns`.
 
     Args:
         run_id (str):
@@ -194,7 +194,7 @@ async def asyncio_detailed(
     reading results by group reports 'produced nothing' for exactly the node runs whose output you asked
     for. This endpoint answers for every kind of node.
 
-    `node_run_id` is the `id` of an entry in the run's `nodeRuns`.
+    `nodeRunId` is the `id` of an entry in the run's `nodeRuns`.
 
     Args:
         run_id (str):
@@ -241,7 +241,7 @@ async def asyncio(
     reading results by group reports 'produced nothing' for exactly the node runs whose output you asked
     for. This endpoint answers for every kind of node.
 
-    `node_run_id` is the `id` of an entry in the run's `nodeRuns`.
+    `nodeRunId` is the `id` of an entry in the run's `nodeRuns`.
 
     Args:
         run_id (str):
