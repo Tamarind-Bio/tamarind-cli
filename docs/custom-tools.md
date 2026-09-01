@@ -42,24 +42,45 @@ my-tool/
 invokes it directly. `config.json` is optional for local validation; when it is
 present, it must be a JSON object and the server validates its full semantics.
 
-Run the lifecycle in this order:
+Run the lifecycle in this order. First, validate locally. This step does not
+authenticate, upload, or build anything:
 
 ```bash
-# 1. Check this exact tool name. Exit 4 means not found or not visible.
-tamarind --json custom-tools get my-tool
-
-# 2. Validate locally. This does not authenticate, upload, or build anything.
 tamarind --json custom-tools validate ./my-tool
+```
 
-# 3. Create the durable tool identity if the name is unclaimed.
+Next, resolve the durable Tool identity with an exact lookup:
+
+```bash
+tamarind --json custom-tools get my-tool
+```
+
+Branch on that command's exit code before continuing:
+
+| Exit | Meaning | Next step |
+|---|---|---|
+| `0` | The Tool exists and is visible | Reuse it; do not run `create` |
+| `4` | The Tool was not found or is not visible | Confirm the name is unclaimed, then run `create` |
+| any other nonzero value | Authentication, transport, or another failure | Stop and handle the error |
+
+For a confirmed unclaimed name, create the identity once:
+
+```bash
 tamarind --json custom-tools create my-tool --display-name "My Tool"
+```
 
-# 4. Package, upload, and build a Version, then wait for it to finish.
+Package, upload, and build a Version, then wait for monitoring to finish:
+
+```bash
 tamarind --json custom-tools build my-tool ./my-tool \
   --idempotency-key release-1 \
   --wait --timeout 1800 --poll-interval 10
+```
 
-# 5. Publish the completed Version using the opaque version.id from step 4.
+Finally, publish the completed Version using the opaque `version.id` returned by
+the build:
+
+```bash
 tamarind --json custom-tools publish my-tool VERSION_ID
 ```
 
