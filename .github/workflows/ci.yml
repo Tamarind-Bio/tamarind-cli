@@ -66,6 +66,25 @@ jobs:
           assert not any('/.uv-cache/' in name or '/.venv/' in name for name in names)"
       - name: Smoke-check the built wheel
         run: uv run --isolated --no-project --with dist/*.whl tamarind --version
+      - name: Verify agent errors with latest runtime dependencies
+        shell: bash
+        run: |
+          set +e
+          uv run --quiet --isolated --no-project --with dist/*.whl \
+            tamarind custom-tools --json list >stdout.txt 2>stderr.json
+          cli_exit=$?
+          set -e
+          test "$cli_exit" -eq 2
+          test ! -s stdout.txt
+          python - <<'PY'
+          import json
+
+          with open("stderr.json", encoding="utf-8") as stream:
+              payload = json.load(stream)
+          assert payload["error"]["type"] == "NoSuchOption", payload
+          assert payload["error"]["exitCode"] == 2, payload
+          assert "--json" in payload["error"]["message"], payload
+          PY
 
   test:
     name: Python ${{ matrix.python-version }}
