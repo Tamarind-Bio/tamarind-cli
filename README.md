@@ -1,6 +1,6 @@
 # Tamarind CLI
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/Tamarind-Bio/tamarind-cli/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 
 Command-line interface for the [Tamarind Bio](https://tamarind.bio) platform.
@@ -10,7 +10,8 @@ and download results — from your terminal, a script, CI, or an AI coding agent
 
 The CLI is a thin client over the same API the [Tamarind MCP
 server](https://mcp.tamarind.bio) uses, so the two stay in lockstep. See
-[`docs/architecture.md`](docs/architecture.md) for how drift is prevented.
+[`docs/architecture.md`](https://github.com/Tamarind-Bio/tamarind-cli/blob/main/docs/architecture.md)
+for how drift is prevented.
 
 ## Install
 
@@ -32,7 +33,8 @@ uv tool install "git+https://github.com/Tamarind-Bio/tamarind-cli"
 # or: pipx install "git+https://github.com/Tamarind-Bio/tamarind-cli"
 ```
 
-> Releasing: tag a GitHub Release and the [`publish.yml`](.github/workflows/publish.yml)
+> Releasing: tag a GitHub Release and the
+> [`publish.yml`](https://github.com/Tamarind-Bio/tamarind-cli/blob/main/.github/workflows/publish.yml)
 > workflow builds and uploads to PyPI via Trusted Publishing (configure the
 > trusted publisher for `tamarind-cli` on PyPI first).
 
@@ -144,6 +146,10 @@ Pass the opaque ID to `version`, `logs`, `cancel`, and `publish`. A local wait
 timeout does not cancel the remote build; reattach with
 `tamarind custom-tools version NAME VERSION_ID --wait`.
 
+For the complete CLI workflow, source layout, build monitoring, publishing, and
+rollback examples, see the
+[Custom Tools CLI guide](https://github.com/Tamarind-Bio/tamarind-cli/blob/main/docs/custom-tools.md).
+
 ## Output for agents
 
 Every command emits JSON when stdout is not a TTY, or with `--json`. Result
@@ -221,4 +227,5 @@ Questions or need help? Contact us at [info@tamarind.bio](mailto:info@tamarind.b
 
 ## License
 
-Licensed under the [Apache License 2.0](LICENSE).
+Licensed under the
+[Apache License 2.0](https://github.com/Tamarind-Bio/tamarind-cli/blob/main/LICENSE).
