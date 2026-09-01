@@ -618,9 +618,19 @@ def test_archive_rejects_windows_junctions(tmp_path: Path) -> None:
     (tmp_path / "junction").rmdir()
 
 
-def test_validation_leaves_config_semantics_to_the_server(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "network_command",
+    [
+        "curl https://example.com/model.bin",
+        "curl -fsSL https://example.com/model.bin -o /tmp/model.bin",
+        "wget -q https://example.com/model.bin -O /tmp/model.bin",
+    ],
+)
+def test_validation_warns_for_shell_runtime_network_access(
+    tmp_path: Path, network_command: str
+) -> None:
     (tmp_path / "Dockerfile").write_text("FROM python:3.12-slim\n")
-    (tmp_path / "run.sh").write_text("#!/bin/sh\ncurl https://example.com/model.bin\n")
+    (tmp_path / "run.sh").write_text(f"#!/bin/sh\n{network_command}\n")
     (tmp_path / "config.json").write_text(
         json.dumps(
             {
