@@ -17,7 +17,9 @@ from tamarind.errors import CustomToolUploadError
 
 
 _NETWORK_PATTERN = re.compile(
-    r"\b(?:curl|wget)\b\s+https?://|\b(?:requests|httpx)\.(?:get|post)\s*\(|\burllib\.request\.urlopen\s*\(",
+    r"\b(?:curl|wget)\b[^\r\n;&|]*\bhttps?://|"
+    r"\b(?:requests|httpx)\.(?:get|post)\s*\(|"
+    r"\burllib\.request\.urlopen\s*\(",
     re.IGNORECASE,
 )
 _MAX_NETWORK_SCAN_BYTES = 1024 * 1024
