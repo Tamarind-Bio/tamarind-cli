@@ -15,9 +15,9 @@ from typing import Optional
 import typer
 
 try:  # Newer Typer can vendor Click as ``typer._click``.
-    from typer._click.exceptions import Abort, ClickException
+    from typer._click.exceptions import ClickException
 except ImportError:  # pragma: no cover - older Typer uses the external Click package
-    from click import Abort, ClickException
+    from click import ClickException
 
 from .. import __version__
 from ..config import Config, load_config
@@ -31,6 +31,13 @@ from .commands import catalog as catalog_cmds
 from .commands import files as files_cmds
 from .commands import jobs as jobs_cmds
 from .commands import custom_tools as custom_tools_cmds
+
+
+# Typer exposes the matching Abort class across both external-Click and
+# vendored-Click releases. Importing it beside ClickException from
+# ``typer._click.exceptions`` is not portable because that module does not
+# export Abort in Typer 0.27.
+Abort = typer.Abort
 
 
 # The callback updates this before any command runs. Keeping the resolved mode

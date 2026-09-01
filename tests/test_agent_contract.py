@@ -141,6 +141,26 @@ def test_entrypoint_emits_json_for_usage_errors(monkeypatch, capsys):
     assert "TOOL" in payload["error"]["message"]
 
 
+def test_entrypoint_sanitizes_misplaced_global_option(monkeypatch, capsys):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["tamarind", "custom-tools", "--json", "list"],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        main_module.run()
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exc.value.code == ExitCode.USAGE
+    assert captured.out == ""
+    assert payload["error"]["type"] == "NoSuchOption"
+    assert payload["error"]["exitCode"] == ExitCode.USAGE
+    assert "No such option" in payload["error"]["message"]
+    assert "--json" in payload["error"]["message"]
+
+
 def test_dangling_global_value_option_keeps_precise_json_usage_error(monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["tamarind", "--json", "--profile"])
 
