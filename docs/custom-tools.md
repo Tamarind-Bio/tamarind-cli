@@ -26,7 +26,7 @@ The examples below use `--json` so their output is stable for scripts and
 agents. Global options such as `--json`, `--profile`, and `--api-base` must
 appear before `custom-tools`.
 
-## Five-minute workflow
+## End-to-end workflow
 
 Suppose the source is in `./my-tool` and has this typical shape:
 
@@ -45,13 +45,13 @@ present, it must be a JSON object and the server validates its full semantics.
 Run the lifecycle in this order:
 
 ```bash
-# 1. Check whether the tool already exists.
-tamarind --json custom-tools list
+# 1. Check this exact tool name. Exit 4 means not found or not visible.
+tamarind --json custom-tools get my-tool
 
 # 2. Validate locally. This does not authenticate, upload, or build anything.
 tamarind --json custom-tools validate ./my-tool
 
-# 3. Create the durable tool identity if it does not already exist.
+# 3. Create the durable tool identity if the name is unclaimed.
 tamarind --json custom-tools create my-tool --display-name "My Tool"
 
 # 4. Package, upload, and build a Version, then wait for it to finish.
@@ -87,6 +87,11 @@ A build result has this general shape:
 Always save and use `version.id` for exact Version operations. `version.name`
 such as `v3` is a display label, not an endpoint identifier.
 
+Use exact reads for identity checks: `custom-tools get NAME` for a Tool and
+`custom-tools version NAME VERSION_ID` for a Version. The `list`, `versions`,
+and `logs` commands each return one page; follow `nextCursor` with `--cursor`
+until it is `null` when a complete collection or log stream is required.
+
 Use an idempotency key for builds initiated by automation. If delivery of the
 first response is ambiguous, retrying with the same key returns the already
 admitted Version instead of starting a duplicate build.
@@ -109,9 +114,15 @@ authoritative for the full configuration contract and build outcome.
 
 ## Monitor and reattach
 
-`--wait` only bounds how long the local CLI waits. Exit code 7 means the local
-timeout elapsed; the remote build may still be running. Do not start a new build
-just because the local wait timed out. Reattach by Version ID instead:
+For both `build --wait` and `version --wait`, `--timeout` starts when Version
+monitoring begins. It does not include earlier work: local validation,
+packaging, upload, and build admission for `build`, or the initial Tool and
+Version reads for `version`. Use a process-level or CI deadline as well when the
+entire CLI invocation must be bounded.
+
+Exit code 7 means the monitoring timeout elapsed; the remote build may still be
+running. Do not start a new build just because monitoring timed out. Reattach by
+Version ID instead:
 
 ```bash
 tamarind --json custom-tools version my-tool VERSION_ID \
@@ -126,9 +137,12 @@ tamarind --json custom-tools logs my-tool VERSION_ID
 tamarind --json custom-tools logs my-tool VERSION_ID --cursor NEXT_CURSOR
 ```
 
-Build timeout and failure errors retain `toolName`, `versionId`, `versionName`,
-and `action` in their structured detail so an agent can recover the durable
-Version and continue safely.
+Once the CLI has a durable Version, monitoring timeout and failure errors retain
+`toolName`, `versionId`, and `versionName` in their structured detail. Errors
+from the initial `build --wait` monitoring phase also include `action`; errors
+from a later `version --wait` reattachment do not. A failure before build
+admission has returned a Version cannot provide this handle, which is why
+automated builds should reuse their idempotency key after an ambiguous request.
 
 ## Publish and roll back
 
@@ -168,15 +182,15 @@ confirm the mutation is still appropriate, and retry with the refreshed state.
 
 | Command | Purpose | Useful options |
 |---|---|---|
-| `custom-tools list` | List visible tools | pagination options |
+| `custom-tools list` | Read one page of visible tools | `--limit`, `--cursor` |
 | `custom-tools get NAME` | Read one tool | — |
 | `custom-tools create NAME` | Create a tool identity | `--display-name` |
 | `custom-tools update NAME` | Change tool metadata | metadata options |
 | `custom-tools validate FOLDER` | Validate local source without auth or upload | — |
-| `custom-tools build NAME FOLDER` | Package, upload, and build a Version | `--idempotency-key`, `--wait`, `--timeout`, `--poll-interval` |
-| `custom-tools versions NAME` | List a tool's Versions | pagination options |
-| `custom-tools version NAME VERSION_ID` | Read or wait for one Version | `--wait`, `--timeout`, `--poll-interval` |
-| `custom-tools logs NAME VERSION_ID` | Read paginated build logs | `--cursor` |
+| `custom-tools build NAME FOLDER` | Package, upload, build, and optionally monitor a Version | `--idempotency-key`, `--wait`, monitoring `--timeout`, `--poll-interval` |
+| `custom-tools versions NAME` | Read one page of a tool's Versions | `--limit`, `--cursor` |
+| `custom-tools version NAME VERSION_ID` | Read or monitor one exact Version | `--wait`, monitoring `--timeout`, `--poll-interval` |
+| `custom-tools logs NAME VERSION_ID` | Read one page of build logs | `--cursor` |
 | `custom-tools cancel NAME VERSION_ID` | Cancel an active build | `--yes` |
 | `custom-tools publish NAME VERSION_ID` | Make a completed Version active | — |
 | `custom-tools delete NAME` | Delete a tool | `--yes` |
