@@ -781,12 +781,12 @@
             ]
           },
           "id": {
-            "description": "The version ID to use for reads, logs, cancellation, and publication.",
+            "description": "The unique ID of this build. Use it in API requests to check status, read logs, cancel, or publish.",
             "title": "Id",
             "type": "string"
           },
           "name": {
-            "description": "The numbered version handle, such as `v3`.",
+            "description": "The display name of this build, such as `v3`. Use `id` in API requests.",
             "title": "Name",
             "type": "string"
           },
