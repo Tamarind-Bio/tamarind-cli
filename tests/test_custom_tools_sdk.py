@@ -441,7 +441,9 @@ def test_build_rejects_malformed_upload_session_scalars(
         "maxBytes": 1024,
     }
     session[field] = value
-    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"observed"'})
+    )
     respx.post(f"{BASE}custom-tools/example/uploads").mock(
         return_value=httpx.Response(201, json=session)
     )
