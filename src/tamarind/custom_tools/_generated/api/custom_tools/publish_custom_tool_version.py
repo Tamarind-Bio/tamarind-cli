@@ -7,17 +7,18 @@ import httpx
 from ...client import AuthenticatedClient, Client
 from ...models.public_custom_tool import PublicCustomTool
 from ...models.public_problem import PublicProblem
-from ...types import Response
+from ...types import UNSET, Response, Unset
 
 
 def _get_kwargs(
     name: str,
     version: str,
     *,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    headers["If-Match"] = if_match
+    if not isinstance(if_match, Unset):
+        headers["If-Match"] = if_match
 
     _kwargs: dict[str, Any] = {
         "method": "post",
@@ -59,11 +60,6 @@ def _parse_response(
 
         return response_422
 
-    if response.status_code == 428:
-        response_428 = PublicProblem.from_dict(response.json())
-
-        return response_428
-
     response_default = PublicProblem.from_dict(response.json())
 
     return response_default
@@ -85,7 +81,7 @@ def sync_detailed(
     version: str,
     *,
     client: AuthenticatedClient | Client,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> Response[PublicCustomTool | PublicProblem]:
     """Publish a custom tool version
 
@@ -97,7 +93,7 @@ def sync_detailed(
         name (str): The custom tool name.
         version (str): The `id` returned by the build or version response. Use this ID for reads,
             logs, cancellation, and publication; `name` is the display label, such as `v3`.
-        if_match (str):
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -125,7 +121,7 @@ def sync(
     version: str,
     *,
     client: AuthenticatedClient | Client,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> PublicCustomTool | PublicProblem | None:
     """Publish a custom tool version
 
@@ -137,7 +133,7 @@ def sync(
         name (str): The custom tool name.
         version (str): The `id` returned by the build or version response. Use this ID for reads,
             logs, cancellation, and publication; `name` is the display label, such as `v3`.
-        if_match (str):
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -160,7 +156,7 @@ async def asyncio_detailed(
     version: str,
     *,
     client: AuthenticatedClient | Client,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> Response[PublicCustomTool | PublicProblem]:
     """Publish a custom tool version
 
@@ -172,7 +168,7 @@ async def asyncio_detailed(
         name (str): The custom tool name.
         version (str): The `id` returned by the build or version response. Use this ID for reads,
             logs, cancellation, and publication; `name` is the display label, such as `v3`.
-        if_match (str):
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -198,7 +194,7 @@ async def asyncio(
     version: str,
     *,
     client: AuthenticatedClient | Client,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> PublicCustomTool | PublicProblem | None:
     """Publish a custom tool version
 
@@ -210,7 +206,7 @@ async def asyncio(
         name (str): The custom tool name.
         version (str): The `id` returned by the build or version response. Use this ID for reads,
             logs, cancellation, and publication; `name` is the display label, such as `v3`.
-        if_match (str):
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

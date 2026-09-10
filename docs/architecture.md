@@ -58,6 +58,11 @@ CI regenerates with the pinned mature generator and rejects drift. The handwritt
 layer contains only HTTP/error normalization and ergonomic resource composition; it
 does not parse OpenAPI or maintain a second schema IR/compiler.
 
+Direct HTTP mutations accept optional `If-Match`. The SDK/CLI resource layer still
+supplies observed validators automatically, preserving stale-snapshot protection.
+The generated endpoints reflect the optional wire contract; the resource facade
+does not require users to manage headers.
+
 The SDK owns archive-local concerns that only the client can decide safely:
 deterministic ZIP construction, symlink and junction rejection, upload limits,
 JSON parseability and top-level object shape, and warnings about the networkless

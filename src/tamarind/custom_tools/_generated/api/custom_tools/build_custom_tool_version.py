@@ -16,13 +16,14 @@ def _get_kwargs(
     *,
     body: PublicCreateVersionRequest,
     idempotency_key: None | str | Unset = UNSET,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
     if not isinstance(idempotency_key, Unset):
         headers["Idempotency-Key"] = idempotency_key
 
-    headers["If-Match"] = if_match
+    if not isinstance(if_match, Unset):
+        headers["If-Match"] = if_match
 
     _kwargs: dict[str, Any] = {
         "method": "post",
@@ -72,11 +73,6 @@ def _parse_response(
 
         return response_422
 
-    if response.status_code == 428:
-        response_428 = PublicProblem.from_dict(response.json())
-
-        return response_428
-
     response_default = PublicProblem.from_dict(response.json())
 
     return response_default
@@ -99,20 +95,21 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     body: PublicCreateVersionRequest,
     idempotency_key: None | str | Unset = UNSET,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> Response[PublicBuildResult | PublicProblem]:
     """Build a custom tool version
 
      Build a version from an uploaded source archive.
 
-    The archive also updates the tool's editable source and configuration, so send the Tool ETag
-    returned by Get tool. Returns immediately with the new or reused version and its current status.
+    The archive also updates the tool's editable source and configuration. Optionally send the Tool
+    ETag from Get tool to reject concurrent edits. Without it, the current tool is updated.
+    Returns immediately with the new or reused version and its current status.
 
     Args:
         name (str): The custom tool name.
         idempotency_key (None | str | Unset): Retries the same build request without admitting
             duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.
-        if_match (str):
+        if_match (str | Unset):
         body (PublicCreateVersionRequest):
 
     Raises:
@@ -143,20 +140,21 @@ def sync(
     client: AuthenticatedClient | Client,
     body: PublicCreateVersionRequest,
     idempotency_key: None | str | Unset = UNSET,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> PublicBuildResult | PublicProblem | None:
     """Build a custom tool version
 
      Build a version from an uploaded source archive.
 
-    The archive also updates the tool's editable source and configuration, so send the Tool ETag
-    returned by Get tool. Returns immediately with the new or reused version and its current status.
+    The archive also updates the tool's editable source and configuration. Optionally send the Tool
+    ETag from Get tool to reject concurrent edits. Without it, the current tool is updated.
+    Returns immediately with the new or reused version and its current status.
 
     Args:
         name (str): The custom tool name.
         idempotency_key (None | str | Unset): Retries the same build request without admitting
             duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.
-        if_match (str):
+        if_match (str | Unset):
         body (PublicCreateVersionRequest):
 
     Raises:
@@ -182,20 +180,21 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     body: PublicCreateVersionRequest,
     idempotency_key: None | str | Unset = UNSET,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> Response[PublicBuildResult | PublicProblem]:
     """Build a custom tool version
 
      Build a version from an uploaded source archive.
 
-    The archive also updates the tool's editable source and configuration, so send the Tool ETag
-    returned by Get tool. Returns immediately with the new or reused version and its current status.
+    The archive also updates the tool's editable source and configuration. Optionally send the Tool
+    ETag from Get tool to reject concurrent edits. Without it, the current tool is updated.
+    Returns immediately with the new or reused version and its current status.
 
     Args:
         name (str): The custom tool name.
         idempotency_key (None | str | Unset): Retries the same build request without admitting
             duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.
-        if_match (str):
+        if_match (str | Unset):
         body (PublicCreateVersionRequest):
 
     Raises:
@@ -224,20 +223,21 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     body: PublicCreateVersionRequest,
     idempotency_key: None | str | Unset = UNSET,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> PublicBuildResult | PublicProblem | None:
     """Build a custom tool version
 
      Build a version from an uploaded source archive.
 
-    The archive also updates the tool's editable source and configuration, so send the Tool ETag
-    returned by Get tool. Returns immediately with the new or reused version and its current status.
+    The archive also updates the tool's editable source and configuration. Optionally send the Tool
+    ETag from Get tool to reject concurrent edits. Without it, the current tool is updated.
+    Returns immediately with the new or reused version and its current status.
 
     Args:
         name (str): The custom tool name.
         idempotency_key (None | str | Unset): Retries the same build request without admitting
             duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.
-        if_match (str):
+        if_match (str | Unset):
         body (PublicCreateVersionRequest):
 
     Raises:

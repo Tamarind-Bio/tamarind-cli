@@ -40,7 +40,7 @@ def test_vendored_contract_is_the_dedicated_backend_artifact() -> None:
                 for parameter in operation.get("parameters", [])
                 if parameter.get("in") == "header"
             ]
-            expected = [("If-Match", True)] if (path, method) in conditional_operations else []
+            expected = [("If-Match", False)] if (path, method) in conditional_operations else []
             if (path, method) in optional_operations:
                 expected = [("If-Match", False)]
             if (path, method) == ("/custom-tools/{name}/versions", "post"):
