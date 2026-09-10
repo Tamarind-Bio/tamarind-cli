@@ -239,8 +239,9 @@ GitHub connection and push-to-deploy authorization are not part of the 0.4.0
 release. The supported CLI path starts from a local source folder.
 
 SDK Tool objects are snapshots. Assign `tool = tool.update(...)` after an update, and
-`tool = tool.refresh()` after a build before starting a different build. Upload creation checks
-the snapshot before transferring bytes; build admission checks it again. If the tool changed,
+`tool = tool.refresh()` after a build before starting a different build. For builds without an idempotency key, upload creation checks
+the snapshot before transferring bytes; build admission checks it again. Keyed builds defer
+this check to replay-aware admission so a retry can recover a previously committed result. If the tool changed,
 review the latest state before retrying.
 
 `version.cancel()` requests cancellation of that exact active build even if its status advanced.

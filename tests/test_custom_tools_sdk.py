@@ -368,7 +368,7 @@ def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> 
     assert upload.calls.last.request.headers["Content-Length"] == str(
         len(upload.calls.last.request.content)
     )
-    assert upload_session.calls.last.request.headers["X-Tamarind-If-Match"] == '"opaque-validator"'
+    assert "X-Tamarind-If-Match" not in upload_session.calls.last.request.headers
     assert "X-Tamarind-Tool-Generation" not in upload_session.calls.last.request.headers
     assert build.calls.last.request.headers["X-Tamarind-If-Match"] == '"opaque-validator"'
     assert "If-Match" not in build.calls.last.request.headers
@@ -1187,3 +1187,37 @@ def test_conditional_cancellation_cannot_silently_refresh_an_unversioned_snapsho
             version.cancel(if_unchanged=True)
     assert get_version.call_count == 1
     assert not cancel.called
+
+
+@respx.mock
+def test_keyed_retry_reaches_replay_admission_with_original_tool_validator(tmp_path: Path) -> None:
+    _source(tmp_path)
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"original"'})
+    )
+
+    def upload_preflight(request):
+        if "X-Tamarind-If-Match" in request.headers:
+            return httpx.Response(412, json={"detail": "Original request already changed the Tool"})
+        return httpx.Response(
+            201,
+            json={
+                "uploadId": "retry-upload",
+                "uploadUrl": UPLOAD,
+                "uploadMethod": "PUT",
+                "uploadHeaders": {},
+                "expiresAt": "2026-08-15T00:15:00Z",
+                "maxBytes": 100000,
+            },
+        )
+
+    respx.post(f"{BASE}custom-tools/example/uploads").mock(side_effect=upload_preflight)
+    respx.put(UPLOAD).mock(return_value=httpx.Response(200))
+    build = respx.post(f"{BASE}custom-tools/example/versions").mock(
+        return_value=httpx.Response(202, json={"action": "unchanged", "version": _version()})
+    )
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        result = client.custom_tools.get("example").build(tmp_path, idempotency_key="same-request")
+    assert result.action == "unchanged"
+    assert build.calls.last.request.headers["X-Tamarind-If-Match"] == '"original"'
+    assert build.calls.last.request.headers["Idempotency-Key"] == "same-request"

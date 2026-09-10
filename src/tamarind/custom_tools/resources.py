@@ -502,7 +502,12 @@ class CustomTools:
         try:
             validator = self._validator(tool)
             session = _upload_session_from_wire(
-                self._transport.create_custom_tool_upload(tool.name, etag=validator)
+                self._transport.create_custom_tool_upload(
+                    tool.name,
+                    # Admission owns keyed replay: its original Tool revision may already
+                    # be stale because that very request committed successfully.
+                    etag=validator if idempotency_key is None else None,
+                )
             )
             if archive.size > session.max_bytes:
                 raise CustomToolUploadError(
