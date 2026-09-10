@@ -199,7 +199,7 @@ def test_refresh_rejects_a_reused_tool_name() -> None:
 
     with Tamarind(api_key="key", api_base=BASE) as client:
         selected = client.custom_tools.get("example")
-        with pytest.raises(StaleCustomToolError, match="different generation"):
+        with pytest.raises(StaleCustomToolError, match="deleted and recreated"):
             selected.refresh()
 
     assert route.call_count == 2
@@ -225,7 +225,7 @@ def test_tool_scoped_version_reads_reject_a_reused_tool_name(operation: str) -> 
 
     with Tamarind(api_key="key", api_base=BASE) as client:
         selected = client.custom_tools.get("example")
-        with pytest.raises(StaleCustomToolError, match="different generation"):
+        with pytest.raises(StaleCustomToolError, match="deleted and recreated"):
             if operation == "get_version":
                 selected.get_version(VERSION_ID)
             else:
@@ -775,7 +775,7 @@ def test_monitor_recomputes_the_deadline_after_log_poll(monkeypatch) -> None:
         completed_at=None,
         error=None,
         tool_name="example",
-        tool_generation="generation-1",
+        _tool_generation="generation-1",
         _collection=None,  # type: ignore[arg-type]
     )
 
@@ -809,7 +809,7 @@ def test_monitor_does_not_dispatch_logs_after_the_deadline(monkeypatch) -> None:
         completed_at=None,
         error=None,
         tool_name="example",
-        tool_generation="generation-1",
+        _tool_generation="generation-1",
         _collection=None,  # type: ignore[arg-type]
     )
 
@@ -859,7 +859,7 @@ def test_monitor_without_callback_does_not_fetch_logs(monkeypatch) -> None:
             completed_at="2026-08-15T00:01:00Z",
             error=version.error,
             tool_name=version.tool_name,
-            tool_generation=version.tool_generation,
+            _tool_generation=version._tool_generation,
             _collection=version._collection,
         )
 
@@ -878,7 +878,7 @@ def test_monitor_without_callback_does_not_fetch_logs(monkeypatch) -> None:
         completed_at=None,
         error=None,
         tool_name="example",
-        tool_generation="generation-1",
+        _tool_generation="generation-1",
         _collection=None,  # type: ignore[arg-type]
     )
 
@@ -905,7 +905,7 @@ def test_monitor_rechecks_deadline_after_terminal_refresh(monkeypatch) -> None:
             completed_at="2026-08-15T00:01:00Z",
             error=version.error,
             tool_name=version.tool_name,
-            tool_generation=version.tool_generation,
+            _tool_generation=version._tool_generation,
             _collection=version._collection,
         )
 
@@ -923,7 +923,7 @@ def test_monitor_rechecks_deadline_after_terminal_refresh(monkeypatch) -> None:
         completed_at=None,
         error=None,
         tool_name="example",
-        tool_generation="generation-1",
+        _tool_generation="generation-1",
         _collection=None,  # type: ignore[arg-type]
     )
 
@@ -954,7 +954,7 @@ def test_monitor_without_callback_polls_until_complete(monkeypatch) -> None:
             completed_at="2026-08-15T00:01:00Z" if status == "Complete" else None,
             error=version.error,
             tool_name=version.tool_name,
-            tool_generation=version.tool_generation,
+            _tool_generation=version._tool_generation,
             _collection=version._collection,
         )
 
@@ -973,7 +973,7 @@ def test_monitor_without_callback_polls_until_complete(monkeypatch) -> None:
         completed_at=None,
         error=None,
         tool_name="example",
-        tool_generation="generation-1",
+        _tool_generation="generation-1",
         _collection=None,  # type: ignore[arg-type]
     )
 
@@ -1012,7 +1012,7 @@ def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> N
             completed_at="2026-08-15T00:01:00Z",
             error=version.error,
             tool_name=version.tool_name,
-            tool_generation=version.tool_generation,
+            _tool_generation=version._tool_generation,
             _collection=version._collection,
         )
 
@@ -1031,7 +1031,7 @@ def test_monitor_delivers_logs_written_during_terminal_refresh(monkeypatch) -> N
         completed_at=None,
         error=None,
         tool_name="example",
-        tool_generation="generation-1",
+        _tool_generation="generation-1",
         _collection=None,  # type: ignore[arg-type]
     )
     delivered: list[resources.BuildEvent] = []
@@ -1065,7 +1065,7 @@ def test_monitor_rechecks_deadline_after_terminal_log_fetch(monkeypatch) -> None
         completed_at="2026-08-15T00:01:00Z",
         error=None,
         tool_name="example",
-        tool_generation="generation-1",
+        _tool_generation="generation-1",
         _collection=None,  # type: ignore[arg-type]
     )
 
@@ -1221,3 +1221,13 @@ def test_keyed_retry_reaches_replay_admission_with_original_tool_validator(tmp_p
     assert result.action == "unchanged"
     assert build.calls.last.request.headers["X-Tamarind-If-Match"] == '"original"'
     assert build.calls.last.request.headers["Idempotency-Key"] == "same-request"
+
+
+@respx.mock
+def test_generation_is_private_resource_state() -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        tool = client.custom_tools.get("example")
+        assert not hasattr(tool, "generation")
+        assert "generation" not in repr(tool)
+        assert tool._generation == "generation-1"

@@ -46,7 +46,6 @@ def _report(report: ValidationReport) -> dict[str, object]:
 def _tool(tool: CustomTool) -> dict[str, object]:
     return {
         "name": tool.name,
-        "generation": tool.generation,
         "displayName": tool.display_name,
         "description": tool.description,
         "functions": list(tool.functions),
@@ -79,7 +78,6 @@ def _version(version: Version) -> dict[str, object]:
         "id": version.id,
         "name": version.name,
         "toolName": version.tool_name,
-        "toolGeneration": version.tool_generation,
         "sourceRevision": version.source_revision,
         "sourceDigest": version.source_digest,
         "status": _value(version.status),
@@ -97,7 +95,6 @@ def _tool_human(tool: CustomTool) -> str:
     return (
         f"{tool.display_name or tool.name}  [{tool.name}]\n"
         f"status: {tool.status}  {published}\n"
-        f"generation: {tool.generation}\n"
         f"default version: {tool.default_version or '(none)'}\n"
         f"resources: {tool.cpu} CPU, {tool.memory}, GPU {tool.gpu_type}"
     )

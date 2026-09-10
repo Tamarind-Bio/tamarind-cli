@@ -314,3 +314,12 @@ def test_local_validation_uses_stable_validation_exit_code(tmp_path):
     payload = json.loads(result.stdout)
     assert payload["valid"] is False
     assert payload["errors"][0]["code"] == "required_file_missing"
+
+
+def test_cli_presentations_do_not_expose_generation():
+    from tamarind.cli.commands.custom_tools import _tool as render_tool
+    from tamarind.cli.commands.custom_tools import _tool_human, _version as render_version
+
+    assert "generation" not in render_tool(_tool())
+    assert "generation" not in _tool_human(_tool())
+    assert "toolGeneration" not in render_version(FakeVersion())
