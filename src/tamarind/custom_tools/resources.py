@@ -319,8 +319,9 @@ class Version:
         )
         return _log_page_from_wire(wire)
 
-    def cancel(self) -> "Version":
-        return self._collection._cancel_version(self)
+    def cancel(self, *, if_unchanged: bool = False) -> "Version":
+        """Request cancellation; optionally require this snapshot's exact build state."""
+        return self._collection._cancel_version(self, if_unchanged=if_unchanged)
 
     def publish(self) -> CustomTool:
         return self._collection._publish_version(self)
@@ -499,8 +500,9 @@ class CustomTools:
         timeout, _ = _validate_monitor_options(timeout=source_timeout, interval=1.0)
         archive = build_source_tree_archive(tree, max_bytes=MAX_TOOL_SOURCE_BYTES)
         try:
+            validator = self._validator(tool)
             session = _upload_session_from_wire(
-                self._transport.create_custom_tool_upload(tool.name)
+                self._transport.create_custom_tool_upload(tool.name, etag=validator)
             )
             if archive.size > session.max_bytes:
                 raise CustomToolUploadError(
@@ -517,7 +519,7 @@ class CustomTools:
             )
             result = self._transport.build_custom_tool_version(
                 tool.name,
-                self._validator(tool),
+                validator,
                 cast(
                     PublicCreateVersionRequest,
                     {
@@ -598,20 +600,16 @@ class CustomTools:
     def _version_validator(self, version: Version) -> str:
         if version._etag is not None:
             return version._etag
-        current = self._get_version(version.tool_name, version.tool_generation, version.id)
-        if current.id != version.id:
-            raise StaleCustomToolError(
-                f"Custom Tool Version {version.tool_name}/{version.name} changed identity; fetch it again."
-            )
-        if current._etag is None:
-            raise TamarindError("Custom Tools response did not include the required Version ETag")
-        return current._etag
+        raise TamarindError(
+            "Conditional cancellation requires an observed version state. "
+            "Assign version = version.refresh() and review it before cancelling."
+        )
 
-    def _cancel_version(self, version: Version) -> Version:
+    def _cancel_version(self, version: Version, *, if_unchanged: bool = False) -> Version:
         wire = self._transport.cancel_custom_tool_build(
             version.tool_name,
             version.id,
-            self._version_validator(version),
+            self._version_validator(version) if if_unchanged else "*",
         )
         return _version_from_wire(self, version.tool_name, version.tool_generation, wire)
 

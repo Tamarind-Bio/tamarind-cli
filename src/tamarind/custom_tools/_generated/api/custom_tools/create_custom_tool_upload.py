@@ -7,12 +7,17 @@ import httpx
 from ...client import AuthenticatedClient, Client
 from ...models.public_problem import PublicProblem
 from ...models.public_upload_session import PublicUploadSession
-from ...types import Response
+from ...types import UNSET, Response, Unset
 
 
 def _get_kwargs(
     name: str,
+    *,
+    if_match: str | Unset = UNSET,
 ) -> dict[str, Any]:
+    headers: dict[str, Any] = {}
+    if not isinstance(if_match, Unset):
+        headers["If-Match"] = if_match
 
     _kwargs: dict[str, Any] = {
         "method": "post",
@@ -21,6 +26,7 @@ def _get_kwargs(
         ),
     }
 
+    _kwargs["headers"] = headers
     return _kwargs
 
 
@@ -41,6 +47,11 @@ def _parse_response(
         response_404 = PublicProblem.from_dict(response.json())
 
         return response_404
+
+    if response.status_code == 412:
+        response_412 = PublicProblem.from_dict(response.json())
+
+        return response_412
 
     if response.status_code == 422:
         response_422 = PublicProblem.from_dict(response.json())
@@ -67,6 +78,7 @@ def sync_detailed(
     name: str,
     *,
     client: AuthenticatedClient | Client,
+    if_match: str | Unset = UNSET,
 ) -> Response[PublicProblem | PublicUploadSession]:
     """Create a source upload
 
@@ -77,6 +89,7 @@ def sync_detailed(
 
     Args:
         name (str): The custom tool name.
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -88,6 +101,7 @@ def sync_detailed(
 
     kwargs = _get_kwargs(
         name=name,
+        if_match=if_match,
     )
 
     response = client.get_httpx_client().request(
@@ -101,6 +115,7 @@ def sync(
     name: str,
     *,
     client: AuthenticatedClient | Client,
+    if_match: str | Unset = UNSET,
 ) -> PublicProblem | PublicUploadSession | None:
     """Create a source upload
 
@@ -111,6 +126,7 @@ def sync(
 
     Args:
         name (str): The custom tool name.
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -123,6 +139,7 @@ def sync(
     return sync_detailed(
         name=name,
         client=client,
+        if_match=if_match,
     ).parsed
 
 
@@ -130,6 +147,7 @@ async def asyncio_detailed(
     name: str,
     *,
     client: AuthenticatedClient | Client,
+    if_match: str | Unset = UNSET,
 ) -> Response[PublicProblem | PublicUploadSession]:
     """Create a source upload
 
@@ -140,6 +158,7 @@ async def asyncio_detailed(
 
     Args:
         name (str): The custom tool name.
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -151,6 +170,7 @@ async def asyncio_detailed(
 
     kwargs = _get_kwargs(
         name=name,
+        if_match=if_match,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -162,6 +182,7 @@ async def asyncio(
     name: str,
     *,
     client: AuthenticatedClient | Client,
+    if_match: str | Unset = UNSET,
 ) -> PublicProblem | PublicUploadSession | None:
     """Create a source upload
 
@@ -172,6 +193,7 @@ async def asyncio(
 
     Args:
         name (str): The custom tool name.
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -185,5 +207,6 @@ async def asyncio(
         await asyncio_detailed(
             name=name,
             client=client,
+            if_match=if_match,
         )
     ).parsed

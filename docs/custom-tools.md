@@ -38,9 +38,8 @@ my-tool/
 └── ...
 ```
 
-`Dockerfile` is required. `run.sh` is strongly recommended because the runtime
-invokes it directly. `config.json` is optional for local validation; when it is
-present, it must be a JSON object and the server validates its full semantics.
+`Dockerfile` and `config.json` are required. `run.sh` is strongly recommended because the runtime
+invokes it directly. `config.json` must be a JSON object; the server validates its full semantics.
 
 Run the lifecycle in this order. First, validate locally. This step does not
 authenticate, upload, or build anything:
@@ -96,7 +95,7 @@ A build result has this general shape:
 {
   "action": "build",
   "version": {
-    "id": "0192d87e-12ab-7cde-9f01-23456789abcd",
+    "id": "ver_WyJ0b29sLWdlbmVyYXRpb24iLCJ2MyJd",
     "name": "v3",
     "toolName": "my-tool",
     "status": "Complete",
@@ -238,3 +237,12 @@ contract, but they fit different execution environments:
 
 GitHub connection and push-to-deploy authorization are not part of the 0.4.0
 release. The supported CLI path starts from a local source folder.
+
+SDK Tool objects are snapshots. Assign `tool = tool.update(...)` after an update, and
+`tool = tool.refresh()` after a build before starting a different build. Upload creation checks
+the snapshot before transferring bytes; build admission checks it again. If the tool changed,
+review the latest state before retrying.
+
+`version.cancel()` requests cancellation of that exact active build even if its status advanced.
+Use `version.cancel(if_unchanged=True)` when cancellation should require the observed state.
+Cancellation is asynchronous; continue monitoring until the version is terminal.

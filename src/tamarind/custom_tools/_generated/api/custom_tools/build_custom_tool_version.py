@@ -105,7 +105,8 @@ def sync_detailed(
 
      Build a version from an uploaded source archive.
 
-    Returns immediately with the numbered version and its current status.
+    The archive also updates the tool's editable source and configuration, so send the Tool ETag
+    returned by Get tool. Returns immediately with the new or reused version and its current status.
 
     Args:
         name (str): The custom tool name.
@@ -148,7 +149,8 @@ def sync(
 
      Build a version from an uploaded source archive.
 
-    Returns immediately with the numbered version and its current status.
+    The archive also updates the tool's editable source and configuration, so send the Tool ETag
+    returned by Get tool. Returns immediately with the new or reused version and its current status.
 
     Args:
         name (str): The custom tool name.
@@ -186,7 +188,8 @@ async def asyncio_detailed(
 
      Build a version from an uploaded source archive.
 
-    Returns immediately with the numbered version and its current status.
+    The archive also updates the tool's editable source and configuration, so send the Tool ETag
+    returned by Get tool. Returns immediately with the new or reused version and its current status.
 
     Args:
         name (str): The custom tool name.
@@ -227,7 +230,8 @@ async def asyncio(
 
      Build a version from an uploaded source archive.
 
-    Returns immediately with the numbered version and its current status.
+    The archive also updates the tool's editable source and configuration, so send the Tool ETag
+    returned by Get tool. Returns immediately with the new or reused version and its current status.
 
     Args:
         name (str): The custom tool name.

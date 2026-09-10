@@ -326,7 +326,7 @@
             "type": "array"
           },
           "generation": {
-            "description": "The immutable lifetime identity of this Tool name. Clients use the Tool's quoted `ETag` with standard `If-Match`; exact Version operations use each Version's opaque `id`.",
+            "description": "Identifies this tool even if its name is later deleted and reused. The SDK handles this identity automatically.",
             "title": "Generation",
             "type": "string"
           },
@@ -791,7 +791,7 @@
             ]
           },
           "id": {
-            "description": "Opaque immutable identifier used in exact Version endpoint paths.",
+            "description": "The version ID to use for reads, logs, cancellation, and publication.",
             "title": "Id",
             "type": "string"
           },
@@ -1042,7 +1042,7 @@
             "description": "The created Tool.",
             "headers": {
               "ETag": {
-                "description": "Quoted strong validator for requests that target this Tool.",
+                "description": "ETag to send in If-Match when changing this tool.",
                 "schema": {
                   "example": "\"01JABCDEF0123456789XYZ\"",
                   "type": "string"
@@ -1087,7 +1087,7 @@
             }
           },
           {
-            "description": "One or more entity-tags using standard If-Match syntax, or `*` to match any existing Tool. Only strong validators can match. The ETag returned with the Tool prevents stale requests from acting on a changed, deleted, or recreated Tool with the same name.",
+            "description": "Send the ETag returned by Get tool, including its quotes, to avoid overwriting changes made since that read. Standard If-Match lists and `*` are also accepted; `*` checks only that the tool exists.",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -1157,7 +1157,7 @@
             "description": "The current Tool generation.",
             "headers": {
               "ETag": {
-                "description": "Quoted strong validator for requests that target this Tool.",
+                "description": "ETag to send in If-Match when changing this tool.",
                 "schema": {
                   "example": "\"01JABCDEF0123456789XYZ\"",
                   "type": "string"
@@ -1203,7 +1203,7 @@
             }
           },
           {
-            "description": "One or more entity-tags using standard If-Match syntax, or `*` to match any existing Tool. Only strong validators can match. The ETag returned with the Tool prevents stale requests from acting on a changed, deleted, or recreated Tool with the same name.",
+            "description": "Send the ETag returned by Get tool, including its quotes, to avoid overwriting changes made since that read. Standard If-Match lists and `*` are also accepted; `*` checks only that the tool exists.",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -1235,7 +1235,7 @@
             "description": "The updated Tool.",
             "headers": {
               "ETag": {
-                "description": "Quoted strong validator for requests that target this Tool.",
+                "description": "ETag to send in If-Match when changing this tool.",
                 "schema": {
                   "example": "\"01JABCDEF0123456789XYZ\"",
                   "type": "string"
@@ -1287,6 +1287,16 @@
               "title": "Name",
               "type": "string"
             }
+          },
+          {
+            "description": "Optionally send the ETag returned by Get tool to reject a stale tool before uploading. The build request still requires its own If-Match check.",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1305,6 +1315,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
           },
           "422": {
             "$ref": "#/components/responses/ValidationProblem"
@@ -1422,7 +1435,7 @@
         "x-doc-group": "Custom Tools"
       },
       "post": {
-        "description": "Build a version from an uploaded source archive.\n\nReturns immediately with the numbered version and its current status.",
+        "description": "Build a version from an uploaded source archive.\n\nThe archive also updates the tool's editable source and configuration, so send the Tool ETag\nreturned by Get tool. Returns immediately with the new or reused version and its current status.",
         "operationId": "buildCustomToolVersion",
         "parameters": [
           {
@@ -1459,7 +1472,7 @@
             }
           },
           {
-            "description": "One or more entity-tags using standard If-Match syntax, or `*` to match any existing Tool. Only strong validators can match. The ETag returned with the Tool prevents stale requests from acting on a changed, deleted, or recreated Tool with the same name.",
+            "description": "Send the ETag returned by Get tool, including its quotes, to avoid overwriting changes made since that read. Standard If-Match lists and `*` are also accepted; `*` checks only that the tool exists.",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -1491,7 +1504,7 @@
             "description": "The admitted Version.",
             "headers": {
               "ETag": {
-                "description": "Quoted strong validator for requests that target this Version.",
+                "description": "ETag for callers that want cancellation to require the observed build state.",
                 "schema": {
                   "example": "\"eyJvcGFxdWUiOiJ2ZXJzaW9uIn0\"",
                   "type": "string"
@@ -1555,12 +1568,12 @@
             }
           },
           {
-            "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
+            "description": "The `id` returned by the build or version response. Use this ID for reads, logs, cancellation, and publication; `name` is the display label, such as `v3`.",
             "in": "path",
             "name": "version",
             "required": true,
             "schema": {
-              "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
+              "description": "The `id` returned by the build or version response. Use this ID for reads, logs, cancellation, and publication; `name` is the display label, such as `v3`.",
               "maxLength": 512,
               "minLength": 2,
               "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
@@ -1581,7 +1594,7 @@
             "description": "The exact Version.",
             "headers": {
               "ETag": {
-                "description": "Quoted strong validator for requests that target this Version.",
+                "description": "ETag for callers that want cancellation to require the observed build state.",
                 "schema": {
                   "example": "\"eyJvcGFxdWUiOiJ2ZXJzaW9uIn0\"",
                   "type": "string"
@@ -1629,12 +1642,12 @@
             }
           },
           {
-            "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
+            "description": "The `id` returned by the build or version response. Use this ID for reads, logs, cancellation, and publication; `name` is the display label, such as `v3`.",
             "in": "path",
             "name": "version",
             "required": true,
             "schema": {
-              "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
+              "description": "The `id` returned by the build or version response. Use this ID for reads, logs, cancellation, and publication; `name` is the display label, such as `v3`.",
               "maxLength": 512,
               "minLength": 2,
               "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
@@ -1695,7 +1708,7 @@
     },
     "/custom-tools/{name}/versions/{version}:cancel": {
       "post": {
-        "description": "Request cancellation of an active build.\n\nSend the current ETag from the build response or exact Version GET. Completed and stopped\nbuilds cannot be canceled.",
+        "description": "Request cancellation of an active build.\n\nUse the exact version ID. No ETag is needed for ordinary cancellation. Optionally send the\nversion's ETag in If-Match to require that its observed state has not changed. Completed and\nstopped builds cannot be canceled. Cancellation is a request; continue polling for the outcome.",
         "operationId": "cancelCustomToolBuild",
         "parameters": [
           {
@@ -1713,12 +1726,12 @@
             }
           },
           {
-            "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
+            "description": "The `id` returned by the build or version response. Use this ID for reads, logs, cancellation, and publication; `name` is the display label, such as `v3`.",
             "in": "path",
             "name": "version",
             "required": true,
             "schema": {
-              "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
+              "description": "The `id` returned by the build or version response. Use this ID for reads, logs, cancellation, and publication; `name` is the display label, such as `v3`.",
               "maxLength": 512,
               "minLength": 2,
               "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
@@ -1727,10 +1740,10 @@
             }
           },
           {
-            "description": "One or more entity-tags using standard If-Match syntax, or `*` to match any existing Version. Only strong validators can match. The ETag returned with the exact Version prevents a delayed request from cancelling a changed Version or the same numbered Version of a recreated Tool.",
+            "description": "Optional: send the ETag returned by Get version to cancel only if that build has not changed. Omit it, or send `*`, to request cancellation of the exact build in its current active state.",
             "in": "header",
             "name": "If-Match",
-            "required": true,
+            "required": false,
             "schema": {
               "minLength": 1,
               "type": "string"
@@ -1749,7 +1762,7 @@
             "description": "The Version with cancellation requested.",
             "headers": {
               "ETag": {
-                "description": "Quoted strong validator for requests that target this Version.",
+                "description": "ETag for callers that want cancellation to require the observed build state.",
                 "schema": {
                   "example": "\"eyJvcGFxdWUiOiJ2ZXJzaW9uIn0\"",
                   "type": "string"
@@ -1768,9 +1781,6 @@
           },
           "422": {
             "$ref": "#/components/responses/ValidationProblem"
-          },
-          "428": {
-            "$ref": "#/components/responses/PreconditionRequired"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -1803,12 +1813,12 @@
             }
           },
           {
-            "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
+            "description": "The `id` returned by the build or version response. Use this ID for reads, logs, cancellation, and publication; `name` is the display label, such as `v3`.",
             "in": "path",
             "name": "version",
             "required": true,
             "schema": {
-              "description": "The opaque Version `id` returned in a Version representation. Numbered names remain accepted for previously generated v1 clients when paired with their generation header.",
+              "description": "The `id` returned by the build or version response. Use this ID for reads, logs, cancellation, and publication; `name` is the display label, such as `v3`.",
               "maxLength": 512,
               "minLength": 2,
               "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
@@ -1817,7 +1827,7 @@
             }
           },
           {
-            "description": "One or more entity-tags using standard If-Match syntax, or `*` to match any existing Tool. Only strong validators can match. The ETag returned with the Tool prevents stale requests from acting on a changed, deleted, or recreated Tool with the same name.",
+            "description": "Send the ETag returned by Get tool, including its quotes, to avoid overwriting changes made since that read. Standard If-Match lists and `*` are also accepted; `*` checks only that the tool exists.",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -1839,7 +1849,7 @@
             "description": "The Tool with its published version updated.",
             "headers": {
               "ETag": {
-                "description": "Quoted strong validator for requests that target this Tool.",
+                "description": "ETag to send in If-Match when changing this tool.",
                 "schema": {
                   "example": "\"01JABCDEF0123456789XYZ\"",
                   "type": "string"

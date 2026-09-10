@@ -185,11 +185,13 @@ class GeneratedCustomToolsTransport:
         )
 
     def create_custom_tool_upload(
-        self, name: str, *, timeout: float | None = None
+        self, name: str, *, etag: str | None = None, timeout: float | None = None
     ) -> dict[str, Any]:
         return self._sync(
             _CREATE_CUSTOM_TOOL_UPLOAD,
-            create_custom_tool_upload._get_kwargs(name=name),
+            create_custom_tool_upload._get_kwargs(
+                name=name, if_match=UNSET if etag is None else etag
+            ),
             timeout,
         )
 

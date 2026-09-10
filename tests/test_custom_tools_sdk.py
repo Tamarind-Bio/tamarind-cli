@@ -368,6 +368,7 @@ def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> 
     assert upload.calls.last.request.headers["Content-Length"] == str(
         len(upload.calls.last.request.content)
     )
+    assert upload_session.calls.last.request.headers["X-Tamarind-If-Match"] == '"opaque-validator"'
     assert "X-Tamarind-Tool-Generation" not in upload_session.calls.last.request.headers
     assert build.calls.last.request.headers["X-Tamarind-If-Match"] == '"opaque-validator"'
     assert "If-Match" not in build.calls.last.request.headers
@@ -571,7 +572,7 @@ def test_build_caps_archive_at_the_server_source_limit(tmp_path: Path, monkeypat
     observed_limit = None
 
     class Transport:
-        def create_custom_tool_upload(self, _name):
+        def create_custom_tool_upload(self, _name, *, etag=None):
             return {"uploadUrl": UPLOAD, "uploadId": "upload-1"}
 
     def capture_limit(_tree, *, max_bytes):
@@ -581,7 +582,9 @@ def test_build_caps_archive_at_the_server_source_limit(tmp_path: Path, monkeypat
 
     monkeypatch.setattr(resources, "build_source_tree_archive", capture_limit)
     collection = resources.CustomTools(Transport())  # type: ignore[arg-type]
-    tool = type("Tool", (), {"name": "example", "generation": "generation-1"})()
+    tool = type(
+        "Tool", (), {"name": "example", "generation": "generation-1", "_etag": '"tool-etag"'}
+    )()
 
     with pytest.raises(CustomToolUploadError, match="observing limit"):
         collection._build(  # type: ignore[arg-type]
@@ -609,7 +612,7 @@ def test_build_constructs_archive_before_creating_upload_session(
             events.append("close")
 
     class Transport:
-        def create_custom_tool_upload(self, _name):
+        def create_custom_tool_upload(self, _name, *, etag=None):
             events.append("session")
             raise RuntimeError("session failed")
 
@@ -620,7 +623,9 @@ def test_build_constructs_archive_before_creating_upload_session(
 
     monkeypatch.setattr(resources, "build_source_tree_archive", build_archive)
     collection = resources.CustomTools(Transport())  # type: ignore[arg-type]
-    tool = type("Tool", (), {"name": "example", "generation": "generation-1"})()
+    tool = type(
+        "Tool", (), {"name": "example", "generation": "generation-1", "_etag": '"tool-etag"'}
+    )()
 
     with pytest.raises(RuntimeError, match="session failed"):
         collection._build(  # type: ignore[arg-type]
@@ -704,7 +709,7 @@ def test_version_logs_cancel_and_publish_use_version_routes() -> None:
         assert version.publish().default_version == "v1"
 
     assert get_tool.call_count == 3
-    assert cancel.calls.last.request.headers["X-Tamarind-If-Match"] == '"version-etag"'
+    assert cancel.calls.last.request.headers["X-Tamarind-If-Match"] == "*"
     assert "If-Match" not in cancel.calls.last.request.headers
     assert publish.calls.last.request.headers["X-Tamarind-If-Match"] == '"opaque-validator"'
     assert "If-Match" not in publish.calls.last.request.headers
@@ -1101,3 +1106,82 @@ def test_log_progress_retains_and_deduplicates_a_terminal_cursor() -> None:
     assert progress.consume(resources.BuildLogPage(items=(final,), status="Running")) == (final,)
     assert progress.cursor == "cursor-1"
     assert progress.consume(resources.BuildLogPage(items=(final,), status="Running")) == ()
+
+
+@respx.mock
+def test_stale_upload_preflight_never_transfers_source(tmp_path: Path) -> None:
+    _source(tmp_path)
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"observed"'})
+    )
+    preflight = respx.post(f"{BASE}custom-tools/example/uploads").mock(
+        return_value=httpx.Response(
+            412, json={"code": "tool_etag_mismatch", "detail": "Tool changed"}
+        )
+    )
+    upload = respx.put(UPLOAD).mock(return_value=httpx.Response(200))
+    build = respx.post(f"{BASE}custom-tools/example/versions").mock(
+        return_value=httpx.Response(202)
+    )
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(StaleCustomToolError):
+            client.custom_tools.get("example").build(tmp_path)
+    assert preflight.calls.last.request.headers["X-Tamarind-If-Match"] == '"observed"'
+    assert not upload.called and not build.called
+
+
+@pytest.mark.parametrize("conditional", [False, True])
+@respx.mock
+def test_cancellation_uses_current_state_unless_explicitly_conditional(conditional: bool) -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"tool"'})
+    )
+    get_version = respx.get(f"{BASE}custom-tools/example/versions/{VERSION_ID}").mock(
+        return_value=httpx.Response(200, json=_version(), headers={"ETag": '"observed-state"'})
+    )
+    cancel = respx.post(f"{BASE}custom-tools/example/versions/{VERSION_ID}:cancel").mock(
+        return_value=httpx.Response(200, json=_version())
+    )
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        version = client.custom_tools.get("example").get_version(VERSION_ID)
+        version.cancel(if_unchanged=conditional)
+    assert get_version.call_count == 1
+    assert cancel.calls.last.request.headers["X-Tamarind-If-Match"] == (
+        '"observed-state"' if conditional else "*"
+    )
+
+
+@respx.mock
+def test_missing_config_is_rejected_before_upload(tmp_path: Path) -> None:
+    _source(tmp_path)
+    (tmp_path / "config.json").unlink()
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"tool"'})
+    )
+    preflight = respx.post(f"{BASE}custom-tools/example/uploads").mock(
+        return_value=httpx.Response(201)
+    )
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(ValidationError) as error:
+            client.custom_tools.get("example").build(tmp_path)
+    assert error.value.detail.errors[0].path == "config.json"
+    assert not preflight.called
+
+
+@respx.mock
+def test_conditional_cancellation_cannot_silently_refresh_an_unversioned_snapshot() -> None:
+    respx.get(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"tool"'})
+    )
+    get_version = respx.get(f"{BASE}custom-tools/example/versions/{VERSION_ID}").mock(
+        return_value=httpx.Response(200, json=_version())
+    )
+    cancel = respx.post(f"{BASE}custom-tools/example/versions/{VERSION_ID}:cancel").mock(
+        return_value=httpx.Response(200)
+    )
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        version = client.custom_tools.get("example").get_version(VERSION_ID)
+        with pytest.raises(TamarindError, match="observed version state"):
+            version.cancel(if_unchanged=True)
+    assert get_version.call_count == 1
+    assert not cancel.called
