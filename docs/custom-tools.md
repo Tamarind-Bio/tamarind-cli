@@ -114,7 +114,11 @@ until it is `null` when a complete collection or log stream is required.
 
 Use an idempotency key for builds initiated by automation. If delivery of the
 first response is ambiguous, retrying with the same key returns the already
-admitted Version instead of starting a duplicate build.
+admitted Version instead of starting a duplicate build. In the SDK, first select
+`tool = client.custom_tools.get(name)` and retain that snapshot and key for retries.
+Items from `custom_tools.list()` do not carry an ETag; they can fail a stale-snapshot
+check before replay admission after the original build commits. The CLI selects
+its Tool with `get()` automatically.
 
 ## Runtime contract
 
@@ -239,10 +243,11 @@ GitHub connection and push-to-deploy authorization are not part of the 0.4.0
 release. The supported CLI path starts from a local source folder.
 
 SDK Tool objects are snapshots. Assign `tool = tool.update(...)` after an update, and
-`tool = tool.refresh()` after a build before starting a different build. For builds without an idempotency key, upload creation checks
-the snapshot before transferring bytes; build admission checks it again. Keyed builds defer
-this check to replay-aware admission so a retry can recover a previously committed result. If the tool changed,
-review the latest state before retrying.
+`tool = tool.refresh()` after a build before starting a different build. For builds without an
+idempotency key, upload creation checks the snapshot before transferring bytes; build admission
+checks it again. Keyed builds using an ETag-bearing snapshot from `get()` defer the revision check
+to replay-aware admission so a retry can recover a previously committed result. For a different
+build after the tool changes, review its latest state before retrying.
 
 `version.cancel()` requests cancellation of that exact active build even if its status advanced.
 Use `version.cancel(if_unchanged=True)` when cancellation should require the observed state.
