@@ -241,10 +241,17 @@
         "additionalProperties": false,
         "properties": {
           "expectedSourceDigest": {
-            "description": "SHA-256 digest of the uploaded archive, formatted as `sha256:<hex>`.",
-            "pattern": "^sha256:[a-f0-9]{64}$",
-            "title": "Expectedsourcedigest",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^sha256:[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional SHA-256 assertion, formatted as `sha256:<hex>`. The server always computes the digest. If supplied, a mismatch rejects the build. Without it, the server builds the uploaded bytes it reads.",
+            "title": "Expectedsourcedigest"
           },
           "uploadId": {
             "description": "The `uploadId` returned when the source upload was created.",
@@ -255,8 +262,7 @@
           }
         },
         "required": [
-          "uploadId",
-          "expectedSourceDigest"
+          "uploadId"
         ],
         "title": "PublicCreateVersionRequest",
         "type": "object"
