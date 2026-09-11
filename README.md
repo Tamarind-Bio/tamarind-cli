@@ -146,6 +146,35 @@ Pass the opaque ID to `version`, `logs`, `cancel`, and `publish`. A local wait
 timeout does not cancel the remote build; reattach with
 `tamarind custom-tools version NAME VERSION_ID --wait`.
 
+### Test a completed Custom Tool version
+
+After building, submit a test without publishing the version:
+
+```bash
+tamarind custom-tools test my-esmfold --version <opaque-version-id> \
+  --input inputs.json --name esmfold-smoke
+tamarind status esmfold-smoke
+tamarind wait esmfold-smoke --timeout 600
+```
+
+Or use the SDK:
+
+```python
+with Tamarind() as client:
+    tool = client.custom_tools.get("my-esmfold")
+    job = tool.test({"sequence": "MKT..."}, version=version.id, name="esmfold-smoke")
+    print(job.job_name, job.id, job.status)
+```
+
+The command returns after submission and the run appears in the tool's website
+Test history. This executes the tool and uses compute; it is not a dry run.
+Omit `name` / `--name` to generate a unique name. Pass the opaque version ID from
+`build` or `versions`; the SDK resolves its execution pin and protects against
+deleting and recreating the tool. The selected build must be complete. Design
+splitting is handled by the backend and returns the parent job receipt.
+Normal `submit` commands keep their existing behavior. If submission times out,
+check the job name in the error details before retrying; it may already be running.
+
 For the complete CLI workflow, source layout, build monitoring, publishing, and
 rollback examples, see the
 [Custom Tools CLI guide](https://github.com/Tamarind-Bio/tamarind-cli/blob/main/docs/custom-tools.md).
@@ -194,7 +223,7 @@ place them before the command name.
 | Submit | `validate`, `submit`, `batch` |
 | Monitor | `jobs`, `status`, `wait`, `results`, `logs` |
 | Files | `files list`, `files stats`, `files upload`, `files delete`, `files folders` |
-| Custom Tools | `custom-tools list`, `get`, `create`, `update`, `validate`, `build`, `versions`, `version`, `logs`, `cancel`, `publish`, `delete` |
+| Custom Tools | `custom-tools list`, `get`, `create`, `update`, `validate`, `build`, `test`, `versions`, `version`, `logs`, `cancel`, `publish`, `delete` |
 | Lifecycle | `cancel`, `delete` |
 | Auth | `auth login`, `auth status`, `auth logout` |
 

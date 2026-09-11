@@ -314,3 +314,69 @@ def test_local_validation_uses_stable_validation_exit_code(tmp_path):
     payload = json.loads(result.stdout)
     assert payload["valid"] is False
     assert payload["errors"][0]["code"] == "required_file_missing"
+
+
+def test_test_command_uses_sdk_with_settings_and_version(monkeypatch, tmp_path):
+    from tamarind.custom_tools import CustomToolTestJob
+
+    sdk = _install_sdk(monkeypatch)
+    captured = {}
+
+    def submit_test(settings, **kwargs):
+        captured.update(settings=settings, **kwargs)
+        return CustomToolTestJob("job-1", "smoke", "batch", "In Queue", "2026-09-11")
+
+    sdk.custom_tools.tool.test = submit_test
+    source = tmp_path / "inputs.yaml"
+    source.write_text(
+        "settings:\n  sequence: AAA\n  numDesigns: 1\njobName: smoke\ntype: fold-local\n"
+    )
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "custom-tools",
+            "test",
+            "fold-local",
+            "--version",
+            VERSION_ID,
+            "--input",
+            str(source),
+            "--set",
+            "numDesigns=101",
+        ],
+        env=ENV,
+    )
+    assert result.exit_code == 0, result.output
+    assert captured == {
+        "settings": {"sequence": "AAA", "numDesigns": 101},
+        "version": VERSION_ID,
+        "name": "smoke",
+    }
+    assert json.loads(result.stdout)["jobName"] == "smoke"
+    assert json.loads(result.stdout)["type"] == "batch"
+    assert sdk.custom_tools.get_names == ["fold-local"]
+
+
+def test_test_command_requires_version_and_rejects_conflicting_tool(monkeypatch, tmp_path):
+    sdk = _install_sdk(monkeypatch)
+    missing = runner.invoke(app, ["--json", "custom-tools", "test", "fold-local"], env=ENV)
+    assert missing.exit_code == 2
+    source = tmp_path / "inputs.json"
+    source.write_text(json.dumps({"type": "wrong", "settings": {}}))
+    wrong = runner.invoke(
+        app,
+        [
+            "--json",
+            "custom-tools",
+            "test",
+            "fold-local",
+            "--version",
+            VERSION_ID,
+            "--input",
+            str(source),
+        ],
+        env=ENV,
+    )
+    assert wrong.exit_code == 5
+    assert sdk.custom_tools.get_names == []

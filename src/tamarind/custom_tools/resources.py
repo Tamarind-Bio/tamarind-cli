@@ -11,7 +11,8 @@ import math
 from pathlib import Path
 import re
 import time
-from typing import Awaitable, BinaryIO, Callable, Generic, TypeAlias, TypeVar, cast
+from uuid import uuid4
+from typing import Any, Awaitable, BinaryIO, Callable, Generic, TypeAlias, TypeVar, cast
 
 import httpx
 
@@ -49,6 +50,7 @@ from tamarind.errors import (
     CustomToolBuildFailedError,
     CustomToolBuildTimeoutError,
     CustomToolUploadError,
+    CustomToolNotDeployableError,
     StaleCustomToolError,
     TamarindError,
     ValidationError,
@@ -135,6 +137,17 @@ class _LogProgress:
             self.delivered_at_cursor = 0
         self.cursor = next_cursor
         return events
+
+
+@dataclass(frozen=True)
+class CustomToolTestJob:
+    """Receipt for a submitted test run; use job_name with the existing status/wait commands."""
+
+    id: str
+    job_name: str
+    job_type: str
+    status: str
+    created_at: str
 
 
 @dataclass(frozen=True)
@@ -239,6 +252,71 @@ class CustomTool:
             idempotency_key=idempotency_key,
             source_timeout=source_timeout,
         )
+
+    def test(
+        self,
+        settings: dict[str, Any],
+        *,
+        version: str,
+        name: str | None = None,
+    ) -> CustomToolTestJob:
+        """Submit a test of an exact opaque Version.id, without publishing it.
+
+        Returns immediately with the job receipt. Ordinary submissions are unaffected.
+        A design-batched tool returns the logical parent job. No automatic retries are made.
+        """
+        if not isinstance(settings, dict):
+            raise ValidationError("Test settings must be an object")
+        if name is not None and (not isinstance(name, str) or not name.strip()):
+            raise ValidationError("Test job name must be a non-empty string")
+        job_name = name if name is not None else f"{self.name}-test-{uuid4().hex[:12]}"
+        selected = self.get_version(version)
+        if selected.status != "Complete":
+            raise CustomToolNotDeployableError(
+                f"Version {selected.name} is {selected.status}; test a completed build."
+            )
+        try:
+            wire = self._collection._transport.submit_test_job(
+                name=self.name,
+                version_name=selected.name,
+                generation=self.generation,
+                job_name=job_name,
+                settings=settings,
+            )
+            fields = ("Id", "JobName", "Type", "JobStatus", "Created")
+            if not isinstance(wire, dict) or any(
+                not isinstance(wire.get(key), str) or not wire[key] for key in fields
+            ):
+                raise TamarindError("Test submission response did not match the jobs contract")
+            return CustomToolTestJob(
+                id=wire["Id"],
+                job_name=wire["JobName"],
+                job_type=wire["Type"],
+                status=wire["JobStatus"],
+                created_at=wire["Created"],
+            )
+        except TamarindError as exc:
+            status_code = getattr(exc, "status_code", None)
+            ambiguous = type(exc) is TamarindError or (
+                isinstance(status_code, int) and status_code >= 500
+            )
+            detail = dict(exc.detail) if isinstance(exc.detail, dict) else {}
+            if exc.detail is not None and not isinstance(exc.detail, dict):
+                detail["upstreamDetail"] = exc.detail
+            detail.update(
+                jobName=job_name,
+                toolName=self.name,
+                versionId=selected.id,
+                submitted=None if ambiguous else False,
+                outcomeMayBeAmbiguous=ambiguous,
+            )
+            exc.detail = detail
+            if ambiguous:
+                exc.message += (
+                    f" Query job {job_name!r} before retrying; submission may have succeeded."
+                )
+            raise
+
 
     def get_version(self, version_id: str) -> "Version":
         """Get one exact Version by its opaque ``id``."""
