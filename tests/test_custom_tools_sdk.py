@@ -1231,3 +1231,120 @@ def test_generation_is_private_resource_state() -> None:
         assert not hasattr(tool, "generation")
         assert "generation" not in repr(tool)
         assert tool._generation == "generation-1"
+
+
+def _submitted_test(*, job_type="example", job_name="smoke-test"):
+    return {
+        "Id": "job-1",
+        "JobName": job_name,
+        "Type": job_type,
+        "JobStatus": "In Queue",
+        "Created": "2026-09-11 00:00:00",
+    }
+
+
+@pytest.mark.parametrize("job_type", ["testorg/example", "batch"])
+@respx.mock
+def test_test_command_pins_completed_version_and_marks_history(job_type):
+    """The SDK selects an exact version, while the server may return a split parent."""
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/versions/{VERSION_ID}").mock(
+        return_value=httpx.Response(200, json=_version(status="Complete"))
+    )
+    submit = respx.post(f"{BASE}v2/jobs").mock(
+        return_value=httpx.Response(200, json=_submitted_test(job_type=job_type))
+    )
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        settings = {"numDesigns": 101, "batch": "ordinary-tool-setting"}
+        job = client.custom_tools.get("example").test(
+            settings, version=VERSION_ID, name="smoke-test"
+        )
+    assert job.id == "job-1"
+    assert job.job_type == job_type
+    assert job.job_name == "smoke-test"
+    body = json.loads(submit.calls[0].request.content)
+    assert body == {
+        "jobName": "smoke-test",
+        "type": "example",
+        "toolRef": "v1",
+        "toolGeneration": "generation-1",
+        "batch": "test-example",
+        "settings": settings,
+        "jobSource": "CLI",
+    }
+    assert submit.call_count == 1
+    assert submit.calls[0].request.headers["x-api-key"] == "key"
+
+
+@pytest.mark.parametrize("status", ["Queued", "Running", "Stopped"])
+@respx.mock
+def test_test_rejects_unfinished_or_failed_versions(status):
+    from tamarind.errors import CustomToolNotDeployableError
+
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/versions/{VERSION_ID}").mock(
+        return_value=httpx.Response(200, json=_version(status=status))
+    )
+    submit = respx.post(f"{BASE}v2/jobs")
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(CustomToolNotDeployableError):
+            client.custom_tools.get("example").test({}, version=VERSION_ID)
+    assert not submit.called
+
+
+@respx.mock
+def test_test_rejects_recreated_tool_before_submitting():
+    respx.get(f"{BASE}custom-tools/example").mock(
+        side_effect=[
+            httpx.Response(200, json=_tool()),
+            httpx.Response(200, json=_tool(generation="replacement")),
+        ]
+    )
+    respx.get(f"{BASE}custom-tools/example/versions/{VERSION_ID}").mock(
+        return_value=httpx.Response(200, json=_version(status="Complete"))
+    )
+    submit = respx.post(f"{BASE}v2/jobs")
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(StaleCustomToolError):
+            client.custom_tools.get("example").test({}, version=VERSION_ID)
+    assert not submit.called
+
+
+@pytest.mark.parametrize("failure", ["network", "server", "malformed", "rejected"])
+@respx.mock
+def test_test_submission_errors_preserve_recovery_name_without_retry(failure):
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    respx.get(f"{BASE}custom-tools/example/versions/{VERSION_ID}").mock(
+        return_value=httpx.Response(200, json=_version(status="Complete"))
+    )
+    submit = respx.post(f"{BASE}v2/jobs")
+    if failure == "network":
+        submit.mock(side_effect=httpx.ReadTimeout("timed out"))
+    else:
+        status = {"server": 503, "malformed": 200, "rejected": 422}[failure]
+        submit.mock(return_value=httpx.Response(status, json={"detail": "problem"}))
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(TamarindError) as raised:
+            client.custom_tools.get("example").test({}, version=VERSION_ID)
+    assert submit.call_count == 1
+    body = json.loads(submit.calls[0].request.content)
+    assert body["jobName"].startswith("example-test-")
+    assert raised.value.detail["jobName"] == body["jobName"]
+    assert raised.value.detail["outcomeMayBeAmbiguous"] is (failure != "rejected")
+    assert str(raised.value) == raised.value.message
+    if failure != "rejected":
+        assert body["jobName"] in str(raised.value)
+        assert "before retrying" in str(raised.value)
+
+
+@respx.mock
+def test_test_rejects_invalid_inputs_without_submitting():
+    respx.get(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(200, json=_tool()))
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        tool = client.custom_tools.get("example")
+        with pytest.raises(ValidationError, match="object"):
+            tool.test([], version=VERSION_ID)
+        with pytest.raises(ValidationError, match="name"):
+            tool.test({}, version=VERSION_ID, name=" ")
+        with pytest.raises(ValidationError, match="opaque Version.id"):
+            tool.test({}, version="v1")

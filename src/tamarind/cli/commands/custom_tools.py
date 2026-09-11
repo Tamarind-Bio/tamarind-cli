@@ -17,6 +17,7 @@ from ...custom_tools.transport import (
 )
 from ...custom_tools.validation import ValidationProblem, ValidationReport, validate_folder
 from ...errors import ExitCode, TamarindError, ValidationError
+from ..inputs import effective_job_name, effective_job_type, resolve_job_input
 from .. import output
 
 
@@ -191,6 +192,46 @@ def get(ctx: typer.Context, name: str = typer.Argument(..., help="Custom Tool na
     with state.sdk_client() as client:
         tool = client.custom_tools.get(name)
     output.emit(_tool(tool), state.output, human=_tool_human(tool))
+
+
+@app.command("test")
+def test_tool(
+    ctx: typer.Context,
+    tool_name: str = typer.Argument(..., help="Custom Tool name."),
+    version: str = typer.Option(
+        ..., "--version", help="Opaque Version.id from custom-tools versions."
+    ),
+    input: Optional[str] = typer.Option(
+        None, "--input", "-i", help="Settings YAML/JSON file, or '-' for stdin."
+    ),
+    set_: list[str] = typer.Option([], "--set", help="Override a setting: key=value (repeatable)."),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="Job name (default: generated)."),
+) -> None:
+    """Run a completed version as a test and include it in the website Test history.
+
+    Returns after submission. Monitor with `tamarind status JOB` or `tamarind wait JOB`.
+    """
+    state = ctx.obj
+    job_input = resolve_job_input(input, set_)
+    tool_name = effective_job_type(tool_name, job_input.job_type)
+    job_name = effective_job_name(name, job_input.job_name)
+    with state.sdk_client() as client:
+        job = client.custom_tools.get(tool_name).test(
+            job_input.settings,
+            version=version,
+            name=job_name,
+        )
+    output.emit(
+        {
+            "jobName": job.job_name,
+            "id": job.id,
+            "type": job.job_type,
+            "status": job.status,
+            "createdAt": job.created_at,
+        },
+        state.output,
+        human=f"Submitted test {job.job_name} ({job.status}).\nMonitor: tamarind status {job.job_name}",
+    )
 
 
 @app.command()

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import sys
+
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -323,3 +326,165 @@ def test_cli_presentations_do_not_expose_generation():
     assert "generation" not in render_tool(_tool())
     assert "generation" not in _tool_human(_tool())
     assert "toolGeneration" not in render_version(FakeVersion())
+@pytest.mark.parametrize("envelope_type", ["fold-local", " Fold-Local "])
+def test_test_command_uses_sdk_with_settings_and_version(monkeypatch, tmp_path, envelope_type):
+    from tamarind.custom_tools import CustomToolTestJob
+
+    sdk = _install_sdk(monkeypatch)
+    captured = {}
+
+    def submit_test(settings, **kwargs):
+        captured.update(settings=settings, **kwargs)
+        return CustomToolTestJob("job-1", "smoke", "batch", "In Queue", "2026-09-11")
+
+    sdk.custom_tools.tool.test = submit_test
+    source = tmp_path / "inputs.yaml"
+    source.write_text(
+        f"settings:\n  sequence: AAA\n  numDesigns: 1\njobName: smoke\ntype: '{envelope_type}'\n"
+    )
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "custom-tools",
+            "test",
+            "fold-local",
+            "--version",
+            VERSION_ID,
+            "--input",
+            str(source),
+            "--set",
+            "numDesigns=101",
+        ],
+        env=ENV,
+    )
+    assert result.exit_code == 0, result.output
+    assert captured == {
+        "settings": {"sequence": "AAA", "numDesigns": 101},
+        "version": VERSION_ID,
+        "name": "smoke",
+    }
+    assert json.loads(result.stdout)["jobName"] == "smoke"
+    assert json.loads(result.stdout)["type"] == "batch"
+    assert sdk.custom_tools.get_names == ["fold-local"]
+
+
+@pytest.mark.parametrize("envelope_type", ["wrong", 1, True])
+def test_test_command_requires_version_and_rejects_conflicting_tool(
+    monkeypatch, tmp_path, capsys, envelope_type
+):
+    from tamarind.cli.main import run
+
+    sdk = _install_sdk(monkeypatch)
+    missing = runner.invoke(app, ["--json", "custom-tools", "test", "fold-local"], env=ENV)
+    assert missing.exit_code == 2
+    source = tmp_path / "inputs.json"
+    source.write_text(json.dumps({"type": envelope_type, "settings": {}}))
+    for key, value in ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(sys, "argv", [
+        "tamarind", "--json", "custom-tools", "test", "fold-local",
+        "--version", VERSION_ID, "--input", str(source),
+    ])
+    with pytest.raises(SystemExit) as raised:
+        run()
+    assert raised.value.code == 5
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    error = json.loads(captured.err)["error"]
+    assert error["type"] == "ValidationError"
+    assert error["exitCode"] == 5
+    assert "Tool mismatch" in error["message"]
+    assert sdk.custom_tools.get_names == []
+
+
+@pytest.mark.parametrize("command", [
+    ["validate", "fold-local"],
+    ["submit", "fold-local"],
+    ["custom-tools", "test", "fold-local", "--version", VERSION_ID],
+])
+def test_invalid_settings_use_console_validation_boundary(monkeypatch, tmp_path, capsys, command):
+    from tamarind.cli.main import run
+
+    sdk = _install_sdk(monkeypatch)
+    source = tmp_path / "input.json"
+    source.write_text(json.dumps({"type": "fold-local", "settings": 1}))
+    for key, value in ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(sys, "argv", ["tamarind", "--json", *command, "--input", str(source)])
+    with pytest.raises(SystemExit) as raised:
+        run()
+    assert raised.value.code == 5
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    error = json.loads(captured.err)["error"]
+    assert error["type"] == "ValidationError"
+    assert error["message"] == "Job settings must be a mapping (an object)."
+    assert sdk.custom_tools.get_names == []
+
+
+@pytest.mark.parametrize("file_type", [False, 0, 1, True, "", " ", [], {}])
+@pytest.mark.parametrize("command", [
+    ["validate", "fold-local"],
+    ["submit", "fold-local"],
+    ["batch", "fold-local"],
+    ["custom-tools", "test", "fold-local", "--version", VERSION_ID],
+])
+def test_malformed_envelope_type_rejected_by_every_command(
+    monkeypatch, tmp_path, capsys, command, file_type
+):
+    from tamarind.cli.main import run
+
+    sdk = _install_sdk(monkeypatch)
+    source = tmp_path / "input.json"
+    settings = [{}] if command[0] == "batch" else {}
+    source.write_text(json.dumps({"type": file_type, "settings": settings}))
+    for key, value in ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(sys, "argv", ["tamarind", "--json", *command, "--input", str(source)])
+    with pytest.raises(SystemExit) as raised:
+        run()
+    assert raised.value.code == 5
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    error = json.loads(captured.err)["error"]
+    assert error["type"] == "ValidationError"
+    assert "Tool mismatch" in error["message"]
+    assert sdk.custom_tools.get_names == []
+
+
+@pytest.mark.parametrize("invalid_name", [False, 0, [], {}, "", " ", 1])
+@pytest.mark.parametrize("command", [
+    ["validate", "fold-local"],
+    ["submit", "fold-local"],
+    ["batch", "fold-local"],
+    ["custom-tools", "test", "fold-local", "--version", VERSION_ID],
+])
+def test_explicit_invalid_names_never_generate_a_replacement(
+    monkeypatch, tmp_path, capsys, command, invalid_name
+):
+    from tamarind.cli.main import run
+
+    sdk = _install_sdk(monkeypatch)
+    source = tmp_path / "input.json"
+    is_batch = command[0] == "batch"
+    source.write_text(json.dumps({
+        "type": "fold-local", "settings": [{}] if is_batch else {},
+        "batchName" if is_batch else "jobName": invalid_name,
+    }))
+    for key, value in ENV.items():
+        monkeypatch.setenv(key, value)
+    argv = ["tamarind", "--json", *command, "--input", str(source)]
+    # Empty/whitespace strings must also fail as explicit CLI options.
+    variants = [argv, [*argv, "--name", invalid_name]] if isinstance(invalid_name, str) else [argv]
+    for args in variants:
+        monkeypatch.setattr(sys, "argv", args)
+        with pytest.raises(SystemExit) as raised:
+            run()
+        assert raised.value.code == 5
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        error = json.loads(captured.err)["error"]
+        assert error["type"] == "ValidationError"
+        assert error["message"] == "Job name must be a non-empty string."
+    assert sdk.custom_tools.get_names == []

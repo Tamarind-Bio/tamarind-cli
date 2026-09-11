@@ -90,16 +90,27 @@ def effective_job_type(cli_tool: str, file_type: object | None) -> str:
     tool you named. Comparison ignores surrounding whitespace and case.
 
     ``file_type`` comes straight from YAML, so it may parse as a non-string
-    (``type: 1`` → int, ``type: true`` → bool). Compare it as text so such
-    malformed input fails with the normal validation error instead of crashing.
+    (``type: 1`` → int, ``type: true`` → bool). Only None means absent;
+    every supplied value must be a string that agrees with the selected tool.
     """
-    if file_type and str(file_type).strip().lower() != cli_tool.strip().lower():
+    if file_type is not None and (
+        not isinstance(file_type, str)
+        or file_type.strip().lower() != cli_tool.strip().lower()
+    ):
         raise ValidationError(
             f"Tool mismatch: the command targets '{cli_tool}' but the input "
             f"file's type is '{file_type}'. Remove the file's 'type' field, or "
             f"re-run the command with '{file_type}' as the tool."
         )
     return cli_tool
+
+
+def effective_job_name(cli_name: str | None, file_name: object | None) -> str | None:
+    """Choose an explicit name without turning malformed values into generated names."""
+    name = cli_name if cli_name is not None else file_name
+    if name is not None and (not isinstance(name, str) or not name.strip()):
+        raise ValidationError("Job name must be a non-empty string.")
+    return name
 
 
 def resolve_job_input(
@@ -121,11 +132,12 @@ def resolve_job_input(
                 "{jobName, type, settings} object)."
             )
         if _looks_like_envelope(doc):
-            settings = dict(doc.get("settings") or {})
             job_type = doc.get("type")
             job_name = doc.get("jobName")
-        else:
-            settings = dict(doc)
+            doc = doc["settings"]
+        if not isinstance(doc, dict):
+            raise ValidationError("Job settings must be a mapping (an object).")
+        settings = dict(doc)
 
     if set_pairs:
         _apply_sets(settings, set_pairs)
