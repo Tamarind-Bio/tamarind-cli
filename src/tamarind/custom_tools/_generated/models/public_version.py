@@ -21,8 +21,8 @@ class PublicVersion:
         completed_at (None | str):
         created_at (str):
         error (None | PublicBuildError):
-        id (str): Opaque immutable identifier used in exact Version endpoint paths.
-        name (str): The numbered version handle, such as `v3`.
+        id (str): The unique ID of this build. Use it in API requests to check status, read logs, cancel, or publish.
+        name (str): The display name of this build, such as `v3`. Use `id` in API requests.
         origin (str):
         source_digest (None | str): SHA-256 digest of this version's source archive. Null when source is hidden.
         source_revision (None | str): Immutable source revision used by this version. Null when source is hidden.

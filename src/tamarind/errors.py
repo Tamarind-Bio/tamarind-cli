@@ -37,8 +37,16 @@ class TamarindError(Exception):
 
     def __init__(self, message: str, *, detail: object | None = None):
         super().__init__(message)
-        self.message = message
         self.detail = detail
+
+    @property
+    def message(self) -> str:
+        """CLI and SDK render the same message, including later recovery guidance."""
+        return str(self.args[0]) if self.args else ""
+
+    @message.setter
+    def message(self, value: str) -> None:
+        self.args = (value,)
 
 
 class AuthError(TamarindError):

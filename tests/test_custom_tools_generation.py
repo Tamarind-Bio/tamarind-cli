@@ -25,8 +25,11 @@ def test_vendored_contract_is_the_dedicated_backend_artifact() -> None:
         ("/custom-tools/{name}", "delete"),
         ("/custom-tools/{name}", "patch"),
         ("/custom-tools/{name}/versions", "post"),
-        ("/custom-tools/{name}/versions/{version}:cancel", "post"),
         ("/custom-tools/{name}/versions/{version}:publish", "post"),
+    }
+    optional_operations = {
+        ("/custom-tools/{name}/uploads", "post"),
+        ("/custom-tools/{name}/versions/{version}:cancel", "post"),
     }
     for path, item in document["paths"].items():
         for method, operation in item.items():
@@ -37,7 +40,9 @@ def test_vendored_contract_is_the_dedicated_backend_artifact() -> None:
                 for parameter in operation.get("parameters", [])
                 if parameter.get("in") == "header"
             ]
-            expected = [("If-Match", True)] if (path, method) in conditional_operations else []
+            expected = [("If-Match", False)] if (path, method) in conditional_operations else []
+            if (path, method) in optional_operations:
+                expected = [("If-Match", False)]
             if (path, method) == ("/custom-tools/{name}/versions", "post"):
                 expected = [("Idempotency-Key", False), *expected]
             assert [(header["name"], header["required"]) for header in headers] == expected

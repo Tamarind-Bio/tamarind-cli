@@ -8,17 +8,18 @@ from ...client import AuthenticatedClient, Client
 from ...models.public_custom_tool import PublicCustomTool
 from ...models.public_problem import PublicProblem
 from ...models.public_update_custom_tool_request import PublicUpdateCustomToolRequest
-from ...types import Response
+from ...types import UNSET, Response, Unset
 
 
 def _get_kwargs(
     name: str,
     *,
     body: PublicUpdateCustomToolRequest,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    headers["If-Match"] = if_match
+    if not isinstance(if_match, Unset):
+        headers["If-Match"] = if_match
 
     _kwargs: dict[str, Any] = {
         "method": "patch",
@@ -63,11 +64,6 @@ def _parse_response(
 
         return response_422
 
-    if response.status_code == 428:
-        response_428 = PublicProblem.from_dict(response.json())
-
-        return response_428
-
     response_default = PublicProblem.from_dict(response.json())
 
     return response_default
@@ -89,7 +85,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: PublicUpdateCustomToolRequest,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> Response[PublicCustomTool | PublicProblem]:
     """Update a custom tool
 
@@ -99,7 +95,7 @@ def sync_detailed(
 
     Args:
         name (str): The custom tool name.
-        if_match (str):
+        if_match (str | Unset):
         body (PublicUpdateCustomToolRequest):
 
     Raises:
@@ -128,7 +124,7 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
     body: PublicUpdateCustomToolRequest,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> PublicCustomTool | PublicProblem | None:
     """Update a custom tool
 
@@ -138,7 +134,7 @@ def sync(
 
     Args:
         name (str): The custom tool name.
-        if_match (str):
+        if_match (str | Unset):
         body (PublicUpdateCustomToolRequest):
 
     Raises:
@@ -162,7 +158,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: PublicUpdateCustomToolRequest,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> Response[PublicCustomTool | PublicProblem]:
     """Update a custom tool
 
@@ -172,7 +168,7 @@ async def asyncio_detailed(
 
     Args:
         name (str): The custom tool name.
-        if_match (str):
+        if_match (str | Unset):
         body (PublicUpdateCustomToolRequest):
 
     Raises:
@@ -199,7 +195,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
     body: PublicUpdateCustomToolRequest,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> PublicCustomTool | PublicProblem | None:
     """Update a custom tool
 
@@ -209,7 +205,7 @@ async def asyncio(
 
     Args:
         name (str): The custom tool name.
-        if_match (str):
+        if_match (str | Unset):
         body (PublicUpdateCustomToolRequest):
 
     Raises:

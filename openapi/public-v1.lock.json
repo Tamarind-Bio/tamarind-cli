@@ -1,8 +1,8 @@
 {
-  "artifactSha256": "871ed8ebf35534128f9b668caf3898ff43b68177093998ce94c43ec9b27c828e",
+  "artifactSha256": "758c6a1b4c918f229d75921dbd5ebbc7c491029f9d4cf6227a45955d8799ee3e",
   "generator": "openapi-python-client==0.28.4",
   "schemaVersion": 2,
-  "sourceCommit": "1f403dc605f2690ec5b978754f09c77c3b1ac9a5",
+  "sourceCommit": "2a8a7eb5771c0ac57c5390e422f87dab46e2b0c8",
   "sourcePath": "backend/app/public_api/openapi/custom-tools-v1.generated.json",
   "sourceRepository": "Tamarind-Bio/tamarind-website"
 }

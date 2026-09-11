@@ -6,16 +6,17 @@ import httpx
 
 from ...client import AuthenticatedClient, Client
 from ...models.public_problem import PublicProblem
-from ...types import Response
+from ...types import UNSET, Response, Unset
 
 
 def _get_kwargs(
     name: str,
     *,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    headers["If-Match"] = if_match
+    if not isinstance(if_match, Unset):
+        headers["If-Match"] = if_match
 
     _kwargs: dict[str, Any] = {
         "method": "delete",
@@ -55,11 +56,6 @@ def _parse_response(
 
         return response_422
 
-    if response.status_code == 428:
-        response_428 = PublicProblem.from_dict(response.json())
-
-        return response_428
-
     response_default = PublicProblem.from_dict(response.json())
 
     return response_default
@@ -80,7 +76,7 @@ def sync_detailed(
     name: str,
     *,
     client: AuthenticatedClient | Client,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> Response[Any | PublicProblem]:
     """Delete a custom tool
 
@@ -88,7 +84,7 @@ def sync_detailed(
 
     Args:
         name (str): The custom tool name.
-        if_match (str):
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -114,7 +110,7 @@ def sync(
     name: str,
     *,
     client: AuthenticatedClient | Client,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> Any | PublicProblem | None:
     """Delete a custom tool
 
@@ -122,7 +118,7 @@ def sync(
 
     Args:
         name (str): The custom tool name.
-        if_match (str):
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -143,7 +139,7 @@ async def asyncio_detailed(
     name: str,
     *,
     client: AuthenticatedClient | Client,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> Response[Any | PublicProblem]:
     """Delete a custom tool
 
@@ -151,7 +147,7 @@ async def asyncio_detailed(
 
     Args:
         name (str): The custom tool name.
-        if_match (str):
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -175,7 +171,7 @@ async def asyncio(
     name: str,
     *,
     client: AuthenticatedClient | Client,
-    if_match: str,
+    if_match: str | Unset = UNSET,
 ) -> Any | PublicProblem | None:
     """Delete a custom tool
 
@@ -183,7 +179,7 @@ async def asyncio(
 
     Args:
         name (str): The custom tool name.
-        if_match (str):
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

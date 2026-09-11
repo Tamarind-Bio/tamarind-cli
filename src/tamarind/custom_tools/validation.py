@@ -103,7 +103,11 @@ def validate_source_tree(tree: SourceTree) -> ValidationReport:
         )
 
     config_file = files.get("config.json")
-    if config_file is not None:
+    if config_file is None:
+        error(
+            "required_file_missing", "config.json", "config.json is required to build a Custom Tool"
+        )
+    else:
         if config_file.size > _MAX_CONFIG_BYTES:
             error(
                 "config_too_large",

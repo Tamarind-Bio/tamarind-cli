@@ -126,6 +126,34 @@ class GeneratedCustomToolsTransport:
             wire["_etag"] = etag
         return wire
 
+    def submit_test_job(
+        self,
+        *,
+        name: str,
+        version_name: str,
+        generation: str,
+        job_name: str,
+        settings: dict[str, Any],
+    ) -> Any:
+        """Submit through the website proxy to canonical Python jobs (including design splits).
+
+        This jobs operation is outside the generated Custom Tools lifecycle contract.
+        Keep the test marker here so every facade/CLI caller uses the same wire shape.
+        """
+        return self._client.post_json(
+            "v2/jobs",
+            json={
+                "jobName": job_name,
+                "type": name,
+                "toolRef": version_name,
+                "toolGeneration": generation,
+                "batch": f"test-{name}",
+                "settings": settings,
+                "jobSource": "CLI",
+            },
+        )
+
+
     def list_custom_tools(
         self,
         status: PublicCustomToolStatus | None = None,
@@ -185,11 +213,13 @@ class GeneratedCustomToolsTransport:
         )
 
     def create_custom_tool_upload(
-        self, name: str, *, timeout: float | None = None
+        self, name: str, *, etag: str | None = None, timeout: float | None = None
     ) -> dict[str, Any]:
         return self._sync(
             _CREATE_CUSTOM_TOOL_UPLOAD,
-            create_custom_tool_upload._get_kwargs(name=name),
+            create_custom_tool_upload._get_kwargs(
+                name=name, if_match=UNSET if etag is None else etag
+            ),
             timeout,
         )
 

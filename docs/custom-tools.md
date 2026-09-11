@@ -38,9 +38,8 @@ my-tool/
 └── ...
 ```
 
-`Dockerfile` is required. `run.sh` is strongly recommended because the runtime
-invokes it directly. `config.json` is optional for local validation; when it is
-present, it must be a JSON object and the server validates its full semantics.
+`Dockerfile` and `config.json` are required. `run.sh` is strongly recommended because the runtime
+invokes it directly. `config.json` must be a JSON object; the server validates its full semantics.
 
 Run the lifecycle in this order. First, validate locally. This step does not
 authenticate, upload, or build anything:
@@ -96,7 +95,7 @@ A build result has this general shape:
 {
   "action": "build",
   "version": {
-    "id": "0192d87e-12ab-7cde-9f01-23456789abcd",
+    "id": "ver_WyJ0b29sLWdlbmVyYXRpb24iLCJ2MyJd",
     "name": "v3",
     "toolName": "my-tool",
     "status": "Complete",
@@ -115,7 +114,11 @@ until it is `null` when a complete collection or log stream is required.
 
 Use an idempotency key for builds initiated by automation. If delivery of the
 first response is ambiguous, retrying with the same key returns the already
-admitted Version instead of starting a duplicate build.
+admitted Version instead of starting a duplicate build. In the SDK, first select
+`tool = client.custom_tools.get(name)` and retain that snapshot and key for retries.
+Items from `custom_tools.list()` do not carry an ETag; they can fail a stale-snapshot
+check before replay admission after the original build commits. The CLI selects
+its Tool with `get()` automatically.
 
 ## Runtime contract
 
@@ -238,3 +241,55 @@ contract, but they fit different execution environments:
 
 GitHub connection and push-to-deploy authorization are not part of the 0.4.0
 release. The supported CLI path starts from a local source folder.
+
+SDK Tool objects are snapshots. Assign `tool = tool.update(...)` after an update, and
+`tool = tool.refresh()` after a build before starting a different build. For builds without an
+idempotency key, upload creation checks the snapshot before transferring bytes; build admission
+checks it again. Keyed builds using an ETag-bearing snapshot from `get()` defer the revision check
+to replay-aware admission so a retry can recover a previously committed result. For a different
+build after the tool changes, review its latest state before retrying.
+
+`version.cancel()` requests cancellation of that exact active build even if its status advanced.
+Use `version.cancel(if_unchanged=True)` when cancellation should require the observed state.
+Cancellation is asynchronous; continue monitoring until the version is terminal.
+
+## Run a version as a test
+
+The `test` command submits a real job using an exact completed build. It does not
+publish the version, and the job appears in the website tool's Test history.
+This uses compute, just like an ordinary submission.
+
+```bash
+tamarind custom-tools versions my-tool
+tamarind --json custom-tools test my-tool --version <opaque-version-id> \
+  --input inputs.yaml --set numDesigns=10 --name my-tool-smoke
+tamarind status my-tool-smoke
+tamarind wait my-tool-smoke --timeout 600
+```
+
+`--input` accepts a settings mapping or the existing `{type, jobName, settings}`
+envelope. `--set` overrides individual settings, and `--name` overrides the job
+name from the file. Omit the name for an automatically generated unique name.
+Settings can also come from stdin with `--input -`.
+
+The command returns a receipt with `jobName`, `id`, `type`, `status`, and
+`createdAt`; it does not wait for execution. For design-batched tools, this is the
+logical parent job. Use existing `status`, `wait`, and `results` commands to follow
+it. A submission timeout or server failure may mean the job was accepted; error
+details preserve the job name so you can check it before retrying.
+
+Python callers use the same implementation:
+
+```python
+from tamarind import Tamarind
+
+with Tamarind() as client:
+    tool = client.custom_tools.get("my-tool")
+    job = tool.test({"numDesigns": 10}, version="<opaque-version-id>")
+    print(job.job_name, job.status)
+```
+
+`tool.test()` requires an opaque Version ID and returns a `CustomToolTestJob`
+receipt. It resolves the selected version, checks the tool's identity internally to reject
+stale handles, and explicitly marks the run as a test. Version pins alone never
+turn normal submissions into tests.

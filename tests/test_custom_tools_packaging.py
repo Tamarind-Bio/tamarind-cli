@@ -529,6 +529,7 @@ def test_validation_requires_exact_runtime_filename_casing(tmp_path: Path) -> No
 
     assert [(problem.code, problem.path) for problem in report.errors] == [
         ("required_file_missing", "Dockerfile"),
+        ("required_file_missing", "config.json"),
     ]
     assert ("run_script_missing", "run.sh") in [
         (problem.code, problem.path) for problem in report.warnings
@@ -647,13 +648,14 @@ def test_validation_warns_for_shell_runtime_network_access(
     assert {problem.code for problem in report.warnings} == {"runtime_network_access"}
 
 
-def test_validation_accepts_an_absent_config_file(tmp_path: Path) -> None:
+def test_validation_rejects_an_absent_config_file(tmp_path: Path) -> None:
     _valid_source(tmp_path)
     (tmp_path / "config.json").unlink()
 
     report = validate_folder(tmp_path)
 
-    assert report.valid
+    assert not report.valid
+    assert [(p.code, p.path) for p in report.errors] == [("required_file_missing", "config.json")]
 
 
 def test_validation_rejects_malformed_config_json(tmp_path: Path) -> None:

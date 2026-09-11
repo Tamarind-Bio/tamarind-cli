@@ -26,8 +26,8 @@ class PublicCustomTool:
         display_name (str):
         est_time (str):
         functions (list[str]):
-        generation (str): The immutable lifetime identity of this Tool name. Clients use the Tool's quoted `ETag` with
-            standard `If-Match`; exact Version operations use each Version's opaque `id`.
+        generation (str): Identifies this tool even if its name is later deleted and reused. The SDK handles this
+            identity automatically.
         gpu_type (PublicCustomToolGputype):
         has_source (bool):
         home_disk_gi (int):

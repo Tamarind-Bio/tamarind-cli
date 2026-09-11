@@ -48,15 +48,11 @@ def test_effective_job_type_rejects_conflict():
     assert "boltz" in exc.value.message and "esmfold" in exc.value.message
 
 
-def test_effective_job_type_non_string_is_clean_error_not_crash():
-    # YAML may parse `type: 1` as int / `type: true` as bool. These are truthy
-    # but have no .strip(); compare as text so they raise a clean ValidationError
-    # (a mismatch) instead of an uncaught AttributeError.
-    for bad in (1, True, [1, 2]):
-        with pytest.raises(ValidationError):
-            effective_job_type("boltz", bad)
-    # falsy non-strings behave like "no type" — the explicit tool arg wins
-    assert effective_job_type("boltz", 0) == "boltz"
+@pytest.mark.parametrize("bad", [0, False, 1, True, [], {}, [1, 2], "", " "])
+@pytest.mark.parametrize("tool", ["boltz", "0", "true"])
+def test_effective_job_type_rejects_all_malformed_types(tool, bad):
+    with pytest.raises(ValidationError):
+        effective_job_type(tool, bad)
 
 
 @respx.mock

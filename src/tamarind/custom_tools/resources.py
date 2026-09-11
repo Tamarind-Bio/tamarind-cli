@@ -11,7 +11,8 @@ import math
 from pathlib import Path
 import re
 import time
-from typing import Awaitable, BinaryIO, Callable, Generic, TypeAlias, TypeVar, cast
+from uuid import uuid4
+from typing import Any, Awaitable, BinaryIO, Callable, Generic, TypeAlias, TypeVar, cast
 
 import httpx
 
@@ -49,6 +50,7 @@ from tamarind.errors import (
     CustomToolBuildFailedError,
     CustomToolBuildTimeoutError,
     CustomToolUploadError,
+    CustomToolNotDeployableError,
     StaleCustomToolError,
     TamarindError,
     ValidationError,
@@ -138,9 +140,20 @@ class _LogProgress:
 
 
 @dataclass(frozen=True)
+class CustomToolTestJob:
+    """Receipt for a submitted test run; use job_name with the existing status/wait commands."""
+
+    id: str
+    job_name: str
+    job_type: str
+    status: str
+    created_at: str
+
+
+@dataclass(frozen=True)
 class CustomTool:
     name: str
-    generation: str
+    _generation: str = field(repr=False)
     display_name: str
     description: str
     functions: tuple[str, ...]
@@ -171,7 +184,7 @@ class CustomTool:
     def _refresh(self, *, request_timeout: float | None) -> "CustomTool":
         return self._collection._current_tool(
             self.name,
-            self.generation,
+            self._generation,
             request_timeout=request_timeout,
         )
 
@@ -209,7 +222,7 @@ class CustomTool:
         return self._collection._update(self, body)
 
     def delete(self) -> None:
-        """Delete this exact tool generation and release its name for reuse."""
+        """Delete this tool and release its name for reuse."""
         self._collection._delete(self)
 
     def validate(self, folder: str | Path) -> ValidationReport:
@@ -239,6 +252,71 @@ class CustomTool:
             idempotency_key=idempotency_key,
             source_timeout=source_timeout,
         )
+
+    def test(
+        self,
+        settings: dict[str, Any],
+        *,
+        version: str,
+        name: str | None = None,
+    ) -> CustomToolTestJob:
+        """Submit a test of an exact opaque Version.id, without publishing it.
+
+        Returns immediately with the job receipt. Ordinary submissions are unaffected.
+        A design-batched tool returns the logical parent job. No automatic retries are made.
+        """
+        if not isinstance(settings, dict):
+            raise ValidationError("Test settings must be an object")
+        if name is not None and (not isinstance(name, str) or not name.strip()):
+            raise ValidationError("Test job name must be a non-empty string")
+        job_name = name if name is not None else f"{self.name}-test-{uuid4().hex[:12]}"
+        selected = self.get_version(version)
+        if selected.status != "Complete":
+            raise CustomToolNotDeployableError(
+                f"Version {selected.name} is {selected.status}; test a completed build."
+            )
+        try:
+            wire = self._collection._transport.submit_test_job(
+                name=self.name,
+                version_name=selected.name,
+                generation=self._generation,
+                job_name=job_name,
+                settings=settings,
+            )
+            fields = ("Id", "JobName", "Type", "JobStatus", "Created")
+            if not isinstance(wire, dict) or any(
+                not isinstance(wire.get(key), str) or not wire[key] for key in fields
+            ):
+                raise TamarindError("Test submission response did not match the jobs contract")
+            return CustomToolTestJob(
+                id=wire["Id"],
+                job_name=wire["JobName"],
+                job_type=wire["Type"],
+                status=wire["JobStatus"],
+                created_at=wire["Created"],
+            )
+        except TamarindError as exc:
+            status_code = getattr(exc, "status_code", None)
+            ambiguous = type(exc) is TamarindError or (
+                isinstance(status_code, int) and status_code >= 500
+            )
+            detail = dict(exc.detail) if isinstance(exc.detail, dict) else {}
+            if exc.detail is not None and not isinstance(exc.detail, dict):
+                detail["upstreamDetail"] = exc.detail
+            detail.update(
+                jobName=job_name,
+                toolName=self.name,
+                versionId=selected.id,
+                submitted=None if ambiguous else False,
+                outcomeMayBeAmbiguous=ambiguous,
+            )
+            exc.detail = detail
+            if ambiguous:
+                exc.message += (
+                    f" Query job {job_name!r} before retrying; submission may have succeeded."
+                )
+            raise
+
 
     def get_version(self, version_id: str) -> "Version":
         """Get one exact Version by its opaque ``id``."""
@@ -273,7 +351,7 @@ class Version:
     completed_at: str | None
     error: BuildError | None
     tool_name: str
-    tool_generation: str
+    _tool_generation: str = field(repr=False)
     _collection: "CustomTools" = field(repr=False, compare=False)
     _etag: str | None = field(default=None, repr=False, compare=False)
 
@@ -286,7 +364,7 @@ class Version:
             self.id,
             timeout=request_timeout,
         )
-        return _version_from_wire(self._collection, self.tool_name, self.tool_generation, wire)
+        return _version_from_wire(self._collection, self.tool_name, self._tool_generation, wire)
 
     async def _refresh_async(self, *, request_timeout: float | None) -> "Version":
         wire = await self._collection._transport.get_custom_tool_version_async(
@@ -294,7 +372,7 @@ class Version:
             self.id,
             timeout=request_timeout,
         )
-        return _version_from_wire(self._collection, self.tool_name, self.tool_generation, wire)
+        return _version_from_wire(self._collection, self.tool_name, self._tool_generation, wire)
 
     def logs(self, *, cursor: str | None = None) -> BuildLogPage:
         return self._logs(cursor=cursor, request_timeout=None)
@@ -319,8 +397,9 @@ class Version:
         )
         return _log_page_from_wire(wire)
 
-    def cancel(self) -> "Version":
-        return self._collection._cancel_version(self)
+    def cancel(self, *, if_unchanged: bool = False) -> "Version":
+        """Request cancellation; optionally require this snapshot's exact build state."""
+        return self._collection._cancel_version(self, if_unchanged=if_unchanged)
 
     def publish(self) -> CustomTool:
         return self._collection._publish_version(self)
@@ -459,9 +538,9 @@ class CustomTools:
         request_timeout: float | None = None,
     ) -> CustomTool:
         current = self._get(tool_name, request_timeout=request_timeout)
-        if current.generation != expected_generation:
+        if current._generation != expected_generation:
             raise StaleCustomToolError(
-                f"Custom Tool {tool_name!r} now refers to a different generation; "
+                f"Custom Tool {tool_name!r} was deleted and recreated; "
                 "fetch it again explicitly to select the replacement."
             )
         return current
@@ -469,7 +548,7 @@ class CustomTools:
     def _validator(self, tool: CustomTool) -> str:
         if tool._etag is not None:
             return tool._etag
-        current = self._current_tool(tool.name, tool.generation)
+        current = self._current_tool(tool.name, tool._generation)
         if current.updated_at != tool.updated_at:
             raise StaleCustomToolError(
                 f"Custom Tool {tool.name!r} changed since it was listed; "
@@ -499,8 +578,14 @@ class CustomTools:
         timeout, _ = _validate_monitor_options(timeout=source_timeout, interval=1.0)
         archive = build_source_tree_archive(tree, max_bytes=MAX_TOOL_SOURCE_BYTES)
         try:
+            validator = self._validator(tool)
             session = _upload_session_from_wire(
-                self._transport.create_custom_tool_upload(tool.name)
+                self._transport.create_custom_tool_upload(
+                    tool.name,
+                    # Admission owns keyed replay: its original Tool revision may already
+                    # be stale because that very request committed successfully.
+                    etag=validator if idempotency_key is None else None,
+                )
             )
             if archive.size > session.max_bytes:
                 raise CustomToolUploadError(
@@ -517,7 +602,7 @@ class CustomTools:
             )
             result = self._transport.build_custom_tool_version(
                 tool.name,
-                self._validator(tool),
+                validator,
                 cast(
                     PublicCreateVersionRequest,
                     {
@@ -530,7 +615,7 @@ class CustomTools:
             )
         finally:
             archive.close()
-        return _build_result_from_wire(self, tool.name, tool.generation, result)
+        return _build_result_from_wire(self, tool.name, tool._generation, result)
 
     def _versions(
         self,
@@ -550,12 +635,12 @@ class CustomTools:
         )
         self._current_tool(
             tool.name,
-            tool.generation,
+            tool._generation,
             request_timeout=request_timeout,
         )
         return Page(
             items=tuple(
-                _version_from_wire(self, tool.name, tool.generation, item) for item in wire["items"]
+                _version_from_wire(self, tool.name, tool._generation, item) for item in wire["items"]
             ),
             next_cursor=wire["nextCursor"],
         )
@@ -569,13 +654,13 @@ class CustomTools:
     ) -> Version:
         version = self._get_version(
             tool.name,
-            tool.generation,
+            tool._generation,
             version_id,
             request_timeout=request_timeout,
         )
         self._current_tool(
             tool.name,
-            tool.generation,
+            tool._generation,
             request_timeout=request_timeout,
         )
         return version
@@ -598,27 +683,23 @@ class CustomTools:
     def _version_validator(self, version: Version) -> str:
         if version._etag is not None:
             return version._etag
-        current = self._get_version(version.tool_name, version.tool_generation, version.id)
-        if current.id != version.id:
-            raise StaleCustomToolError(
-                f"Custom Tool Version {version.tool_name}/{version.name} changed identity; fetch it again."
-            )
-        if current._etag is None:
-            raise TamarindError("Custom Tools response did not include the required Version ETag")
-        return current._etag
+        raise TamarindError(
+            "Conditional cancellation requires an observed version state. "
+            "Assign version = version.refresh() and review it before cancelling."
+        )
 
-    def _cancel_version(self, version: Version) -> Version:
+    def _cancel_version(self, version: Version, *, if_unchanged: bool = False) -> Version:
         wire = self._transport.cancel_custom_tool_build(
             version.tool_name,
             version.id,
-            self._version_validator(version),
+            self._version_validator(version) if if_unchanged else "*",
         )
-        return _version_from_wire(self, version.tool_name, version.tool_generation, wire)
+        return _version_from_wire(self, version.tool_name, version._tool_generation, wire)
 
     def _publish_version(self, version: Version) -> CustomTool:
         tool = self._current_tool(
             version.tool_name,
-            version.tool_generation,
+            version._tool_generation,
         )
         wire = self._transport.publish_custom_tool_version(
             version.tool_name,
@@ -697,7 +778,7 @@ def _upload_archive(
 def _tool_from_wire(collection: CustomTools, wire: PublicCustomTool) -> CustomTool:
     return CustomTool(
         name=wire["name"],
-        generation=wire["generation"],
+        _generation=wire["generation"],
         display_name=wire["displayName"],
         description=wire["description"],
         functions=tuple(wire["functions"]),
@@ -743,7 +824,7 @@ def _version_from_wire(
         completed_at=wire["completedAt"],
         error=_build_error_from_wire(wire["error"]),
         tool_name=tool_name,
-        tool_generation=tool_generation,
+        _tool_generation=tool_generation,
         _etag=cast(str | None, wire.get("_etag")),
         _collection=collection,
     )
