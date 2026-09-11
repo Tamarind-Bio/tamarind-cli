@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import sys
+
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -316,7 +319,8 @@ def test_local_validation_uses_stable_validation_exit_code(tmp_path):
     assert payload["errors"][0]["code"] == "required_file_missing"
 
 
-def test_test_command_uses_sdk_with_settings_and_version(monkeypatch, tmp_path):
+@pytest.mark.parametrize("envelope_type", ["fold-local", " Fold-Local "])
+def test_test_command_uses_sdk_with_settings_and_version(monkeypatch, tmp_path, envelope_type):
     from tamarind.custom_tools import CustomToolTestJob
 
     sdk = _install_sdk(monkeypatch)
@@ -329,7 +333,7 @@ def test_test_command_uses_sdk_with_settings_and_version(monkeypatch, tmp_path):
     sdk.custom_tools.tool.test = submit_test
     source = tmp_path / "inputs.yaml"
     source.write_text(
-        "settings:\n  sequence: AAA\n  numDesigns: 1\njobName: smoke\ntype: fold-local\n"
+        f"settings:\n  sequence: AAA\n  numDesigns: 1\njobName: smoke\ntype: '{envelope_type}'\n"
     )
     result = runner.invoke(
         app,
@@ -358,25 +362,30 @@ def test_test_command_uses_sdk_with_settings_and_version(monkeypatch, tmp_path):
     assert sdk.custom_tools.get_names == ["fold-local"]
 
 
-def test_test_command_requires_version_and_rejects_conflicting_tool(monkeypatch, tmp_path):
+@pytest.mark.parametrize("envelope_type", ["wrong", 1, True])
+def test_test_command_requires_version_and_rejects_conflicting_tool(
+    monkeypatch, tmp_path, capsys, envelope_type
+):
+    from tamarind.cli.main import run
+
     sdk = _install_sdk(monkeypatch)
     missing = runner.invoke(app, ["--json", "custom-tools", "test", "fold-local"], env=ENV)
     assert missing.exit_code == 2
     source = tmp_path / "inputs.json"
-    source.write_text(json.dumps({"type": "wrong", "settings": {}}))
-    wrong = runner.invoke(
-        app,
-        [
-            "--json",
-            "custom-tools",
-            "test",
-            "fold-local",
-            "--version",
-            VERSION_ID,
-            "--input",
-            str(source),
-        ],
-        env=ENV,
-    )
-    assert wrong.exit_code == 5
+    source.write_text(json.dumps({"type": envelope_type, "settings": {}}))
+    for key, value in ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(sys, "argv", [
+        "tamarind", "--json", "custom-tools", "test", "fold-local",
+        "--version", VERSION_ID, "--input", str(source),
+    ])
+    with pytest.raises(SystemExit) as raised:
+        run()
+    assert raised.value.code == 5
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    error = json.loads(captured.err)["error"]
+    assert error["type"] == "ValidationError"
+    assert error["exitCode"] == 5
+    assert "Tool mismatch" in error["message"]
     assert sdk.custom_tools.get_names == []

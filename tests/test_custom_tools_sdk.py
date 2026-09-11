@@ -1201,6 +1201,10 @@ def test_test_submission_errors_preserve_recovery_name_without_retry(failure):
     assert body["jobName"].startswith("example-test-")
     assert raised.value.detail["jobName"] == body["jobName"]
     assert raised.value.detail["outcomeMayBeAmbiguous"] is (failure != "rejected")
+    assert str(raised.value) == raised.value.message
+    if failure != "rejected":
+        assert body["jobName"] in str(raised.value)
+        assert "before retrying" in str(raised.value)
 
 
 @respx.mock

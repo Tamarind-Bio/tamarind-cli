@@ -160,9 +160,11 @@ tamarind wait esmfold-smoke --timeout 600
 Or use the SDK:
 
 ```python
+from tamarind import Tamarind
+
 with Tamarind() as client:
     tool = client.custom_tools.get("my-esmfold")
-    job = tool.test({"sequence": "MKT..."}, version=version.id, name="esmfold-smoke")
+    job = tool.test({"sequence": "MKT..."}, version="<opaque-version-id>", name="esmfold-smoke")
     print(job.job_name, job.id, job.status)
 ```
 
