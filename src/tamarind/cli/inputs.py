@@ -90,10 +90,13 @@ def effective_job_type(cli_tool: str, file_type: object | None) -> str:
     tool you named. Comparison ignores surrounding whitespace and case.
 
     ``file_type`` comes straight from YAML, so it may parse as a non-string
-    (``type: 1`` → int, ``type: true`` → bool). Compare it as text so such
-    malformed input fails with the normal validation error instead of crashing.
+    (``type: 1`` → int, ``type: true`` → bool). Only None means absent;
+    every supplied value must be a string that agrees with the selected tool.
     """
-    if file_type and str(file_type).strip().lower() != cli_tool.strip().lower():
+    if file_type is not None and (
+        not isinstance(file_type, str)
+        or file_type.strip().lower() != cli_tool.strip().lower()
+    ):
         raise ValidationError(
             f"Tool mismatch: the command targets '{cli_tool}' but the input "
             f"file's type is '{file_type}'. Remove the file's 'type' field, or "
