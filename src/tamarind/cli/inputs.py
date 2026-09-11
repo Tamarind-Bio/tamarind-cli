@@ -105,6 +105,14 @@ def effective_job_type(cli_tool: str, file_type: object | None) -> str:
     return cli_tool
 
 
+def effective_job_name(cli_name: str | None, file_name: object | None) -> str | None:
+    """Choose an explicit name without turning malformed values into generated names."""
+    name = cli_name if cli_name is not None else file_name
+    if name is not None and (not isinstance(name, str) or not name.strip()):
+        raise ValidationError("Job name must be a non-empty string.")
+    return name
+
+
 def resolve_job_input(
     input_source: str | None,
     set_pairs: list[str] | None,

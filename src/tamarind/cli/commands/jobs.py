@@ -18,7 +18,7 @@ from ... import rest
 from ...errors import ExitCode, NotFoundError, TamarindError, ValidationError
 from .. import output
 from ..guidance import rewrite_validation_guidance
-from ..inputs import effective_job_type, resolve_job_input
+from ..inputs import effective_job_name, effective_job_type, resolve_job_input
 
 
 def _gen_name(tool: str) -> str:
@@ -251,7 +251,7 @@ def register(app: typer.Typer) -> None:
         state = ctx.obj
         job = resolve_job_input(input, set_)
         job_type = effective_job_type(tool, job.job_type)
-        job_name = name or job.job_name or _gen_name(tool)
+        job_name = effective_job_name(name, job.job_name) or _gen_name(tool)
         with state.rest_client() as client:
             result = _rewrite_validation_guidance(
                 rest.validate_job(
@@ -284,7 +284,7 @@ def register(app: typer.Typer) -> None:
         state = ctx.obj
         job = resolve_job_input(input, set_)
         job_type = effective_job_type(tool, job.job_type)
-        job_name = name or job.job_name or _gen_name(tool)
+        job_name = effective_job_name(name, job.job_name) or _gen_name(tool)
         if wait:
             # A local wait-option error must never occur after creating a
             # remote, potentially billable job.
@@ -389,14 +389,14 @@ def register(app: typer.Typer) -> None:
         from ..inputs import _load_text, _parse_document  # internal reuse
 
         doc = _parse_document(_load_text(input))
-        batch_name = name or _gen_name(tool)
+        batch_name = effective_job_name(name, None) or _gen_name(tool)
         job_type = tool
         job_names = None
         if isinstance(doc, list):
             settings_list = doc
         elif isinstance(doc, dict) and isinstance(doc.get("settings"), list):
             settings_list = doc["settings"]
-            batch_name = name or doc.get("batchName") or batch_name
+            batch_name = effective_job_name(name, doc.get("batchName")) or batch_name
             job_type = effective_job_type(tool, doc.get("type"))
             job_names = doc.get("jobNames")
         else:

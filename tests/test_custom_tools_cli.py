@@ -444,3 +444,40 @@ def test_malformed_envelope_type_rejected_by_every_command(
     assert error["type"] == "ValidationError"
     assert "Tool mismatch" in error["message"]
     assert sdk.custom_tools.get_names == []
+
+
+@pytest.mark.parametrize("invalid_name", [False, 0, [], {}, "", " ", 1])
+@pytest.mark.parametrize("command", [
+    ["validate", "fold-local"],
+    ["submit", "fold-local"],
+    ["batch", "fold-local"],
+    ["custom-tools", "test", "fold-local", "--version", VERSION_ID],
+])
+def test_explicit_invalid_names_never_generate_a_replacement(
+    monkeypatch, tmp_path, capsys, command, invalid_name
+):
+    from tamarind.cli.main import run
+
+    sdk = _install_sdk(monkeypatch)
+    source = tmp_path / "input.json"
+    is_batch = command[0] == "batch"
+    source.write_text(json.dumps({
+        "type": "fold-local", "settings": [{}] if is_batch else {},
+        "batchName" if is_batch else "jobName": invalid_name,
+    }))
+    for key, value in ENV.items():
+        monkeypatch.setenv(key, value)
+    argv = ["tamarind", "--json", *command, "--input", str(source)]
+    # Empty/whitespace strings must also fail as explicit CLI options.
+    variants = [argv, [*argv, "--name", invalid_name]] if isinstance(invalid_name, str) else [argv]
+    for args in variants:
+        monkeypatch.setattr(sys, "argv", args)
+        with pytest.raises(SystemExit) as raised:
+            run()
+        assert raised.value.code == 5
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        error = json.loads(captured.err)["error"]
+        assert error["type"] == "ValidationError"
+        assert error["message"] == "Job name must be a non-empty string."
+    assert sdk.custom_tools.get_names == []

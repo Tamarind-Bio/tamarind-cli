@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from tamarind.cli.inputs import resolve_job_input
+from tamarind.cli.inputs import effective_job_name, resolve_job_input
 from tamarind.errors import ExitCode, ValidationError
 
 
@@ -92,3 +92,12 @@ def test_envelope_requires_mapping_settings(tmp_path, monkeypatch, settings, sou
         input_source = str(path)
     with pytest.raises(ValidationError, match="Job settings must be a mapping"):
         resolve_job_input(input_source, ["sequence=AAA"])
+
+
+def test_explicit_name_precedence_and_absence():
+    assert effective_job_name(None, None) is None
+    assert effective_job_name(None, "file-name") == "file-name"
+    assert effective_job_name("cli-name", "file-name") == "cli-name"
+    assert effective_job_name("cli-name", False) == "cli-name"
+    with pytest.raises(ValidationError):
+        effective_job_name("", "file-name")
