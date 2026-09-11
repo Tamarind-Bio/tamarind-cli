@@ -389,3 +389,28 @@ def test_test_command_requires_version_and_rejects_conflicting_tool(
     assert error["exitCode"] == 5
     assert "Tool mismatch" in error["message"]
     assert sdk.custom_tools.get_names == []
+
+
+@pytest.mark.parametrize("command", [
+    ["validate", "fold-local"],
+    ["submit", "fold-local"],
+    ["custom-tools", "test", "fold-local", "--version", VERSION_ID],
+])
+def test_invalid_settings_use_console_validation_boundary(monkeypatch, tmp_path, capsys, command):
+    from tamarind.cli.main import run
+
+    sdk = _install_sdk(monkeypatch)
+    source = tmp_path / "input.json"
+    source.write_text(json.dumps({"type": "fold-local", "settings": 1}))
+    for key, value in ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(sys, "argv", ["tamarind", "--json", *command, "--input", str(source)])
+    with pytest.raises(SystemExit) as raised:
+        run()
+    assert raised.value.code == 5
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    error = json.loads(captured.err)["error"]
+    assert error["type"] == "ValidationError"
+    assert error["message"] == "Job settings must be a mapping (an object)."
+    assert sdk.custom_tools.get_names == []

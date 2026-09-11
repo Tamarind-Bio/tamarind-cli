@@ -121,11 +121,12 @@ def resolve_job_input(
                 "{jobName, type, settings} object)."
             )
         if _looks_like_envelope(doc):
-            settings = dict(doc.get("settings") or {})
             job_type = doc.get("type")
             job_name = doc.get("jobName")
-        else:
-            settings = dict(doc)
+            doc = doc["settings"]
+        if not isinstance(doc, dict):
+            raise ValidationError("Job settings must be a mapping (an object).")
+        settings = dict(doc)
 
     if set_pairs:
         _apply_sets(settings, set_pairs)
