@@ -22,6 +22,12 @@ _TRUE = "true"
 # don't create a job.
 _JOB_SOURCE = "CLI"
 
+# The HTTP 400 ``code`` values that mean "right job, wrong endpoint". The
+# single-job and batch submit endpoints answer the first for a finetune tool;
+# /finetune answers the second for an ordinary tool.
+USE_FINETUNE_ENDPOINT = "use_finetune_endpoint"
+NOT_A_FINETUNE_TOOL = "not_a_finetune_tool"
+
 
 def submit_job(
     client: HTTPClient, *, job_name: str, job_type: str, settings: dict[str, Any]
@@ -36,6 +42,33 @@ def submit_job(
             "jobSource": _JOB_SOURCE,
         },
     )
+
+
+def finetune_job(
+    client: HTTPClient,
+    *,
+    job_name: str,
+    model: str,
+    settings: dict[str, Any],
+    max_runtime_seconds: int | None = None,
+) -> Any:
+    """POST /finetune — submit a single finetuning job.
+
+    Same contract as /submit-job, except the tool field is ``model``. Body:
+    {jobName, model, settings, jobSource[, maxRuntimeSeconds]}. There is no batch
+    form. /submit-job and /submit-batch may refuse a finetune tool with a 400
+    carrying ``code: "use_finetune_endpoint"``; /finetune refuses an ordinary tool
+    with ``code: "not_a_finetune_tool"``.
+    """
+    body: dict[str, Any] = {
+        "jobName": job_name,
+        "model": model,
+        "settings": settings,
+        "jobSource": _JOB_SOURCE,
+    }
+    if max_runtime_seconds is not None:
+        body["maxRuntimeSeconds"] = max_runtime_seconds
+    return client.post_json("finetune", json=body)
 
 
 def validate_job(
