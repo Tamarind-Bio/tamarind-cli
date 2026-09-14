@@ -80,13 +80,15 @@ tamarind schema chemprop-finetune
 tamarind finetune chemprop-finetune --input train.yaml --name solubility-model
 ```
 
-Finetune tools cannot be batched. If `submit` or `batch` is given a finetune tool
-and the server refuses it with `code: "use_finetune_endpoint"`, the CLI sends it
-to `/finetune` instead: `submit` resubmits once, and `batch` submits each item as
-its own finetune job, stopping at the first rejection (the error detail lists
-`submittedJobs` and `notSubmittedJobs`). The same applies in reverse when
-`finetune` is given an ordinary tool. Submission output includes the `endpoint`
-that accepted the job.
+To train several models in one request, use `batch` with the finetune tool.
+The CLI follows the server's routing, resending a request once when the server
+answers that it belongs on the other endpoint: `submit` and `batch` move a
+finetune tool to `/finetune` and `/finetune-batch` on `code:
+"use_finetune_endpoint"`, and `finetune` moves an ordinary tool to `/submit-job`
+on `code: "not_a_finetune_tool"` — or on a 404 from a server that does not have
+`/finetune` yet. A batch is always sent as one request. Submission output
+includes the `endpoint` that accepted it. An input file may name the tool as
+`type` or `model`; either must match the command's tool.
 
 Set individual fields inline instead of a file:
 

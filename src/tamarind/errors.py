@@ -34,6 +34,11 @@ class TamarindError(Exception):
     """Base class for all client errors. Carries a stable exit code."""
 
     exit_code: int = ExitCode.ERROR
+    # The HTTP status of the API response this error was mapped from; None for an
+    # error raised without one (network failure, local validation). The subclass
+    # alone cannot say it: a 400 whose message reads "not found" maps to
+    # NotFoundError just like a real 404.
+    http_status: int | None = None
 
     def __init__(self, message: str, *, detail: object | None = None):
         super().__init__(message)

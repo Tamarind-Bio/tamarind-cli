@@ -101,7 +101,7 @@ class HTTPClient:
 
         if resp.is_success:
             return resp
-        raise _map_error(resp, request_path=path)
+        raise _map_error_with_status(resp, request_path=path)
 
     async def request_async(
         self,
@@ -144,7 +144,7 @@ class HTTPClient:
 
         if resp.is_success:
             return resp
-        raise _map_error(resp, request_path=path)
+        raise _map_error_with_status(resp, request_path=path)
 
     def get_json(
         self,
@@ -200,6 +200,12 @@ def _extract_message(resp: httpx.Response, body: object | None, *, is_json: bool
     if isinstance(body, str):
         return body
     return resp.reason_phrase or f"HTTP {resp.status_code}"
+
+
+def _map_error_with_status(resp: httpx.Response, *, request_path: str) -> TamarindError:
+    error = _map_error(resp, request_path=request_path)
+    error.http_status = resp.status_code
+    return error
 
 
 def _map_error(resp: httpx.Response, *, request_path: str) -> TamarindError:

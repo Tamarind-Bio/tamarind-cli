@@ -4,7 +4,8 @@ A job's ``settings`` can come from:
 
 - ``--input job.yaml`` (YAML or JSON, by content) — the file holds the
   ``settings`` object (the same shape as a schema's ``exampleJob.settings``),
-  or a full ``{jobName, type, settings}`` envelope.
+  or a full ``{jobName, type, settings}`` envelope (``model`` instead of
+  ``type`` is the /finetune spelling of the same field).
 - ``--input -`` to read that document from stdin.
 - ``@yaml://./job.yaml`` / ``@json://./job.json`` reference syntax, matching the
   convention other agent CLIs use.
@@ -30,6 +31,8 @@ class JobInput:
     settings: dict[str, Any]
     job_type: str | None = None
     job_name: str | None = None
+    # The envelope's ``model`` — the tool field as /finetune spells it.
+    model: str | None = None
 
 
 def _load_text(source: str) -> str:
@@ -77,10 +80,10 @@ def _apply_sets(settings: dict[str, Any], pairs: list[str]) -> None:
 
 
 def _looks_like_envelope(doc: dict[str, Any]) -> bool:
-    return "settings" in doc and ("type" in doc or "jobName" in doc)
+    return "settings" in doc and ("type" in doc or "model" in doc or "jobName" in doc)
 
 
-def effective_job_type(cli_tool: str, file_type: object | None) -> str:
+def effective_job_type(cli_tool: str, file_type: object | None, *, field: str = "type") -> str:
     """Reconcile the explicit ``<tool>`` argument with a ``type`` in the input file.
 
     The command's ``<tool>`` argument is authoritative. A ``type`` in the input
@@ -92,6 +95,9 @@ def effective_job_type(cli_tool: str, file_type: object | None) -> str:
     ``file_type`` comes straight from YAML, so it may parse as a non-string
     (``type: 1`` → int, ``type: true`` → bool). Only None means absent;
     every supplied value must be a string that agrees with the selected tool.
+
+    ``field`` names the envelope field being checked in the error: ``type``, or
+    ``model`` (the /finetune spelling of the same field).
     """
     if file_type is not None and (
         not isinstance(file_type, str)
@@ -99,10 +105,17 @@ def effective_job_type(cli_tool: str, file_type: object | None) -> str:
     ):
         raise ValidationError(
             f"Tool mismatch: the command targets '{cli_tool}' but the input "
-            f"file's type is '{file_type}'. Remove the file's 'type' field, or "
+            f"file's {field} is '{file_type}'. Remove the file's '{field}' field, or "
             f"re-run the command with '{file_type}' as the tool."
         )
     return cli_tool
+
+
+def effective_job_tool(cli_tool: str, job: JobInput) -> str:
+    """:func:`effective_job_type` for both spellings of the envelope's tool field:
+    a ``type`` or a ``model`` in the input file must each agree with ``cli_tool``."""
+    effective_job_type(cli_tool, job.job_type)
+    return effective_job_type(cli_tool, job.model, field="model")
 
 
 def effective_job_name(cli_name: str | None, file_name: object | None) -> str | None:
@@ -121,6 +134,7 @@ def resolve_job_input(
     settings: dict[str, Any] = {}
     job_type: str | None = None
     job_name: str | None = None
+    model: str | None = None
 
     if input_source:
         doc = _parse_document(_load_text(input_source))
@@ -129,10 +143,11 @@ def resolve_job_input(
         if not isinstance(doc, dict):
             raise ValidationError(
                 "Input must be a mapping (the job settings, or a "
-                "{jobName, type, settings} object)."
+                "{jobName, type, settings} or {jobName, model, settings} object)."
             )
         if _looks_like_envelope(doc):
             job_type = doc.get("type")
+            model = doc.get("model")
             job_name = doc.get("jobName")
             doc = doc["settings"]
         if not isinstance(doc, dict):
@@ -142,7 +157,7 @@ def resolve_job_input(
     if set_pairs:
         _apply_sets(settings, set_pairs)
 
-    return JobInput(settings=settings, job_type=job_type, job_name=job_name)
+    return JobInput(settings=settings, job_type=job_type, job_name=job_name, model=model)
 
 
 def dump_settings(settings: dict[str, Any]) -> str:

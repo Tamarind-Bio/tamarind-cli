@@ -18,7 +18,7 @@ from ... import rest
 from ...errors import ExitCode, NotFoundError, TamarindError, ValidationError
 from .. import output
 from ..guidance import rewrite_validation_guidance
-from ..inputs import effective_job_name, effective_job_type, resolve_job_input
+from ..inputs import effective_job_name, effective_job_tool, effective_job_type, resolve_job_input
 
 
 def _gen_name(tool: str) -> str:
@@ -209,120 +209,93 @@ def _rewrite_validation_guidance(value: object) -> object:
 
 
 _SUBMIT_JOB_ENDPOINT = "/submit-job"
+_SUBMIT_BATCH_ENDPOINT = "/submit-batch"
 _FINETUNE_ENDPOINT = "/finetune"
-
-# A finetune "batch" becomes one /finetune request per job, in sequence. Each is a
-# model-training run, so a real request is a handful; the cap stops a mistaken
-# settings file with thousands of rows from becoming thousands of submissions.
-_MAX_FINETUNE_SPLIT = 100
+_FINETUNE_BATCH_ENDPOINT = "/finetune-batch"
 
 
 def _refusal_code(exc: TamarindError) -> str | None:
-    """The JSON ``code`` a rejected request carried, if any."""
+    """The JSON ``code`` of an HTTP 400 refusal, or None for anything else."""
+    if exc.http_status != 400:
+        return None
     detail = exc.detail
     code = detail.get("code") if isinstance(detail, dict) else None
     return code if isinstance(code, str) else None
 
 
-def _submit_single(client, state, *, endpoint: str, job_name: str, tool: str, settings: dict):
-    """Submit one job to ``endpoint`` and return ``(response, endpoint_used)``.
+def _wrong_endpoint_for_ordinary_endpoint(exc: TamarindError) -> bool:
+    """/submit-job and /submit-batch: only the exact finetune refusal moves a job."""
+    return _refusal_code(exc) == rest.USE_FINETUNE_ENDPOINT
 
-    Finetune tools submit through POST /finetune (tool field ``model``); every other
-    tool through POST /submit-job (``type``). The CLI does not classify tools
-    itself — the server's refusal is the authority — so a job sent to the wrong one
-    and refused with the matching ``code`` is resubmitted to the other endpoint
-    exactly ONCE. Both refusals are 400s issued before a job exists, so the resend
-    cannot duplicate one; a second refusal propagates unchanged.
+
+def _wrong_endpoint_for_finetune_endpoint(exc: TamarindError) -> bool:
+    """/finetune and /finetune-batch: the exact ordinary-tool refusal, or a 404 —
+    a server that has not shipped the route yet, where the old route still takes
+    finetune tools. The error came from the exact route that was posted."""
+    return exc.http_status == 404 or _refusal_code(exc) == rest.NOT_A_FINETUNE_TOOL
+
+
+# endpoint -> (where a refused request is resent, the refusal test for it)
+_ENDPOINT_REROUTES = {
+    _SUBMIT_JOB_ENDPOINT: (_FINETUNE_ENDPOINT, _wrong_endpoint_for_ordinary_endpoint),
+    _SUBMIT_BATCH_ENDPOINT: (_FINETUNE_BATCH_ENDPOINT, _wrong_endpoint_for_ordinary_endpoint),
+    _FINETUNE_ENDPOINT: (_SUBMIT_JOB_ENDPOINT, _wrong_endpoint_for_finetune_endpoint),
+    _FINETUNE_BATCH_ENDPOINT: (_SUBMIT_BATCH_ENDPOINT, _wrong_endpoint_for_finetune_endpoint),
+}
+
+
+def _post_routed(state, *, endpoint: str, tool: str, post):
+    """``post(endpoint)`` and return ``(response, endpoint_used)``.
+
+    Finetune tools submit through POST /finetune and /finetune-batch (tool field
+    ``model``); every other tool through POST /submit-job and /submit-batch
+    (``type``). The CLI does not classify tools itself — the server's answer is the
+    authority — so a request refused with the matching ``code`` (or, from a
+    finetune route, a 404) is resent to the paired endpoint exactly ONCE. Those
+    answers come before a job exists, so the resend cannot duplicate one; any other
+    error, or a second refusal, propagates unchanged.
     """
+    other, should_resend = _ENDPOINT_REROUTES[endpoint]
+    try:
+        return post(endpoint), endpoint
+    except TamarindError as exc:
+        if not should_resend(exc):
+            raise
+        reason = "does not exist on this server" if exc.http_status == 404 else "was refused"
+    output.info(f"  {tool} on {endpoint} {reason}; sending it to {other}…", state.output)
+    return post(other), other
+
+
+def _submit_single(client, state, *, endpoint: str, job_name: str, tool: str, settings: dict):
+    """One job to /submit-job or /finetune, following the server's routing once."""
 
     def post(target: str):
         if target == _FINETUNE_ENDPOINT:
             return rest.finetune_job(client, job_name=job_name, model=tool, settings=settings)
         return rest.submit_job(client, job_name=job_name, job_type=tool, settings=settings)
 
-    if endpoint == _SUBMIT_JOB_ENDPOINT:
-        other, redirect_code = _FINETUNE_ENDPOINT, rest.USE_FINETUNE_ENDPOINT
-    else:
-        other, redirect_code = _SUBMIT_JOB_ENDPOINT, rest.NOT_A_FINETUNE_TOOL
-    try:
-        return post(endpoint), endpoint
-    except TamarindError as exc:
-        if _refusal_code(exc) != redirect_code:
-            raise
-    output.info(f"  {tool} belongs on {other}; resubmitting there…", state.output)
-    return post(other), other
+    return _post_routed(state, endpoint=endpoint, tool=tool, post=post)
 
 
-def _effective_batch_job_names(batch_name: str, job_names: list | None, count: int) -> list[str]:
-    """The child names /submit-batch would have created: a supplied name gains a
-    ``<batchName>-`` prefix unless it already starts with the batch name; with no
-    names the server uses ``<batchName>-<index>`` counting from 0."""
-    if job_names is None:
-        return [f"{batch_name}-{index}" for index in range(count)]
-    return [name if name.startswith(batch_name) else f"{batch_name}-{name}" for name in job_names]
+def _submit_batch(
+    client, state, *, endpoint: str, batch_name: str, tool: str, settings_list: list,
+    job_names: list | None, max_runtime: int | None,
+):
+    """One batch request to /submit-batch or /finetune-batch, following the server's
+    routing once. The batch is always ONE request — never split into jobs."""
 
-
-def _submit_finetune_batch_individually(
-    client, state, *, batch_name: str, tool: str, settings_list: list, job_names: list | None,
-    max_runtime: int | None,
-) -> dict:
-    """``batch``'s answer to /submit-batch refusing a finetune tool.
-
-    There is no batch finetune endpoint, so each job goes to POST /finetune on its
-    own, under the name the batch would have given it. Stops at the first rejection:
-    a policy refusal would otherwise repeat once per job, and the error detail lists
-    exactly which jobs went in so a retry can skip them.
-    """
-    names = _effective_batch_job_names(batch_name, job_names, len(settings_list))
-    if len(settings_list) > _MAX_FINETUNE_SPLIT:
-        raise ValidationError(
-            f"{tool} is a finetune tool, which cannot be batched; {len(settings_list)} jobs is "
-            f"more than the {_MAX_FINETUNE_SPLIT} the CLI will submit one by one. "
-            "Nothing was submitted. Use fewer items, or `tamarind finetune` per model.",
-            detail={"batchName": batch_name, "endpoint": _FINETUNE_ENDPOINT, "submitted": False},
+    def post(target: str):
+        if target == _FINETUNE_BATCH_ENDPOINT:
+            return rest.finetune_batch(
+                client, batch_name=batch_name, model=tool, settings=settings_list,
+                job_names=job_names, max_runtime_seconds=max_runtime,
+            )
+        return rest.submit_batch(
+            client, batch_name=batch_name, job_type=tool, settings=settings_list,
+            job_names=job_names, max_runtime_seconds=max_runtime,
         )
-    output.info(
-        f"{tool} is a finetune tool and cannot be batched; submitting {len(names)} "
-        "jobs individually…",
-        state.output,
-    )
-    responses = []
-    for index, (settings, job_name) in enumerate(zip(settings_list, names)):
-        try:
-            responses.append(
-                rest.finetune_job(
-                    client,
-                    job_name=job_name,
-                    model=tool,
-                    settings=settings,
-                    max_runtime_seconds=max_runtime,
-                )
-            )
-        except TamarindError as exc:
-            status_code = getattr(exc, "status_code", None)
-            ambiguous = type(exc) is TamarindError or (
-                isinstance(status_code, int) and status_code >= 500
-            )
-            raise _attach_error_context(
-                exc,
-                batchName=batch_name,
-                phase="finetune",
-                endpoint=_FINETUNE_ENDPOINT,
-                failedJob=job_name,
-                submittedJobs=names[:index],
-                notSubmittedJobs=names[index + 1:] if ambiguous else names[index:],
-                submitted=None if ambiguous else bool(index),
-                outcomeMayBeAmbiguous=ambiguous,
-                recoveryCommand=f"tamarind --json status {job_name}",
-            )
-    return {
-        "batchName": batch_name,
-        "type": tool,
-        "count": len(settings_list),
-        "endpoint": _FINETUNE_ENDPOINT,
-        "jobNames": names,
-        "submit": responses,
-    }
+
+    return _post_routed(state, endpoint=endpoint, tool=tool, post=post)
 
 
 def _submit_command(
@@ -342,7 +315,7 @@ def _submit_command(
     """Shared body of ``submit`` (POST /submit-job) and ``finetune`` (POST /finetune)."""
     state = ctx.obj
     job = resolve_job_input(input, set_)
-    job_type = effective_job_type(tool, job.job_type)
+    job_type = effective_job_tool(tool, job)
     job_name = effective_job_name(name, job.job_name) or _gen_name(tool)
     if wait:
         # A local wait-option error must never occur after creating a
@@ -484,7 +457,7 @@ def register(app: typer.Typer) -> None:
         """Validate a job's settings without submitting (catches errors early)."""
         state = ctx.obj
         job = resolve_job_input(input, set_)
-        job_type = effective_job_type(tool, job.job_type)
+        job_type = effective_job_tool(tool, job)
         job_name = effective_job_name(name, job.job_name) or _gen_name(tool)
         with state.rest_client() as client:
             result = _rewrite_validation_guidance(
@@ -516,8 +489,9 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Submit a single job. Validates first unless --skip-validate.
 
-        Finetune tools train a model and use `tamarind finetune MODEL` (POST /finetune);
-        if one is submitted here and the server refuses it, it is resubmitted there once.
+        Prefer `tamarind finetune MODEL` (POST /finetune) to train a model. A finetune
+        tool submitted here still goes through: if the server answers that it belongs
+        on /finetune, it is resent there once.
         """
         _submit_command(
             ctx,
@@ -548,9 +522,9 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Train (finetune) a model: submit one finetuning job to POST /finetune.
 
-        Same inputs as `submit`. There is no batch form; `batch` with a finetune tool
-        submits each item individually. If MODEL is not a finetune tool and the server
-        refuses it, it is resubmitted to /submit-job once.
+        Same inputs as `submit`. To train several models in one request, use `batch`
+        with the finetune tool. If MODEL is not a finetune tool, or the server has no
+        /finetune yet, the job is resent to /submit-job once.
         """
         _submit_command(
             ctx,
@@ -581,8 +555,8 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Submit many jobs as one batch (preferred over looping submit).
 
-        Finetune tools cannot be batched: if the server refuses the batch for that
-        reason, each item is submitted individually to POST /finetune.
+        A finetune tool batch goes to POST /finetune-batch: if the server answers that
+        the batch belongs there, the same batch is resent there once.
         """
         state = ctx.obj
         from ..inputs import _load_text, _parse_document  # internal reuse
@@ -597,6 +571,7 @@ def register(app: typer.Typer) -> None:
             settings_list = doc["settings"]
             batch_name = effective_job_name(name, doc.get("batchName")) or batch_name
             job_type = effective_job_type(tool, doc.get("type"))
+            effective_job_type(tool, doc.get("model"), field="model")
             job_names = doc.get("jobNames")
         else:
             raise TamarindError("Batch --input must be a list of settings or a {settings:[...]} object.")
@@ -658,63 +633,40 @@ def register(app: typer.Typer) -> None:
                             f"{validation_error}",
                             detail={"index": index, "jobName": validation_name, "validation": validation},
                         )
-            finetune_split = None
             try:
-                resp = rest.submit_batch(
-                    client,
-                    batch_name=batch_name,
-                    job_type=job_type,
-                    settings=settings_list,
-                    job_names=job_names,
-                    max_runtime_seconds=max_runtime,
-                )
-            except TamarindError as exc:
-                if _refusal_code(exc) != rest.USE_FINETUNE_ENDPOINT:
-                    status_code = getattr(exc, "status_code", None)
-                    ambiguous = type(exc) is TamarindError or (
-                        isinstance(status_code, int) and status_code >= 500
-                    )
-                    if ambiguous:
-                        exc.message = (
-                            f"{exc.message} Batch submission outcome may be ambiguous; "
-                            f"query batch '{batch_name}' before retrying."
-                        )
-                    raise _attach_error_context(
-                        exc,
-                        batchName=batch_name,
-                        phase="submit-batch",
-                        submitted=None if ambiguous else False,
-                        outcomeMayBeAmbiguous=ambiguous,
-                        recoveryCommand=f"tamarind --json status {batch_name}",
-                    )
-                # Refused only because the tool is a finetune tool: nothing was
-                # created, and there is no batch finetune endpoint.
-                finetune_split = True
-            if finetune_split:
-                result = _submit_finetune_batch_individually(
+                resp, endpoint_used = _submit_batch(
                     client,
                     state,
+                    endpoint=_SUBMIT_BATCH_ENDPOINT,
                     batch_name=batch_name,
                     tool=job_type,
                     settings_list=settings_list,
                     job_names=job_names,
                     max_runtime=max_runtime,
                 )
-        if finetune_split:
-            output.emit(
-                _sanitize_job_output(result),
-                state.output,
-                human=(
-                    f"submitted {len(result['jobNames'])} {job_type} finetune jobs "
-                    "individually (finetune tools cannot be batched)"
-                ),
-            )
-            return
+            except TamarindError as exc:
+                status_code = getattr(exc, "status_code", None)
+                ambiguous = type(exc) is TamarindError or (
+                    isinstance(status_code, int) and status_code >= 500
+                )
+                if ambiguous:
+                    exc.message = (
+                        f"{exc.message} Batch submission outcome may be ambiguous; "
+                        f"query batch '{batch_name}' before retrying."
+                    )
+                raise _attach_error_context(
+                    exc,
+                    batchName=batch_name,
+                    phase="submit-batch",
+                    submitted=None if ambiguous else False,
+                    outcomeMayBeAmbiguous=ambiguous,
+                    recoveryCommand=f"tamarind --json status {batch_name}",
+                )
         result = {
             "batchName": batch_name,
             "type": job_type,
             "count": len(settings_list),
-            "endpoint": "/submit-batch",
+            "endpoint": endpoint_used,
             "submit": resp,
         }
         output.emit(
