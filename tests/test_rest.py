@@ -49,6 +49,28 @@ def test_submit_job_body():
 
 
 @respx.mock
+def test_finetune_job_body():
+    # /finetune is /submit-job for finetune tools: the tool goes in `model`, never `type`.
+    route = respx.post(f"{BASE}finetune").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    rest.finetune_job(
+        client(), job_name="m1", model="chemprop-finetune", settings={"csvFile": "a.csv"}
+    )
+    rest.finetune_job(
+        client(), job_name="m2", model="chemprop-finetune", settings={}, max_runtime_seconds=60
+    )
+    first, second = (json.loads(call.request.content) for call in route.calls)
+    assert first == {
+        "jobName": "m1",
+        "model": "chemprop-finetune",
+        "settings": {"csvFile": "a.csv"},
+        "jobSource": "CLI",
+    }
+    assert second["maxRuntimeSeconds"] == 60
+
+
+@respx.mock
 def test_submit_batch_body():
     route = respx.post(f"{BASE}submit-batch").mock(
         return_value=httpx.Response(200, json={"ok": True})

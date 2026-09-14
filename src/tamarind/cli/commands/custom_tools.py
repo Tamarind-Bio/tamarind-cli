@@ -17,7 +17,7 @@ from ...custom_tools.transport import (
 )
 from ...custom_tools.validation import ValidationProblem, ValidationReport, validate_folder
 from ...errors import ExitCode, TamarindError, ValidationError
-from ..inputs import effective_job_name, effective_job_type, resolve_job_input
+from ..inputs import effective_job_name, effective_job_tool, resolve_job_input
 from .. import output
 
 
@@ -213,7 +213,7 @@ def test_tool(
     """
     state = ctx.obj
     job_input = resolve_job_input(input, set_)
-    tool_name = effective_job_type(tool_name, job_input.job_type)
+    tool_name = effective_job_tool(tool_name, job_input)
     job_name = effective_job_name(name, job_input.job_name)
     with state.sdk_client() as client:
         job = client.custom_tools.get(tool_name).test(

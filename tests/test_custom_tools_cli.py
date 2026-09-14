@@ -424,21 +424,24 @@ def test_invalid_settings_use_console_validation_boundary(monkeypatch, tmp_path,
 
 
 @pytest.mark.parametrize("file_type", [False, 0, 1, True, "", " ", [], {}])
+# `model` is the /finetune spelling of the envelope's tool field; it is held to the same rule.
+@pytest.mark.parametrize("field", ["type", "model"])
 @pytest.mark.parametrize("command", [
     ["validate", "fold-local"],
     ["submit", "fold-local"],
+    ["finetune", "fold-local"],
     ["batch", "fold-local"],
     ["custom-tools", "test", "fold-local", "--version", VERSION_ID],
 ])
 def test_malformed_envelope_type_rejected_by_every_command(
-    monkeypatch, tmp_path, capsys, command, file_type
+    monkeypatch, tmp_path, capsys, command, field, file_type
 ):
     from tamarind.cli.main import run
 
     sdk = _install_sdk(monkeypatch)
     source = tmp_path / "input.json"
     settings = [{}] if command[0] == "batch" else {}
-    source.write_text(json.dumps({"type": file_type, "settings": settings}))
+    source.write_text(json.dumps({field: file_type, "settings": settings}))
     for key, value in ENV.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setattr(sys, "argv", ["tamarind", "--json", *command, "--input", str(source)])

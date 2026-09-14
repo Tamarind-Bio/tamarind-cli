@@ -22,6 +22,12 @@ _TRUE = "true"
 # don't create a job.
 _JOB_SOURCE = "CLI"
 
+# The HTTP 400 ``code`` values that mean "right job, wrong endpoint". /submit-job
+# and /submit-batch answer the first for a finetune tool; /finetune and
+# /finetune-batch answer the second for an ordinary tool.
+USE_FINETUNE_ENDPOINT = "use_finetune_endpoint"
+NOT_A_FINETUNE_TOOL = "not_a_finetune_tool"
+
 
 def submit_job(
     client: HTTPClient, *, job_name: str, job_type: str, settings: dict[str, Any]
@@ -36,6 +42,32 @@ def submit_job(
             "jobSource": _JOB_SOURCE,
         },
     )
+
+
+def finetune_job(
+    client: HTTPClient,
+    *,
+    job_name: str,
+    model: str,
+    settings: dict[str, Any],
+    max_runtime_seconds: int | None = None,
+) -> Any:
+    """POST /finetune — submit a single finetuning job.
+
+    Same contract as /submit-job, except the tool field is ``model``. Body:
+    {jobName, model, settings, jobSource[, maxRuntimeSeconds]}. /submit-job may
+    refuse a finetune tool with a 400 carrying ``code: "use_finetune_endpoint"``;
+    /finetune refuses an ordinary tool with ``code: "not_a_finetune_tool"``.
+    """
+    body: dict[str, Any] = {
+        "jobName": job_name,
+        "model": model,
+        "settings": settings,
+        "jobSource": _JOB_SOURCE,
+    }
+    if max_runtime_seconds is not None:
+        body["maxRuntimeSeconds"] = max_runtime_seconds
+    return client.post_json("finetune", json=body)
 
 
 def validate_job(
@@ -69,6 +101,35 @@ def submit_batch(
     if max_runtime_seconds is not None:
         body["maxRuntimeSeconds"] = max_runtime_seconds
     return client.post_json("submit-batch", json=body)
+
+
+def finetune_batch(
+    client: HTTPClient,
+    *,
+    batch_name: str,
+    model: str,
+    settings: list[dict[str, Any]],
+    job_names: list[str] | None = None,
+    max_runtime_seconds: int | None = None,
+) -> Any:
+    """POST /finetune-batch — submit many finetuning jobs as one batch.
+
+    Same contract as /submit-batch (one atomic request), except the tool field is
+    ``model``. /submit-batch may refuse a finetune tool with ``code:
+    "use_finetune_endpoint"``; /finetune-batch refuses an ordinary tool with
+    ``code: "not_a_finetune_tool"``.
+    """
+    body: dict[str, Any] = {
+        "batchName": batch_name,
+        "model": model,
+        "settings": settings,
+        "jobSource": _JOB_SOURCE,
+    }
+    if job_names is not None:
+        body["jobNames"] = job_names
+    if max_runtime_seconds is not None:
+        body["maxRuntimeSeconds"] = max_runtime_seconds
+    return client.post_json("finetune-batch", json=body)
 
 
 def get_jobs(

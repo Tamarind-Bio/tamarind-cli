@@ -71,6 +71,25 @@ tamarind status my-run
 tamarind results my-run --download ./out
 ```
 
+Train (finetune) a model with `finetune`. It takes the same inputs as `submit`
+and posts to `/finetune`, where the tool is sent as `model`:
+
+```bash
+tamarind tools --function finetuning
+tamarind schema chemprop-finetune
+tamarind finetune chemprop-finetune --input train.yaml --name solubility-model
+```
+
+To train several models in one request, use `batch` with the finetune tool.
+The CLI follows the server's routing, resending a request once when the server
+answers that it belongs on the other endpoint: `submit` and `batch` move a
+finetune tool to `/finetune` and `/finetune-batch` on `code:
+"use_finetune_endpoint"`, and `finetune` moves an ordinary tool to `/submit-job`
+on `code: "not_a_finetune_tool"` — or on a 404 from a server that does not have
+`/finetune` yet. A batch is always sent as one request. Submission output
+includes the `endpoint` that accepted it. An input file may name the tool as
+`type` or `model`; either must match the command's tool.
+
 Set individual fields inline instead of a file:
 
 ```bash
@@ -222,7 +241,7 @@ place them before the command name.
 | Group | Commands |
 |---|---|
 | Discover | `tools`, `modalities`, `functions`, `schema` |
-| Submit | `validate`, `submit`, `batch` |
+| Submit | `validate`, `submit`, `finetune`, `batch` |
 | Monitor | `jobs`, `status`, `wait`, `results`, `logs` |
 | Files | `files list`, `files stats`, `files upload`, `files delete`, `files folders` |
 | Custom Tools | `custom-tools list`, `get`, `create`, `update`, `validate`, `build`, `test`, `versions`, `version`, `logs`, `cancel`, `publish`, `delete` |
