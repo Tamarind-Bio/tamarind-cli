@@ -823,10 +823,24 @@ def test_interrupted_download_removes_partial_file(tmp_path):
 
 @respx.mock
 def test_batch_validates_every_item_before_single_submit(tmp_path):
+    """Every item is still checked — but in ONE request, not one per item. The
+    per-item loop this replaced is the traffic shape that got a customer's egress
+    IP blocked at the edge."""
     batch = tmp_path / "batch.yaml"
     batch.write_text("- {sequence: MKT}\n- {sequence: MKV}\n")
     validation = respx.post(f"{API}validate-job").mock(
-        return_value=httpx.Response(200, json={"valid": True})
+        return_value=httpx.Response(
+            200,
+            json={
+                "valid": True,
+                "count": 2,
+                "valid_count": 2,
+                "results": [
+                    {"index": 0, "valid": True},
+                    {"index": 1, "valid": True},
+                ],
+            },
+        )
     )
     submit = respx.post(f"{API}submit-batch").mock(
         return_value=httpx.Response(200, json={"message": "queued"})
@@ -848,10 +862,14 @@ def test_batch_validates_every_item_before_single_submit(tmp_path):
     )
 
     assert result.exit_code == 0, result.stdout
-    assert validation.call_count == 2
+    assert validation.call_count == 1, "two jobs must cost ONE validate request"
     assert submit.call_count == 1
-    names = [json.loads(call.request.content)["jobName"] for call in validation.calls]
-    assert names == ["batch-1-1", "batch-1-2"]
+    body = json.loads(validation.calls[0].request.content)
+    # The whole array goes up in one body, and the names ride along as `jobNames`
+    # so a per-row refusal still names the job it refused.
+    assert body["settings"] == [{"sequence": "MKT"}, {"sequence": "MKV"}]
+    assert body["jobNames"] == ["batch-1-1", "batch-1-2"]
+    assert "jobName" not in body
 
 
 @respx.mock
@@ -859,10 +877,18 @@ def test_batch_invalid_item_prevents_submit(tmp_path):
     batch = tmp_path / "batch.yaml"
     batch.write_text("- {sequence: MKT}\n- {sequence: BAD}\n")
     respx.post(f"{API}validate-job").mock(
-        side_effect=[
-            httpx.Response(200, json={"valid": True}),
-            httpx.Response(200, json={"valid": False, "error": "bad sequence"}),
-        ]
+        return_value=httpx.Response(
+            200,
+            json={
+                "valid": False,
+                "count": 2,
+                "valid_count": 1,
+                "results": [
+                    {"index": 0, "valid": True},
+                    {"index": 1, "valid": False, "error": "bad sequence"},
+                ],
+            },
+        )
     )
     submit = respx.post(f"{API}submit-batch").mock(
         return_value=httpx.Response(200, json={"message": "should not happen"})

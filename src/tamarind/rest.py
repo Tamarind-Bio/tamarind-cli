@@ -48,6 +48,40 @@ def validate_job(
     )
 
 
+# How many settings rows /validate-job accepts in ONE request, and how many bytes.
+# Both bounds are the server's, and with large payloads the byte bound binds first:
+# over ~4.5 MB the platform answers a bare 413 with no JSON body at all, ahead of the
+# endpoint, so there is nothing to parse and nothing to explain. 3.5 MB leaves room
+# for the envelope and the jobNames array alongside the rows.
+VALIDATE_BATCH_MAX_ROWS = 1000
+VALIDATE_BATCH_MAX_BYTES = 3_500_000
+
+
+def validate_jobs(
+    client: HTTPClient,
+    *,
+    job_type: str,
+    settings: list[dict[str, Any]],
+    job_names: list[str] | None = None,
+) -> dict:
+    """POST /validate-job with an ARRAY — one verdict per row, in ONE request.
+
+    Every row is validated; nothing is sampled. What batching removes is the
+    per-request cost, not the checking.
+
+    Two response shapes, and they must be told apart by whether ``results`` is
+    PRESENT, not by ``valid``:
+      - ``{valid, count, valid_count, results: [{index, valid, ...}]}`` — the rows
+        were judged and ``index`` is the row's position in ``settings``.
+      - ``{valid: false, error}`` with NO ``results`` — the whole request was
+        refused (out of quota, over the row cap, a bad ``jobNames``).
+    """
+    body: dict[str, Any] = {"type": job_type, "settings": settings}
+    if job_names is not None:
+        body["jobNames"] = job_names
+    return client.post_json("validate-job", json=body)
+
+
 def submit_batch(
     client: HTTPClient,
     *,
