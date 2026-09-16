@@ -208,6 +208,136 @@ def _rewrite_validation_guidance(value: object) -> object:
     return rewritten
 
 
+def _chunk_for_validate(
+    settings_list: list, *, job_type: str = "", names: "list | None" = None
+) -> "list[tuple[int, list]]":
+    """Split rows into calls bounded by BOTH the row cap and the body-size cap.
+
+    The row cap alone is not enough: a batch of large payloads crosses the ~4.5 MB
+    request limit well before 1000 rows, and that failure arrives as a bare 413 from
+    the platform with no JSON body to report.
+
+    Measures the WHOLE body ``validate_jobs`` will send — `type` and one `jobNames`
+    entry per row ride along with the rows, and a budget that ignores them is not the
+    budget the edge applies.
+    """
+    def fits(offset: int, count: int) -> bool:
+        body: dict = {"type": job_type, "settings": settings_list[offset : offset + count]}
+        if names is not None:
+            body["jobNames"] = names[offset : offset + count]
+        return len(json.dumps(body).encode()) <= rest.VALIDATE_BATCH_MAX_BYTES
+
+    chunks: list[tuple[int, list]] = []
+    offset, total = 0, len(settings_list)
+    while offset < total:
+        hi = min(rest.VALIDATE_BATCH_MAX_ROWS, total - offset)
+        if fits(offset, hi):
+            count = hi
+        else:
+            # The largest prefix that fits. Halving would overshoot — if 600 rows fit it
+            # settles for 500 — and every extra request is one the caller did not need.
+            # `lo` starts at 1, so a single row too large to split is still sent and the
+            # server gets to answer for it.
+            lo = 1
+            while lo < hi:
+                mid = (lo + hi + 1) // 2
+                if fits(offset, mid):
+                    lo = mid
+                else:
+                    hi = mid - 1
+            count = lo
+        chunks.append((offset, settings_list[offset : offset + count]))
+        offset += count
+    return chunks
+
+
+def _prevalidate_batch(
+    client, *, batch_name: str, job_type: str, settings_list: list, job_names
+) -> None:
+    """Pre-flight every row of a batch, in as FEW requests as possible.
+
+    This was one request per job. At campaign scale that SHAPE is the failure: a
+    10,000-job batch meant 10,000 POSTs from one address, which edge rate limiting
+    refuses — 429s first, then an address-wide block answering 403 on every endpoint
+    until it expires — long before it is a load problem for the server. /validate-job
+    takes the whole array and still checks every row, so nothing is sampled and only
+    the per-request cost is gone.
+
+    Raises ValidationError on the first invalid row, identified by its index in the
+    ORIGINAL list — chunking must not renumber it.
+    """
+    names = [
+        str(
+            job_names[index]
+            if isinstance(job_names, list) and index < len(job_names) and job_names[index]
+            else f"{batch_name}-{index + 1}"
+        )
+        for index in range(len(settings_list))
+    ]
+
+    def _row_index(row: dict) -> int:
+        value = row.get("index")
+        return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+    for offset, rows in _chunk_for_validate(settings_list, job_type=job_type, names=names):
+        response = rest.validate_jobs(
+            client,
+            job_type=job_type,
+            settings=rows,
+            job_names=names[offset : offset + len(rows)],
+        )
+        results = response.get("results") if isinstance(response, dict) else None
+        if not isinstance(results, list):
+            # No per-row verdicts means the request was refused AS A WHOLE — out of
+            # quota, over a cap, a bad jobNames. Pinning that on row 0 would send the
+            # caller off to fix a payload that is fine.
+            reason = (
+                response.get("error", "unknown error")
+                if isinstance(response, dict)
+                else "unexpected validation response"
+            )
+            raise ValidationError(
+                f"Batch validation was refused: {rewrite_validation_guidance(str(reason))}",
+                detail={"batchName": batch_name, "validation": response},
+            )
+        # One verdict per row is the contract. Fewer, or entries with no usable index,
+        # means rows went unjudged — and "no invalid rows" would then be a false pass on
+        # the ones never checked. That is the one direction a pre-flight must not fail
+        # in, because the caller acts on it by spending compute.
+        judged = {
+            r["index"]
+            for r in results
+            if isinstance(r, dict)
+            and isinstance(r.get("index"), int)
+            and not isinstance(r["index"], bool)
+        }
+        if judged != set(range(len(rows))):
+            raise ValidationError(
+                f"Batch validation answered for {len(judged)} of {len(rows)} rows; "
+                f"refusing to submit jobs it did not check.",
+                detail={"batchName": batch_name, "offset": offset, "validation": response},
+            )
+        invalid = [r for r in results if isinstance(r, dict) and not r.get("valid")]
+        if invalid:
+            # The FIRST bad row in input order, which is what the per-job loop reported.
+            row = min(invalid, key=_row_index)
+            index = offset + _row_index(row)
+            validation = _rewrite_validation_guidance(row)
+            error = (
+                validation.get("error", "unknown error")
+                if isinstance(validation, dict)
+                else "unexpected validation response"
+            )
+            raise ValidationError(
+                f"Batch item {index + 1} settings invalid: {error}",
+                detail={
+                    "index": index,
+                    "jobName": names[index] if index < len(names) else None,
+                    "validation": validation,
+                },
+            )
+
+
 # Safety bound on `jobs --all` so a runaway cursor can't loop forever.
 _MAX_AUTO_PAGES = 100
 
@@ -381,7 +511,7 @@ def register(app: typer.Typer) -> None:
         prevalidate: bool = typer.Option(
             False,
             "--prevalidate",
-            help="Validate every item before submitting (one API request per item).",
+            help="Validate every item before submitting.",
         ),
     ) -> None:
         """Submit many jobs as one batch (preferred over looping submit)."""
@@ -432,33 +562,13 @@ def register(app: typer.Typer) -> None:
 
         with state.rest_client() as client:
             if prevalidate:
-                for index, settings in enumerate(settings_list):
-                    validation_name = (
-                        job_names[index]
-                        if isinstance(job_names, list)
-                        and index < len(job_names)
-                        and job_names[index]
-                        else f"{batch_name}-{index + 1}"
-                    )
-                    validation = _rewrite_validation_guidance(
-                        rest.validate_job(
-                            client,
-                            job_name=str(validation_name),
-                            job_type=job_type,
-                            settings=settings,
-                        )
-                    )
-                    if not isinstance(validation, dict) or not validation.get("valid"):
-                        validation_error = (
-                            validation.get("error", "unknown error")
-                            if isinstance(validation, dict)
-                            else "unexpected validation response"
-                        )
-                        raise ValidationError(
-                            f"Batch item {index + 1} settings invalid: "
-                            f"{validation_error}",
-                            detail={"index": index, "jobName": validation_name, "validation": validation},
-                        )
+                _prevalidate_batch(
+                    client,
+                    batch_name=batch_name,
+                    job_type=job_type,
+                    settings_list=settings_list,
+                    job_names=job_names,
+                )
             try:
                 resp = rest.submit_batch(
                     client,
