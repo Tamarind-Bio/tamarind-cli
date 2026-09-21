@@ -82,8 +82,11 @@ def _post_submission(client: HTTPClient, path: str, body: dict[str, Any]) -> Any
     resp = client.send("POST", path, json=body)
     if resp.is_success:
         return parse_json(resp)
-    route = _FINETUNE_ROUTING[path]
-    if not _should_reroute(resp, route):
+    # A route with no row simply never reroutes. Looking it up with [] instead would
+    # raise KeyError over whatever the server actually said, turning a real API error
+    # into a crash for the next caller that posts through here.
+    route = _FINETUNE_ROUTING.get(path)
+    if route is None or not _should_reroute(resp, route):
         raise map_error(resp, request_path=path)
     resent = client.send("POST", route.alternate, json=_rerouted_body(body, route))
     if resent.is_success:

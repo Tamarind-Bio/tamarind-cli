@@ -281,6 +281,20 @@ def test_transport_failures_are_never_resent(origin, sibling, failure):
 
 
 @respx.mock
+def test_a_route_with_no_routing_row_surfaces_the_servers_own_error():
+    """A submission posted through _post_submission on a route the table does not
+    cover must report what the server said, not crash looking the route up."""
+    from tamarind import rest
+
+    respx.post(f"{BASE}some-future-route").mock(
+        return_value=httpx.Response(400, json={"error": "Unrecognized setting: foo"})
+    )
+
+    with pytest.raises(ValidationError, match="Unrecognized setting"):
+        rest._post_submission(client(), "some-future-route", {"jobName": "j", "type": "t"})
+
+
+@respx.mock
 def test_validate_job_not_tagged():
     # Validation never creates a job, so it carries no jobSource.
     route = respx.post(f"{BASE}validate-job").mock(
