@@ -1105,7 +1105,10 @@ def test_finetune_commands_reject_a_disagreeing_tool_in_the_input_file(tmp_path,
     # batch takes a LIST of settings; a dict there fails a different check first and
     # would never reach the tool-name reconciliation this test is about.
     settings = [{"sequence": "ABC"}] if command == "finetune-batch" else {"sequence": "ABC"}
-    doc.write_text(json.dumps({"type": "esmfold", "settings": settings}))
+    name_key = "batchName" if command == "finetune-batch" else "jobName"
+    # The name marks this as an envelope; the point of the test is the disagreeing
+    # `type`, which the finetune path used to read as None and silently drop.
+    doc.write_text(json.dumps({name_key: "r", "type": "esmfold", "settings": settings}))
     submit = respx.post(f"{API}finetune").mock(
         return_value=httpx.Response(200, json={"message": "should not happen"})
     )

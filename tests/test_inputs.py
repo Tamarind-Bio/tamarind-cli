@@ -32,11 +32,10 @@ def test_envelope(tmp_path):
         # not recognised as an envelope at all and the WHOLE document (model and
         # the nested settings object) silently becomes the job's settings.
         ("model", '{"model":"boltz","settings":{"sequence":"ABC"}}'),
-        # And by the OTHER key too. A user porting a working `submit` input file to
-        # `finetune` writes `type`; if that is not recognised as an envelope, the
-        # whole document (type and the nested settings object) becomes the settings.
-        ("model", '{"type":"boltz","settings":{"sequence":"ABC"}}'),
-        ("type", '{"model":"boltz","settings":{"sequence":"ABC"}}'),
+        # jobName alone also marks an envelope, and then the tool is read from
+        # whichever key carries it — including the other one.
+        ("model", '{"jobName":"r","type":"boltz","settings":{"sequence":"ABC"}}'),
+        ("type", '{"jobName":"r","model":"boltz","settings":{"sequence":"ABC"}}'),
     ],
 )
 def test_envelope_is_recognised_by_its_own_tool_key(tmp_path, tool_key, document):
@@ -47,21 +46,57 @@ def test_envelope_is_recognised_by_its_own_tool_key(tmp_path, tool_key, document
     assert job.settings == {"sequence": "ABC"}
 
 
-@pytest.mark.parametrize("tool_key,doc_key", [
-    ("type", "type"),
-    ("model", "model"),
-    # A disagreeing tool named under the OTHER key must still be rejected. It was
-    # read as None and silently discarded, so `finetune esm2` on a file saying
-    # type: esmfold submitted esm2 without a word.
-    ("model", "type"),
-    ("type", "model"),
+@pytest.mark.parametrize("tool_key,document", [
+    ("type", {"type": "esmfold", "settings": {"sequence": "ABC"}}),
+    ("model", {"model": "esmfold", "settings": {"sequence": "ABC"}}),
+    # A disagreeing tool named under the OTHER key of an envelope must still be
+    # rejected. It was read as None and silently discarded, so `finetune boltz` on
+    # a file saying type: esmfold submitted boltz without a word.
+    ("model", {"jobName": "r", "type": "esmfold", "settings": {"sequence": "ABC"}}),
+    ("type", {"jobName": "r", "model": "esmfold", "settings": {"sequence": "ABC"}}),
+    # A key PRESENT but null is absent, not "the tool". Reading it as the tool
+    # returned None and never looked at the real name under the other key, so the
+    # disagreement went unreported and the command-line tool was submitted.
+    ("type", {"jobName": "r", "type": None, "model": "esmfold",
+              "settings": {"sequence": "ABC"}}),
+    ("model", {"jobName": "r", "model": None, "type": "esmfold",
+               "settings": {"sequence": "ABC"}}),
 ])
-def test_envelope_tool_key_must_agree_with_the_command(tmp_path, tool_key, doc_key):
+def test_envelope_tool_key_must_agree_with_the_command(tmp_path, tool_key, document):
     f = tmp_path / "job.json"
-    f.write_text(json.dumps({doc_key: "esmfold", "settings": {"sequence": "ABC"}}))
+    f.write_text(json.dumps(document))
     job = resolve_job_input(str(f), [], tool_key=tool_key)
     with pytest.raises(ValidationError, match="esmfold"):
         effective_job_type("boltz", job.job_type, tool_key=tool_key)
+
+
+@pytest.mark.parametrize("tool_key", ["type", "model"])
+@pytest.mark.parametrize("document", [
+    {"type": "boltz", "model": "esmfold", "settings": {"sequence": "ABC"}},
+])
+def test_an_envelope_naming_two_different_tools_is_refused(tmp_path, tool_key, document):
+    f = tmp_path / "job.json"
+    f.write_text(json.dumps(document))
+    with pytest.raises(ValidationError, match="two different tools"):
+        resolve_job_input(str(f), [], tool_key=tool_key)
+
+
+@pytest.mark.parametrize("tool_key", ["type", "model"])
+def test_a_settings_document_that_merely_contains_a_tool_key_is_not_an_envelope(
+    tmp_path, tool_key
+):
+    """Raw settings that happen to carry the OTHER tool key beside their own
+    `settings` must stay settings. custom-tools test allows user-defined schemas
+    with exactly this shape, and submit/validate accept it today."""
+    other = "model" if tool_key == "type" else "type"
+    doc = {other: "esmfold2-fast", "settings": {"weights": "s3://bucket/model"}}
+    f = tmp_path / "job.json"
+    f.write_text(json.dumps(doc))
+
+    job = resolve_job_input(str(f), [], tool_key=tool_key)
+
+    assert job.job_type is None
+    assert job.settings == doc
 
 
 def test_set_overrides_and_coercion(tmp_path):

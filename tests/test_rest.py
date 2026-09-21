@@ -112,6 +112,14 @@ def test_submit_finetune_batch_body():
 
 # Each entry submits through one of the four routes with an identical payload
 # shape, so a resend's body can be compared field-for-field with the original.
+# The route each submission is resent to, mirroring rest._FINETUNE_ROUTING.
+_FINETUNE_SIBLING = {
+    "submit-job": "finetune",
+    "submit-batch": "finetune-batch",
+    "finetune": "submit-job",
+    "finetune-batch": "submit-batch",
+}
+
 SUBMISSIONS = {
     "submit-job": lambda c: rest.submit_job(
         c, job_name="j1", job_type="esm2", settings={"sequence": "ABC"}
@@ -485,32 +493,12 @@ def test_custom_tool_problem_codes_have_stable_error_types(code, exc) -> None:
         ({"error": "Job 'x' not found"}, NotFoundError),  # -> not-found (4)
         ({"error": "file does not exist"}, NotFoundError),  # -> not-found (4)
         ({"error": "Unrecognized setting: foo"}, ValidationError),  # genuine -> validation (5)
-        # The finetune routes' real messages, classified by problem code rather
-        # than wording. Both of the first two quote the caller's own tool name
-        # back, so a tool named "no such thing" would otherwise read as a missing
-        # resource and get exit code 4 instead of 5.
-        (
-            {
-                "code": "not_a_finetune_tool",
-                "error": '"no such thing" is not a finetuning tool. Submit it with POST /submit-job.',
-            },
-            ValidationError,
-        ),
-        (
-            {
-                "code": "use_finetune_endpoint",
-                "error": '"not found here" is a finetuning tool. Submit it with POST /finetune.',
-            },
-            ValidationError,
-        ),
-        ({"code": "model_required", "error": "model is required"}, ValidationError),
-        (
-            {
-                "code": "type_model_mismatch",
-                "error": '"type" ("a") does not match "model" ("b"). Send only "model" to POST /finetune.',
-            },
-            ValidationError,
-        ),
+        # A finetune problem code on a NON-submission route must change nothing.
+        # This package is published, so classifying these codes globally would
+        # silently move /jobs from exit 4 to exit 5 for any caller catching them.
+        # The wording decides here, exactly as it did before the finetune work.
+        ({"code": "not_a_finetune_tool", "error": "Job 'x' not found"}, NotFoundError),
+        ({"code": "model_required", "error": "Unrecognized setting: foo"}, ValidationError),
     ],
 )
 def test_400_subtype_classification(body, exc):
@@ -519,6 +507,47 @@ def test_400_subtype_classification(body, exc):
     respx.get(f"{BASE}jobs").mock(return_value=httpx.Response(400, json=body))
     with pytest.raises(exc) as raised:
         rest.get_jobs(client())
+    assert raised.value.detail == body
+
+
+@respx.mock
+@pytest.mark.parametrize("route", ["submit-job", "submit-batch", "finetune", "finetune-batch"])
+@pytest.mark.parametrize(
+    "body",
+    [
+        # Quotes the caller's own tool name back, so a tool literally named
+        # "no such thing" would read as a missing resource without the code branch.
+        {
+            "code": "not_a_finetune_tool",
+            "error": '"no such thing" is not a finetuning tool. Submit it with POST /submit-job.',
+        },
+        {
+            "code": "use_finetune_endpoint",
+            "error": '"not found here" is a finetuning tool. Submit it with POST /finetune.',
+        },
+        {"code": "model_required", "error": "model is required"},
+        {
+            "code": "type_model_mismatch",
+            "error": '"type" ("a") does not match "model" ("b"). Send only "model" to POST /finetune.',
+        },
+    ],
+)
+def test_finetune_problem_codes_classify_on_the_submission_routes(route, body):
+    """On a submission route these codes are caller errors — exit 5, by CODE rather
+    than by wording, since the wording embeds a tool name the caller chose.
+
+    These are the SECOND, final answer: a `not_a_finetune_tool` or
+    `use_finetune_endpoint` that arrives here was already resent once and refused
+    again, so it reaches the caller instead of triggering another hop.
+    """
+    respx.post(f"{BASE}{route}").mock(return_value=httpx.Response(400, json=body))
+    respx.post(f"{BASE}{_FINETUNE_SIBLING[route]}").mock(
+        return_value=httpx.Response(400, json=body)
+    )
+
+    with pytest.raises(ValidationError) as raised:
+        SUBMISSIONS[route](client())
+
     assert raised.value.detail == body
 
 

@@ -86,26 +86,47 @@ TOOL_KEYS = ("type", "model")
 def _looks_like_envelope(doc: dict[str, Any], tool_key: str = "type") -> bool:
     """Whether this document wraps the settings rather than being them.
 
-    Recognised by EITHER tool key, not just the running command's. A document that
-    names the tool under the other key is still an envelope — it is a user mistake
-    to report, not a document to silently treat as raw settings. Keying only on the
-    command's own field meant `finetune` fed a whole `{type, settings}` document in
-    as the job's settings, and dropped a disagreeing `type` without a word.
+    Deliberately keyed on the COMMAND's own tool field (or ``jobName``), not on
+    either field. Widening it to both regresses raw settings documents that simply
+    happen to contain a key called ``model`` or ``type`` beside their own
+    ``settings`` — a real shape for ``custom-tools test``, whose schemas are
+    user-defined, and for ``submit``/``validate``. Those documents must keep being
+    read as settings.
+
+    The dangerous half of the ambiguity — an envelope that names a DIFFERENT tool
+    under the other key, which used to be dropped in silence — is handled once we
+    already know this is an envelope, by :func:`envelope_tool_value`.
     """
-    return "settings" in doc and (
-        any(key in doc for key in TOOL_KEYS) or "jobName" in doc
-    )
+    return "settings" in doc and (tool_key in doc or "jobName" in doc)
 
 
 def envelope_tool_value(doc: dict[str, Any], tool_key: str) -> object | None:
-    """The tool named by the envelope, read from the command's own key when present
-    and otherwise from the other one, so a mismatch is reported rather than lost."""
-    if tool_key in doc:
-        return doc[tool_key]
-    for other in TOOL_KEYS:
-        if other in doc:
-            return doc[other]
-    return None
+    """The tool an envelope names, reconciling BOTH tool keys.
+
+    Called only for a document already recognised as an envelope. Every tool key
+    actually present with a value is considered, so:
+
+    - a tool named only under the other key is still seen, instead of being read as
+      None and silently discarded while the command-line tool is submitted;
+    - two keys naming DIFFERENT tools are refused rather than one being picked. That
+      includes ``{type: null, model: esmfold}``, where keying on presence alone
+      returned None and never looked at the conflicting ``model``.
+    """
+    named = {
+        key: doc[key] for key in TOOL_KEYS if key in doc and doc[key] is not None
+    }
+    distinct = {
+        value if isinstance(value, str) else repr(value) for value in named.values()
+    }
+    if len(distinct) > 1:
+        pairs = ", ".join(f"{key}: {value!r}" for key, value in sorted(named.items()))
+        raise ValidationError(
+            f"The input file names two different tools ({pairs}). Keep only one of "
+            f"{' or '.join(TOOL_KEYS)}."
+        )
+    if tool_key in named:
+        return named[tool_key]
+    return next(iter(named.values()), None)
 
 
 def effective_job_type(

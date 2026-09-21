@@ -46,6 +46,12 @@ _FINETUNE_PROBLEM_CODES = frozenset(
     }
 )
 
+# The only routes on which the codes above mean what they say. Kept here rather than
+# imported from :mod:`tamarind.rest` because rest imports this module.
+_SUBMISSION_PATHS = frozenset(
+    {"/submit-job", "/submit-batch", "/finetune", "/finetune-batch"}
+)
+
 
 class HTTPClient:
     """A small wrapper around ``httpx.Client`` keyed by base URL + API key."""
@@ -273,7 +279,11 @@ def map_error(resp: httpx.Response, *, request_path: str) -> TamarindError:
         return CustomToolBuildInProgressError(msg, detail=detail)
     if problem_code == "custom_tool_build_not_cancellable":
         return CustomToolBuildNotInProgressError(msg, detail=detail)
-    if code == 400 and problem_code in _FINETUNE_PROBLEM_CODES:
+    if (
+        code == 400
+        and problem_code in _FINETUNE_PROBLEM_CODES
+        and relative_path in _SUBMISSION_PATHS
+    ):
         # Classify by the machine-readable code, BEFORE the message heuristics
         # below. These messages quote the caller's own tool name back
         # (`"x" is not a finetuning tool.`), so a tool named "no such thing"
@@ -282,6 +292,11 @@ def map_error(resp: httpx.Response, *, request_path: str) -> TamarindError:
         # Only on a 400, matching the reroute rule in :mod:`tamarind.rest`: a 403
         # carrying one of these codes is an access denial, not a routing hint,
         # and the two must not disagree about which one it is.
+        #
+        # And only on the four SUBMISSION routes. Applying it to every path would
+        # change this published package's behaviour on unrelated endpoints: a 400
+        # from GET /jobs carrying one of these codes used to raise NotFoundError
+        # (exit 4) and would start raising ValidationError (exit 5).
         return ValidationError(msg, detail=detail)
     ml = msg.lower()
     auth_ish = "api key" in ml or "api-key" in ml or "apikey" in ml or "unauthorized" in ml
