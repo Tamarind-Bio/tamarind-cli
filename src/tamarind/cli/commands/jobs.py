@@ -402,7 +402,7 @@ def _resolve_batch_document(
     line — ``type`` for an ordinary batch, ``model`` for a finetuning batch — so
     both commands enforce one set of rules instead of two that can drift.
     """
-    from ..inputs import _load_text, _parse_document  # internal reuse
+    from ..inputs import _load_text, _parse_document, envelope_tool_value  # internal reuse
 
     doc = _parse_document(_load_text(input))
     batch_name = effective_job_name(name, None) or _gen_name(tool)
@@ -413,7 +413,13 @@ def _resolve_batch_document(
     elif isinstance(doc, dict) and isinstance(doc.get("settings"), list):
         settings_list = doc["settings"]
         batch_name = effective_job_name(name, doc.get("batchName")) or batch_name
-        job_type = effective_job_type(tool, doc.get(tool_key), tool_key=tool_key)
+        # Read the tool from EITHER key, same rule as the single-job path. Reading
+        # only `tool_key` meant finetune-batch saw None for a document naming the
+        # tool under `type`, silently dropped a disagreeing tool name, and submitted
+        # under the command-line one.
+        job_type = effective_job_type(
+            tool, envelope_tool_value(doc, tool_key), tool_key=tool_key
+        )
         job_names = doc.get("jobNames")
     else:
         raise TamarindError("Batch --input must be a list of settings or a {settings:[...]} object.")

@@ -32,6 +32,11 @@ def test_envelope(tmp_path):
         # not recognised as an envelope at all and the WHOLE document (model and
         # the nested settings object) silently becomes the job's settings.
         ("model", '{"model":"boltz","settings":{"sequence":"ABC"}}'),
+        # And by the OTHER key too. A user porting a working `submit` input file to
+        # `finetune` writes `type`; if that is not recognised as an envelope, the
+        # whole document (type and the nested settings object) becomes the settings.
+        ("model", '{"type":"boltz","settings":{"sequence":"ABC"}}'),
+        ("type", '{"model":"boltz","settings":{"sequence":"ABC"}}'),
     ],
 )
 def test_envelope_is_recognised_by_its_own_tool_key(tmp_path, tool_key, document):
@@ -42,12 +47,20 @@ def test_envelope_is_recognised_by_its_own_tool_key(tmp_path, tool_key, document
     assert job.settings == {"sequence": "ABC"}
 
 
-@pytest.mark.parametrize("tool_key", ["type", "model"])
-def test_envelope_tool_key_must_agree_with_the_command(tmp_path, tool_key):
+@pytest.mark.parametrize("tool_key,doc_key", [
+    ("type", "type"),
+    ("model", "model"),
+    # A disagreeing tool named under the OTHER key must still be rejected. It was
+    # read as None and silently discarded, so `finetune esm2` on a file saying
+    # type: esmfold submitted esm2 without a word.
+    ("model", "type"),
+    ("type", "model"),
+])
+def test_envelope_tool_key_must_agree_with_the_command(tmp_path, tool_key, doc_key):
     f = tmp_path / "job.json"
-    f.write_text(json.dumps({tool_key: "esmfold", "settings": {"sequence": "ABC"}}))
+    f.write_text(json.dumps({doc_key: "esmfold", "settings": {"sequence": "ABC"}}))
     job = resolve_job_input(str(f), [], tool_key=tool_key)
-    with pytest.raises(ValidationError, match=f"file's {tool_key} is 'esmfold'"):
+    with pytest.raises(ValidationError, match="esmfold"):
         effective_job_type("boltz", job.job_type, tool_key=tool_key)
 
 

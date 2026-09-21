@@ -85,7 +85,13 @@ def _post_submission(client: HTTPClient, path: str, body: dict[str, Any]) -> Any
     # A route with no row simply never reroutes. Looking it up with [] instead would
     # raise KeyError over whatever the server actually said, turning a real API error
     # into a crash for the next caller that posts through here.
-    route = _FINETUNE_ROUTING.get(path)
+    #
+    # Match the table the SAME way HTTPClient.send resolves the URL — it does
+    # `path.lstrip("/")`, so "/submit-job" and "submit-job" are one endpoint and must
+    # route alike; a caller writing the leading slash would otherwise silently lose
+    # its reroute with no error at all. Only leading: a TRAILING slash is a different
+    # URL, and rerouting a request that went somewhere else would be wrong.
+    route = _FINETUNE_ROUTING.get(path.lstrip("/"))
     if route is None or not _should_reroute(resp, route):
         raise map_error(resp, request_path=path)
     resent = client.send("POST", route.alternate, json=_rerouted_body(body, route))

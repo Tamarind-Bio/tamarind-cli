@@ -273,11 +273,17 @@ def test_transport_failures_are_never_resent(origin, sibling, failure):
         return_value=httpx.Response(200, json={"message": "must never be reached"})
     )
 
-    with pytest.raises(TamarindError):
+    with pytest.raises(TamarindError) as raised:
         SUBMISSIONS[origin](client())
 
     assert first.call_count == 1
     assert not second.called
+    # The EXACT type matters, not just the base class: cli/commands/jobs.py's
+    # _outcome_is_ambiguous keys on `type(exc) is TamarindError` to decide whether a
+    # submit's outcome is unknown. A subclass here would silently stop the CLI
+    # reporting outcomeMayBeAmbiguous on a network failure, and a bare
+    # pytest.raises(TamarindError) would not notice, since everything subclasses it.
+    assert type(raised.value) is TamarindError
 
 
 @respx.mock
@@ -292,6 +298,28 @@ def test_a_route_with_no_routing_row_surfaces_the_servers_own_error():
 
     with pytest.raises(ValidationError, match="Unrecognized setting"):
         rest._post_submission(client(), "some-future-route", {"jobName": "j", "type": "t"})
+
+
+@respx.mock
+@pytest.mark.parametrize("path", ["submit-job", "/submit-job"])
+def test_the_routing_table_matches_a_leading_slash_too(path):
+    """HTTPClient.send resolves the URL with path.lstrip("/"), so "/submit-job" and
+    "submit-job" are the SAME endpoint. The routing table must agree, or a caller
+    writing the leading slash silently loses its reroute with no error at all."""
+    from tamarind import rest
+
+    origin = respx.post(f"{BASE}submit-job").mock(
+        return_value=httpx.Response(400, json={"code": "use_finetune_endpoint", "error": "x"})
+    )
+    resent = respx.post(f"{BASE}finetune").mock(
+        return_value=httpx.Response(200, json={"message": "ok"})
+    )
+
+    rest._post_submission(client(), path, {"jobName": "j", "type": "plm-finetune"})
+
+    assert origin.call_count == 1
+    assert resent.call_count == 1
+    assert json.loads(resent.calls.last.request.content)["model"] == "plm-finetune"
 
 
 @respx.mock

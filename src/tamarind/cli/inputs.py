@@ -76,8 +76,36 @@ def _apply_sets(settings: dict[str, Any], pairs: list[str]) -> None:
         settings[key.strip()] = _coerce_scalar(raw)
 
 
+# The two names an envelope can give the tool. `submit`/`batch` use `type`;
+# `finetune`/`finetune-batch` use `model`, because that is what those API routes
+# call it. An envelope is recognised by EITHER, whichever command is running —
+# see _looks_like_envelope.
+TOOL_KEYS = ("type", "model")
+
+
 def _looks_like_envelope(doc: dict[str, Any], tool_key: str = "type") -> bool:
-    return "settings" in doc and (tool_key in doc or "jobName" in doc)
+    """Whether this document wraps the settings rather than being them.
+
+    Recognised by EITHER tool key, not just the running command's. A document that
+    names the tool under the other key is still an envelope — it is a user mistake
+    to report, not a document to silently treat as raw settings. Keying only on the
+    command's own field meant `finetune` fed a whole `{type, settings}` document in
+    as the job's settings, and dropped a disagreeing `type` without a word.
+    """
+    return "settings" in doc and (
+        any(key in doc for key in TOOL_KEYS) or "jobName" in doc
+    )
+
+
+def envelope_tool_value(doc: dict[str, Any], tool_key: str) -> object | None:
+    """The tool named by the envelope, read from the command's own key when present
+    and otherwise from the other one, so a mismatch is reported rather than lost."""
+    if tool_key in doc:
+        return doc[tool_key]
+    for other in TOOL_KEYS:
+        if other in doc:
+            return doc[other]
+    return None
 
 
 def effective_job_type(
@@ -145,7 +173,7 @@ def resolve_job_input(
                 f"{{jobName, {tool_key}, settings}} object)."
             )
         if _looks_like_envelope(doc, tool_key):
-            job_type = doc.get(tool_key)
+            job_type = envelope_tool_value(doc, tool_key)
             job_name = doc.get("jobName")
             doc = doc["settings"]
         if not isinstance(doc, dict):
