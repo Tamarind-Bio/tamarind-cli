@@ -9,11 +9,20 @@ the CLI and the MCP from drifting as the platform evolves.
 
 ### 1. Job/file REST surface — source of truth: the OpenAPI spec
 
-`submit`, `validate`, `batch`, `jobs`, `status`/`wait`, `results`, `files`,
-`cancel`, and `delete` map onto operations in `openapi-mcp.yaml` — the same
-server contract used to generate the MCP surface. The CLI's
-[`rest.py`](../src/tamarind/rest.py) is intentionally a small mapping of those
-operations.
+`submit`, `validate`, `batch`, `finetune`, `finetune-batch`, `jobs`,
+`status`/`wait`, `results`, `files`, `cancel`, and `delete` map onto operations
+in `openapi-mcp.yaml` — the same server contract used to generate the MCP
+surface. The CLI's [`rest.py`](../src/tamarind/rest.py) is intentionally a small
+mapping of those operations.
+
+The one exception to "thin mapping" is which route a submission belongs on.
+Whether a tool is a finetuning tool is knowable only server-side, so `/submit-job`
+and `/finetune` (and their `-batch` siblings) each answer a misrouted submission
+with a machine-readable problem code, and `rest.py` resends it **once** to the
+sibling route with the tool-name key renamed (`type` ↔ `model`). An exact 404
+from `/finetune*` is treated the same way, so the CLI keeps working against
+deployments that predate those routes. A 5xx, a timeout, or a network error is
+never resent — that request may already have created a job.
 
 The CLI mapping is still client code and can drift. Unit tests cover request and
 response shapes, and authenticated no-spend smoke tests should exercise auth,

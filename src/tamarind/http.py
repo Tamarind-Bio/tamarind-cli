@@ -33,6 +33,19 @@ from .errors import (
 DEFAULT_TIMEOUT = 120.0
 USER_AGENT = "tamarind-cli"
 
+# Caller errors the finetune routes answer with, as machine-readable problem codes.
+# `use_finetune_endpoint` and `not_a_finetune_tool` normally make
+# :mod:`tamarind.rest` resend to the sibling route and so never reach a caller;
+# they arrive here when they are the SECOND and final answer, which is not resent.
+_FINETUNE_PROBLEM_CODES = frozenset(
+    {
+        "model_required",
+        "not_a_finetune_tool",
+        "type_model_mismatch",
+        "use_finetune_endpoint",
+    }
+)
+
 
 class HTTPClient:
     """A small wrapper around ``httpx.Client`` keyed by base URL + API key."""
@@ -70,7 +83,7 @@ class HTTPClient:
         self.close()
 
     # -- requests ----------------------------------------------------------
-    def request(
+    def send(
         self,
         method: str,
         path: str,
@@ -80,6 +93,17 @@ class HTTPClient:
         json: Any | None = None,
         timeout: float | None = None,
     ) -> httpx.Response:
+        """Perform one request and return the response, 2xx or not.
+
+        :meth:`request` is this plus :func:`map_error`. A caller that must branch
+        on BOTH the status code and the server's problem code — the route-level
+        fallbacks in :mod:`tamarind.rest` — needs the response itself: the mapped
+        errors deliberately do not all carry a status code (a 404 becomes a bare
+        :class:`NotFoundError`), so branching on the exception cannot see one.
+
+        A network error or timeout still raises, so a caller branching on the
+        response can never mistake "no answer" for an answer.
+        """
         if not self.api_key:
             raise AuthError(
                 "No API key configured. Set TAMARIND_API_KEY, pass --api-key, "
@@ -88,7 +112,7 @@ class HTTPClient:
         clean_params = _without_none_values(params)
         clean_headers = _without_none_values(headers)
         try:
-            resp = self._client.request(
+            return self._client.request(
                 method,
                 path.lstrip("/"),
                 params=clean_params,
@@ -99,9 +123,22 @@ class HTTPClient:
         except httpx.HTTPError as exc:
             raise TamarindError(f"Network error talking to {self.base_url}: {exc}") from exc
 
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str | None] | None = None,
+        json: Any | None = None,
+        timeout: float | None = None,
+    ) -> httpx.Response:
+        resp = self.send(
+            method, path, params=params, headers=headers, json=json, timeout=timeout
+        )
         if resp.is_success:
             return resp
-        raise _map_error(resp, request_path=path)
+        raise map_error(resp, request_path=path)
 
     async def request_async(
         self,
@@ -144,7 +181,7 @@ class HTTPClient:
 
         if resp.is_success:
             return resp
-        raise _map_error(resp, request_path=path)
+        raise map_error(resp, request_path=path)
 
     def get_json(
         self,
@@ -153,18 +190,18 @@ class HTTPClient:
         params: dict[str, Any] | None = None,
         timeout: float | None = None,
     ) -> Any:
-        return _parse_json(self.request("GET", path, params=params, timeout=timeout))
+        return parse_json(self.request("GET", path, params=params, timeout=timeout))
 
     def post_json(self, path: str, *, json: Any | None = None) -> Any:
-        return _parse_json(self.request("POST", path, json=json))
+        return parse_json(self.request("POST", path, json=json))
 
     def delete_json(
         self, path: str, *, params: dict[str, Any] | None = None, json: Any | None = None
     ) -> Any:
-        return _parse_json(self.request("DELETE", path, params=params, json=json))
+        return parse_json(self.request("DELETE", path, params=params, json=json))
 
 
-def _parse_json(resp: httpx.Response) -> Any:
+def parse_json(resp: httpx.Response) -> Any:
     text = resp.text.strip()
     if not text:
         return None
@@ -202,7 +239,7 @@ def _extract_message(resp: httpx.Response, body: object | None, *, is_json: bool
     return resp.reason_phrase or f"HTTP {resp.status_code}"
 
 
-def _map_error(resp: httpx.Response, *, request_path: str) -> TamarindError:
+def map_error(resp: httpx.Response, *, request_path: str) -> TamarindError:
     body, is_json = _error_body(resp)
     detail = body if is_json else None
     msg = _extract_message(resp, body, is_json=is_json)
@@ -236,6 +273,16 @@ def _map_error(resp: httpx.Response, *, request_path: str) -> TamarindError:
         return CustomToolBuildInProgressError(msg, detail=detail)
     if problem_code == "custom_tool_build_not_cancellable":
         return CustomToolBuildNotInProgressError(msg, detail=detail)
+    if code == 400 and problem_code in _FINETUNE_PROBLEM_CODES:
+        # Classify by the machine-readable code, BEFORE the message heuristics
+        # below. These messages quote the caller's own tool name back
+        # (`"x" is not a finetuning tool.`), so a tool named "no such thing"
+        # would otherwise read as a missing resource and exit 4 instead of 5.
+        #
+        # Only on a 400, matching the reroute rule in :mod:`tamarind.rest`: a 403
+        # carrying one of these codes is an access denial, not a routing hint,
+        # and the two must not disagree about which one it is.
+        return ValidationError(msg, detail=detail)
     ml = msg.lower()
     auth_ish = "api key" in ml or "api-key" in ml or "apikey" in ml or "unauthorized" in ml
     resource = (
@@ -282,6 +329,16 @@ def _map_error(resp: httpx.Response, *, request_path: str) -> TamarindError:
 def _problem_code(body: object | None) -> str | None:
     value = body.get("code") if isinstance(body, dict) else None
     return str(value) if value else None
+
+
+def response_problem_code(resp: httpx.Response) -> str | None:
+    """The server's machine-readable ``code``, or None when the body isn't JSON.
+
+    A non-JSON error body (an edge/proxy HTML page, an empty 400) has no code and
+    must never be treated as one — see the route fallbacks in :mod:`tamarind.rest`.
+    """
+    body, is_json = _error_body(resp)
+    return _problem_code(body) if is_json else None
 
 
 def _version() -> str:

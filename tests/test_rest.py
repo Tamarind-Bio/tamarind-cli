@@ -19,6 +19,7 @@ from tamarind.errors import (
     NotFoundError,
     RateLimitError,
     StaleCustomToolError,
+    TamarindError,
     ValidationError,
 )
 from tamarind.http import HTTPClient
@@ -63,6 +64,220 @@ def test_submit_batch_body():
     body = json.loads(route.calls.last.request.content)
     assert body["jobSource"] == "CLI"
     assert body["batchName"] == "b1" and body["jobNames"] == ["b1-1"]
+
+
+@respx.mock
+def test_submit_finetune_body():
+    route = respx.post(f"{BASE}finetune").mock(return_value=httpx.Response(200, json={"ok": True}))
+    rest.submit_finetune(client(), job_name="ft1", model="esm2", settings={"sequence": "ABC"})
+    body = json.loads(route.calls.last.request.content)
+    # Same envelope as /submit-job, except the tool name rides in `model`.
+    assert body == {
+        "jobName": "ft1",
+        "model": "esm2",
+        "settings": {"sequence": "ABC"},
+        "jobSource": "CLI",
+    }
+    assert route.calls.last.request.headers["x-api-key"] == "test-key"
+
+
+@respx.mock
+def test_submit_finetune_batch_body():
+    route = respx.post(f"{BASE}finetune-batch").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    rest.submit_finetune_batch(
+        client(),
+        batch_name="fb1",
+        model="esm2",
+        settings=[{"sequence": "ABC"}],
+        job_names=["fb1-1"],
+        max_runtime_seconds=600,
+    )
+    assert json.loads(route.calls.last.request.content) == {
+        "batchName": "fb1",
+        "model": "esm2",
+        "settings": [{"sequence": "ABC"}],
+        "jobSource": "CLI",
+        "jobNames": ["fb1-1"],
+        "maxRuntimeSeconds": 600,
+    }
+
+
+# ---------------------------------------------------------------------------
+# The finetune routing table. Which tools are finetuning tools is knowable only
+# server-side, so a submission sent to the wrong sibling route is resent ONCE to
+# the right one with the tool-name key renamed. These tests are the table.
+# ---------------------------------------------------------------------------
+
+# Each entry submits through one of the four routes with an identical payload
+# shape, so a resend's body can be compared field-for-field with the original.
+SUBMISSIONS = {
+    "submit-job": lambda c: rest.submit_job(
+        c, job_name="j1", job_type="esm2", settings={"sequence": "ABC"}
+    ),
+    "submit-batch": lambda c: rest.submit_batch(
+        c,
+        batch_name="b1",
+        job_type="esm2",
+        settings=[{"sequence": "ABC"}],
+        job_names=["b1-1"],
+        max_runtime_seconds=900,
+    ),
+    "finetune": lambda c: rest.submit_finetune(
+        c, job_name="j1", model="esm2", settings={"sequence": "ABC"}
+    ),
+    "finetune-batch": lambda c: rest.submit_finetune_batch(
+        c,
+        batch_name="b1",
+        model="esm2",
+        settings=[{"sequence": "ABC"}],
+        job_names=["b1-1"],
+        max_runtime_seconds=900,
+    ),
+}
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "origin,origin_key,sibling,sibling_key,status,code",
+    [
+        # /submit-job and /submit-batch: only the explicit 400 problem code reroutes.
+        ("submit-job", "type", "finetune", "model", 400, "use_finetune_endpoint"),
+        ("submit-batch", "type", "finetune-batch", "model", 400, "use_finetune_endpoint"),
+        # /finetune and /finetune-batch: the 400 problem code, OR an exact 404.
+        ("finetune", "model", "submit-job", "type", 400, "not_a_finetune_tool"),
+        ("finetune-batch", "model", "submit-batch", "type", 400, "not_a_finetune_tool"),
+        # The 404 rows are why this ships safely before the server routes exist:
+        # an older deployment has no /finetune* at all.
+        ("finetune", "model", "submit-job", "type", 404, None),
+        ("finetune-batch", "model", "submit-batch", "type", 404, None),
+    ],
+)
+def test_misrouted_submission_is_resent_once_to_the_sibling_route(
+    origin, origin_key, sibling, sibling_key, status, code
+):
+    refusal = {"error": "wrong route"}
+    if code:
+        refusal["code"] = code
+    first = respx.post(f"{BASE}{origin}").mock(return_value=httpx.Response(status, json=refusal))
+    second = respx.post(f"{BASE}{sibling}").mock(
+        return_value=httpx.Response(200, json={"message": "queued"})
+    )
+
+    assert SUBMISSIONS[origin](client()) == {"message": "queued"}
+
+    assert first.call_count == 1
+    assert second.call_count == 1
+    sent = json.loads(first.calls.last.request.content)
+    resent = json.loads(second.calls.last.request.content)
+    # Only the tool-name key is renamed; its value and every other field survive.
+    assert sent.pop(origin_key) == resent.pop(sibling_key) == "esm2"
+    assert origin_key not in resent and sibling_key not in sent
+    assert resent == sent
+    assert sent["jobSource"] == "CLI"
+    assert second.calls.last.request.headers["x-api-key"] == "test-key"
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "origin,sibling,status,body,exc",
+    [
+        # A 400 with any other problem code is a genuine caller error.
+        ("submit-job", "finetune", 400, {"code": "invalid_settings", "error": "bad"}, ValidationError),
+        ("finetune", "submit-job", 400, {"code": "model_required", "error": "model is required"}, ValidationError),
+        # A 400 with no JSON body has no problem code to trust.
+        ("submit-job", "finetune", 400, None, ValidationError),
+        ("finetune", "submit-job", 400, None, ValidationError),
+        # The code only counts on a 400: a 403 carrying it is still a refusal.
+        ("submit-job", "finetune", 403, {"code": "use_finetune_endpoint", "error": "denied"}, APIError),
+        ("finetune", "submit-job", 403, {"code": "not_a_finetune_tool", "error": "denied"}, APIError),
+        # Only an EXACT 404 falls back, and only from the /finetune* rows.
+        ("finetune", "submit-job", 405, {"error": "Method not allowed"}, APIError),
+        ("submit-job", "finetune", 404, {"error": "Not Found"}, NotFoundError),
+        ("submit-batch", "finetune-batch", 404, {"error": "Not Found"}, NotFoundError),
+        # A 5xx may already have created the job; resending would submit twice.
+        ("submit-job", "finetune", 500, {"error": "boom"}, APIError),
+        ("submit-batch", "finetune-batch", 503, {"error": "boom"}, APIError),
+        ("finetune", "submit-job", 500, {"error": "boom"}, APIError),
+        ("finetune-batch", "submit-batch", 502, {"error": "boom"}, APIError),
+    ],
+)
+def test_refusals_that_must_not_be_resent(origin, sibling, status, body, exc):
+    refusal = (
+        httpx.Response(status, json=body)
+        if body is not None
+        else httpx.Response(status, text="<html>upstream refused</html>")
+    )
+    first = respx.post(f"{BASE}{origin}").mock(return_value=refusal)
+    second = respx.post(f"{BASE}{sibling}").mock(
+        return_value=httpx.Response(200, json={"message": "must never be reached"})
+    )
+
+    with pytest.raises(exc):
+        SUBMISSIONS[origin](client())
+
+    assert first.call_count == 1
+    assert not second.called
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "origin,first_code,sibling,status,body,exc",
+    [
+        ("submit-job", "use_finetune_endpoint", "finetune", 400,
+         {"code": "not_a_finetune_tool", "error": "second refusal"}, ValidationError),
+        ("submit-batch", "use_finetune_endpoint", "finetune-batch", 400,
+         {"code": "not_a_finetune_tool", "error": "second refusal"}, ValidationError),
+        ("finetune", "not_a_finetune_tool", "submit-job", 400,
+         {"code": "use_finetune_endpoint", "error": "second refusal"}, ValidationError),
+        ("finetune-batch", "not_a_finetune_tool", "submit-batch", 400,
+         {"code": "use_finetune_endpoint", "error": "second refusal"}, ValidationError),
+        # A 404 on the resend is not a licence to bounce back either.
+        ("finetune", "not_a_finetune_tool", "submit-job", 404,
+         {"error": "second refusal"}, NotFoundError),
+    ],
+)
+def test_a_resend_that_is_refused_again_is_returned_as_is(
+    origin, first_code, sibling, status, body, exc
+):
+    # The origin would answer 200 on a SECOND visit, so an implementation that
+    # ping-pongs succeeds here instead of raising — the assertion is real.
+    first = respx.post(f"{BASE}{origin}").mock(
+        side_effect=[
+            httpx.Response(400, json={"code": first_code, "error": "first refusal"}),
+            httpx.Response(200, json={"message": "a third request must never happen"}),
+        ]
+    )
+    second = respx.post(f"{BASE}{sibling}").mock(return_value=httpx.Response(status, json=body))
+
+    with pytest.raises(exc, match="second refusal"):
+        SUBMISSIONS[origin](client())
+
+    assert first.call_count == 1
+    assert second.call_count == 1
+
+
+@respx.mock
+@pytest.mark.parametrize("origin,sibling", list(
+    zip(
+        ["submit-job", "submit-batch", "finetune", "finetune-batch"],
+        ["finetune", "finetune-batch", "submit-job", "submit-batch"],
+    )
+))
+@pytest.mark.parametrize("failure", [httpx.ConnectError("no route"), httpx.ReadTimeout("too slow")])
+def test_transport_failures_are_never_resent(origin, sibling, failure):
+    # No answer means the server may have received and acted on the request.
+    first = respx.post(f"{BASE}{origin}").mock(side_effect=failure)
+    second = respx.post(f"{BASE}{sibling}").mock(
+        return_value=httpx.Response(200, json={"message": "must never be reached"})
+    )
+
+    with pytest.raises(TamarindError):
+        SUBMISSIONS[origin](client())
+
+    assert first.call_count == 1
+    assert not second.called
 
 
 @respx.mock
@@ -222,19 +437,47 @@ def test_custom_tool_problem_codes_have_stable_error_types(code, exc) -> None:
 
 @respx.mock
 @pytest.mark.parametrize(
-    "message,exc",
+    "body,exc",
     [
-        ("Missing or incorrect API key", AuthError),  # bad key -> auth (3)
-        ("Job 'x' not found", NotFoundError),  # -> not-found (4)
-        ("file does not exist", NotFoundError),  # -> not-found (4)
-        ("Unrecognized setting: foo", ValidationError),  # genuine -> validation (5)
+        ({"error": "Missing or incorrect API key"}, AuthError),  # bad key -> auth (3)
+        ({"error": "Job 'x' not found"}, NotFoundError),  # -> not-found (4)
+        ({"error": "file does not exist"}, NotFoundError),  # -> not-found (4)
+        ({"error": "Unrecognized setting: foo"}, ValidationError),  # genuine -> validation (5)
+        # The finetune routes' real messages, classified by problem code rather
+        # than wording. Both of the first two quote the caller's own tool name
+        # back, so a tool named "no such thing" would otherwise read as a missing
+        # resource and get exit code 4 instead of 5.
+        (
+            {
+                "code": "not_a_finetune_tool",
+                "error": '"no such thing" is not a finetuning tool. Submit it with POST /submit-job.',
+            },
+            ValidationError,
+        ),
+        (
+            {
+                "code": "use_finetune_endpoint",
+                "error": '"not found here" is a finetuning tool. Submit it with POST /finetune.',
+            },
+            ValidationError,
+        ),
+        ({"code": "model_required", "error": "model is required"}, ValidationError),
+        (
+            {
+                "code": "type_model_mismatch",
+                "error": '"type" ("a") does not match "model" ("b"). Send only "model" to POST /finetune.',
+            },
+            ValidationError,
+        ),
     ],
 )
-def test_400_subtype_classification(message, exc):
-    # The API overloads HTTP 400; the client classifies by message for stable exit codes.
-    respx.get(f"{BASE}jobs").mock(return_value=httpx.Response(400, json={"error": message}))
-    with pytest.raises(exc):
+def test_400_subtype_classification(body, exc):
+    # The API overloads HTTP 400; the client classifies by problem code when the
+    # server sends one, and by message otherwise, for stable exit codes.
+    respx.get(f"{BASE}jobs").mock(return_value=httpx.Response(400, json=body))
+    with pytest.raises(exc) as raised:
         rest.get_jobs(client())
+    assert raised.value.detail == body
 
 
 @respx.mock

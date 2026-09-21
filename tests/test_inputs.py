@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from tamarind.cli.inputs import effective_job_name, resolve_job_input
+from tamarind.cli.inputs import effective_job_name, effective_job_type, resolve_job_input
 from tamarind.errors import ExitCode, ValidationError
 
 
@@ -22,6 +22,33 @@ def test_envelope(tmp_path):
     assert job.job_type == "boltz"
     assert job.job_name == "run1"
     assert job.settings == {"sequence": "ABC"}
+
+
+@pytest.mark.parametrize(
+    "tool_key,document",
+    [
+        ("type", '{"type":"boltz","settings":{"sequence":"ABC"}}'),
+        # The finetune commands name the tool "model". Without tool_key this is
+        # not recognised as an envelope at all and the WHOLE document (model and
+        # the nested settings object) silently becomes the job's settings.
+        ("model", '{"model":"boltz","settings":{"sequence":"ABC"}}'),
+    ],
+)
+def test_envelope_is_recognised_by_its_own_tool_key(tmp_path, tool_key, document):
+    f = tmp_path / "job.json"
+    f.write_text(document)
+    job = resolve_job_input(str(f), [], tool_key=tool_key)
+    assert job.job_type == "boltz"
+    assert job.settings == {"sequence": "ABC"}
+
+
+@pytest.mark.parametrize("tool_key", ["type", "model"])
+def test_envelope_tool_key_must_agree_with_the_command(tmp_path, tool_key):
+    f = tmp_path / "job.json"
+    f.write_text(json.dumps({tool_key: "esmfold", "settings": {"sequence": "ABC"}}))
+    job = resolve_job_input(str(f), [], tool_key=tool_key)
+    with pytest.raises(ValidationError, match=f"file's {tool_key} is 'esmfold'"):
+        effective_job_type("boltz", job.job_type, tool_key=tool_key)
 
 
 def test_set_overrides_and_coercion(tmp_path):

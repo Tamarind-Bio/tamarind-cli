@@ -76,11 +76,13 @@ def _apply_sets(settings: dict[str, Any], pairs: list[str]) -> None:
         settings[key.strip()] = _coerce_scalar(raw)
 
 
-def _looks_like_envelope(doc: dict[str, Any]) -> bool:
-    return "settings" in doc and ("type" in doc or "jobName" in doc)
+def _looks_like_envelope(doc: dict[str, Any], tool_key: str = "type") -> bool:
+    return "settings" in doc and (tool_key in doc or "jobName" in doc)
 
 
-def effective_job_type(cli_tool: str, file_type: object | None) -> str:
+def effective_job_type(
+    cli_tool: str, file_type: object | None, *, tool_key: str = "type"
+) -> str:
     """Reconcile the explicit ``<tool>`` argument with a ``type`` in the input file.
 
     The command's ``<tool>`` argument is authoritative. A ``type`` in the input
@@ -92,6 +94,9 @@ def effective_job_type(cli_tool: str, file_type: object | None) -> str:
     ``file_type`` comes straight from YAML, so it may parse as a non-string
     (``type: 1`` → int, ``type: true`` → bool). Only None means absent;
     every supplied value must be a string that agrees with the selected tool.
+
+    ``tool_key`` names the field being reconciled, for the error message only:
+    the finetune commands carry the tool name in ``model`` rather than ``type``.
     """
     if file_type is not None and (
         not isinstance(file_type, str)
@@ -99,8 +104,8 @@ def effective_job_type(cli_tool: str, file_type: object | None) -> str:
     ):
         raise ValidationError(
             f"Tool mismatch: the command targets '{cli_tool}' but the input "
-            f"file's type is '{file_type}'. Remove the file's 'type' field, or "
-            f"re-run the command with '{file_type}' as the tool."
+            f"file's {tool_key} is '{file_type}'. Remove the file's '{tool_key}' "
+            f"field, or re-run the command with '{file_type}' as the tool."
         )
     return cli_tool
 
@@ -116,8 +121,16 @@ def effective_job_name(cli_name: str | None, file_name: object | None) -> str | 
 def resolve_job_input(
     input_source: str | None,
     set_pairs: list[str] | None,
+    *,
+    tool_key: str = "type",
 ) -> JobInput:
-    """Build a :class:`JobInput` from ``--input`` and ``--set`` options."""
+    """Build a :class:`JobInput` from ``--input`` and ``--set`` options.
+
+    ``tool_key`` is the envelope field naming the tool — ``type`` everywhere
+    except the finetune commands, whose API surface calls it ``model``. Without
+    it a ``{model, settings}`` envelope would not be recognised as an envelope
+    at all, and the whole document would silently become the job's settings.
+    """
     settings: dict[str, Any] = {}
     job_type: str | None = None
     job_name: str | None = None
@@ -129,10 +142,10 @@ def resolve_job_input(
         if not isinstance(doc, dict):
             raise ValidationError(
                 "Input must be a mapping (the job settings, or a "
-                "{jobName, type, settings} object)."
+                f"{{jobName, {tool_key}, settings}} object)."
             )
-        if _looks_like_envelope(doc):
-            job_type = doc.get("type")
+        if _looks_like_envelope(doc, tool_key):
+            job_type = doc.get(tool_key)
             job_name = doc.get("jobName")
             doc = doc["settings"]
         if not isinstance(doc, dict):
