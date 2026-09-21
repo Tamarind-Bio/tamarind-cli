@@ -100,6 +100,23 @@ def _looks_like_envelope(doc: dict[str, Any], tool_key: str = "type") -> bool:
     return "settings" in doc and (tool_key in doc or "jobName" in doc)
 
 
+def _tool_identity(value: object) -> tuple[str, str]:
+    """Compare two tool names the SAME way :func:`effective_job_type` does.
+
+    That function trims and lowercases before deciding a name agrees with the
+    command's tool, so a raw comparison here would disagree with it and reject
+    ``{type: "ESM2", model: "esm2"}`` as two different tools when it is one.
+
+    Non-strings are tagged separately rather than rendered into the string space:
+    ``repr(1)`` is ``"1"``, which would make ``{type: 1, model: "1"}`` look like a
+    single name and hide a genuinely malformed value that
+    :func:`effective_job_type` goes on to reject.
+    """
+    if isinstance(value, str):
+        return ("str", value.strip().lower())
+    return ("other", repr(value))
+
+
 def envelope_tool_value(doc: dict[str, Any], tool_key: str) -> object | None:
     """The tool an envelope names, reconciling BOTH tool keys.
 
@@ -115,9 +132,7 @@ def envelope_tool_value(doc: dict[str, Any], tool_key: str) -> object | None:
     named = {
         key: doc[key] for key in TOOL_KEYS if key in doc and doc[key] is not None
     }
-    distinct = {
-        value if isinstance(value, str) else repr(value) for value in named.values()
-    }
+    distinct = {_tool_identity(value) for value in named.values()}
     if len(distinct) > 1:
         pairs = ", ".join(f"{key}: {value!r}" for key, value in sorted(named.items()))
         raise ValidationError(

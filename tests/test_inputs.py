@@ -73,12 +73,35 @@ def test_envelope_tool_key_must_agree_with_the_command(tmp_path, tool_key, docum
 @pytest.mark.parametrize("tool_key", ["type", "model"])
 @pytest.mark.parametrize("document", [
     {"type": "boltz", "model": "esmfold", "settings": {"sequence": "ABC"}},
+    # A non-string can never BE a string tool name. Rendering it into the string
+    # space to compare (repr(1) == "1") would hide a malformed value behind an
+    # apparent agreement.
+    {"type": 1, "model": "1", "settings": {"sequence": "ABC"}},
 ])
 def test_an_envelope_naming_two_different_tools_is_refused(tmp_path, tool_key, document):
     f = tmp_path / "job.json"
     f.write_text(json.dumps(document))
     with pytest.raises(ValidationError, match="two different tools"):
         resolve_job_input(str(f), [], tool_key=tool_key)
+
+
+@pytest.mark.parametrize("tool_key", ["type", "model"])
+@pytest.mark.parametrize("document", [
+    # Same tool, spelled differently. effective_job_type compares trimmed and
+    # case-insensitively, so the conflict check must too or the two rules disagree
+    # and a perfectly valid document is refused.
+    {"type": "ESM2", "model": "esm2", "settings": {"sequence": "ABC"}},
+    {"type": " esm2 ", "model": "esm2", "settings": {"sequence": "ABC"}},
+])
+def test_two_tool_keys_naming_the_same_tool_are_not_a_conflict(
+    tmp_path, tool_key, document
+):
+    f = tmp_path / "job.json"
+    f.write_text(json.dumps(document))
+
+    job = resolve_job_input(str(f), [], tool_key=tool_key)
+
+    assert effective_job_type("esm2", job.job_type, tool_key=tool_key) == "esm2"
 
 
 @pytest.mark.parametrize("tool_key", ["type", "model"])
