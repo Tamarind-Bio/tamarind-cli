@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 
+from .attribution import client_headers
 from .errors import (
     APIError,
     AuthError,
@@ -53,6 +54,8 @@ class HTTPClient:
             # surprises from upstream content-encoding negotiation.
             "Accept-Encoding": "identity",
             "User-Agent": f"{USER_AGENT}/{_version()}",
+            # Channel (cli/sdk) and the AI agent driving us, for usage attribution only.
+            **client_headers(),
         }
         if api_key:
             headers["x-api-key"] = api_key

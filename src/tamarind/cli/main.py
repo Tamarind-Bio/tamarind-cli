@@ -19,7 +19,7 @@ try:  # Newer Typer can vendor Click as ``typer._click``.
 except ImportError:  # pragma: no cover - older Typer uses the external Click package
     from click import ClickException
 
-from .. import __version__
+from .. import __version__, attribution
 from ..config import Config, load_config
 from ..errors import ExitCode, TamarindError
 from ..http import HTTPClient
@@ -177,6 +177,7 @@ jobs_cmds.register(app)
 def run() -> None:
     """Console-script entry point with global error→exit-code mapping."""
     global _active_output_mode
+    attribution.set_channel(attribution.CHANNEL_CLI)
     # Reset for callers that invoke ``run`` repeatedly in-process (notably
     # tests). Read explicit output flags as a fallback for parse errors that
     # occur before the root callback can resolve them.
