@@ -239,6 +239,11 @@ Run `tamarind <command> --help` for full options.
 | Job API base | `--api-base` | `TAMARIND_API_BASE` | `https://app.tamarind.bio/api/` |
 | Catalog base | `--catalog-base` | `TAMARIND_CATALOG_BASE` | `https://mcp.tamarind.bio` |
 | Profile | `--profile` | `TAMARIND_PROFILE` | `default` |
+| AI agent reported to Tamarind | — | `TAMARIND_AGENT` | detected; `none` to send none |
+
+Every request says whether it came from the CLI or the SDK, and which AI agent (Claude Code,
+Codex, Claude Science, ...) is running it when that can be told from the environment. Tamarind
+uses this only to count usage by channel and platform.
 
 Profiles (key + endpoints) are stored in `~/.tamarind/config.json`. Use a
 profile to point at staging:
