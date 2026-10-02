@@ -51,7 +51,6 @@ from tamarind.errors import (
     CustomToolBuildTimeoutError,
     CustomToolUploadError,
     CustomToolNotDeployableError,
-    StaleCustomToolError,
     TamarindError,
     ValidationError,
 )
@@ -153,7 +152,6 @@ class CustomToolTestJob:
 @dataclass(frozen=True)
 class CustomTool:
     name: str
-    _generation: str = field(repr=False)
     display_name: str
     description: str
     functions: tuple[str, ...]
@@ -175,7 +173,7 @@ class CustomTool:
     updated_at: str
     can_edit: bool
     can_build: bool
-    _etag: str | None = field(repr=False, compare=False)
+    _etag: str = field(repr=False, compare=False)
     _collection: "CustomTools" = field(repr=False, compare=False)
 
     def refresh(self) -> "CustomTool":
@@ -184,7 +182,7 @@ class CustomTool:
     def _refresh(self, *, request_timeout: float | None) -> "CustomTool":
         return self._collection._current_tool(
             self.name,
-            self._generation,
+            self._etag,
             request_timeout=request_timeout,
         )
 
@@ -260,7 +258,7 @@ class CustomTool:
         version: str,
         name: str | None = None,
     ) -> CustomToolTestJob:
-        """Submit a test of an exact opaque Version.id, without publishing it.
+        """Submit a test of a completed numbered version, without publishing it.
 
         Returns immediately with the job receipt. Ordinary submissions are unaffected.
         A design-batched tool returns the logical parent job. No automatic retries are made.
@@ -271,15 +269,15 @@ class CustomTool:
             raise ValidationError("Test job name must be a non-empty string")
         job_name = name if name is not None else f"{self.name}-test-{uuid4().hex[:12]}"
         selected = self.get_version(version)
-        if selected.status != "Complete":
+        if selected.status != "Complete" or selected.error is not None:
             raise CustomToolNotDeployableError(
-                f"Version {selected.name} is {selected.status}; test a completed build."
+                f"Version {selected.version} is {selected.status}; test a completed build."
             )
         try:
             wire = self._collection._transport.submit_test_job(
                 name=self.name,
-                version_name=selected.name,
-                generation=self._generation,
+                version=selected.version,
+                lifetime_etag=selected._lifetime_etag,
                 job_name=job_name,
                 settings=settings,
             )
@@ -306,7 +304,7 @@ class CustomTool:
             detail.update(
                 jobName=job_name,
                 toolName=self.name,
-                versionId=selected.id,
+                version=selected.version,
                 submitted=None if ambiguous else False,
                 outcomeMayBeAmbiguous=ambiguous,
             )
@@ -317,10 +315,9 @@ class CustomTool:
                 )
             raise
 
-
-    def get_version(self, version_id: str) -> "Version":
-        """Get one exact Version by its opaque ``id``."""
-        return self._collection._get_version_for_tool(self, _require_opaque_version_id(version_id))
+    def get_version(self, version: str) -> "Version":
+        """Get an exact numbered version (for example, ``v3``)."""
+        return self._collection._get_version_for_tool(self, _require_version(version))
 
     def versions(
         self,
@@ -339,8 +336,7 @@ class CustomTool:
 
 @dataclass(frozen=True)
 class Version:
-    id: str
-    name: str
+    version: str
     source_revision: str | None
     source_digest: str | None
     status: PublicVersionStatus
@@ -351,9 +347,9 @@ class Version:
     completed_at: str | None
     error: BuildError | None
     tool_name: str
-    _tool_generation: str = field(repr=False)
+    _lifetime_etag: str = field(repr=False)
     _collection: "CustomTools" = field(repr=False, compare=False)
-    _etag: str | None = field(default=None, repr=False, compare=False)
+    _etag: str = field(repr=False, compare=False)
 
     def refresh(self) -> "Version":
         return self._refresh(request_timeout=None)
@@ -361,18 +357,20 @@ class Version:
     def _refresh(self, *, request_timeout: float | None) -> "Version":
         wire = self._collection._transport.get_custom_tool_version(
             self.tool_name,
-            self.id,
+            self.version,
+            etag=self._lifetime_etag,
             timeout=request_timeout,
         )
-        return _version_from_wire(self._collection, self.tool_name, self._tool_generation, wire)
+        return _version_from_wire(self._collection, self.tool_name, wire)
 
     async def _refresh_async(self, *, request_timeout: float | None) -> "Version":
         wire = await self._collection._transport.get_custom_tool_version_async(
             self.tool_name,
-            self.id,
+            self.version,
+            etag=self._lifetime_etag,
             timeout=request_timeout,
         )
-        return _version_from_wire(self._collection, self.tool_name, self._tool_generation, wire)
+        return _version_from_wire(self._collection, self.tool_name, wire)
 
     def logs(self, *, cursor: str | None = None) -> BuildLogPage:
         return self._logs(cursor=cursor, request_timeout=None)
@@ -380,8 +378,9 @@ class Version:
     def _logs(self, *, cursor: str | None, request_timeout: float | None) -> BuildLogPage:
         wire = self._collection._transport.list_custom_tool_build_logs(
             self.tool_name,
-            self.id,
+            self.version,
             cursor=cursor,
+            etag=self._lifetime_etag,
             timeout=request_timeout,
         )
         return _log_page_from_wire(wire)
@@ -391,8 +390,9 @@ class Version:
     ) -> BuildLogPage:
         wire = await self._collection._transport.list_custom_tool_build_logs_async(
             self.tool_name,
-            self.id,
+            self.version,
             cursor=cursor,
+            etag=self._lifetime_etag,
             timeout=request_timeout,
         )
         return _log_page_from_wire(wire)
@@ -429,7 +429,7 @@ class Version:
             remaining = deadline - _clock()
             if remaining <= 0:
                 raise CustomToolBuildTimeoutError(
-                    f"Custom Tool Version {self.tool_name}/{self.name} monitoring timed out "
+                    f"Custom Tool Version {self.tool_name}/{self.version} monitoring timed out "
                     f"while status is {current.status}"
                 )
             return remaining
@@ -508,8 +508,12 @@ class CustomTools:
     def get(self, name: str) -> CustomTool:
         return self._get(name, request_timeout=None)
 
-    def _get(self, name: str, *, request_timeout: float | None) -> CustomTool:
-        return _tool_from_wire(self, self._transport.get_custom_tool(name, timeout=request_timeout))
+    def _get(
+        self, name: str, *, request_timeout: float | None, etag: str | None = None
+    ) -> CustomTool:
+        return _tool_from_wire(
+            self, self._transport.get_custom_tool(name, etag=etag, timeout=request_timeout)
+        )
 
     def list(
         self,
@@ -533,39 +537,21 @@ class CustomTools:
     def _current_tool(
         self,
         tool_name: str,
-        expected_generation: str,
+        etag: str,
         *,
         request_timeout: float | None = None,
     ) -> CustomTool:
-        current = self._get(tool_name, request_timeout=request_timeout)
-        if current._generation != expected_generation:
-            raise StaleCustomToolError(
-                f"Custom Tool {tool_name!r} was deleted and recreated; "
-                "fetch it again explicitly to select the replacement."
-            )
-        return current
-
-    def _validator(self, tool: CustomTool) -> str:
-        if tool._etag is not None:
-            return tool._etag
-        current = self._current_tool(tool.name, tool._generation)
-        if current.updated_at != tool.updated_at:
-            raise StaleCustomToolError(
-                f"Custom Tool {tool.name!r} changed since it was listed; "
-                "fetch it again before mutating it."
-            )
-        if current._etag is None:
-            raise TamarindError("Custom Tools response did not include the required ETag")
-        return current._etag
+        # The server interprets this opaque validator as a lifetime fence on reads.
+        return self._get(tool_name, etag=etag, request_timeout=request_timeout)
 
     def _update(self, tool: CustomTool, body: PublicUpdateCustomToolRequest) -> CustomTool:
         return _tool_from_wire(
             self,
-            self._transport.update_custom_tool(tool.name, self._validator(tool), body),
+            self._transport.update_custom_tool(tool.name, tool._etag, body),
         )
 
     def _delete(self, tool: CustomTool) -> None:
-        self._transport.delete_custom_tool(tool.name, self._validator(tool))
+        self._transport.delete_custom_tool(tool.name, tool._etag)
 
     def _build(
         self,
@@ -578,7 +564,7 @@ class CustomTools:
         timeout, _ = _validate_monitor_options(timeout=source_timeout, interval=1.0)
         archive = build_source_tree_archive(tree, max_bytes=MAX_TOOL_SOURCE_BYTES)
         try:
-            validator = self._validator(tool)
+            validator = tool._etag
             session = _upload_session_from_wire(
                 self._transport.create_custom_tool_upload(
                     tool.name,
@@ -615,7 +601,7 @@ class CustomTools:
             )
         finally:
             archive.close()
-        return _build_result_from_wire(self, tool.name, tool._generation, result)
+        return _build_result_from_wire(self, tool.name, result)
 
     def _versions(
         self,
@@ -631,80 +617,42 @@ class CustomTools:
             status=status,
             limit=limit,
             cursor=cursor,
+            etag=tool._etag,
             timeout=request_timeout,
         )
-        self._current_tool(
-            tool.name,
-            tool._generation,
-            request_timeout=request_timeout,
-        )
         return Page(
-            items=tuple(
-                _version_from_wire(self, tool.name, tool._generation, item) for item in wire["items"]
-            ),
+            items=tuple(_version_from_wire(self, tool.name, item) for item in wire["items"]),
             next_cursor=wire["nextCursor"],
         )
 
     def _get_version_for_tool(
         self,
         tool: CustomTool,
-        version_id: str,
-        *,
-        request_timeout: float | None = None,
-    ) -> Version:
-        version = self._get_version(
-            tool.name,
-            tool._generation,
-            version_id,
-            request_timeout=request_timeout,
-        )
-        self._current_tool(
-            tool.name,
-            tool._generation,
-            request_timeout=request_timeout,
-        )
-        return version
-
-    def _get_version(
-        self,
-        tool_name: str,
-        tool_generation: str,
-        version_id: str,
+        version: str,
         *,
         request_timeout: float | None = None,
     ) -> Version:
         wire = self._transport.get_custom_tool_version(
-            tool_name,
-            version_id,
+            tool.name,
+            version,
+            etag=tool._etag,
             timeout=request_timeout,
         )
-        return _version_from_wire(self, tool_name, tool_generation, wire)
-
-    def _version_validator(self, version: Version) -> str:
-        if version._etag is not None:
-            return version._etag
-        raise TamarindError(
-            "Conditional cancellation requires an observed version state. "
-            "Assign version = version.refresh() and review it before cancelling."
-        )
+        return _version_from_wire(self, tool.name, wire)
 
     def _cancel_version(self, version: Version, *, if_unchanged: bool = False) -> Version:
         wire = self._transport.cancel_custom_tool_build(
             version.tool_name,
-            version.id,
-            self._version_validator(version) if if_unchanged else "*",
+            version.version,
+            version._etag if if_unchanged else version._lifetime_etag,
         )
-        return _version_from_wire(self, version.tool_name, version._tool_generation, wire)
+        return _version_from_wire(self, version.tool_name, wire)
 
     def _publish_version(self, version: Version) -> CustomTool:
-        tool = self._current_tool(
-            version.tool_name,
-            version._tool_generation,
-        )
         wire = self._transport.publish_custom_tool_version(
             version.tool_name,
-            version.id,
-            self._validator(tool),
+            version.version,
+            version._lifetime_etag,
         )
         return _tool_from_wire(self, wire)
 
@@ -778,7 +726,6 @@ def _upload_archive(
 def _tool_from_wire(collection: CustomTools, wire: PublicCustomTool) -> CustomTool:
     return CustomTool(
         name=wire["name"],
-        _generation=wire["generation"],
         display_name=wire["displayName"],
         description=wire["description"],
         functions=tuple(wire["functions"]),
@@ -800,20 +747,17 @@ def _tool_from_wire(collection: CustomTools, wire: PublicCustomTool) -> CustomTo
         updated_at=wire["updatedAt"],
         can_edit=wire["canEdit"],
         can_build=wire["canBuild"],
-        _etag=cast(str | None, wire.get("_etag")),
+        _etag=wire["etag"],
         _collection=collection,
     )
 
 
-def _version_from_wire(
-    collection: CustomTools, tool_name: str, tool_generation: str, wire: PublicVersion
-) -> Version:
+def _version_from_wire(collection: CustomTools, tool_name: str, wire: PublicVersion) -> Version:
     terminal = wire["terminal"]
     if not isinstance(terminal, bool):
         raise TamarindError("Custom Tools response did not match the generated contract")
     return Version(
-        id=wire["id"],
-        name=wire["name"],
+        version=wire["version"],
         source_revision=wire["sourceRevision"],
         source_digest=wire["sourceDigest"],
         status=PublicVersionStatus(wire["status"]),
@@ -824,8 +768,8 @@ def _version_from_wire(
         completed_at=wire["completedAt"],
         error=_build_error_from_wire(wire["error"]),
         tool_name=tool_name,
-        _tool_generation=tool_generation,
-        _etag=cast(str | None, wire.get("_etag")),
+        _lifetime_etag=wire["lifetimeEtag"],
+        _etag=wire["etag"],
         _collection=collection,
     )
 
@@ -833,15 +777,12 @@ def _version_from_wire(
 def _build_result_from_wire(
     collection: CustomTools,
     tool_name: str,
-    tool_generation: str,
     wire: PublicBuildResult,
 ) -> BuildResult:
     version = dict(wire["version"])
-    if "_etag" in wire:
-        version["_etag"] = wire["_etag"]
     return BuildResult(
         action=BuildAction(wire["action"]),
-        version=_version_from_wire(collection, tool_name, tool_generation, version),
+        version=_version_from_wire(collection, tool_name, version),
     )
 
 
@@ -867,12 +808,12 @@ def _build_error_from_wire(error: object) -> BuildError | None:
 
 
 def _require_success(version: Version) -> Version:
-    if version.status != "Complete":
+    if version.status != "Complete" or version.error is not None:
         message = (
             version.error.message if version.error else f"build ended with status {version.status}"
         )
         raise CustomToolBuildFailedError(
-            f"Custom Tool Version {version.tool_name}/{version.name} failed: {message}",
+            f"Custom Tool Version {version.tool_name}/{version.version} failed: {message}",
             detail=version,
         )
     return version
@@ -915,7 +856,7 @@ def _positive_finite_number(value: object, label: str) -> float:
     return normalized
 
 
-def _require_opaque_version_id(value: str) -> str:
-    if re.fullmatch(r"v[1-9][0-9]*", value):
-        raise ValidationError("get_version requires the opaque Version.id, not its numbered name")
+def _require_version(value: str) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"v[1-9][0-9]*", value):
+        raise ValidationError("Use a numbered version such as v1 from custom-tools versions")
     return value

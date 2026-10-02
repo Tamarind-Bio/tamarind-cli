@@ -10,6 +10,9 @@ from .public_create_custom_tool_request_gputype import PublicCreateCustomToolReq
 from .public_create_custom_tool_request_memory import PublicCreateCustomToolRequestMemory
 from .public_create_version_request import PublicCreateVersionRequest
 from .public_custom_tool import PublicCustomTool
+from .public_custom_tool_detail import PublicCustomToolDetail
+from .public_custom_tool_detail_gputype import PublicCustomToolDetailGputype
+from .public_custom_tool_detail_memory import PublicCustomToolDetailMemory
 from .public_custom_tool_gputype import PublicCustomToolGputype
 from .public_custom_tool_memory import PublicCustomToolMemory
 from .public_custom_tool_page import PublicCustomToolPage
@@ -40,6 +43,9 @@ __all__ = (
     "PublicCreateCustomToolRequestMemory",
     "PublicCreateVersionRequest",
     "PublicCustomTool",
+    "PublicCustomToolDetail",
+    "PublicCustomToolDetailGputype",
+    "PublicCustomToolDetailMemory",
     "PublicCustomToolGputype",
     "PublicCustomToolMemory",
     "PublicCustomToolPage",

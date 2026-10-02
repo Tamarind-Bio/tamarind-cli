@@ -27,7 +27,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/custom-tools/{name}/versions".format(
+        "url": "/custom-tools/{name}/build".format(
             name=quote(str(name), safe=""),
         ),
     }
@@ -97,12 +97,13 @@ def sync_detailed(
     idempotency_key: None | str | Unset = UNSET,
     if_match: str | Unset = UNSET,
 ) -> Response[PublicBuildResult | PublicProblem]:
-    """Build a custom tool version
+    """Build a custom tool
 
      Build a version from an uploaded source archive.
 
     The archive also updates the tool's editable source and configuration. Optionally send the Tool
-    ETag from Get tool to reject concurrent edits. Without it, the current tool is updated.
+    `etag` field from the Get tool JSON body to reject concurrent edits. Without it, the current tool is
+    updated.
     Returns immediately with the new or reused version and its current status.
 
     Args:
@@ -142,12 +143,13 @@ def sync(
     idempotency_key: None | str | Unset = UNSET,
     if_match: str | Unset = UNSET,
 ) -> PublicBuildResult | PublicProblem | None:
-    """Build a custom tool version
+    """Build a custom tool
 
      Build a version from an uploaded source archive.
 
     The archive also updates the tool's editable source and configuration. Optionally send the Tool
-    ETag from Get tool to reject concurrent edits. Without it, the current tool is updated.
+    `etag` field from the Get tool JSON body to reject concurrent edits. Without it, the current tool is
+    updated.
     Returns immediately with the new or reused version and its current status.
 
     Args:
@@ -182,12 +184,13 @@ async def asyncio_detailed(
     idempotency_key: None | str | Unset = UNSET,
     if_match: str | Unset = UNSET,
 ) -> Response[PublicBuildResult | PublicProblem]:
-    """Build a custom tool version
+    """Build a custom tool
 
      Build a version from an uploaded source archive.
 
     The archive also updates the tool's editable source and configuration. Optionally send the Tool
-    ETag from Get tool to reject concurrent edits. Without it, the current tool is updated.
+    `etag` field from the Get tool JSON body to reject concurrent edits. Without it, the current tool is
+    updated.
     Returns immediately with the new or reused version and its current status.
 
     Args:
@@ -225,12 +228,13 @@ async def asyncio(
     idempotency_key: None | str | Unset = UNSET,
     if_match: str | Unset = UNSET,
 ) -> PublicBuildResult | PublicProblem | None:
-    """Build a custom tool version
+    """Build a custom tool
 
      Build a version from an uploaded source archive.
 
     The archive also updates the tool's editable source and configuration. Optionally send the Tool
-    ETag from Get tool to reject concurrent edits. Without it, the current tool is updated.
+    `etag` field from the Get tool JSON body to reject concurrent edits. Without it, the current tool is
+    updated.
     Returns immediately with the new or reused version and its current status.
 
     Args:

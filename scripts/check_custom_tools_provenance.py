@@ -1,14 +1,22 @@
 #!/usr/bin/env python3
 """Verify the exact backend artifact, generator pin, and immutable provenance lock."""
 
+import argparse
 from hashlib import sha256
 import json
 from pathlib import Path
 
-from sync_custom_tools_contract import _contract_metadata
+from sync_custom_tools_contract import _contract_metadata, _git, _verify_committed_source
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--source-checkout",
+        type=Path,
+        help="Also compare the Custom Tools snapshot to this backend checkout's committed HEAD",
+    )
+    args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     spec = root / "openapi/public-v1.json"
     lock = json.loads((root / "openapi/public-v1.lock.json").read_text())
@@ -30,6 +38,8 @@ def main() -> None:
         raise SystemExit("unsupported Custom Tools producer")
     if sha256(spec.read_bytes()).hexdigest() != lock["artifactSha256"]:
         raise SystemExit("public-v1.json does not match its provenance lock")
+    if args.source_checkout is not None:
+        verify_upstream(args.source_checkout, lock["sourcePath"], spec.read_bytes())
     expected_metadata = _contract_metadata(json.loads(spec.read_text()))
     metadata = root / "src/tamarind/custom_tools/_contract.py"
     if metadata.read_text() != expected_metadata:
@@ -41,12 +51,19 @@ def main() -> None:
         raise SystemExit("pipelines-v1.lock.json has an unsupported shape")
     if pipelines_lock["generator"] != "openapi-python-client==0.28.4":
         raise SystemExit("Pipelines client does not use the pinned generator")
-    if pipelines_lock["sourceRepository"] != "Tamarind-Bio/tamarind-website" or pipelines_lock[
-        "sourcePath"
-    ] != "backend/app/public_api/openapi/public-v1.generated.json":
+    if (
+        pipelines_lock["sourceRepository"] != "Tamarind-Bio/tamarind-website"
+        or pipelines_lock["sourcePath"] != "backend/app/public_api/openapi/public-v1.generated.json"
+    ):
         raise SystemExit("unsupported Pipelines producer")
     if sha256(pipelines_spec.read_bytes()).hexdigest() != pipelines_lock["artifactSha256"]:
         raise SystemExit("pipelines-v1.json does not match its provenance lock")
+
+
+def verify_upstream(checkout: Path, source_path: str, raw: bytes) -> None:
+    """Compare committed producer HEAD, not just the consumer's own pinned snapshot."""
+    head = _git(checkout, "rev-parse", "HEAD").decode().strip()
+    _verify_committed_source(checkout, head, source_path, raw)
 
 
 if __name__ == "__main__":

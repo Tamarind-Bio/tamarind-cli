@@ -271,10 +271,10 @@ class ProbeTransport(GeneratedCustomToolsTransport):
         )
 
     def _sync(self, _operation, _kwargs, _timeout=None):
-        return {}
+        return {"version": {}}
 
     async def _async(self, _operation, _kwargs, _timeout=None):
-        return {}
+        return {"version": {}}
 
 
 transport = ProbeTransport()
@@ -293,18 +293,18 @@ transport.build_custom_tool_version(
         "expectedSourceDigest": "sha256:" + "0" * 64,
     },
 )
-transport.get_custom_tool_version("contract-probe", "ver_opaque")
-transport.cancel_custom_tool_build("contract-probe", "ver_opaque", '"version-etag"')
-transport.list_custom_tool_build_logs("contract-probe", "ver_opaque")
-transport.publish_custom_tool_version("contract-probe", "ver_opaque", '"tool-etag"')
+transport.get_custom_tool_version("contract-probe", "v1")
+transport.cancel_custom_tool_build("contract-probe", "v1", '"version-etag"')
+transport.list_custom_tool_build_logs("contract-probe", "v1")
+transport.publish_custom_tool_version("contract-probe", "v1", '"tool-etag"')
 
 
 async def exercise_async_facade():
     await transport.get_custom_tool_version_async(
-        "contract-probe", "ver_opaque"
+        "contract-probe", "v1"
     )
     await transport.list_custom_tool_build_logs_async(
-        "contract-probe", "ver_opaque"
+        "contract-probe", "v1"
     )
 
 

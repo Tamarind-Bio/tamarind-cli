@@ -10,13 +10,13 @@ permissions:
 
 jobs:
   generated:
-    name: Generated transport is current
+    name: Generated transport matches pinned contracts
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Verify backend provenance and generated client freshness
+      - name: Verify pinned provenance and generated client freshness
         run: |
           uv run --extra dev python scripts/check_custom_tools_provenance.py
           tmp_dir=$(mktemp -d .custom-tools-generated.XXXXXX)

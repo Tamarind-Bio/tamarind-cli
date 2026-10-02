@@ -76,8 +76,7 @@ def _version(version: Version) -> dict[str, object]:
     if version.error is not None:
         error = {"code": version.error.code, "message": version.error.message}
     return {
-        "id": version.id,
-        "name": version.name,
+        "version": version.version,
         "toolName": version.tool_name,
         "sourceRevision": version.source_revision,
         "sourceDigest": version.source_digest,
@@ -104,8 +103,7 @@ def _tool_human(tool: CustomTool) -> str:
 def _version_human(version: Version) -> str:
     error = f"\nerror: {version.error.message}" if version.error is not None else ""
     return (
-        f"{version.tool_name}/{version.name}\n"
-        f"id: {version.id}\n"
+        f"{version.tool_name}/{version.version}\n"
         f"status: {version.status}\n"
         f"terminal: {'yes' if version.terminal else 'no'}{error}"
     )
@@ -121,8 +119,8 @@ def _event_printer(mode: output.OutputMode):
     return show
 
 
-def _get_version(client: Any, tool_name: str, version_id: str) -> Version:
-    return client.custom_tools.get(tool_name).get_version(version_id)
+def _get_version(client: Any, tool_name: str, version_number: str) -> Version:
+    return client.custom_tools.get(tool_name).get_version(version_number)
 
 
 def _attach_version_context(
@@ -135,8 +133,7 @@ def _attach_version_context(
     detail.update(
         {
             "toolName": version.tool_name,
-            "versionId": version.id,
-            "versionName": version.name,
+            "version": version.version,
         }
     )
     if action is not None:
@@ -199,7 +196,7 @@ def test_tool(
     ctx: typer.Context,
     tool_name: str = typer.Argument(..., help="Custom Tool name."),
     version: str = typer.Option(
-        ..., "--version", help="Opaque Version.id from custom-tools versions."
+        ..., "--version", help="Numbered version from custom-tools versions (for example v3)."
     ),
     input: Optional[str] = typer.Option(
         None, "--input", "-i", help="Settings YAML/JSON file, or '-' for stdin."
@@ -272,9 +269,7 @@ def update(
     memory: Optional[MemorySize] = typer.Option(None, "--memory"),
     cpu: Optional[int] = typer.Option(None, "--cpu", min=1),
     home_disk_gi: Optional[int] = typer.Option(None, "--home-disk-gi", min=1),
-    auto_publish: Optional[bool] = typer.Option(
-        None, "--auto-publish/--no-auto-publish"
-    ),
+    auto_publish: Optional[bool] = typer.Option(None, "--auto-publish/--no-auto-publish"),
     est_time: Optional[str] = typer.Option(None, "--est-time"),
     paper_url: Optional[str] = typer.Option(None, "--paper-url"),
     tag: Optional[list[str]] = typer.Option(None, "--tag", help="Repeatable."),
@@ -313,11 +308,13 @@ def validate(
     state = ctx.obj
     report = validate_folder(folder)
     result = _report(report)
-    rows = [
-        {"severity": "error", **_problem(item)} for item in report.errors
-    ] + [{"severity": "warning", **_problem(item)} for item in report.warnings]
-    human = "valid" if report.valid and not rows else output.render_table(
-        rows, ["severity", "code", "path", "message"]
+    rows = [{"severity": "error", **_problem(item)} for item in report.errors] + [
+        {"severity": "warning", **_problem(item)} for item in report.warnings
+    ]
+    human = (
+        "valid"
+        if report.valid and not rows
+        else output.render_table(rows, ["severity", "code", "path", "message"])
     )
     output.emit(result, state.output, human=human)
     if not report.valid:
@@ -341,9 +338,7 @@ def build(
     """Validate, package, upload, and build a local source folder."""
     state = ctx.obj
     with state.sdk_client() as client:
-        result = client.custom_tools.get(name).build(
-            folder, idempotency_key=idempotency_key
-        )
+        result = client.custom_tools.get(name).build(folder, idempotency_key=idempotency_key)
         version = result.version
         if wait:
             try:
@@ -353,14 +348,12 @@ def build(
                     on_event=_event_printer(state.output),
                 )
             except TamarindError as exc:
-                raise _attach_version_context(
-                    exc, version=version, action=result.action
-                ) from exc
+                raise _attach_version_context(exc, version=version, action=result.action) from exc
     payload = {"action": _value(result.action), "version": _version(version)}
     human = f"{_value(result.action)}: {_version_human(version)}"
     if not wait and not version.terminal:
         human += (
-            f"\n\nReattach with `tamarind custom-tools version {name} {version.id} --wait`."
+            f"\n\nReattach with `tamarind custom-tools version {name} {version.version} --wait`."
         )
     output.emit(payload, state.output, human=human)
 
@@ -376,14 +369,11 @@ def versions(
     """List a Custom Tool's build versions."""
     state = ctx.obj
     with state.sdk_client() as client:
-        page = client.custom_tools.get(name).versions(
-            status=status, limit=limit, cursor=cursor
-        )
+        page = client.custom_tools.get(name).versions(status=status, limit=limit, cursor=cursor)
     result = {"items": [_version(item) for item in page.items], "nextCursor": page.next_cursor}
     rows = [
         {
-            "id": item.id,
-            "name": item.name,
+            "version": item.version,
             "status": str(item.status),
             "origin": item.origin,
             "createdAt": item.created_at,
@@ -400,7 +390,7 @@ def versions(
 def get_version(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Custom Tool name."),
-    version_id: str = typer.Argument(..., help="Opaque Version ID (not its vN display name)."),
+    version_number: str = typer.Argument(..., help="Numbered version, for example v3."),
     wait: bool = typer.Option(False, "--wait", help="Wait for this build to finish."),
     timeout: float = typer.Option(1800.0, "--timeout", min=0.001),
     poll_interval: float = typer.Option(2.0, "--poll-interval", min=0.001),
@@ -408,7 +398,7 @@ def get_version(
     """Inspect or wait for one exact Version."""
     state = ctx.obj
     with state.sdk_client() as client:
-        version = _get_version(client, name, version_id)
+        version = _get_version(client, name, version_number)
         if wait:
             try:
                 version = version.monitor(
@@ -425,13 +415,13 @@ def get_version(
 def logs(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Custom Tool name."),
-    version_id: str = typer.Argument(..., help="Opaque Version ID."),
+    version_number: str = typer.Argument(..., help="Numbered version, for example v3."),
     cursor: Optional[str] = typer.Option(None, "--cursor", help="Resume from this log cursor."),
 ) -> None:
     """Read one page of build logs for an exact Version."""
     state = ctx.obj
     with state.sdk_client() as client:
-        page = _get_version(client, name, version_id).logs(cursor=cursor)
+        page = _get_version(client, name, version_number).logs(cursor=cursor)
     result = {
         "items": [asdict(item) for item in page.items],
         "status": _value(page.status),
@@ -448,30 +438,34 @@ def logs(
 def cancel(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Custom Tool name."),
-    version_id: str = typer.Argument(..., help="Opaque Version ID."),
+    version_number: str = typer.Argument(..., help="Numbered version, for example v3."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     """Request cancellation of a queued or running build."""
     state = ctx.obj
     output.confirm_destructive(
-        f"cancel Custom Tool build '{name}/{version_id}'", yes=yes, mode=state.output
+        f"cancel Custom Tool build '{name}/{version_number}'", yes=yes, mode=state.output
     )
     with state.sdk_client() as client:
-        version = _get_version(client, name, version_id).cancel()
-    output.emit(_version(version), state.output, human=f"cancellation requested\n{_version_human(version)}")
+        version = _get_version(client, name, version_number).cancel()
+    output.emit(
+        _version(version), state.output, human=f"cancellation requested\n{_version_human(version)}"
+    )
 
 
 @app.command()
 def publish(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Custom Tool name."),
-    version_id: str = typer.Argument(..., help="Opaque completed Version ID."),
+    version_number: str = typer.Argument(..., help="Completed numbered version, for example v3."),
 ) -> None:
     """Publish a completed Version as the tool's organization-wide default."""
     state = ctx.obj
     with state.sdk_client() as client:
-        tool = _get_version(client, name, version_id).publish()
-    output.emit(_tool(tool), state.output, human=f"published {name}/{version_id}\n{_tool_human(tool)}")
+        tool = _get_version(client, name, version_number).publish()
+    output.emit(
+        _tool(tool), state.output, human=f"published {name}/{version_number}\n{_tool_human(tool)}"
+    )
 
 
 @app.command()

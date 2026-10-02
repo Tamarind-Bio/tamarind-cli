@@ -80,7 +80,7 @@ def sync_detailed(
 ) -> Response[Any | PublicProblem]:
     """Delete a custom tool
 
-     Delete this generation and release its name for reuse.
+     Delete this custom tool and release its name for reuse.
 
     Args:
         name (str): The custom tool name.
@@ -114,7 +114,7 @@ def sync(
 ) -> Any | PublicProblem | None:
     """Delete a custom tool
 
-     Delete this generation and release its name for reuse.
+     Delete this custom tool and release its name for reuse.
 
     Args:
         name (str): The custom tool name.
@@ -143,7 +143,7 @@ async def asyncio_detailed(
 ) -> Response[Any | PublicProblem]:
     """Delete a custom tool
 
-     Delete this generation and release its name for reuse.
+     Delete this custom tool and release its name for reuse.
 
     Args:
         name (str): The custom tool name.
@@ -175,7 +175,7 @@ async def asyncio(
 ) -> Any | PublicProblem | None:
     """Delete a custom tool
 
-     Delete this generation and release its name for reuse.
+     Delete this custom tool and release its name for reuse.
 
     Args:
         name (str): The custom tool name.

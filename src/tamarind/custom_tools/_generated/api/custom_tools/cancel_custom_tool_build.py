@@ -12,20 +12,31 @@ from ...types import UNSET, Response, Unset
 
 def _get_kwargs(
     name: str,
-    version: str,
     *,
+    version: None | str | Unset = UNSET,
     if_match: str | Unset = UNSET,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
     if not isinstance(if_match, Unset):
         headers["If-Match"] = if_match
 
+    params: dict[str, Any] = {}
+
+    json_version: None | str | Unset
+    if isinstance(version, Unset):
+        json_version = UNSET
+    else:
+        json_version = version
+    params["version"] = json_version
+
+    params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
+
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/custom-tools/{name}/versions/{version}:cancel".format(
+        "url": "/custom-tools/{name}/cancel-build".format(
             name=quote(str(name), safe=""),
-            version=quote(str(version), safe=""),
         ),
+        "params": params,
     }
 
     _kwargs["headers"] = headers
@@ -49,6 +60,11 @@ def _parse_response(
         response_404 = PublicProblem.from_dict(response.json())
 
         return response_404
+
+    if response.status_code == 409:
+        response_409 = PublicProblem.from_dict(response.json())
+
+        return response_409
 
     if response.status_code == 412:
         response_412 = PublicProblem.from_dict(response.json())
@@ -78,23 +94,21 @@ def _build_response(
 
 def sync_detailed(
     name: str,
-    version: str,
     *,
     client: AuthenticatedClient | Client,
+    version: None | str | Unset = UNSET,
     if_match: str | Unset = UNSET,
 ) -> Response[PublicProblem | PublicVersion]:
     """Cancel a custom tool build
 
      Request cancellation of an active build.
 
-    Use the exact version ID. No ETag is needed for ordinary cancellation. Optionally send the
-    version's ETag in If-Match to require that its observed state has not changed. Completed and
-    stopped builds cannot be canceled. Cancellation is a request; continue polling for the outcome.
+    When exactly one build is active, no version is needed. If multiple builds are active, pass a
+    version such as `version=v2`. Cancellation is a request; continue polling for the outcome.
 
     Args:
         name (str): The custom tool name.
-        version (str): The `id` returned by the build or version response. Use this ID for reads,
-            logs, cancellation, and publication; `name` is the display label, such as `v3`.
+        version (None | str | Unset):
         if_match (str | Unset):
 
     Raises:
@@ -120,23 +134,21 @@ def sync_detailed(
 
 def sync(
     name: str,
-    version: str,
     *,
     client: AuthenticatedClient | Client,
+    version: None | str | Unset = UNSET,
     if_match: str | Unset = UNSET,
 ) -> PublicProblem | PublicVersion | None:
     """Cancel a custom tool build
 
      Request cancellation of an active build.
 
-    Use the exact version ID. No ETag is needed for ordinary cancellation. Optionally send the
-    version's ETag in If-Match to require that its observed state has not changed. Completed and
-    stopped builds cannot be canceled. Cancellation is a request; continue polling for the outcome.
+    When exactly one build is active, no version is needed. If multiple builds are active, pass a
+    version such as `version=v2`. Cancellation is a request; continue polling for the outcome.
 
     Args:
         name (str): The custom tool name.
-        version (str): The `id` returned by the build or version response. Use this ID for reads,
-            logs, cancellation, and publication; `name` is the display label, such as `v3`.
+        version (None | str | Unset):
         if_match (str | Unset):
 
     Raises:
@@ -149,31 +161,29 @@ def sync(
 
     return sync_detailed(
         name=name,
-        version=version,
         client=client,
+        version=version,
         if_match=if_match,
     ).parsed
 
 
 async def asyncio_detailed(
     name: str,
-    version: str,
     *,
     client: AuthenticatedClient | Client,
+    version: None | str | Unset = UNSET,
     if_match: str | Unset = UNSET,
 ) -> Response[PublicProblem | PublicVersion]:
     """Cancel a custom tool build
 
      Request cancellation of an active build.
 
-    Use the exact version ID. No ETag is needed for ordinary cancellation. Optionally send the
-    version's ETag in If-Match to require that its observed state has not changed. Completed and
-    stopped builds cannot be canceled. Cancellation is a request; continue polling for the outcome.
+    When exactly one build is active, no version is needed. If multiple builds are active, pass a
+    version such as `version=v2`. Cancellation is a request; continue polling for the outcome.
 
     Args:
         name (str): The custom tool name.
-        version (str): The `id` returned by the build or version response. Use this ID for reads,
-            logs, cancellation, and publication; `name` is the display label, such as `v3`.
+        version (None | str | Unset):
         if_match (str | Unset):
 
     Raises:
@@ -197,23 +207,21 @@ async def asyncio_detailed(
 
 async def asyncio(
     name: str,
-    version: str,
     *,
     client: AuthenticatedClient | Client,
+    version: None | str | Unset = UNSET,
     if_match: str | Unset = UNSET,
 ) -> PublicProblem | PublicVersion | None:
     """Cancel a custom tool build
 
      Request cancellation of an active build.
 
-    Use the exact version ID. No ETag is needed for ordinary cancellation. Optionally send the
-    version's ETag in If-Match to require that its observed state has not changed. Completed and
-    stopped builds cannot be canceled. Cancellation is a request; continue polling for the outcome.
+    When exactly one build is active, no version is needed. If multiple builds are active, pass a
+    version such as `version=v2`. Cancellation is a request; continue polling for the outcome.
 
     Args:
         name (str): The custom tool name.
-        version (str): The `id` returned by the build or version response. Use this ID for reads,
-            logs, cancellation, and publication; `name` is the display label, such as `v3`.
+        version (None | str | Unset):
         if_match (str | Unset):
 
     Raises:
@@ -227,8 +235,8 @@ async def asyncio(
     return (
         await asyncio_detailed(
             name=name,
-            version=version,
             client=client,
+            version=version,
             if_match=if_match,
         )
     ).parsed

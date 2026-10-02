@@ -20,17 +20,26 @@ T = TypeVar("T", bound="PublicUpdateCustomToolRequest")
 class PublicUpdateCustomToolRequest:
     """
     Attributes:
-        auto_publish (bool | None | Unset):
-        cpu (int | None | Unset):
-        description (None | str | Unset):
-        display_name (None | str | Unset):
-        est_time (None | str | Unset):
-        functions (list[str] | None | Unset):
-        gpu_type (None | PublicUpdateCustomToolRequestGpuTypeType0 | Unset):
-        home_disk_gi (int | None | Unset):
-        memory (None | PublicUpdateCustomToolRequestMemoryType0 | Unset):
-        paper_url (None | str | Unset):
-        tags (list[str] | None | Unset):
+        auto_publish (bool | None | Unset): Whether successful builds become the default version automatically. Omit or
+            pass null to leave it unchanged.
+        cpu (int | None | Unset): Number of CPU cores allocated to each run. Omit or pass null to leave it unchanged.
+        description (None | str | Unset): Short explanation of the tool. Omit or pass null to leave it unchanged; pass
+            an empty string to clear it.
+        display_name (None | str | Unset): Human-readable name shown in the UI. Omit or pass null to leave it unchanged;
+            pass an empty string to clear it.
+        est_time (None | str | Unset): Estimated runtime in H:M:S format, for example "0:1:0". Minutes and seconds must
+            be 0-59. Omit or pass null to leave it unchanged; pass an empty string to clear it.
+        functions (list[str] | None | Unset): Short capability labels used for discovery. Omit or pass null to leave
+            them unchanged; pass an empty list to clear them.
+        gpu_type (None | PublicUpdateCustomToolRequestGpuTypeType0 | Unset): GPU allocated to each run: "None", T4, L4,
+            L40S, or A100. Omit or pass null to leave it unchanged. A10 is retired: it is still accepted and runs on L4.
+        home_disk_gi (int | None | Unset): Writable home-disk capacity in GiB. Omit or pass null to leave it unchanged.
+        memory (None | PublicUpdateCustomToolRequestMemoryType0 | Unset): Memory allocated to each run. Omit or pass
+            null to leave it unchanged.
+        paper_url (None | str | Unset): Related HTTP or HTTPS publication URL. Omit or pass null to leave it unchanged;
+            pass an empty string to clear it.
+        tags (list[str] | None | Unset): Search and discovery tags. Omit or pass null to leave them unchanged; pass an
+            empty list to clear them.
     """
 
     auto_publish: bool | None | Unset = UNSET

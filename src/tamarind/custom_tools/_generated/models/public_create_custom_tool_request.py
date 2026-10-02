@@ -17,11 +17,14 @@ class PublicCreateCustomToolRequest:
     """
     Attributes:
         name (str): A unique lowercase name containing letters, numbers, and hyphens.
-        cpu (int | Unset):  Default: 1.
-        description (str | Unset):  Default: ''.
-        display_name (str | Unset):  Default: ''.
-        gpu_type (PublicCreateCustomToolRequestGputype | Unset):  Default: PublicCreateCustomToolRequestGputype.NONE.
-        memory (PublicCreateCustomToolRequestMemory | Unset):  Default: PublicCreateCustomToolRequestMemory.VALUE_0.
+        cpu (int | Unset): Number of CPU cores allocated to each run. Defaults to 1. Default: 1.
+        description (str | Unset): Short explanation of the tool. Defaults to an empty string. Default: ''.
+        display_name (str | Unset): Human-readable name shown in the UI. Defaults to an empty string. Default: ''.
+        gpu_type (PublicCreateCustomToolRequestGputype | Unset): GPU allocated to each run: "None", T4, L4, L40S, or
+            A100. Defaults to "None". A10 is retired: it is still accepted and runs on L4. Default:
+            PublicCreateCustomToolRequestGputype.NONE.
+        memory (PublicCreateCustomToolRequestMemory | Unset): Memory allocated to each run. Defaults to "8Gi". Default:
+            PublicCreateCustomToolRequestMemory.VALUE_0.
     """
 
     name: str

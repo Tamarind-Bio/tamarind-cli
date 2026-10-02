@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from attrs import define as _attrs_define
 
-from ..models.public_custom_tool_gputype import PublicCustomToolGputype
-from ..models.public_custom_tool_memory import PublicCustomToolMemory
+from ..models.public_custom_tool_detail_gputype import PublicCustomToolDetailGputype
+from ..models.public_custom_tool_detail_memory import PublicCustomToolDetailMemory
 from ..models.public_custom_tool_status import PublicCustomToolStatus
 
-T = TypeVar("T", bound="PublicCustomTool")
+if TYPE_CHECKING:
+    from ..models.public_version import PublicVersion
+
+
+T = TypeVar("T", bound="PublicCustomToolDetail")
 
 
 @_attrs_define
-class PublicCustomTool:
+class PublicCustomToolDetail:
     """
     Attributes:
         auto_publish (bool):
@@ -27,11 +31,11 @@ class PublicCustomTool:
         est_time (str):
         etag (str): Opaque SDK-managed validator for this Tool snapshot.
         functions (list[str]):
-        gpu_type (PublicCustomToolGputype):
+        gpu_type (PublicCustomToolDetailGputype):
         has_source (bool):
         home_disk_gi (int):
         max_runtime_seconds (int | None): Maximum runtime for a tool run, in seconds. Null means no tool-specific limit.
-        memory (PublicCustomToolMemory):
+        memory (PublicCustomToolDetailMemory):
         name (str):
         paper_url (str):
         published (bool):
@@ -40,6 +44,7 @@ class PublicCustomTool:
         status (PublicCustomToolStatus):
         tags (list[str]):
         updated_at (str):
+        version (None | PublicVersion): The requested version, or the latest version when no version was requested.
     """
 
     auto_publish: bool
@@ -53,11 +58,11 @@ class PublicCustomTool:
     est_time: str
     etag: str
     functions: list[str]
-    gpu_type: PublicCustomToolGputype
+    gpu_type: PublicCustomToolDetailGputype
     has_source: bool
     home_disk_gi: int
     max_runtime_seconds: int | None
-    memory: PublicCustomToolMemory
+    memory: PublicCustomToolDetailMemory
     name: str
     paper_url: str
     published: bool
@@ -65,8 +70,11 @@ class PublicCustomTool:
     status: PublicCustomToolStatus
     tags: list[str]
     updated_at: str
+    version: None | PublicVersion
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.public_version import PublicVersion
+
         auto_publish = self.auto_publish
 
         can_build = self.can_build
@@ -116,6 +124,12 @@ class PublicCustomTool:
 
         updated_at = self.updated_at
 
+        version: dict[str, Any] | None
+        if isinstance(self.version, PublicVersion):
+            version = self.version.to_dict()
+        else:
+            version = self.version
+
         field_dict: dict[str, Any] = {}
 
         field_dict.update(
@@ -143,6 +157,7 @@ class PublicCustomTool:
                 "status": status,
                 "tags": tags,
                 "updatedAt": updated_at,
+                "version": version,
             }
         )
 
@@ -150,6 +165,8 @@ class PublicCustomTool:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.public_version import PublicVersion
+
         d = dict(src_dict)
         auto_publish = d.pop("autoPublish")
 
@@ -178,7 +195,7 @@ class PublicCustomTool:
 
         functions = cast(list[str], d.pop("functions"))
 
-        gpu_type = PublicCustomToolGputype(d.pop("gpuType"))
+        gpu_type = PublicCustomToolDetailGputype(d.pop("gpuType"))
 
         has_source = d.pop("hasSource")
 
@@ -191,7 +208,7 @@ class PublicCustomTool:
 
         max_runtime_seconds = _parse_max_runtime_seconds(d.pop("maxRuntimeSeconds"))
 
-        memory = PublicCustomToolMemory(d.pop("memory"))
+        memory = PublicCustomToolDetailMemory(d.pop("memory"))
 
         name = d.pop("name")
 
@@ -212,7 +229,22 @@ class PublicCustomTool:
 
         updated_at = d.pop("updatedAt")
 
-        public_custom_tool = cls(
+        def _parse_version(data: object) -> None | PublicVersion:
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                version_type_0 = PublicVersion.from_dict(data)
+
+                return version_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | PublicVersion, data)
+
+        version = _parse_version(d.pop("version"))
+
+        public_custom_tool_detail = cls(
             auto_publish=auto_publish,
             can_build=can_build,
             can_edit=can_edit,
@@ -236,6 +268,7 @@ class PublicCustomTool:
             status=status,
             tags=tags,
             updated_at=updated_at,
+            version=version,
         )
 
-        return public_custom_tool
+        return public_custom_tool_detail
