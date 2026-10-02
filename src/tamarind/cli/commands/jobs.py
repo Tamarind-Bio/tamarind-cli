@@ -7,7 +7,7 @@ import re
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 from urllib.parse import parse_qsl, urlsplit
 
 import httpx
@@ -108,6 +108,19 @@ def _failed_terminal(job: dict) -> bool:
     """Whether a returned terminal job represents an unsuccessful run."""
     status = jobs_helpers.job_status(job)
     return jobs_helpers.is_terminal(status) and not jobs_helpers.is_success(status)
+
+
+def _outcome_is_ambiguous(exc: TamarindError) -> bool:
+    """Whether a failed submission may still have created the job remotely.
+
+    A bare ``TamarindError`` is the transport's network/timeout failure — the
+    request may well have been received — and so is any 5xx. Anything the server
+    classified (a 400, a 403) definitively created nothing.
+    """
+    status_code = getattr(exc, "status_code", None)
+    return type(exc) is TamarindError or (
+        isinstance(status_code, int) and status_code >= 500
+    )
 
 
 def _attach_error_context(exc: TamarindError, **context: object) -> TamarindError:
@@ -368,6 +381,79 @@ def _fetch_all_jobs(client, **kwargs):
     return all_jobs, statuses, key, pages
 
 
+class _BatchInput(NamedTuple):
+    batch_name: str
+    tool: str
+    settings_list: list
+    job_names: object
+
+
+def _resolve_batch_document(
+    input: str,
+    *,
+    tool: str,
+    name: Optional[str],
+    max_runtime: Optional[int],
+    tool_key: str = "type",
+) -> _BatchInput:
+    """Parse and fully validate a batch ``--input`` document before any remote call.
+
+    ``tool_key`` is the document field that may override the tool on the command
+    line — ``type`` for an ordinary batch, ``model`` for a finetuning batch — so
+    both commands enforce one set of rules instead of two that can drift.
+    """
+    from ..inputs import _load_text, _parse_document, envelope_tool_value  # internal reuse
+
+    doc = _parse_document(_load_text(input))
+    batch_name = effective_job_name(name, None) or _gen_name(tool)
+    job_type = tool
+    job_names = None
+    if isinstance(doc, list):
+        settings_list = doc
+    elif isinstance(doc, dict) and isinstance(doc.get("settings"), list):
+        settings_list = doc["settings"]
+        batch_name = effective_job_name(name, doc.get("batchName")) or batch_name
+        # Read the tool from EITHER key, same rule as the single-job path. Reading
+        # only `tool_key` meant finetune-batch saw None for a document naming the
+        # tool under `type`, silently dropped a disagreeing tool name, and submitted
+        # under the command-line one.
+        job_type = effective_job_type(
+            tool, envelope_tool_value(doc, tool_key), tool_key=tool_key
+        )
+        job_names = doc.get("jobNames")
+    else:
+        raise TamarindError("Batch --input must be a list of settings or a {settings:[...]} object.")
+    if not isinstance(batch_name, str) or not batch_name.strip():
+        raise ValidationError("Batch name must be a non-empty string.")
+    if batch_name != batch_name.strip():
+        raise ValidationError("Batch name may not have leading or trailing whitespace.")
+    if max_runtime is not None and max_runtime <= 0:
+        raise ValidationError("Batch max runtime must be greater than zero.")
+    if not settings_list:
+        raise ValidationError("Batch settings list may not be empty.")
+    for index, settings in enumerate(settings_list):
+        if not isinstance(settings, dict):
+            raise ValidationError(
+                f"Batch settings item {index + 1} must be an object, "
+                f"not {type(settings).__name__}."
+            )
+    if job_names is not None and (
+        not isinstance(job_names, list) or len(job_names) != len(settings_list)
+    ):
+        raise ValidationError("Batch jobNames must be a list with one name per settings item.")
+    if isinstance(job_names, list):
+        if any(not isinstance(job_name, str) or not job_name.strip() for job_name in job_names):
+            raise ValidationError("Every batch jobName must be a non-empty string.")
+        if any(job_name != job_name.strip() for job_name in job_names):
+            raise ValidationError(
+                "Batch jobNames may not have leading or trailing whitespace."
+            )
+        normalized_names = [job_name.strip() for job_name in job_names]
+        if len(set(normalized_names)) != len(normalized_names):
+            raise ValidationError("Batch jobNames must be unique.")
+    return _BatchInput(batch_name, job_type, settings_list, job_names)
+
+
 def register(app: typer.Typer) -> None:
     @app.command()
     def validate(
@@ -444,10 +530,7 @@ def register(app: typer.Typer) -> None:
                     client, job_name=job_name, job_type=job_type, settings=job.settings
                 )
             except TamarindError as exc:
-                status_code = getattr(exc, "status_code", None)
-                ambiguous = type(exc) is TamarindError or (
-                    isinstance(status_code, int) and status_code >= 500
-                )
+                ambiguous = _outcome_is_ambiguous(exc)
                 if ambiguous:
                     exc.message = (
                         f"{exc.message} Submission outcome may be ambiguous; "
@@ -502,6 +585,104 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(ExitCode.JOB_FAILED)
 
     @app.command()
+    def finetune(
+        ctx: typer.Context,
+        model: str = typer.Argument(..., help="Base model to finetune (e.g. 'esm2'). See `tamarind tools`."),
+        input: Optional[str] = typer.Option(None, "--input", "-i", help="Settings file (YAML/JSON), '-' for stdin, or @yaml://path."),
+        set_: list[str] = typer.Option([], "--set", help="Override a setting: key=value (repeatable)."),
+        name: Optional[str] = typer.Option(None, "--name", "-n", help="Job name (default: auto-generated)."),
+        skip_validate: bool = typer.Option(False, "--skip-validate", help="Skip the pre-submit validate-job check."),
+        wait: bool = typer.Option(False, "--wait", help="Block until the job reaches a terminal state."),
+        poll_interval: float = typer.Option(10.0, "--poll-interval", help="Seconds between polls when --wait."),
+        timeout: Optional[float] = typer.Option(None, "--timeout", help="With --wait, give up after N seconds."),
+        download: Optional[Path] = typer.Option(None, "--download", help="With --wait, download results to this directory."),
+    ) -> None:
+        """Finetune a model on your own data. Validates first unless --skip-validate."""
+        state = ctx.obj
+        job = resolve_job_input(input, set_, tool_key="model")
+        model_name = effective_job_type(model, job.job_type, tool_key="model")
+        job_name = effective_job_name(name, job.job_name) or _gen_name(model)
+        if wait:
+            # A local wait-option error must never occur after creating a
+            # remote, potentially billable job.
+            jobs_helpers.validate_wait_options(
+                poll_interval=poll_interval, timeout=timeout
+            )
+
+        with state.rest_client() as client:
+            if not skip_validate:
+                v = _rewrite_validation_guidance(
+                    rest.validate_job(
+                        client,
+                        job_name=job_name,
+                        job_type=model_name,
+                        settings=job.settings,
+                    )
+                )
+                if not v.get("valid"):
+                    raise ValidationError(f"Settings invalid: {v.get('error', 'unknown error')}", detail=v)
+
+            output.info(f"Submitting {model_name} finetuning job '{job_name}'…", state.output)
+            try:
+                submit_resp = rest.submit_finetune(
+                    client, job_name=job_name, model=model_name, settings=job.settings
+                )
+            except TamarindError as exc:
+                ambiguous = _outcome_is_ambiguous(exc)
+                if ambiguous:
+                    exc.message = (
+                        f"{exc.message} Submission outcome may be ambiguous; "
+                        f"query job '{job_name}' before retrying."
+                    )
+                raise _attach_error_context(
+                    exc,
+                    jobName=job_name,
+                    phase="finetune",
+                    submitted=None if ambiguous else False,
+                    outcomeMayBeAmbiguous=ambiguous,
+                    recoveryCommand=f"tamarind --json status {job_name}",
+                )
+
+            result = {"jobName": job_name, "model": model_name, "submit": submit_resp}
+
+            if wait:
+                try:
+                    output.info("Waiting for completion…", state.output)
+                    final = jobs_helpers.wait_for_job(
+                        client,
+                        job_name,
+                        poll_interval=poll_interval,
+                        timeout=timeout,
+                        on_poll=lambda j: output.info(
+                            f"  status: {jobs_helpers.job_status(j)}", state.output
+                        ),
+                    )
+                    result["final"] = final
+                    status = jobs_helpers.job_status(final)
+                    if download and jobs_helpers.is_success(status):
+                        url = _result_url(rest.get_result(client, job_name=job_name))
+                        dest = download / Path(f"{job_name}.zip").name
+                        written = _download(url, dest)
+                        result["download"] = {"path": str(dest), "bytes": written}
+                        output.info(f"  downloaded {written} bytes → {dest}", state.output)
+                except TamarindError as exc:
+                    raise _attach_error_context(
+                        exc,
+                        jobName=job_name,
+                        phase="post-submit",
+                        submitted=True,
+                        outcomeMayBeAmbiguous=False,
+                        recoveryCommand=f"tamarind --json status {job_name}",
+                    )
+
+        human = f"submitted: {job_name}" + (
+            f"  ({jobs_helpers.job_status(result['final'])})" if "final" in result else ""
+        )
+        output.emit(_sanitize_job_output(result), state.output, human=human)
+        if "final" in result and _failed_terminal(result["final"]):
+            raise typer.Exit(ExitCode.JOB_FAILED)
+
+    @app.command()
     def batch(
         ctx: typer.Context,
         tool: str = typer.Argument(..., help="Tool name applied to every job in the batch."),
@@ -516,49 +697,9 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Submit many jobs as one batch (preferred over looping submit)."""
         state = ctx.obj
-        from ..inputs import _load_text, _parse_document  # internal reuse
-
-        doc = _parse_document(_load_text(input))
-        batch_name = effective_job_name(name, None) or _gen_name(tool)
-        job_type = tool
-        job_names = None
-        if isinstance(doc, list):
-            settings_list = doc
-        elif isinstance(doc, dict) and isinstance(doc.get("settings"), list):
-            settings_list = doc["settings"]
-            batch_name = effective_job_name(name, doc.get("batchName")) or batch_name
-            job_type = effective_job_type(tool, doc.get("type"))
-            job_names = doc.get("jobNames")
-        else:
-            raise TamarindError("Batch --input must be a list of settings or a {settings:[...]} object.")
-        if not isinstance(batch_name, str) or not batch_name.strip():
-            raise ValidationError("Batch name must be a non-empty string.")
-        if batch_name != batch_name.strip():
-            raise ValidationError("Batch name may not have leading or trailing whitespace.")
-        if max_runtime is not None and max_runtime <= 0:
-            raise ValidationError("Batch max runtime must be greater than zero.")
-        if not settings_list:
-            raise ValidationError("Batch settings list may not be empty.")
-        for index, settings in enumerate(settings_list):
-            if not isinstance(settings, dict):
-                raise ValidationError(
-                    f"Batch settings item {index + 1} must be an object, "
-                    f"not {type(settings).__name__}."
-                )
-        if job_names is not None and (
-            not isinstance(job_names, list) or len(job_names) != len(settings_list)
-        ):
-            raise ValidationError("Batch jobNames must be a list with one name per settings item.")
-        if isinstance(job_names, list):
-            if any(not isinstance(job_name, str) or not job_name.strip() for job_name in job_names):
-                raise ValidationError("Every batch jobName must be a non-empty string.")
-            if any(job_name != job_name.strip() for job_name in job_names):
-                raise ValidationError(
-                    "Batch jobNames may not have leading or trailing whitespace."
-                )
-            normalized_names = [job_name.strip() for job_name in job_names]
-            if len(set(normalized_names)) != len(normalized_names):
-                raise ValidationError("Batch jobNames must be unique.")
+        batch_name, job_type, settings_list, job_names = _resolve_batch_document(
+            input, tool=tool, name=name, max_runtime=max_runtime
+        )
 
         with state.rest_client() as client:
             if prevalidate:
@@ -579,10 +720,7 @@ def register(app: typer.Typer) -> None:
                     max_runtime_seconds=max_runtime,
                 )
             except TamarindError as exc:
-                status_code = getattr(exc, "status_code", None)
-                ambiguous = type(exc) is TamarindError or (
-                    isinstance(status_code, int) and status_code >= 500
-                )
+                ambiguous = _outcome_is_ambiguous(exc)
                 if ambiguous:
                     exc.message = (
                         f"{exc.message} Batch submission outcome may be ambiguous; "
@@ -597,6 +735,65 @@ def register(app: typer.Typer) -> None:
                     recoveryCommand=f"tamarind --json status {batch_name}",
                 )
         result = {"batchName": batch_name, "type": job_type, "count": len(settings_list), "submit": resp}
+        output.emit(
+            _sanitize_job_output(result),
+            state.output,
+            human=f"submitted batch '{batch_name}' ({len(settings_list)} jobs)",
+        )
+
+    @app.command("finetune-batch")
+    def finetune_batch(
+        ctx: typer.Context,
+        model: str = typer.Argument(..., help="Base model applied to every job in the batch."),
+        input: str = typer.Option(..., "--input", "-i", help="YAML/JSON list of per-job settings, or a {batchName,model,settings[],jobNames} object."),
+        name: Optional[str] = typer.Option(None, "--name", "-n", help="Batch name (default: auto)."),
+        max_runtime: Optional[int] = typer.Option(None, "--max-runtime", help="Max runtime seconds per job."),
+        prevalidate: bool = typer.Option(
+            False,
+            "--prevalidate",
+            help="Validate every item before submitting.",
+        ),
+    ) -> None:
+        """Submit many finetuning jobs as one batch (preferred over looping finetune)."""
+        state = ctx.obj
+        batch_name, model_name, settings_list, job_names = _resolve_batch_document(
+            input, tool=model, name=name, max_runtime=max_runtime, tool_key="model"
+        )
+
+        with state.rest_client() as client:
+            if prevalidate:
+                _prevalidate_batch(
+                    client,
+                    batch_name=batch_name,
+                    job_type=model_name,
+                    settings_list=settings_list,
+                    job_names=job_names,
+                )
+            try:
+                resp = rest.submit_finetune_batch(
+                    client,
+                    batch_name=batch_name,
+                    model=model_name,
+                    settings=settings_list,
+                    job_names=job_names,
+                    max_runtime_seconds=max_runtime,
+                )
+            except TamarindError as exc:
+                ambiguous = _outcome_is_ambiguous(exc)
+                if ambiguous:
+                    exc.message = (
+                        f"{exc.message} Batch submission outcome may be ambiguous; "
+                        f"query batch '{batch_name}' before retrying."
+                    )
+                raise _attach_error_context(
+                    exc,
+                    batchName=batch_name,
+                    phase="finetune-batch",
+                    submitted=None if ambiguous else False,
+                    outcomeMayBeAmbiguous=ambiguous,
+                    recoveryCommand=f"tamarind --json status {batch_name}",
+                )
+        result = {"batchName": batch_name, "model": model_name, "count": len(settings_list), "submit": resp}
         output.emit(
             _sanitize_job_output(result),
             state.output,

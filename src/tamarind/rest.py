@@ -8,10 +8,12 @@ remain necessary. Discovery/catalog calls live in :mod:`tamarind.catalog`.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NamedTuple
+
+import httpx
 
 from .errors import APIError
-from .http import HTTPClient
+from .http import HTTPClient, map_error, parse_json, response_problem_code
 
 # Query params that the API expects as the literal string "true" rather than a
 # JSON boolean.
@@ -23,15 +25,107 @@ _TRUE = "true"
 _JOB_SOURCE = "CLI"
 
 
+class _Reroute(NamedTuple):
+    """One row of the finetune routing table."""
+
+    alternate: str  # the sibling route to resend to
+    rename_from: str  # the tool-name key this route uses
+    rename_to: str  # the tool-name key the sibling route uses
+    problem_code: str  # the 400 code that means "wrong route"
+    on_404: bool  # whether an exact 404 also means "wrong route"
+
+
+# Which tools are finetuning tools is knowable only SERVER-side, and /finetune
+# did not exist before the route shipped. So a submission that lands on the wrong
+# sibling route is resent ONCE to the right one, in both directions, from this
+# one table. Both directions read the same rows, so they cannot drift apart.
+#
+# Exactly ONE resend, never a loop: a resent request that is refused again returns
+# that second answer as-is. Only an explicit 400 problem code triggers a resend —
+# plus, for the /finetune* rows, an exact 404, which is a deployment that predates
+# the route and is the reason this is safe to ship before the server side lands.
+#
+# A 5xx, a timeout, and a network error NEVER trigger one: that request may
+# already have created a job, and resending it would submit twice. Network errors
+# raise out of ``HTTPClient.send`` before any branch here can see them.
+_FINETUNE_ROUTING: dict[str, _Reroute] = {
+    "submit-job": _Reroute("finetune", "type", "model", "use_finetune_endpoint", False),
+    "submit-batch": _Reroute(
+        "finetune-batch", "type", "model", "use_finetune_endpoint", False
+    ),
+    "finetune": _Reroute("submit-job", "model", "type", "not_a_finetune_tool", True),
+    "finetune-batch": _Reroute(
+        "submit-batch", "model", "type", "not_a_finetune_tool", True
+    ),
+}
+
+
+def _should_reroute(resp: httpx.Response, route: _Reroute) -> bool:
+    """Whether this refusal means "you sent it to the wrong route", and nothing else."""
+    if resp.status_code == 404:
+        return route.on_404
+    if resp.status_code != 400:
+        return False
+    return response_problem_code(resp) == route.problem_code
+
+
+def _rerouted_body(body: dict[str, Any], route: _Reroute) -> dict[str, Any]:
+    """The same body with ONLY the tool-name key renamed; every other field is kept."""
+    return {
+        (route.rename_to if key == route.rename_from else key): value
+        for key, value in body.items()
+    }
+
+
+def _post_submission(client: HTTPClient, path: str, body: dict[str, Any]) -> Any:
+    """POST a submission, resending it ONCE to the sibling route if the server says so."""
+    resp = client.send("POST", path, json=body)
+    if resp.is_success:
+        return parse_json(resp)
+    # A route with no row simply never reroutes. Looking it up with [] instead would
+    # raise KeyError over whatever the server actually said, turning a real API error
+    # into a crash for the next caller that posts through here.
+    #
+    # Match the table the SAME way HTTPClient.send resolves the URL — it does
+    # `path.lstrip("/")`, so "/submit-job" and "submit-job" are one endpoint and must
+    # route alike; a caller writing the leading slash would otherwise silently lose
+    # its reroute with no error at all. Only leading: a TRAILING slash is a different
+    # URL, and rerouting a request that went somewhere else would be wrong.
+    route = _FINETUNE_ROUTING.get(path.lstrip("/"))
+    if route is None or not _should_reroute(resp, route):
+        raise map_error(resp, request_path=path)
+    resent = client.send("POST", route.alternate, json=_rerouted_body(body, route))
+    if resent.is_success:
+        return parse_json(resent)
+    raise map_error(resent, request_path=route.alternate)
+
+
 def submit_job(
     client: HTTPClient, *, job_name: str, job_type: str, settings: dict[str, Any]
 ) -> Any:
     """POST /submit-job — submit a single job. Body: {jobName, type, settings, jobSource}."""
-    return client.post_json(
+    return _post_submission(
+        client,
         "submit-job",
-        json={
+        {
             "jobName": job_name,
             "type": job_type,
+            "settings": settings,
+            "jobSource": _JOB_SOURCE,
+        },
+    )
+
+
+def submit_finetune(
+    client: HTTPClient, *, job_name: str, model: str, settings: dict[str, Any]
+) -> Any:
+    """POST /finetune — submit one finetuning job. Body: {jobName, model, settings, jobSource}."""
+    return _post_submission(
+        client,
+        "finetune",
+        {
+            "jobName": job_name,
+            "model": model,
             "settings": settings,
             "jobSource": _JOB_SOURCE,
         },
@@ -102,7 +196,30 @@ def submit_batch(
         body["jobNames"] = job_names
     if max_runtime_seconds is not None:
         body["maxRuntimeSeconds"] = max_runtime_seconds
-    return client.post_json("submit-batch", json=body)
+    return _post_submission(client, "submit-batch", body)
+
+
+def submit_finetune_batch(
+    client: HTTPClient,
+    *,
+    batch_name: str,
+    model: str,
+    settings: list[dict[str, Any]],
+    job_names: list[str] | None = None,
+    max_runtime_seconds: int | None = None,
+) -> Any:
+    """POST /finetune-batch — submit many finetuning jobs as one batch."""
+    body: dict[str, Any] = {
+        "batchName": batch_name,
+        "model": model,
+        "settings": settings,
+        "jobSource": _JOB_SOURCE,
+    }
+    if job_names is not None:
+        body["jobNames"] = job_names
+    if max_runtime_seconds is not None:
+        body["maxRuntimeSeconds"] = max_runtime_seconds
+    return _post_submission(client, "finetune-batch", body)
 
 
 def get_jobs(

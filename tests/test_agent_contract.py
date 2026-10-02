@@ -1006,3 +1006,118 @@ def test_batch_rejects_invalid_batch_options_before_network(
     assert isinstance(result.exception, ValidationError)
     assert message in result.exception.message
     assert not submit.called
+
+
+# --- the finetune commands ---------------------------------------------------
+#
+# These two ship the /finetune and /finetune-batch routes to the CLI. Everything
+# below the command was covered by tests/test_rest.py; these pin the parts only the
+# command owns — the typer wiring, the tool_key="model" envelope, the --json shape,
+# and the phase recorded on an error.
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    ("command", "tool_route", "fallback_route", "name_key", "extra_args"),
+    [
+        ("finetune", "finetune", "submit-job", "jobName", []),
+        ("finetune-batch", "finetune-batch", "submit-batch", "batchName", []),
+    ],
+)
+def test_finetune_commands_submit_through_the_finetune_route(
+    tmp_path, command, tool_route, fallback_route, name_key, extra_args
+):
+    doc = tmp_path / "job.yaml"
+    if command == "finetune-batch":
+        doc.write_text("settings:\n  - sequence: ABC\n  - sequence: DEF\n")
+    else:
+        doc.write_text("sequence: ABC\n")
+    respx.post(f"{API}validate-job").mock(return_value=httpx.Response(200, json={"valid": True}))
+    route = respx.post(f"{API}{tool_route}").mock(
+        return_value=httpx.Response(200, json={"message": "submitted"})
+    )
+    fallback = respx.post(f"{API}{fallback_route}").mock(
+        return_value=httpx.Response(200, json={"message": "must not be reached"})
+    )
+
+    result = runner.invoke(
+        app,
+        ["--json", command, "plm-finetune", "--input", str(doc), "--name", "n1", *extra_args],
+        env=ENV,
+    )
+
+    assert result.exit_code == ExitCode.OK, result.output
+    assert route.call_count == 1
+    assert not fallback.called
+    body = json.loads(route.calls.last.request.content)
+    # The tool is named `model`, never `type`, on these routes.
+    assert body["model"] == "plm-finetune"
+    assert "type" not in body
+    assert body[name_key] == "n1"
+    assert json.loads(result.stdout)["model"] == "plm-finetune"
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    ("command", "tool_route", "fallback_route"),
+    [
+        ("finetune", "finetune", "submit-job"),
+        ("finetune-batch", "finetune-batch", "submit-batch"),
+    ],
+)
+def test_finetune_commands_fall_back_when_the_route_is_not_deployed(
+    tmp_path, command, tool_route, fallback_route
+):
+    """The whole reason this is safe to ship before tamarind-website #4028 merges:
+    against today's platform the finetune routes 404, and the command still works."""
+    doc = tmp_path / "job.yaml"
+    if command == "finetune-batch":
+        doc.write_text("settings:\n  - sequence: ABC\n")
+    else:
+        doc.write_text("sequence: ABC\n")
+    respx.post(f"{API}validate-job").mock(return_value=httpx.Response(200, json={"valid": True}))
+    missing = respx.post(f"{API}{tool_route}").mock(return_value=httpx.Response(404))
+    fallback = respx.post(f"{API}{fallback_route}").mock(
+        return_value=httpx.Response(200, json={"message": "submitted"})
+    )
+
+    result = runner.invoke(
+        app,
+        ["--json", command, "plm-finetune", "--input", str(doc), "--name", "n1"],
+        env=ENV,
+    )
+
+    assert result.exit_code == ExitCode.OK, result.output
+    assert missing.call_count == 1
+    assert fallback.call_count == 1
+    # On the general route the tool goes back to being `type`.
+    body = json.loads(fallback.calls.last.request.content)
+    assert body["type"] == "plm-finetune"
+    assert "model" not in body
+
+
+@respx.mock
+@pytest.mark.parametrize("command", ["finetune", "finetune-batch"])
+def test_finetune_commands_reject_a_disagreeing_tool_in_the_input_file(tmp_path, command):
+    """A document naming a different tool must be refused, whichever key it uses —
+    including `type`, which a user porting a working `submit` file will write."""
+    doc = tmp_path / "job.json"
+    # batch takes a LIST of settings; a dict there fails a different check first and
+    # would never reach the tool-name reconciliation this test is about.
+    settings = [{"sequence": "ABC"}] if command == "finetune-batch" else {"sequence": "ABC"}
+    name_key = "batchName" if command == "finetune-batch" else "jobName"
+    # The name marks this as an envelope; the point of the test is the disagreeing
+    # `type`, which the finetune path used to read as None and silently drop.
+    doc.write_text(json.dumps({name_key: "r", "type": "esmfold", "settings": settings}))
+    submit = respx.post(f"{API}finetune").mock(
+        return_value=httpx.Response(200, json={"message": "should not happen"})
+    )
+
+    result = runner.invoke(
+        app, [command, "plm-finetune", "--input", str(doc)], env=ENV
+    )
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ValidationError)
+    assert "esmfold" in result.exception.message
+    assert not submit.called

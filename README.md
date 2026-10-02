@@ -223,6 +223,7 @@ place them before the command name.
 |---|---|
 | Discover | `tools`, `modalities`, `functions`, `schema` |
 | Submit | `validate`, `submit`, `batch` |
+| Finetune | `finetune`, `finetune-batch` |
 | Monitor | `jobs`, `status`, `wait`, `results`, `logs` |
 | Files | `files list`, `files stats`, `files upload`, `files delete`, `files folders` |
 | Custom Tools | `custom-tools list`, `get`, `create`, `update`, `validate`, `build`, `test`, `versions`, `version`, `logs`, `cancel`, `publish`, `delete` |

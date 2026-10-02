@@ -76,11 +76,77 @@ def _apply_sets(settings: dict[str, Any], pairs: list[str]) -> None:
         settings[key.strip()] = _coerce_scalar(raw)
 
 
-def _looks_like_envelope(doc: dict[str, Any]) -> bool:
-    return "settings" in doc and ("type" in doc or "jobName" in doc)
+# The two names an envelope can give the tool. `submit`/`batch` use `type`;
+# `finetune`/`finetune-batch` use `model`, because that is what those API routes
+# call it. An envelope is recognised by EITHER, whichever command is running —
+# see _looks_like_envelope.
+TOOL_KEYS = ("type", "model")
 
 
-def effective_job_type(cli_tool: str, file_type: object | None) -> str:
+def _looks_like_envelope(doc: dict[str, Any], tool_key: str = "type") -> bool:
+    """Whether this document wraps the settings rather than being them.
+
+    Deliberately keyed on the COMMAND's own tool field (or ``jobName``), not on
+    either field. Widening it to both regresses raw settings documents that simply
+    happen to contain a key called ``model`` or ``type`` beside their own
+    ``settings`` — a real shape for ``custom-tools test``, whose schemas are
+    user-defined, and for ``submit``/``validate``. Those documents must keep being
+    read as settings.
+
+    The dangerous half of the ambiguity — an envelope that names a DIFFERENT tool
+    under the other key, which used to be dropped in silence — is handled once we
+    already know this is an envelope, by :func:`envelope_tool_value`.
+    """
+    return "settings" in doc and (tool_key in doc or "jobName" in doc)
+
+
+def _tool_identity(value: object) -> tuple[str, str]:
+    """Compare two tool names the SAME way :func:`effective_job_type` does.
+
+    That function trims and lowercases before deciding a name agrees with the
+    command's tool, so a raw comparison here would disagree with it and reject
+    ``{type: "ESM2", model: "esm2"}`` as two different tools when it is one.
+
+    Non-strings are tagged separately rather than rendered into the string space:
+    ``repr(1)`` is ``"1"``, which would make ``{type: 1, model: "1"}`` look like a
+    single name and hide a genuinely malformed value that
+    :func:`effective_job_type` goes on to reject.
+    """
+    if isinstance(value, str):
+        return ("str", value.strip().lower())
+    return ("other", repr(value))
+
+
+def envelope_tool_value(doc: dict[str, Any], tool_key: str) -> object | None:
+    """The tool an envelope names, reconciling BOTH tool keys.
+
+    Called only for a document already recognised as an envelope. Every tool key
+    actually present with a value is considered, so:
+
+    - a tool named only under the other key is still seen, instead of being read as
+      None and silently discarded while the command-line tool is submitted;
+    - two keys naming DIFFERENT tools are refused rather than one being picked. That
+      includes ``{type: null, model: esmfold}``, where keying on presence alone
+      returned None and never looked at the conflicting ``model``.
+    """
+    named = {
+        key: doc[key] for key in TOOL_KEYS if key in doc and doc[key] is not None
+    }
+    distinct = {_tool_identity(value) for value in named.values()}
+    if len(distinct) > 1:
+        pairs = ", ".join(f"{key}: {value!r}" for key, value in sorted(named.items()))
+        raise ValidationError(
+            f"The input file names two different tools ({pairs}). Keep only one of "
+            f"{' or '.join(TOOL_KEYS)}."
+        )
+    if tool_key in named:
+        return named[tool_key]
+    return next(iter(named.values()), None)
+
+
+def effective_job_type(
+    cli_tool: str, file_type: object | None, *, tool_key: str = "type"
+) -> str:
     """Reconcile the explicit ``<tool>`` argument with a ``type`` in the input file.
 
     The command's ``<tool>`` argument is authoritative. A ``type`` in the input
@@ -92,6 +158,9 @@ def effective_job_type(cli_tool: str, file_type: object | None) -> str:
     ``file_type`` comes straight from YAML, so it may parse as a non-string
     (``type: 1`` → int, ``type: true`` → bool). Only None means absent;
     every supplied value must be a string that agrees with the selected tool.
+
+    ``tool_key`` names the field being reconciled, for the error message only:
+    the finetune commands carry the tool name in ``model`` rather than ``type``.
     """
     if file_type is not None and (
         not isinstance(file_type, str)
@@ -99,8 +168,8 @@ def effective_job_type(cli_tool: str, file_type: object | None) -> str:
     ):
         raise ValidationError(
             f"Tool mismatch: the command targets '{cli_tool}' but the input "
-            f"file's type is '{file_type}'. Remove the file's 'type' field, or "
-            f"re-run the command with '{file_type}' as the tool."
+            f"file's {tool_key} is '{file_type}'. Remove the file's '{tool_key}' "
+            f"field, or re-run the command with '{file_type}' as the tool."
         )
     return cli_tool
 
@@ -116,8 +185,16 @@ def effective_job_name(cli_name: str | None, file_name: object | None) -> str | 
 def resolve_job_input(
     input_source: str | None,
     set_pairs: list[str] | None,
+    *,
+    tool_key: str = "type",
 ) -> JobInput:
-    """Build a :class:`JobInput` from ``--input`` and ``--set`` options."""
+    """Build a :class:`JobInput` from ``--input`` and ``--set`` options.
+
+    ``tool_key`` is the envelope field naming the tool — ``type`` everywhere
+    except the finetune commands, whose API surface calls it ``model``. Without
+    it a ``{model, settings}`` envelope would not be recognised as an envelope
+    at all, and the whole document would silently become the job's settings.
+    """
     settings: dict[str, Any] = {}
     job_type: str | None = None
     job_name: str | None = None
@@ -129,10 +206,10 @@ def resolve_job_input(
         if not isinstance(doc, dict):
             raise ValidationError(
                 "Input must be a mapping (the job settings, or a "
-                "{jobName, type, settings} object)."
+                f"{{jobName, {tool_key}, settings}} object)."
             )
-        if _looks_like_envelope(doc):
-            job_type = doc.get("type")
+        if _looks_like_envelope(doc, tool_key):
+            job_type = envelope_tool_value(doc, tool_key)
             job_name = doc.get("jobName")
             doc = doc["settings"]
         if not isinstance(doc, dict):
