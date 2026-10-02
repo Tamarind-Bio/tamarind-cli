@@ -177,14 +177,7 @@ class CustomTool:
     _collection: "CustomTools" = field(repr=False, compare=False)
 
     def refresh(self) -> "CustomTool":
-        return self._refresh(request_timeout=None)
-
-    def _refresh(self, *, request_timeout: float | None) -> "CustomTool":
-        return self._collection._current_tool(
-            self.name,
-            self._etag,
-            request_timeout=request_timeout,
-        )
+        return self._collection._get(self.name, etag=self._etag)
 
     def update(
         self,
@@ -506,14 +499,11 @@ class CustomTools:
         )
 
     def get(self, name: str) -> CustomTool:
-        return self._get(name, request_timeout=None)
+        return self._get(name)
 
-    def _get(
-        self, name: str, *, request_timeout: float | None, etag: str | None = None
-    ) -> CustomTool:
-        return _tool_from_wire(
-            self, self._transport.get_custom_tool(name, etag=etag, timeout=request_timeout)
-        )
+    def _get(self, name: str, *, etag: str | None = None) -> CustomTool:
+        # The server interprets a retained Tool ETag as a lifetime fence on reads.
+        return _tool_from_wire(self, self._transport.get_custom_tool(name, etag=etag))
 
     def list(
         self,
@@ -533,16 +523,6 @@ class CustomTools:
             items=tuple(_tool_from_wire(self, item) for item in wire["items"]),
             next_cursor=wire["nextCursor"],
         )
-
-    def _current_tool(
-        self,
-        tool_name: str,
-        etag: str,
-        *,
-        request_timeout: float | None = None,
-    ) -> CustomTool:
-        # The server interprets this opaque validator as a lifetime fence on reads.
-        return self._get(tool_name, etag=etag, request_timeout=request_timeout)
 
     def _update(self, tool: CustomTool, body: PublicUpdateCustomToolRequest) -> CustomTool:
         return _tool_from_wire(
@@ -610,7 +590,6 @@ class CustomTools:
         status: PublicVersionStatus | None,
         limit: int,
         cursor: str | None,
-        request_timeout: float | None = None,
     ) -> Page[Version]:
         wire = self._transport.list_custom_tool_versions(
             tool.name,
@@ -618,7 +597,6 @@ class CustomTools:
             limit=limit,
             cursor=cursor,
             etag=tool._etag,
-            timeout=request_timeout,
         )
         return Page(
             items=tuple(_version_from_wire(self, tool.name, item) for item in wire["items"]),
@@ -629,14 +607,11 @@ class CustomTools:
         self,
         tool: CustomTool,
         version: str,
-        *,
-        request_timeout: float | None = None,
     ) -> Version:
         wire = self._transport.get_custom_tool_version(
             tool.name,
             version,
             etag=tool._etag,
-            timeout=request_timeout,
         )
         return _version_from_wire(self, tool.name, wire)
 

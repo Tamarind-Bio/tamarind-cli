@@ -102,7 +102,7 @@ class FakeVersion:
 
     def publish(self):
         self.published = True
-        return _tool(default_version=self.name)
+        return _tool(default_version=self.version)
 
 
 class FakeTool:
@@ -181,7 +181,7 @@ def test_list_is_machine_readable_and_preserves_cursor(monkeypatch):
     assert payload["nextCursor"] == "next-tools"
 
 
-def test_build_waits_through_sdk_and_returns_opaque_version_number(monkeypatch, tmp_path):
+def test_build_waits_through_sdk_and_returns_numbered_version(monkeypatch, tmp_path):
     sdk = _install_sdk(monkeypatch)
     (tmp_path / "Dockerfile").write_text("FROM scratch\n")
 
@@ -510,3 +510,29 @@ def test_explicit_invalid_names_never_generate_a_replacement(
         assert error["type"] == "ValidationError"
         assert error["message"] == "Job name must be a non-empty string."
     assert sdk.custom_tools.get_names == []
+
+
+@pytest.mark.parametrize("json_mode", [False, True])
+def test_versions_exposes_numbered_version_and_cursor(monkeypatch, json_mode):
+    _install_sdk(monkeypatch)
+    args = ["--json"] if json_mode else ["--no-json"]
+    result = runner.invoke(app, [*args, "custom-tools", "versions", "fold-local"], env=ENV)
+    assert result.exit_code == 0, result.stdout
+    if json_mode:
+        payload = json.loads(result.stdout)
+        assert payload["items"][0]["version"] == VERSION
+        assert payload["nextCursor"] == "next-versions"
+    else:
+        assert VERSION in result.stdout
+        assert "Running" in result.stdout
+        assert "--cursor next-versions" in result.stdout
+
+
+def test_publish_uses_numbered_version(monkeypatch):
+    sdk = _install_sdk(monkeypatch)
+    result = runner.invoke(
+        app, ["--json", "custom-tools", "publish", "fold-local", VERSION], env=ENV
+    )
+    assert result.exit_code == 0, result.stdout
+    assert sdk.version.published
+    assert json.loads(result.stdout)["defaultVersion"] == VERSION

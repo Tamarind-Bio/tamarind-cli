@@ -112,19 +112,15 @@ class GeneratedCustomToolsTransport:
             raise TamarindError("Custom Tools response did not match the generated contract")
         try:
             parsed = operation.endpoint._parse_response(client=self._parser, response=response)
+            wire = cast(dict[str, Any], parsed.to_dict())
             # The generator's nullable union can fall back to a raw dict.
             # Validate a selected version with its generated model before exposing it.
-            if operation is _GET_CUSTOM_TOOL and parsed is not None:
-                wire = parsed.to_dict()
-                if wire.get("version") is not None:
-                    VersionModel.from_dict(wire["version"])
+            if operation is _GET_CUSTOM_TOOL and wire.get("version") is not None:
+                VersionModel.from_dict(wire["version"])
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
             raise TamarindError(
                 "Custom Tools response did not match the generated contract"
             ) from exc
-        if parsed is None or not hasattr(parsed, "to_dict"):
-            raise TamarindError("Custom Tools response did not match the generated contract")
-        wire = cast(dict[str, Any], parsed.to_dict())
         return wire
 
     def submit_test_job(

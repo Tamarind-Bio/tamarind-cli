@@ -371,16 +371,7 @@ def versions(
     with state.sdk_client() as client:
         page = client.custom_tools.get(name).versions(status=status, limit=limit, cursor=cursor)
     result = {"items": [_version(item) for item in page.items], "nextCursor": page.next_cursor}
-    rows = [
-        {
-            "version": item.version,
-            "status": str(item.status),
-            "origin": item.origin,
-            "createdAt": item.created_at,
-        }
-        for item in page.items
-    ]
-    human = output.render_table(rows, ["id", "name", "status", "origin", "createdAt"])
+    human = output.render_table(result["items"], ["version", "status", "origin", "createdAt"])
     if page.next_cursor:
         human += f"\n\nMore results: pass --cursor {page.next_cursor}"
     output.emit(result, state.output, human=human)

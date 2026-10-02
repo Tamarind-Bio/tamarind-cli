@@ -161,7 +161,7 @@ tamarind --json custom-tools logs my-tool VERSION --cursor NEXT_CURSOR
 ```
 
 Once the CLI has a durable Version, monitoring timeout and failure errors retain
-`toolName`, `versionId`, and `versionName` in their structured detail. Errors
+`toolName` and `version` in their structured detail. Errors
 from the initial `build --wait` monitoring phase also include `action`; errors
 from a later `version --wait` reattachment do not. A failure before build
 admission has returned a Version cannot provide this handle, which is why
