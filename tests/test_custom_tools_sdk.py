@@ -260,6 +260,48 @@ def test_generated_response_shape_failures_use_the_sdk_error_boundary() -> None:
     assert isinstance(raised.value.__cause__, KeyError)
 
 
+@pytest.mark.parametrize("etag", [None, 7])
+@respx.mock
+def test_tool_rejects_malformed_validator_before_mutation(etag: object) -> None:
+    malformed = _tool()
+    malformed["etag"] = etag
+    respx.get(f"{BASE}custom-tools/example", params__eq={}).mock(
+        return_value=httpx.Response(200, json=malformed)
+    )
+    delete = respx.delete(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(204)
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(TamarindError, match="generated contract"):
+            client.custom_tools.get("example").delete()
+
+    assert not delete.called
+
+
+@pytest.mark.parametrize("field", ["etag", "lifetimeEtag"])
+@pytest.mark.parametrize("etag", [None, 7])
+@respx.mock
+def test_version_rejects_malformed_validator_before_mutation(field: str, etag: object) -> None:
+    malformed = _version()
+    malformed[field] = etag
+    respx.get(f"{BASE}custom-tools/example", params__eq={}).mock(
+        return_value=httpx.Response(200, json=_tool())
+    )
+    respx.get(f"{BASE}custom-tools/example?version={VERSION}").mock(
+        return_value=httpx.Response(200, json=_detail(malformed))
+    )
+    cancel = respx.post(f"{BASE}custom-tools/example/cancel-build?version={VERSION}").mock(
+        return_value=httpx.Response(200)
+    )
+
+    with Tamarind(api_key="key", api_base=BASE) as client:
+        with pytest.raises(TamarindError, match="generated contract"):
+            client.custom_tools.get("example").get_version(VERSION).cancel()
+
+    assert not cancel.called
+
+
 @pytest.mark.parametrize("status_code", [201, 202, 206, 299])
 def test_every_model_operation_rejects_undocumented_2xx_problem_responses(
     status_code: int,

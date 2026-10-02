@@ -699,6 +699,8 @@ def _upload_archive(
 
 
 def _tool_from_wire(collection: CustomTools, wire: PublicCustomTool) -> CustomTool:
+    if not isinstance(wire["etag"], str):
+        raise TamarindError("Custom Tools response did not match the generated contract")
     return CustomTool(
         name=wire["name"],
         display_name=wire["displayName"],
@@ -729,7 +731,11 @@ def _tool_from_wire(collection: CustomTools, wire: PublicCustomTool) -> CustomTo
 
 def _version_from_wire(collection: CustomTools, tool_name: str, wire: PublicVersion) -> Version:
     terminal = wire["terminal"]
-    if not isinstance(terminal, bool):
+    if (
+        not isinstance(terminal, bool)
+        or not isinstance(wire["etag"], str)
+        or not isinstance(wire["lifetimeEtag"], str)
+    ):
         raise TamarindError("Custom Tools response did not match the generated contract")
     return Version(
         version=wire["version"],
