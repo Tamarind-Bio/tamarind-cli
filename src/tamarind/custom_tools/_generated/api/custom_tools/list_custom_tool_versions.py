@@ -17,7 +17,11 @@ def _get_kwargs(
     status: None | PublicVersionStatus | Unset = UNSET,
     limit: int | Unset = 50,
     cursor: None | str | Unset = UNSET,
+    if_match: str | Unset = UNSET,
 ) -> dict[str, Any]:
+    headers: dict[str, Any] = {}
+    if not isinstance(if_match, Unset):
+        headers["If-Match"] = if_match
 
     params: dict[str, Any] = {}
 
@@ -49,6 +53,7 @@ def _get_kwargs(
         "params": params,
     }
 
+    _kwargs["headers"] = headers
     return _kwargs
 
 
@@ -69,6 +74,11 @@ def _parse_response(
         response_404 = PublicProblem.from_dict(response.json())
 
         return response_404
+
+    if response.status_code == 412:
+        response_412 = PublicProblem.from_dict(response.json())
+
+        return response_412
 
     if response.status_code == 422:
         response_422 = PublicProblem.from_dict(response.json())
@@ -98,6 +108,7 @@ def sync_detailed(
     status: None | PublicVersionStatus | Unset = UNSET,
     limit: int | Unset = 50,
     cursor: None | str | Unset = UNSET,
+    if_match: str | Unset = UNSET,
 ) -> Response[PublicProblem | PublicVersionPage]:
     """List custom tool versions
 
@@ -110,6 +121,7 @@ def sync_detailed(
         status (None | PublicVersionStatus | Unset): Filter by build status.
         limit (int | Unset): Maximum number of versions to return in one page. Default: 50.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -124,6 +136,7 @@ def sync_detailed(
         status=status,
         limit=limit,
         cursor=cursor,
+        if_match=if_match,
     )
 
     response = client.get_httpx_client().request(
@@ -140,6 +153,7 @@ def sync(
     status: None | PublicVersionStatus | Unset = UNSET,
     limit: int | Unset = 50,
     cursor: None | str | Unset = UNSET,
+    if_match: str | Unset = UNSET,
 ) -> PublicProblem | PublicVersionPage | None:
     """List custom tool versions
 
@@ -152,6 +166,7 @@ def sync(
         status (None | PublicVersionStatus | Unset): Filter by build status.
         limit (int | Unset): Maximum number of versions to return in one page. Default: 50.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -167,6 +182,7 @@ def sync(
         status=status,
         limit=limit,
         cursor=cursor,
+        if_match=if_match,
     ).parsed
 
 
@@ -177,6 +193,7 @@ async def asyncio_detailed(
     status: None | PublicVersionStatus | Unset = UNSET,
     limit: int | Unset = 50,
     cursor: None | str | Unset = UNSET,
+    if_match: str | Unset = UNSET,
 ) -> Response[PublicProblem | PublicVersionPage]:
     """List custom tool versions
 
@@ -189,6 +206,7 @@ async def asyncio_detailed(
         status (None | PublicVersionStatus | Unset): Filter by build status.
         limit (int | Unset): Maximum number of versions to return in one page. Default: 50.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -203,6 +221,7 @@ async def asyncio_detailed(
         status=status,
         limit=limit,
         cursor=cursor,
+        if_match=if_match,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -217,6 +236,7 @@ async def asyncio(
     status: None | PublicVersionStatus | Unset = UNSET,
     limit: int | Unset = 50,
     cursor: None | str | Unset = UNSET,
+    if_match: str | Unset = UNSET,
 ) -> PublicProblem | PublicVersionPage | None:
     """List custom tool versions
 
@@ -229,6 +249,7 @@ async def asyncio(
         status (None | PublicVersionStatus | Unset): Filter by build status.
         limit (int | Unset): Maximum number of versions to return in one page. Default: 50.
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -245,5 +266,6 @@ async def asyncio(
             status=status,
             limit=limit,
             cursor=cursor,
+            if_match=if_match,
         )
     ).parsed

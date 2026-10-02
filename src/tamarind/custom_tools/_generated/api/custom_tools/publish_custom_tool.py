@@ -5,32 +5,49 @@ from urllib.parse import quote
 import httpx
 
 from ...client import AuthenticatedClient, Client
+from ...models.public_custom_tool import PublicCustomTool
 from ...models.public_problem import PublicProblem
-from ...models.public_version import PublicVersion
-from ...types import Response
+from ...types import UNSET, Response, Unset
 
 
 def _get_kwargs(
     name: str,
-    version: str,
+    *,
+    version: None | str | Unset = UNSET,
+    if_match: str | Unset = UNSET,
 ) -> dict[str, Any]:
+    headers: dict[str, Any] = {}
+    if not isinstance(if_match, Unset):
+        headers["If-Match"] = if_match
+
+    params: dict[str, Any] = {}
+
+    json_version: None | str | Unset
+    if isinstance(version, Unset):
+        json_version = UNSET
+    else:
+        json_version = version
+    params["version"] = json_version
+
+    params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
 
     _kwargs: dict[str, Any] = {
-        "method": "get",
-        "url": "/custom-tools/{name}/versions/{version}".format(
+        "method": "post",
+        "url": "/custom-tools/{name}/publish".format(
             name=quote(str(name), safe=""),
-            version=quote(str(version), safe=""),
         ),
+        "params": params,
     }
 
+    _kwargs["headers"] = headers
     return _kwargs
 
 
 def _parse_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> PublicProblem | PublicVersion:
+) -> PublicCustomTool | PublicProblem:
     if response.status_code == 200:
-        response_200 = PublicVersion.from_dict(response.json())
+        response_200 = PublicCustomTool.from_dict(response.json())
 
         return response_200
 
@@ -44,6 +61,11 @@ def _parse_response(
 
         return response_404
 
+    if response.status_code == 412:
+        response_412 = PublicProblem.from_dict(response.json())
+
+        return response_412
+
     if response.status_code == 422:
         response_422 = PublicProblem.from_dict(response.json())
 
@@ -56,7 +78,7 @@ def _parse_response(
 
 def _build_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[PublicProblem | PublicVersion]:
+) -> Response[PublicCustomTool | PublicProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -67,30 +89,35 @@ def _build_response(
 
 def sync_detailed(
     name: str,
-    version: str,
     *,
     client: AuthenticatedClient | Client,
-) -> Response[PublicProblem | PublicVersion]:
-    """Get a custom tool version
+    version: None | str | Unset = UNSET,
+    if_match: str | Unset = UNSET,
+) -> Response[PublicCustomTool | PublicProblem]:
+    """Publish a custom tool version
 
-     Get a version's source, build status, and error details.
+     Publish a completed version.
+
+    By default this publishes the latest completed version. Pass `version=v2` to publish or roll back
+    to a specific completed version.
 
     Args:
         name (str): The custom tool name.
-        version (str): The `id` returned by the build or version response. Use this ID for reads,
-            logs, cancellation, and publication; `name` is the display label, such as `v3`.
+        version (None | str | Unset):
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[PublicProblem | PublicVersion]
+        Response[PublicCustomTool | PublicProblem]
     """
 
     kwargs = _get_kwargs(
         name=name,
         version=version,
+        if_match=if_match,
     )
 
     response = client.get_httpx_client().request(
@@ -102,60 +129,70 @@ def sync_detailed(
 
 def sync(
     name: str,
-    version: str,
     *,
     client: AuthenticatedClient | Client,
-) -> PublicProblem | PublicVersion | None:
-    """Get a custom tool version
+    version: None | str | Unset = UNSET,
+    if_match: str | Unset = UNSET,
+) -> PublicCustomTool | PublicProblem | None:
+    """Publish a custom tool version
 
-     Get a version's source, build status, and error details.
+     Publish a completed version.
+
+    By default this publishes the latest completed version. Pass `version=v2` to publish or roll back
+    to a specific completed version.
 
     Args:
         name (str): The custom tool name.
-        version (str): The `id` returned by the build or version response. Use this ID for reads,
-            logs, cancellation, and publication; `name` is the display label, such as `v3`.
+        version (None | str | Unset):
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        PublicProblem | PublicVersion
+        PublicCustomTool | PublicProblem
     """
 
     return sync_detailed(
         name=name,
-        version=version,
         client=client,
+        version=version,
+        if_match=if_match,
     ).parsed
 
 
 async def asyncio_detailed(
     name: str,
-    version: str,
     *,
     client: AuthenticatedClient | Client,
-) -> Response[PublicProblem | PublicVersion]:
-    """Get a custom tool version
+    version: None | str | Unset = UNSET,
+    if_match: str | Unset = UNSET,
+) -> Response[PublicCustomTool | PublicProblem]:
+    """Publish a custom tool version
 
-     Get a version's source, build status, and error details.
+     Publish a completed version.
+
+    By default this publishes the latest completed version. Pass `version=v2` to publish or roll back
+    to a specific completed version.
 
     Args:
         name (str): The custom tool name.
-        version (str): The `id` returned by the build or version response. Use this ID for reads,
-            logs, cancellation, and publication; `name` is the display label, such as `v3`.
+        version (None | str | Unset):
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[PublicProblem | PublicVersion]
+        Response[PublicCustomTool | PublicProblem]
     """
 
     kwargs = _get_kwargs(
         name=name,
         version=version,
+        if_match=if_match,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -165,31 +202,36 @@ async def asyncio_detailed(
 
 async def asyncio(
     name: str,
-    version: str,
     *,
     client: AuthenticatedClient | Client,
-) -> PublicProblem | PublicVersion | None:
-    """Get a custom tool version
+    version: None | str | Unset = UNSET,
+    if_match: str | Unset = UNSET,
+) -> PublicCustomTool | PublicProblem | None:
+    """Publish a custom tool version
 
-     Get a version's source, build status, and error details.
+     Publish a completed version.
+
+    By default this publishes the latest completed version. Pass `version=v2` to publish or roll back
+    to a specific completed version.
 
     Args:
         name (str): The custom tool name.
-        version (str): The `id` returned by the build or version response. Use this ID for reads,
-            logs, cancellation, and publication; `name` is the display label, such as `v3`.
+        version (None | str | Unset):
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        PublicProblem | PublicVersion
+        PublicCustomTool | PublicProblem
     """
 
     return (
         await asyncio_detailed(
             name=name,
-            version=version,
             client=client,
+            version=version,
+            if_match=if_match,
         )
     ).parsed

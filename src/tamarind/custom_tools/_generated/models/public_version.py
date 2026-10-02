@@ -21,27 +21,29 @@ class PublicVersion:
         completed_at (None | str):
         created_at (str):
         error (None | PublicBuildError):
-        id (str): The unique ID of this build. Use it in API requests to check status, read logs, cancel, or publish.
-        name (str): The display name of this build, such as `v3`. Use `id` in API requests.
+        etag (str): Opaque SDK-managed validator for this exact Version snapshot.
+        lifetime_etag (str): Opaque SDK-managed validator for the Tool lifetime that owns this Version.
         origin (str):
         source_digest (None | str): SHA-256 digest of this version's source archive. Null when source is hidden.
         source_revision (None | str): Immutable source revision used by this version. Null when source is hidden.
         started_at (str):
         status (PublicVersionStatus):
         terminal (bool): Whether the build has reached a final status and will not run again.
+        version (str): The version number, such as `v3`.
     """
 
     completed_at: None | str
     created_at: str
     error: None | PublicBuildError
-    id: str
-    name: str
+    etag: str
+    lifetime_etag: str
     origin: str
     source_digest: None | str
     source_revision: None | str
     started_at: str
     status: PublicVersionStatus
     terminal: bool
+    version: str
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.public_build_error import PublicBuildError
@@ -57,9 +59,9 @@ class PublicVersion:
         else:
             error = self.error
 
-        id = self.id
+        etag = self.etag
 
-        name = self.name
+        lifetime_etag = self.lifetime_etag
 
         origin = self.origin
 
@@ -75,6 +77,8 @@ class PublicVersion:
 
         terminal = self.terminal
 
+        version = self.version
+
         field_dict: dict[str, Any] = {}
 
         field_dict.update(
@@ -82,14 +86,15 @@ class PublicVersion:
                 "completedAt": completed_at,
                 "createdAt": created_at,
                 "error": error,
-                "id": id,
-                "name": name,
+                "etag": etag,
+                "lifetimeEtag": lifetime_etag,
                 "origin": origin,
                 "sourceDigest": source_digest,
                 "sourceRevision": source_revision,
                 "startedAt": started_at,
                 "status": status,
                 "terminal": terminal,
+                "version": version,
             }
         )
 
@@ -125,9 +130,9 @@ class PublicVersion:
 
         error = _parse_error(d.pop("error"))
 
-        id = d.pop("id")
+        etag = d.pop("etag")
 
-        name = d.pop("name")
+        lifetime_etag = d.pop("lifetimeEtag")
 
         origin = d.pop("origin")
 
@@ -151,18 +156,21 @@ class PublicVersion:
 
         terminal = d.pop("terminal")
 
+        version = d.pop("version")
+
         public_version = cls(
             completed_at=completed_at,
             created_at=created_at,
             error=error,
-            id=id,
-            name=name,
+            etag=etag,
+            lifetime_etag=lifetime_etag,
             origin=origin,
             source_digest=source_digest,
             source_revision=source_revision,
             started_at=started_at,
             status=status,
             terminal=terminal,
+            version=version,
         )
 
         return public_version

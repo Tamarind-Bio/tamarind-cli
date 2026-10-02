@@ -114,7 +114,7 @@ with Tamarind() as client:
     result = tool.build("./my-esmfold", idempotency_key="release-2026-08-26")
     print(result.action)  # build, reuse_image, or unchanged
     version = result.version
-    print(version.id, version.name)  # opaque machine identity, human-facing label
+    print(version.version)  # numbered version, e.g. v3
     if not version.terminal:
         version = version.monitor(timeout=1800, on_event=print)
 ```
@@ -126,7 +126,7 @@ server returns the already admitted Version. If no key was supplied, fetch the
 tool's versions before retrying. Interrupting `monitor()` stops local monitoring; it
 does not cancel the remote build.
 
-Exact Version operations use `version.id`; `version.name` is display-only. If a
+Exact Version operations use `version.version`, such as `v3`. If a
 mutation reports `412 Precondition Failed`, refetch the affected Tool or Version,
 confirm the mutation is still desired, and retry using the refreshed resource.
 
@@ -138,20 +138,20 @@ tamarind custom-tools create my-esmfold --display-name "My ESMFold"
 tamarind custom-tools build my-esmfold ./my-esmfold \
   --idempotency-key release-2026-08-31 --wait --timeout 1800
 tamarind custom-tools versions my-esmfold
-tamarind custom-tools publish my-esmfold <opaque-version-id>
+tamarind custom-tools publish my-esmfold v3
 ```
 
-Build responses contain both a display name such as `v3` and an opaque `id`.
-Pass the opaque ID to `version`, `logs`, `cancel`, and `publish`. A local wait
+Build responses contain a numbered `version`, such as `v3`.
+Pass it to `version`, `logs`, `cancel`, and `publish`. A local wait
 timeout does not cancel the remote build; reattach with
-`tamarind custom-tools version NAME VERSION_ID --wait`.
+`tamarind custom-tools version NAME VERSION --wait`.
 
 ### Test a completed Custom Tool version
 
 After building, submit a test without publishing the version:
 
 ```bash
-tamarind custom-tools test my-esmfold --version <opaque-version-id> \
+tamarind custom-tools test my-esmfold --version v3 \
   --input inputs.json --name esmfold-smoke
 tamarind status esmfold-smoke
 tamarind wait esmfold-smoke --timeout 600
@@ -164,13 +164,13 @@ from tamarind import Tamarind
 
 with Tamarind() as client:
     tool = client.custom_tools.get("my-esmfold")
-    job = tool.test({"sequence": "MKT..."}, version="<opaque-version-id>", name="esmfold-smoke")
+    job = tool.test({"sequence": "MKT..."}, version="v3", name="esmfold-smoke")
     print(job.job_name, job.id, job.status)
 ```
 
 The command returns after submission and the run appears in the tool's website
 Test history. This executes the tool and uses compute; it is not a dry run.
-Omit `name` / `--name` to generate a unique name. Pass the opaque version ID from
+Omit `name` / `--name` to generate a unique name. Pass the version number (such as `v3`) from
 `build` or `versions`; the SDK resolves its execution pin and protects against
 deleting and recreating the tool. The selected build must be complete. Design
 splitting is handled by the backend and returns the parent job receipt.

@@ -76,11 +76,11 @@ tamarind --json custom-tools build my-tool ./my-tool \
   --wait --timeout 1800 --poll-interval 10
 ```
 
-Finally, publish the completed Version using the opaque `version.id` returned by
+Finally, publish the completed Version using the `version.version` returned by
 the build:
 
 ```bash
-tamarind --json custom-tools publish my-tool VERSION_ID
+tamarind --json custom-tools publish my-tool VERSION
 ```
 
 A successful local validation returns:
@@ -95,8 +95,7 @@ A build result has this general shape:
 {
   "action": "build",
   "version": {
-    "id": "ver_WyJ0b29sLWdlbmVyYXRpb24iLCJ2MyJd",
-    "name": "v3",
+    "version": "v3",
     "toolName": "my-tool",
     "status": "Complete",
     "terminal": true
@@ -104,21 +103,20 @@ A build result has this general shape:
 }
 ```
 
-Always save and use `version.id` for exact Version operations. `version.name`
-such as `v3` is a display label, not an endpoint identifier.
+Use `version.version`, such as `v3`, for Version operations. The SDK retains opaque
+ETags internally so existing resource handles cannot cross tool deletion and name reuse.
 
 Use exact reads for identity checks: `custom-tools get NAME` for a Tool and
-`custom-tools version NAME VERSION_ID` for a Version. The `list`, `versions`,
+`custom-tools version NAME VERSION` for a Version. The `list`, `versions`,
 and `logs` commands each return one page; follow `nextCursor` with `--cursor`
 until it is `null` when a complete collection or log stream is required.
 
 Use an idempotency key for builds initiated by automation. If delivery of the
 first response is ambiguous, retrying with the same key returns the already
-admitted Version instead of starting a duplicate build. In the SDK, first select
-`tool = client.custom_tools.get(name)` and retain that snapshot and key for retries.
-Items from `custom_tools.list()` do not carry an ETag; they can fail a stale-snapshot
-check before replay admission after the original build commits. The CLI selects
-its Tool with `get()` automatically.
+admitted Version instead of starting a duplicate build. In the SDK, retain the
+same Tool snapshot and key for retries. Both `custom_tools.get()` and items from
+`custom_tools.list()` carry the ETag needed for conditional operations and keyed
+builds. The CLI selects its Tool with `get()` automatically.
 
 ## Runtime contract
 
@@ -146,10 +144,10 @@ entire CLI invocation must be bounded.
 
 Exit code 7 means the monitoring timeout elapsed; the remote build may still be
 running. Do not start a new build just because monitoring timed out. Reattach by
-Version ID instead:
+numbered Version instead:
 
 ```bash
-tamarind --json custom-tools version my-tool VERSION_ID \
+tamarind --json custom-tools version my-tool VERSION \
   --wait --timeout 1800 --poll-interval 10
 ```
 
@@ -157,12 +155,12 @@ Read build logs, following the returned cursor when the response has another
 page:
 
 ```bash
-tamarind --json custom-tools logs my-tool VERSION_ID
-tamarind --json custom-tools logs my-tool VERSION_ID --cursor NEXT_CURSOR
+tamarind --json custom-tools logs my-tool VERSION
+tamarind --json custom-tools logs my-tool VERSION --cursor NEXT_CURSOR
 ```
 
 Once the CLI has a durable Version, monitoring timeout and failure errors retain
-`toolName`, `versionId`, and `versionName` in their structured detail. Errors
+`toolName` and `version` in their structured detail. Errors
 from the initial `build --wait` monitoring phase also include `action`; errors
 from a later `version --wait` reattachment do not. A failure before build
 admission has returned a Version cannot provide this handle, which is why
@@ -171,15 +169,15 @@ automated builds should reuse their idempotency key after an ambiguous request.
 ## Publish and roll back
 
 Publishing changes which completed Version is active. List Versions, inspect the
-candidate, and publish its opaque ID:
+candidate, and publish its version number:
 
 ```bash
 tamarind --json custom-tools versions my-tool
-tamarind --json custom-tools version my-tool VERSION_ID
-tamarind --json custom-tools publish my-tool VERSION_ID
+tamarind --json custom-tools version my-tool VERSION
+tamarind --json custom-tools publish my-tool VERSION
 ```
 
-Rollback uses the same operation: publish the ID of an older known-good,
+Rollback uses the same operation: publish the number of an older known-good,
 completed Version.
 
 ## Update, cancel, and delete
@@ -195,7 +193,7 @@ Cancellation and deletion are destructive. Non-interactive callers must pass
 `--yes` explicitly:
 
 ```bash
-tamarind --json custom-tools cancel my-tool VERSION_ID --yes
+tamarind --json custom-tools cancel my-tool VERSION --yes
 tamarind --json custom-tools delete my-tool --yes
 ```
 
@@ -213,10 +211,10 @@ confirm the mutation is still appropriate, and retry with the refreshed state.
 | `custom-tools validate FOLDER` | Validate local source without auth or upload | — |
 | `custom-tools build NAME FOLDER` | Package, upload, build, and optionally monitor a Version | `--idempotency-key`, `--wait`, monitoring `--timeout`, `--poll-interval` |
 | `custom-tools versions NAME` | Read one page of a tool's Versions | `--limit`, `--cursor` |
-| `custom-tools version NAME VERSION_ID` | Read or monitor one exact Version | `--wait`, monitoring `--timeout`, `--poll-interval` |
-| `custom-tools logs NAME VERSION_ID` | Read one page of build logs | `--cursor` |
-| `custom-tools cancel NAME VERSION_ID` | Cancel an active build | `--yes` |
-| `custom-tools publish NAME VERSION_ID` | Make a completed Version active | — |
+| `custom-tools version NAME VERSION` | Read or monitor one exact Version | `--wait`, monitoring `--timeout`, `--poll-interval` |
+| `custom-tools logs NAME VERSION` | Read one page of build logs | `--cursor` |
+| `custom-tools cancel NAME VERSION` | Cancel an active build | `--yes` |
+| `custom-tools publish NAME VERSION` | Make a completed Version active | — |
 | `custom-tools delete NAME` | Delete a tool | `--yes` |
 
 Run `tamarind custom-tools COMMAND --help` for every option and default.
@@ -245,7 +243,7 @@ release. The supported CLI path starts from a local source folder.
 SDK Tool objects are snapshots. Assign `tool = tool.update(...)` after an update, and
 `tool = tool.refresh()` after a build before starting a different build. For builds without an
 idempotency key, upload creation checks the snapshot before transferring bytes; build admission
-checks it again. Keyed builds using an ETag-bearing snapshot from `get()` defer the revision check
+checks it again. Keyed builds using the retained Tool snapshot defer the revision check
 to replay-aware admission so a retry can recover a previously committed result. For a different
 build after the tool changes, review its latest state before retrying.
 
@@ -261,7 +259,7 @@ This uses compute, just like an ordinary submission.
 
 ```bash
 tamarind custom-tools versions my-tool
-tamarind --json custom-tools test my-tool --version <opaque-version-id> \
+tamarind --json custom-tools test my-tool --version v3 \
   --input inputs.yaml --set numDesigns=10 --name my-tool-smoke
 tamarind status my-tool-smoke
 tamarind wait my-tool-smoke --timeout 600
@@ -285,11 +283,11 @@ from tamarind import Tamarind
 
 with Tamarind() as client:
     tool = client.custom_tools.get("my-tool")
-    job = tool.test({"numDesigns": 10}, version="<opaque-version-id>")
+    job = tool.test({"numDesigns": 10}, version="v3")
     print(job.job_name, job.status)
 ```
 
-`tool.test()` requires an opaque Version ID and returns a `CustomToolTestJob`
+`tool.test()` requires a numbered version such as `v3` and returns a `CustomToolTestJob`
 receipt. It resolves the selected version, checks the tool's identity internally to reject
 stale handles, and explicitly marks the run as a test. Version pins alone never
 turn normal submissions into tests.

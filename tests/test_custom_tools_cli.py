@@ -30,7 +30,7 @@ ENV = {
     "TAMARIND_API_KEY": "test-key",
     "TAMARIND_API_BASE": "https://api.test/",
 }
-VERSION_ID = "df82ad10-2639-4576-a117-46ec736b9f52"
+VERSION = "v3"
 
 
 def _tool(**overrides):
@@ -65,8 +65,7 @@ def _tool(**overrides):
 
 class FakeVersion:
     def __init__(self, *, terminal: bool = False, status=PublicVersionStatus.RUNNING):
-        self.id = VERSION_ID
-        self.name = "v3"
+        self.version = VERSION
         self.source_revision = "revision-3"
         self.source_digest = "sha256:abc"
         self.status = status
@@ -77,7 +76,6 @@ class FakeVersion:
         self.completed_at = None
         self.error = None
         self.tool_name = "fold-local"
-        self.tool_generation = "generation-1"
         self.monitor_args = None
         self.cancelled = False
         self.published = False
@@ -104,7 +102,7 @@ class FakeVersion:
 
     def publish(self):
         self.published = True
-        return _tool(default_version=self.name)
+        return _tool(default_version=self.version)
 
 
 class FakeTool:
@@ -116,8 +114,8 @@ class FakeTool:
     def __getattr__(self, name):
         return getattr(_tool(), name)
 
-    def get_version(self, version_id):
-        assert version_id == VERSION_ID
+    def get_version(self, version_number):
+        assert version_number == VERSION
         return self._version
 
     def versions(self, **kwargs):
@@ -183,7 +181,7 @@ def test_list_is_machine_readable_and_preserves_cursor(monkeypatch):
     assert payload["nextCursor"] == "next-tools"
 
 
-def test_build_waits_through_sdk_and_returns_opaque_version_id(monkeypatch, tmp_path):
+def test_build_waits_through_sdk_and_returns_numbered_version(monkeypatch, tmp_path):
     sdk = _install_sdk(monkeypatch)
     (tmp_path / "Dockerfile").write_text("FROM scratch\n")
 
@@ -209,7 +207,7 @@ def test_build_waits_through_sdk_and_returns_opaque_version_id(monkeypatch, tmp_
     assert result.exit_code == 0, result.stdout
     payload = json.loads(result.stdout)
     assert payload["action"] == "build"
-    assert payload["version"]["id"] == VERSION_ID
+    assert payload["version"]["version"] == VERSION
     assert payload["version"]["status"] == "Complete"
     assert sdk.custom_tools.tool.built == (tmp_path.resolve(), "release-1")
     assert sdk.version.monitor_args["timeout"] == 9
@@ -217,12 +215,12 @@ def test_build_waits_through_sdk_and_returns_opaque_version_id(monkeypatch, tmp_
     assert sdk.version.monitor_args["on_event"] is None
 
 
-def test_version_wait_reattaches_by_opaque_id(monkeypatch):
+def test_version_wait_reattaches_by_numbered_version(monkeypatch):
     sdk = _install_sdk(monkeypatch)
 
     result = runner.invoke(
         app,
-        ["--json", "custom-tools", "version", "fold-local", VERSION_ID, "--wait"],
+        ["--json", "custom-tools", "version", "fold-local", VERSION, "--wait"],
         env=ENV,
     )
 
@@ -248,8 +246,7 @@ def test_build_wait_error_keeps_durable_reattachment_handle(monkeypatch, tmp_pat
     assert isinstance(result.exception, CustomToolBuildTimeoutError)
     assert result.exception.detail == {
         "toolName": "fold-local",
-        "versionId": VERSION_ID,
-        "versionName": "v3",
+        "version": VERSION,
         "action": "build",
     }
 
@@ -264,7 +261,7 @@ def test_logs_return_resume_cursor(monkeypatch):
             "custom-tools",
             "logs",
             "fold-local",
-            VERSION_ID,
+            VERSION,
             "--cursor",
             "cursor-1",
         ],
@@ -281,11 +278,11 @@ def test_cancel_requires_explicit_confirmation_in_json_mode(monkeypatch):
     sdk = _install_sdk(monkeypatch)
 
     refused = runner.invoke(
-        app, ["--json", "custom-tools", "cancel", "fold-local", VERSION_ID], env=ENV
+        app, ["--json", "custom-tools", "cancel", "fold-local", VERSION], env=ENV
     )
     allowed = runner.invoke(
         app,
-        ["--json", "custom-tools", "cancel", "fold-local", VERSION_ID, "--yes"],
+        ["--json", "custom-tools", "cancel", "fold-local", VERSION, "--yes"],
         env=ENV,
     )
 
@@ -309,9 +306,7 @@ def test_delete_requires_explicit_confirmation_in_json_mode(monkeypatch):
 
 
 def test_local_validation_uses_stable_validation_exit_code(tmp_path):
-    result = runner.invoke(
-        app, ["--json", "custom-tools", "validate", str(tmp_path)], env=ENV
-    )
+    result = runner.invoke(app, ["--json", "custom-tools", "validate", str(tmp_path)], env=ENV)
 
     assert result.exit_code == 5
     payload = json.loads(result.stdout)
@@ -326,6 +321,8 @@ def test_cli_presentations_do_not_expose_generation():
     assert "generation" not in render_tool(_tool())
     assert "generation" not in _tool_human(_tool())
     assert "toolGeneration" not in render_version(FakeVersion())
+
+
 @pytest.mark.parametrize("envelope_type", ["fold-local", " Fold-Local "])
 def test_test_command_uses_sdk_with_settings_and_version(monkeypatch, tmp_path, envelope_type):
     from tamarind.custom_tools import CustomToolTestJob
@@ -350,7 +347,7 @@ def test_test_command_uses_sdk_with_settings_and_version(monkeypatch, tmp_path, 
             "test",
             "fold-local",
             "--version",
-            VERSION_ID,
+            VERSION,
             "--input",
             str(source),
             "--set",
@@ -361,7 +358,7 @@ def test_test_command_uses_sdk_with_settings_and_version(monkeypatch, tmp_path, 
     assert result.exit_code == 0, result.output
     assert captured == {
         "settings": {"sequence": "AAA", "numDesigns": 101},
-        "version": VERSION_ID,
+        "version": VERSION,
         "name": "smoke",
     }
     assert json.loads(result.stdout)["jobName"] == "smoke"
@@ -382,10 +379,21 @@ def test_test_command_requires_version_and_rejects_conflicting_tool(
     source.write_text(json.dumps({"type": envelope_type, "settings": {}}))
     for key, value in ENV.items():
         monkeypatch.setenv(key, value)
-    monkeypatch.setattr(sys, "argv", [
-        "tamarind", "--json", "custom-tools", "test", "fold-local",
-        "--version", VERSION_ID, "--input", str(source),
-    ])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "tamarind",
+            "--json",
+            "custom-tools",
+            "test",
+            "fold-local",
+            "--version",
+            VERSION,
+            "--input",
+            str(source),
+        ],
+    )
     with pytest.raises(SystemExit) as raised:
         run()
     assert raised.value.code == 5
@@ -398,11 +406,14 @@ def test_test_command_requires_version_and_rejects_conflicting_tool(
     assert sdk.custom_tools.get_names == []
 
 
-@pytest.mark.parametrize("command", [
-    ["validate", "fold-local"],
-    ["submit", "fold-local"],
-    ["custom-tools", "test", "fold-local", "--version", VERSION_ID],
-])
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["validate", "fold-local"],
+        ["submit", "fold-local"],
+        ["custom-tools", "test", "fold-local", "--version", VERSION],
+    ],
+)
 def test_invalid_settings_use_console_validation_boundary(monkeypatch, tmp_path, capsys, command):
     from tamarind.cli.main import run
 
@@ -424,12 +435,15 @@ def test_invalid_settings_use_console_validation_boundary(monkeypatch, tmp_path,
 
 
 @pytest.mark.parametrize("file_type", [False, 0, 1, True, "", " ", [], {}])
-@pytest.mark.parametrize("command", [
-    ["validate", "fold-local"],
-    ["submit", "fold-local"],
-    ["batch", "fold-local"],
-    ["custom-tools", "test", "fold-local", "--version", VERSION_ID],
-])
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["validate", "fold-local"],
+        ["submit", "fold-local"],
+        ["batch", "fold-local"],
+        ["custom-tools", "test", "fold-local", "--version", VERSION],
+    ],
+)
 def test_malformed_envelope_type_rejected_by_every_command(
     monkeypatch, tmp_path, capsys, command, file_type
 ):
@@ -454,12 +468,15 @@ def test_malformed_envelope_type_rejected_by_every_command(
 
 
 @pytest.mark.parametrize("invalid_name", [False, 0, [], {}, "", " ", 1])
-@pytest.mark.parametrize("command", [
-    ["validate", "fold-local"],
-    ["submit", "fold-local"],
-    ["batch", "fold-local"],
-    ["custom-tools", "test", "fold-local", "--version", VERSION_ID],
-])
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["validate", "fold-local"],
+        ["submit", "fold-local"],
+        ["batch", "fold-local"],
+        ["custom-tools", "test", "fold-local", "--version", VERSION],
+    ],
+)
 def test_explicit_invalid_names_never_generate_a_replacement(
     monkeypatch, tmp_path, capsys, command, invalid_name
 ):
@@ -468,10 +485,15 @@ def test_explicit_invalid_names_never_generate_a_replacement(
     sdk = _install_sdk(monkeypatch)
     source = tmp_path / "input.json"
     is_batch = command[0] == "batch"
-    source.write_text(json.dumps({
-        "type": "fold-local", "settings": [{}] if is_batch else {},
-        "batchName" if is_batch else "jobName": invalid_name,
-    }))
+    source.write_text(
+        json.dumps(
+            {
+                "type": "fold-local",
+                "settings": [{}] if is_batch else {},
+                "batchName" if is_batch else "jobName": invalid_name,
+            }
+        )
+    )
     for key, value in ENV.items():
         monkeypatch.setenv(key, value)
     argv = ["tamarind", "--json", *command, "--input", str(source)]
@@ -488,3 +510,29 @@ def test_explicit_invalid_names_never_generate_a_replacement(
         assert error["type"] == "ValidationError"
         assert error["message"] == "Job name must be a non-empty string."
     assert sdk.custom_tools.get_names == []
+
+
+@pytest.mark.parametrize("json_mode", [False, True])
+def test_versions_exposes_numbered_version_and_cursor(monkeypatch, json_mode):
+    _install_sdk(monkeypatch)
+    args = ["--json"] if json_mode else ["--no-json"]
+    result = runner.invoke(app, [*args, "custom-tools", "versions", "fold-local"], env=ENV)
+    assert result.exit_code == 0, result.stdout
+    if json_mode:
+        payload = json.loads(result.stdout)
+        assert payload["items"][0]["version"] == VERSION
+        assert payload["nextCursor"] == "next-versions"
+    else:
+        assert VERSION in result.stdout
+        assert "Running" in result.stdout
+        assert "--cursor next-versions" in result.stdout
+
+
+def test_publish_uses_numbered_version(monkeypatch):
+    sdk = _install_sdk(monkeypatch)
+    result = runner.invoke(
+        app, ["--json", "custom-tools", "publish", "fold-local", VERSION], env=ENV
+    )
+    assert result.exit_code == 0, result.stdout
+    assert sdk.version.published
+    assert json.loads(result.stdout)["defaultVersion"] == VERSION

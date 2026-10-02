@@ -115,12 +115,22 @@
               }
             ]
           },
+          "etag": {
+            "description": "Opaque SDK-managed validator for the current Version snapshot.",
+            "title": "Etag",
+            "type": "string"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/PublicBuildEvent"
             },
             "title": "Items",
             "type": "array"
+          },
+          "lifetimeEtag": {
+            "description": "Opaque SDK-managed validator for the Tool lifetime that owns this Version.",
+            "title": "Lifetimeetag",
+            "type": "string"
           },
           "nextCursor": {
             "anyOf": [
@@ -136,9 +146,17 @@
           },
           "status": {
             "$ref": "#/components/schemas/PublicVersionStatus"
+          },
+          "version": {
+            "description": "The version these log events belong to, such as `v3`.",
+            "title": "Version",
+            "type": "string"
           }
         },
         "required": [
+          "etag",
+          "lifetimeEtag",
+          "version",
           "status",
           "items",
           "nextCursor",
@@ -176,6 +194,7 @@
         "properties": {
           "cpu": {
             "default": 1,
+            "description": "Number of CPU cores allocated to each run. Defaults to 1.",
             "maximum": 8.0,
             "minimum": 1.0,
             "title": "Cpu",
@@ -183,18 +202,21 @@
           },
           "description": {
             "default": "",
+            "description": "Short explanation of the tool. Defaults to an empty string.",
             "maxLength": 2000,
             "title": "Description",
             "type": "string"
           },
           "displayName": {
             "default": "",
+            "description": "Human-readable name shown in the UI. Defaults to an empty string.",
             "maxLength": 200,
             "title": "Displayname",
             "type": "string"
           },
           "gpuType": {
             "default": "None",
+            "description": "GPU allocated to each run: \"None\", T4, L4, L40S, or A100. Defaults to \"None\". A10 is retired: it is still accepted and runs on L4.",
             "enum": [
               "None",
               "T4",
@@ -208,6 +230,7 @@
           },
           "memory": {
             "default": "8Gi",
+            "description": "Memory allocated to each run. Defaults to \"8Gi\".",
             "enum": [
               "8Gi",
               "12Gi",
@@ -314,17 +337,17 @@
             "title": "Esttime",
             "type": "string"
           },
+          "etag": {
+            "description": "Opaque SDK-managed validator for this Tool snapshot.",
+            "title": "Etag",
+            "type": "string"
+          },
           "functions": {
             "items": {
               "type": "string"
             },
             "title": "Functions",
             "type": "array"
-          },
-          "generation": {
-            "description": "Identifies this tool even if its name is later deleted and reused. The SDK handles this identity automatically.",
-            "title": "Generation",
-            "type": "string"
           },
           "gpuType": {
             "enum": [
@@ -413,8 +436,8 @@
           }
         },
         "required": [
+          "etag",
           "name",
-          "generation",
           "displayName",
           "description",
           "functions",
@@ -438,6 +461,191 @@
           "canBuild"
         ],
         "title": "PublicCustomTool",
+        "type": "object"
+      },
+      "PublicCustomToolDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "autoPublish": {
+            "title": "Autopublish",
+            "type": "boolean"
+          },
+          "canBuild": {
+            "title": "Canbuild",
+            "type": "boolean"
+          },
+          "canEdit": {
+            "title": "Canedit",
+            "type": "boolean"
+          },
+          "cpu": {
+            "title": "Cpu",
+            "type": "integer"
+          },
+          "createdAt": {
+            "title": "Createdat",
+            "type": "string"
+          },
+          "defaultVersion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The version used by default, such as `v3`. Null when no version is published.",
+            "title": "Defaultversion"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "displayName": {
+            "title": "Displayname",
+            "type": "string"
+          },
+          "estTime": {
+            "title": "Esttime",
+            "type": "string"
+          },
+          "etag": {
+            "description": "Opaque SDK-managed validator for this Tool snapshot.",
+            "title": "Etag",
+            "type": "string"
+          },
+          "functions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Functions",
+            "type": "array"
+          },
+          "gpuType": {
+            "enum": [
+              "None",
+              "T4",
+              "L4",
+              "L40S",
+              "A10",
+              "A100"
+            ],
+            "title": "Gputype",
+            "type": "string"
+          },
+          "hasSource": {
+            "title": "Hassource",
+            "type": "boolean"
+          },
+          "homeDiskGi": {
+            "title": "Homediskgi",
+            "type": "integer"
+          },
+          "maxRuntimeSeconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum runtime for a tool run, in seconds. Null means no tool-specific limit.",
+            "title": "Maxruntimeseconds"
+          },
+          "memory": {
+            "enum": [
+              "8Gi",
+              "12Gi",
+              "24Gi",
+              "32Gi",
+              "48Gi",
+              "64Gi",
+              "90Gi",
+              "96Gi",
+              "180Gi"
+            ],
+            "title": "Memory",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "paperUrl": {
+            "title": "Paperurl",
+            "type": "string"
+          },
+          "published": {
+            "title": "Published",
+            "type": "boolean"
+          },
+          "sourceDigest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SHA-256 digest of the current source archive after it has been admitted for a build. Null when the current source is unbuilt, absent, or hidden.",
+            "title": "Sourcedigest"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PublicCustomToolStatus"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "updatedAt": {
+            "title": "Updatedat",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicVersion"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The requested version, or the latest version when no version was requested."
+          }
+        },
+        "required": [
+          "etag",
+          "name",
+          "displayName",
+          "description",
+          "functions",
+          "status",
+          "gpuType",
+          "memory",
+          "cpu",
+          "homeDiskGi",
+          "maxRuntimeSeconds",
+          "hasSource",
+          "sourceDigest",
+          "published",
+          "autoPublish",
+          "estTime",
+          "paperUrl",
+          "tags",
+          "defaultVersion",
+          "createdAt",
+          "updatedAt",
+          "canEdit",
+          "canBuild",
+          "version"
+        ],
+        "title": "PublicCustomToolDetail",
         "type": "object"
       },
       "PublicCustomToolPage": {
@@ -518,6 +726,19 @@
             "description": "Structured per-item detail (request-validation fields OR pipeline diagnostics).",
             "title": "Errors"
           },
+          "retryable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether the SAME request can succeed later. `true` means retry (honour `Retry-After` when present); `false` means this will not resolve on its own and retrying cannot change it. Omitted when the error does not specify \u2014 absence is NOT `false`.",
+            "title": "Retryable"
+          },
           "status": {
             "description": "The HTTP status code, duplicated in the body per RFC 9457.",
             "title": "Status",
@@ -555,6 +776,7 @@
                 "type": "null"
               }
             ],
+            "description": "Whether successful builds become the default version automatically. Omit or pass null to leave it unchanged.",
             "title": "Autopublish"
           },
           "cpu": {
@@ -568,6 +790,7 @@
                 "type": "null"
               }
             ],
+            "description": "Number of CPU cores allocated to each run. Omit or pass null to leave it unchanged.",
             "title": "Cpu"
           },
           "description": {
@@ -580,6 +803,7 @@
                 "type": "null"
               }
             ],
+            "description": "Short explanation of the tool. Omit or pass null to leave it unchanged; pass an empty string to clear it.",
             "title": "Description"
           },
           "displayName": {
@@ -592,6 +816,7 @@
                 "type": "null"
               }
             ],
+            "description": "Human-readable name shown in the UI. Omit or pass null to leave it unchanged; pass an empty string to clear it.",
             "title": "Displayname"
           },
           "estTime": {
@@ -603,6 +828,7 @@
                 "type": "null"
               }
             ],
+            "description": "Estimated runtime in H:M:S format, for example \"0:1:0\". Minutes and seconds must be 0-59. Omit or pass null to leave it unchanged; pass an empty string to clear it.",
             "title": "Esttime"
           },
           "functions": {
@@ -620,6 +846,7 @@
                 "type": "null"
               }
             ],
+            "description": "Short capability labels used for discovery. Omit or pass null to leave them unchanged; pass an empty list to clear them.",
             "title": "Functions"
           },
           "gpuType": {
@@ -639,6 +866,7 @@
                 "type": "null"
               }
             ],
+            "description": "GPU allocated to each run: \"None\", T4, L4, L40S, or A100. Omit or pass null to leave it unchanged. A10 is retired: it is still accepted and runs on L4.",
             "title": "Gputype"
           },
           "homeDiskGi": {
@@ -652,6 +880,7 @@
                 "type": "null"
               }
             ],
+            "description": "Writable home-disk capacity in GiB. Omit or pass null to leave it unchanged.",
             "title": "Homediskgi"
           },
           "memory": {
@@ -674,6 +903,7 @@
                 "type": "null"
               }
             ],
+            "description": "Memory allocated to each run. Omit or pass null to leave it unchanged.",
             "title": "Memory"
           },
           "paperUrl": {
@@ -686,6 +916,7 @@
                 "type": "null"
               }
             ],
+            "description": "Related HTTP or HTTPS publication URL. Omit or pass null to leave it unchanged; pass an empty string to clear it.",
             "title": "Paperurl"
           },
           "tags": {
@@ -703,6 +934,7 @@
                 "type": "null"
               }
             ],
+            "description": "Search and discovery tags. Omit or pass null to leave them unchanged; pass an empty list to clear them.",
             "title": "Tags"
           }
         },
@@ -786,14 +1018,14 @@
               }
             ]
           },
-          "id": {
-            "description": "The unique ID of this build. Use it in API requests to check status, read logs, cancel, or publish.",
-            "title": "Id",
+          "etag": {
+            "description": "Opaque SDK-managed validator for this exact Version snapshot.",
+            "title": "Etag",
             "type": "string"
           },
-          "name": {
-            "description": "The display name of this build, such as `v3`. Use `id` in API requests.",
-            "title": "Name",
+          "lifetimeEtag": {
+            "description": "Opaque SDK-managed validator for the Tool lifetime that owns this Version.",
+            "title": "Lifetimeetag",
             "type": "string"
           },
           "origin": {
@@ -835,11 +1067,17 @@
             "description": "Whether the build has reached a final status and will not run again.",
             "title": "Terminal",
             "type": "boolean"
+          },
+          "version": {
+            "description": "The version number, such as `v3`.",
+            "title": "Version",
+            "type": "string"
           }
         },
         "required": [
-          "id",
-          "name",
+          "etag",
+          "lifetimeEtag",
+          "version",
           "sourceRevision",
           "sourceDigest",
           "status",
@@ -1065,7 +1303,7 @@
     },
     "/custom-tools/{name}": {
       "delete": {
-        "description": "Delete this generation and release its name for reuse.",
+        "description": "Delete this custom tool and release its name for reuse.",
         "operationId": "deleteCustomTool",
         "parameters": [
           {
@@ -1083,7 +1321,7 @@
             }
           },
           {
-            "description": "Optional: send the ETag returned by Get tool, including its quotes, to avoid overwriting changes made since that read. Standard If-Match lists and `*` are also accepted; `*` checks only that the tool exists. Without this header, changes apply to the current tool state and may overwrite concurrent edits.",
+            "description": "Optional: send the `etag` field returned in the Get tool JSON body, including its quotes, to avoid overwriting changes made since that read. Standard If-Match lists and `*` are also accepted; `*` checks only that the tool exists. Without this header, changes apply to the current tool state and may overwrite concurrent edits.",
             "in": "header",
             "name": "If-Match",
             "required": false,
@@ -1120,7 +1358,7 @@
         "x-doc-group": "Custom Tools"
       },
       "get": {
-        "description": "Get a custom tool's configuration, source status, and current version.",
+        "description": "Get a custom tool and one version.\n\nBy default this includes the latest version. Pass `version=v2` to inspect a specific version.\nA tool that has never been built returns `version: null`.",
         "operationId": "getCustomTool",
         "parameters": [
           {
@@ -1136,6 +1374,36 @@
               "title": "Name",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "description": "A version number such as `v3`. Omit it to use the endpoint's documented default.",
+                  "maxLength": 32,
+                  "minLength": 2,
+                  "pattern": "^v[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version"
+            }
+          },
+          {
+            "description": "Optional SDK-managed identity condition. A retained Tool or Version ETag prevents a read from silently switching to a replacement tool with the same name. Representation changes within the same resource remain readable.",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1143,26 +1411,20 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PublicCustomTool"
+                  "$ref": "#/components/schemas/PublicCustomToolDetail"
                 }
               }
             },
-            "description": "The current Tool generation.",
-            "headers": {
-              "ETag": {
-                "description": "ETag to send in If-Match when changing this tool.",
-                "schema": {
-                  "example": "\"01JABCDEF0123456789XYZ\"",
-                  "type": "string"
-                }
-              }
-            }
+            "description": "The current custom tool."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
           },
           "422": {
             "$ref": "#/components/responses/ValidationProblem"
@@ -1196,7 +1458,7 @@
             }
           },
           {
-            "description": "Optional: send the ETag returned by Get tool, including its quotes, to avoid overwriting changes made since that read. Standard If-Match lists and `*` are also accepted; `*` checks only that the tool exists. Without this header, changes apply to the current tool state and may overwrite concurrent edits.",
+            "description": "Optional: send the `etag` field returned in the Get tool JSON body, including its quotes, to avoid overwriting changes made since that read. Standard If-Match lists and `*` are also accepted; `*` checks only that the tool exists. Without this header, changes apply to the current tool state and may overwrite concurrent edits.",
             "in": "header",
             "name": "If-Match",
             "required": false,
@@ -1259,6 +1521,408 @@
         "x-doc-group": "Custom Tools"
       }
     },
+    "/custom-tools/{name}/build": {
+      "post": {
+        "description": "Build a version from an uploaded source archive.\n\nThe archive also updates the tool's editable source and configuration. Optionally send the Tool\n`etag` field from the Get tool JSON body to reject concurrent edits. Without it, the current tool is updated.\nReturns immediately with the new or reused version and its current status.",
+        "operationId": "buildCustomTool",
+        "parameters": [
+          {
+            "description": "The custom tool name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The custom tool name.",
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Retries the same build request without admitting duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Retries the same build request without admitting duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.",
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "description": "Optional: send the `etag` field returned in the Get tool JSON body, including its quotes, to avoid overwriting changes made since that read. Standard If-Match lists and `*` are also accepted; `*` checks only that the tool exists. Without this header, changes apply to the current tool state and may overwrite concurrent edits.",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicCreateVersionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicBuildResult"
+                }
+              }
+            },
+            "description": "The admitted Version.",
+            "headers": {
+              "ETag": {
+                "description": "Opaque validator retained by SDK Version resources for refreshes and safe mutations.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Location": {
+                "description": "Relative URL of the exact version admitted or reused by this request.",
+                "schema": {
+                  "example": "../my-custom-tool?version=v3",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Build a custom tool",
+        "tags": [
+          "custom-tools"
+        ],
+        "x-doc-group": "Custom Tools"
+      }
+    },
+    "/custom-tools/{name}/build-logs": {
+      "get": {
+        "description": "List build log events for a version.\n\nBy default this reads the latest version. Pass `version=v2` for a specific version. Paginated \u2014\nfollow `nextCursor` until it is null.",
+        "operationId": "listCustomToolBuildLogs",
+        "parameters": [
+          {
+            "description": "The custom tool name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The custom tool name.",
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "description": "A version number such as `v3`. Omit it to use the endpoint's documented default.",
+                  "maxLength": 32,
+                  "minLength": 2,
+                  "pattern": "^v[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version"
+            }
+          },
+          {
+            "description": "Pagination token from the previous response's `nextCursor`.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 4096,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Pagination token from the previous response's `nextCursor`.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Optional SDK-managed identity condition. A retained Tool or Version ETag prevents a read from silently switching to a replacement tool with the same name. Representation changes within the same resource remain readable.",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicBuildLogPage"
+                }
+              }
+            },
+            "description": "Build events and current version status."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "List build logs",
+        "tags": [
+          "custom-tools"
+        ],
+        "x-doc-group": "Custom Tools"
+      }
+    },
+    "/custom-tools/{name}/cancel-build": {
+      "post": {
+        "description": "Request cancellation of an active build.\n\nWhen exactly one build is active, no version is needed. If multiple builds are active, pass a\nversion such as `version=v2`. Cancellation is a request; continue polling for the outcome.",
+        "operationId": "cancelCustomToolBuild",
+        "parameters": [
+          {
+            "description": "The custom tool name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The custom tool name.",
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "description": "A version number such as `v3`. Omit it to use the endpoint's documented default.",
+                  "maxLength": 32,
+                  "minLength": 2,
+                  "pattern": "^v[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version"
+            }
+          },
+          {
+            "description": "Optional resource condition used by SDKs to prevent a stale version handle from changing a replacement tool with the same name. The SDK manages this value automatically.",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicVersion"
+                }
+              }
+            },
+            "description": "The version with cancellation requested.",
+            "headers": {
+              "ETag": {
+                "description": "Opaque validator retained by SDK Version resources for refreshes and safe mutations.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Cancel a custom tool build",
+        "tags": [
+          "custom-tools"
+        ],
+        "x-doc-group": "Custom Tools"
+      }
+    },
+    "/custom-tools/{name}/publish": {
+      "post": {
+        "description": "Publish a completed version.\n\nBy default this publishes the latest completed version. Pass `version=v2` to publish or roll back\nto a specific completed version.",
+        "operationId": "publishCustomTool",
+        "parameters": [
+          {
+            "description": "The custom tool name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The custom tool name.",
+              "maxLength": 50,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "description": "A version number such as `v3`. Omit it to use the endpoint's documented default.",
+                  "maxLength": 32,
+                  "minLength": 2,
+                  "pattern": "^v[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version"
+            }
+          },
+          {
+            "description": "Optional resource condition. Send the Tool ETag to protect its current representation. SDK Version resources may instead send the selected Version ETag to fence publication to that tool lifetime.",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicCustomTool"
+                }
+              }
+            },
+            "description": "The Tool with its published version updated.",
+            "headers": {
+              "ETag": {
+                "description": "ETag to send in If-Match when changing this tool.",
+                "schema": {
+                  "example": "\"01JABCDEF0123456789XYZ\"",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationProblem"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Publish a custom tool version",
+        "tags": [
+          "custom-tools"
+        ],
+        "x-doc-group": "Custom Tools"
+      }
+    },
     "/custom-tools/{name}/uploads": {
       "post": {
         "description": "Create a temporary upload for a source archive.\n\nUpload the file to `uploadUrl` using `uploadMethod` and every value in `uploadHeaders`, then use\n`uploadId` to build a version.",
@@ -1279,7 +1943,7 @@
             }
           },
           {
-            "description": "Optionally send the ETag returned by Get tool to reject a stale tool before uploading. To protect build admission too, also send it on the build request.",
+            "description": "Optionally send the `etag` field returned in the Get tool JSON body to reject a stale tool before uploading. To protect build admission too, also send it on the build request.",
             "in": "header",
             "name": "If-Match",
             "required": false,
@@ -1392,6 +2056,16 @@
               "description": "Pagination token from the previous response's `nextCursor`.",
               "title": "Cursor"
             }
+          },
+          {
+            "description": "Optional SDK-managed identity condition. A retained Tool or Version ETag prevents a read from silently switching to a replacement tool with the same name. Representation changes within the same resource remain readable.",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1411,6 +2085,9 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
           "422": {
             "$ref": "#/components/responses/ValidationProblem"
           },
@@ -1419,448 +2096,6 @@
           }
         },
         "summary": "List custom tool versions",
-        "tags": [
-          "custom-tools"
-        ],
-        "x-doc-group": "Custom Tools"
-      },
-      "post": {
-        "description": "Build a version from an uploaded source archive.\n\nThe archive also updates the tool's editable source and configuration. Optionally send the Tool\nETag from Get tool to reject concurrent edits. Without it, the current tool is updated.\nReturns immediately with the new or reused version and its current status.",
-        "operationId": "buildCustomToolVersion",
-        "parameters": [
-          {
-            "description": "The custom tool name.",
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "description": "The custom tool name.",
-              "maxLength": 50,
-              "minLength": 3,
-              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
-              "title": "Name",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Retries the same build request without admitting duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 255,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Retries the same build request without admitting duplicate work. Reusing a key with different source or runtime facts returns 409 Conflict.",
-              "title": "Idempotency-Key"
-            }
-          },
-          {
-            "description": "Optional: send the ETag returned by Get tool, including its quotes, to avoid overwriting changes made since that read. Standard If-Match lists and `*` are also accepted; `*` checks only that the tool exists. Without this header, changes apply to the current tool state and may overwrite concurrent edits.",
-            "in": "header",
-            "name": "If-Match",
-            "required": false,
-            "schema": {
-              "minLength": 1,
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PublicCreateVersionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PublicBuildResult"
-                }
-              }
-            },
-            "description": "The admitted Version.",
-            "headers": {
-              "ETag": {
-                "description": "ETag for callers that want cancellation to require the observed build state.",
-                "schema": {
-                  "example": "\"eyJvcGFxdWUiOiJ2ZXJzaW9uIn0\"",
-                  "type": "string"
-                }
-              },
-              "Location": {
-                "description": "Relative URL of the exact Version admitted or reused by this request.",
-                "schema": {
-                  "example": "./versions/ver_eyJvcGFxdWUiOiJ2ZXJzaW9uIn0",
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationProblem"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "summary": "Build a custom tool version",
-        "tags": [
-          "custom-tools"
-        ],
-        "x-doc-group": "Custom Tools"
-      }
-    },
-    "/custom-tools/{name}/versions/{version}": {
-      "get": {
-        "description": "Get a version's source, build status, and error details.",
-        "operationId": "getCustomToolVersion",
-        "parameters": [
-          {
-            "description": "The custom tool name.",
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "description": "The custom tool name.",
-              "maxLength": 50,
-              "minLength": 3,
-              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
-              "title": "Name",
-              "type": "string"
-            }
-          },
-          {
-            "description": "The `id` returned by the build or version response. Use this ID for reads, logs, cancellation, and publication; `name` is the display label, such as `v3`.",
-            "in": "path",
-            "name": "version",
-            "required": true,
-            "schema": {
-              "description": "The `id` returned by the build or version response. Use this ID for reads, logs, cancellation, and publication; `name` is the display label, such as `v3`.",
-              "maxLength": 512,
-              "minLength": 2,
-              "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
-              "title": "Version",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PublicVersion"
-                }
-              }
-            },
-            "description": "The exact Version.",
-            "headers": {
-              "ETag": {
-                "description": "ETag for callers that want cancellation to require the observed build state.",
-                "schema": {
-                  "example": "\"eyJvcGFxdWUiOiJ2ZXJzaW9uIn0\"",
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationProblem"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "summary": "Get a custom tool version",
-        "tags": [
-          "custom-tools"
-        ],
-        "x-doc-group": "Custom Tools"
-      }
-    },
-    "/custom-tools/{name}/versions/{version}/logs": {
-      "get": {
-        "description": "List build log events for a version.\n\nPaginated \u2014 follow `nextCursor` until it is null.",
-        "operationId": "listCustomToolBuildLogs",
-        "parameters": [
-          {
-            "description": "The custom tool name.",
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "description": "The custom tool name.",
-              "maxLength": 50,
-              "minLength": 3,
-              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
-              "title": "Name",
-              "type": "string"
-            }
-          },
-          {
-            "description": "The `id` returned by the build or version response. Use this ID for reads, logs, cancellation, and publication; `name` is the display label, such as `v3`.",
-            "in": "path",
-            "name": "version",
-            "required": true,
-            "schema": {
-              "description": "The `id` returned by the build or version response. Use this ID for reads, logs, cancellation, and publication; `name` is the display label, such as `v3`.",
-              "maxLength": 512,
-              "minLength": 2,
-              "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
-              "title": "Version",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Pagination token from the previous response's `nextCursor`.",
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 4096,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Pagination token from the previous response's `nextCursor`.",
-              "title": "Cursor"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PublicBuildLogPage"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationProblem"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "summary": "List build logs",
-        "tags": [
-          "custom-tools"
-        ],
-        "x-doc-group": "Custom Tools"
-      }
-    },
-    "/custom-tools/{name}/versions/{version}:cancel": {
-      "post": {
-        "description": "Request cancellation of an active build.\n\nUse the exact version ID. No ETag is needed for ordinary cancellation. Optionally send the\nversion's ETag in If-Match to require that its observed state has not changed. Completed and\nstopped builds cannot be canceled. Cancellation is a request; continue polling for the outcome.",
-        "operationId": "cancelCustomToolBuild",
-        "parameters": [
-          {
-            "description": "The custom tool name.",
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "description": "The custom tool name.",
-              "maxLength": 50,
-              "minLength": 3,
-              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
-              "title": "Name",
-              "type": "string"
-            }
-          },
-          {
-            "description": "The `id` returned by the build or version response. Use this ID for reads, logs, cancellation, and publication; `name` is the display label, such as `v3`.",
-            "in": "path",
-            "name": "version",
-            "required": true,
-            "schema": {
-              "description": "The `id` returned by the build or version response. Use this ID for reads, logs, cancellation, and publication; `name` is the display label, such as `v3`.",
-              "maxLength": 512,
-              "minLength": 2,
-              "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
-              "title": "Version",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Optional: send the ETag returned by Get version to cancel only if that build has not changed. Omit it, or send `*`, to request cancellation of the exact build in its current active state.",
-            "in": "header",
-            "name": "If-Match",
-            "required": false,
-            "schema": {
-              "minLength": 1,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PublicVersion"
-                }
-              }
-            },
-            "description": "The Version with cancellation requested.",
-            "headers": {
-              "ETag": {
-                "description": "ETag for callers that want cancellation to require the observed build state.",
-                "schema": {
-                  "example": "\"eyJvcGFxdWUiOiJ2ZXJzaW9uIn0\"",
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationProblem"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "summary": "Cancel a custom tool build",
-        "tags": [
-          "custom-tools"
-        ],
-        "x-doc-group": "Custom Tools"
-      }
-    },
-    "/custom-tools/{name}/versions/{version}:publish": {
-      "post": {
-        "description": "Make a completed version the tool's published runtime version.\n\nThis also supports an explicit rollback to an older completed version.",
-        "operationId": "publishCustomToolVersion",
-        "parameters": [
-          {
-            "description": "The custom tool name.",
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "description": "The custom tool name.",
-              "maxLength": 50,
-              "minLength": 3,
-              "pattern": "^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$",
-              "title": "Name",
-              "type": "string"
-            }
-          },
-          {
-            "description": "The `id` returned by the build or version response. Use this ID for reads, logs, cancellation, and publication; `name` is the display label, such as `v3`.",
-            "in": "path",
-            "name": "version",
-            "required": true,
-            "schema": {
-              "description": "The `id` returned by the build or version response. Use this ID for reads, logs, cancellation, and publication; `name` is the display label, such as `v3`.",
-              "maxLength": 512,
-              "minLength": 2,
-              "pattern": "^(?:ver_[A-Za-z0-9_-]+|v[1-9][0-9]*)$",
-              "title": "Version",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Optional: send the ETag returned by Get tool, including its quotes, to avoid overwriting changes made since that read. Standard If-Match lists and `*` are also accepted; `*` checks only that the tool exists. Without this header, changes apply to the current tool state and may overwrite concurrent edits.",
-            "in": "header",
-            "name": "If-Match",
-            "required": false,
-            "schema": {
-              "minLength": 1,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PublicCustomTool"
-                }
-              }
-            },
-            "description": "The Tool with its published version updated.",
-            "headers": {
-              "ETag": {
-                "description": "ETag to send in If-Match when changing this tool.",
-                "schema": {
-                  "example": "\"01JABCDEF0123456789XYZ\"",
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationProblem"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "summary": "Publish a custom tool version",
         "tags": [
           "custom-tools"
         ],

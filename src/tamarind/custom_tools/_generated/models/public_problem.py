@@ -26,6 +26,9 @@ class PublicProblem:
         detail (None | str | Unset): Instance-specific human explanation.
         errors (list[PublicProblemErrorsType0Item] | None | Unset): Structured per-item detail (request-validation
             fields OR pipeline diagnostics).
+        retryable (bool | None | Unset): Whether the SAME request can succeed later. `true` means retry (honour `Retry-
+            After` when present); `false` means this will not resolve on its own and retrying cannot change it. Omitted when
+            the error does not specify — absence is NOT `false`.
     """
 
     code: str
@@ -34,6 +37,7 @@ class PublicProblem:
     type_: str
     detail: None | str | Unset = UNSET
     errors: list[PublicProblemErrorsType0Item] | None | Unset = UNSET
+    retryable: bool | None | Unset = UNSET
 
     def to_dict(self) -> dict[str, Any]:
         code = self.code
@@ -62,6 +66,12 @@ class PublicProblem:
         else:
             errors = self.errors
 
+        retryable: bool | None | Unset
+        if isinstance(self.retryable, Unset):
+            retryable = UNSET
+        else:
+            retryable = self.retryable
+
         field_dict: dict[str, Any] = {}
 
         field_dict.update(
@@ -76,6 +86,8 @@ class PublicProblem:
             field_dict["detail"] = detail
         if errors is not UNSET:
             field_dict["errors"] = errors
+        if retryable is not UNSET:
+            field_dict["retryable"] = retryable
 
         return field_dict
 
@@ -125,6 +137,15 @@ class PublicProblem:
 
         errors = _parse_errors(d.pop("errors", UNSET))
 
+        def _parse_retryable(data: object) -> bool | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(bool | None | Unset, data)
+
+        retryable = _parse_retryable(d.pop("retryable", UNSET))
+
         public_problem = cls(
             code=code,
             status=status,
@@ -132,6 +153,7 @@ class PublicProblem:
             type_=type_,
             detail=detail,
             errors=errors,
+            retryable=retryable,
         )
 
         return public_problem

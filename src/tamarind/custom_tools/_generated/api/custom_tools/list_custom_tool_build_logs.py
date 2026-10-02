@@ -12,12 +12,23 @@ from ...types import UNSET, Response, Unset
 
 def _get_kwargs(
     name: str,
-    version: str,
     *,
+    version: None | str | Unset = UNSET,
     cursor: None | str | Unset = UNSET,
+    if_match: str | Unset = UNSET,
 ) -> dict[str, Any]:
+    headers: dict[str, Any] = {}
+    if not isinstance(if_match, Unset):
+        headers["If-Match"] = if_match
 
     params: dict[str, Any] = {}
+
+    json_version: None | str | Unset
+    if isinstance(version, Unset):
+        json_version = UNSET
+    else:
+        json_version = version
+    params["version"] = json_version
 
     json_cursor: None | str | Unset
     if isinstance(cursor, Unset):
@@ -30,13 +41,13 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/custom-tools/{name}/versions/{version}/logs".format(
+        "url": "/custom-tools/{name}/build-logs".format(
             name=quote(str(name), safe=""),
-            version=quote(str(version), safe=""),
         ),
         "params": params,
     }
 
+    _kwargs["headers"] = headers
     return _kwargs
 
 
@@ -57,6 +68,11 @@ def _parse_response(
         response_404 = PublicProblem.from_dict(response.json())
 
         return response_404
+
+    if response.status_code == 412:
+        response_412 = PublicProblem.from_dict(response.json())
+
+        return response_412
 
     if response.status_code == 422:
         response_422 = PublicProblem.from_dict(response.json())
@@ -81,22 +97,24 @@ def _build_response(
 
 def sync_detailed(
     name: str,
-    version: str,
     *,
     client: AuthenticatedClient | Client,
+    version: None | str | Unset = UNSET,
     cursor: None | str | Unset = UNSET,
+    if_match: str | Unset = UNSET,
 ) -> Response[PublicBuildLogPage | PublicProblem]:
     """List build logs
 
      List build log events for a version.
 
-    Paginated — follow `nextCursor` until it is null.
+    By default this reads the latest version. Pass `version=v2` for a specific version. Paginated —
+    follow `nextCursor` until it is null.
 
     Args:
         name (str): The custom tool name.
-        version (str): The `id` returned by the build or version response. Use this ID for reads,
-            logs, cancellation, and publication; `name` is the display label, such as `v3`.
+        version (None | str | Unset):
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -110,6 +128,7 @@ def sync_detailed(
         name=name,
         version=version,
         cursor=cursor,
+        if_match=if_match,
     )
 
     response = client.get_httpx_client().request(
@@ -121,22 +140,24 @@ def sync_detailed(
 
 def sync(
     name: str,
-    version: str,
     *,
     client: AuthenticatedClient | Client,
+    version: None | str | Unset = UNSET,
     cursor: None | str | Unset = UNSET,
+    if_match: str | Unset = UNSET,
 ) -> PublicBuildLogPage | PublicProblem | None:
     """List build logs
 
      List build log events for a version.
 
-    Paginated — follow `nextCursor` until it is null.
+    By default this reads the latest version. Pass `version=v2` for a specific version. Paginated —
+    follow `nextCursor` until it is null.
 
     Args:
         name (str): The custom tool name.
-        version (str): The `id` returned by the build or version response. Use this ID for reads,
-            logs, cancellation, and publication; `name` is the display label, such as `v3`.
+        version (None | str | Unset):
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -148,30 +169,33 @@ def sync(
 
     return sync_detailed(
         name=name,
-        version=version,
         client=client,
+        version=version,
         cursor=cursor,
+        if_match=if_match,
     ).parsed
 
 
 async def asyncio_detailed(
     name: str,
-    version: str,
     *,
     client: AuthenticatedClient | Client,
+    version: None | str | Unset = UNSET,
     cursor: None | str | Unset = UNSET,
+    if_match: str | Unset = UNSET,
 ) -> Response[PublicBuildLogPage | PublicProblem]:
     """List build logs
 
      List build log events for a version.
 
-    Paginated — follow `nextCursor` until it is null.
+    By default this reads the latest version. Pass `version=v2` for a specific version. Paginated —
+    follow `nextCursor` until it is null.
 
     Args:
         name (str): The custom tool name.
-        version (str): The `id` returned by the build or version response. Use this ID for reads,
-            logs, cancellation, and publication; `name` is the display label, such as `v3`.
+        version (None | str | Unset):
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -185,6 +209,7 @@ async def asyncio_detailed(
         name=name,
         version=version,
         cursor=cursor,
+        if_match=if_match,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -194,22 +219,24 @@ async def asyncio_detailed(
 
 async def asyncio(
     name: str,
-    version: str,
     *,
     client: AuthenticatedClient | Client,
+    version: None | str | Unset = UNSET,
     cursor: None | str | Unset = UNSET,
+    if_match: str | Unset = UNSET,
 ) -> PublicBuildLogPage | PublicProblem | None:
     """List build logs
 
      List build log events for a version.
 
-    Paginated — follow `nextCursor` until it is null.
+    By default this reads the latest version. Pass `version=v2` for a specific version. Paginated —
+    follow `nextCursor` until it is null.
 
     Args:
         name (str): The custom tool name.
-        version (str): The `id` returned by the build or version response. Use this ID for reads,
-            logs, cancellation, and publication; `name` is the display label, such as `v3`.
+        version (None | str | Unset):
         cursor (None | str | Unset): Pagination token from the previous response's `nextCursor`.
+        if_match (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -222,8 +249,9 @@ async def asyncio(
     return (
         await asyncio_detailed(
             name=name,
-            version=version,
             client=client,
+            version=version,
             cursor=cursor,
+            if_match=if_match,
         )
     ).parsed

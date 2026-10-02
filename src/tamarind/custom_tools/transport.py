@@ -24,6 +24,7 @@ from tamarind.custom_tools._generated.models.public_custom_tool_status import (
 from tamarind.custom_tools._generated.models.public_update_custom_tool_request import (
     PublicUpdateCustomToolRequest as UpdateModel,
 )
+from tamarind.custom_tools._generated.models.public_version import PublicVersion as VersionModel
 from tamarind.custom_tools._generated.models.public_version_status import (
     PublicVersionStatus as GeneratedVersionStatus,
 )
@@ -31,17 +32,16 @@ from tamarind.errors import TamarindError
 from tamarind.http import HTTPClient
 
 from ._generated.api.custom_tools import (
-    build_custom_tool_version,
+    build_custom_tool,
     cancel_custom_tool_build,
     create_custom_tool,
     create_custom_tool_upload,
     delete_custom_tool,
     get_custom_tool,
-    get_custom_tool_version,
     list_custom_tool_build_logs,
     list_custom_tool_versions,
     list_custom_tools,
-    publish_custom_tool_version,
+    publish_custom_tool,
     update_custom_tool,
 )
 
@@ -69,11 +69,10 @@ _GET_CUSTOM_TOOL = _Operation(get_custom_tool, 200)
 _UPDATE_CUSTOM_TOOL = _Operation(update_custom_tool, 200)
 _CREATE_CUSTOM_TOOL_UPLOAD = _Operation(create_custom_tool_upload, 201)
 _LIST_CUSTOM_TOOL_VERSIONS = _Operation(list_custom_tool_versions, 200)
-_BUILD_CUSTOM_TOOL_VERSION = _Operation(build_custom_tool_version, 202)
-_GET_CUSTOM_TOOL_VERSION = _Operation(get_custom_tool_version, 200)
+_BUILD_CUSTOM_TOOL_VERSION = _Operation(build_custom_tool, 202)
 _CANCEL_CUSTOM_TOOL_BUILD = _Operation(cancel_custom_tool_build, 200)
 _LIST_CUSTOM_TOOL_BUILD_LOGS = _Operation(list_custom_tool_build_logs, 200)
-_PUBLISH_CUSTOM_TOOL_VERSION = _Operation(publish_custom_tool_version, 200)
+_PUBLISH_CUSTOM_TOOL_VERSION = _Operation(publish_custom_tool, 200)
 
 _MODEL_OPERATIONS = (
     _LIST_CUSTOM_TOOLS,
@@ -83,7 +82,6 @@ _MODEL_OPERATIONS = (
     _CREATE_CUSTOM_TOOL_UPLOAD,
     _LIST_CUSTOM_TOOL_VERSIONS,
     _BUILD_CUSTOM_TOOL_VERSION,
-    _GET_CUSTOM_TOOL_VERSION,
     _CANCEL_CUSTOM_TOOL_BUILD,
     _LIST_CUSTOM_TOOL_BUILD_LOGS,
     _PUBLISH_CUSTOM_TOOL_VERSION,
@@ -114,24 +112,23 @@ class GeneratedCustomToolsTransport:
             raise TamarindError("Custom Tools response did not match the generated contract")
         try:
             parsed = operation.endpoint._parse_response(client=self._parser, response=response)
+            wire = cast(dict[str, Any], parsed.to_dict())
+            # The generator's nullable union can fall back to a raw dict.
+            # Validate a selected version with its generated model before exposing it.
+            if operation is _GET_CUSTOM_TOOL and wire.get("version") is not None:
+                VersionModel.from_dict(wire["version"])
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
             raise TamarindError(
                 "Custom Tools response did not match the generated contract"
             ) from exc
-        if parsed is None or not hasattr(parsed, "to_dict"):
-            raise TamarindError("Custom Tools response did not match the generated contract")
-        wire = cast(dict[str, Any], parsed.to_dict())
-        etag = response.headers.get("ETag")
-        if etag is not None:
-            wire["_etag"] = etag
         return wire
 
     def submit_test_job(
         self,
         *,
         name: str,
-        version_name: str,
-        generation: str,
+        version: str,
+        lifetime_etag: str,
         job_name: str,
         settings: dict[str, Any],
     ) -> Any:
@@ -145,14 +142,13 @@ class GeneratedCustomToolsTransport:
             json={
                 "jobName": job_name,
                 "type": name,
-                "toolRef": version_name,
-                "toolGeneration": generation,
+                "toolRef": version,
+                "toolLifetimeEtag": lifetime_etag,
                 "batch": f"test-{name}",
                 "settings": settings,
                 "jobSource": "CLI",
             },
         )
-
 
     def list_custom_tools(
         self,
@@ -191,8 +187,14 @@ class GeneratedCustomToolsTransport:
         if response.status_code != 204:
             raise TamarindError("Custom Tools response did not match the generated contract")
 
-    def get_custom_tool(self, name: str, *, timeout: float | None = None) -> PublicCustomTool:
-        return self._sync(_GET_CUSTOM_TOOL, get_custom_tool._get_kwargs(name=name), timeout)
+    def get_custom_tool(
+        self, name: str, *, etag: str | None = None, timeout: float | None = None
+    ) -> PublicCustomTool:
+        return self._sync(
+            _GET_CUSTOM_TOOL,
+            get_custom_tool._get_kwargs(name=name, if_match=UNSET if etag is None else etag),
+            timeout,
+        )
 
     def update_custom_tool(
         self,
@@ -230,12 +232,14 @@ class GeneratedCustomToolsTransport:
         limit: int | None = None,
         cursor: str | None = None,
         *,
+        etag: str | None = None,
         timeout: float | None = None,
     ) -> dict[str, Any]:
         return self._sync(
             _LIST_CUSTOM_TOOL_VERSIONS,
             list_custom_tool_versions._get_kwargs(
                 name=name,
+                if_match=UNSET if etag is None else etag,
                 status=GeneratedVersionStatus(status) if status is not None else None,
                 limit=50 if limit is None else limit,
                 cursor=cursor,
@@ -254,7 +258,7 @@ class GeneratedCustomToolsTransport:
     ) -> PublicBuildResult:
         return self._sync(
             _BUILD_CUSTOM_TOOL_VERSION,
-            build_custom_tool_version._get_kwargs(
+            build_custom_tool._get_kwargs(
                 name=name,
                 if_match=etag,
                 idempotency_key=UNSET if idempotency_key is None else idempotency_key,
@@ -264,25 +268,27 @@ class GeneratedCustomToolsTransport:
         )
 
     def get_custom_tool_version(
-        self, name: str, version_id: str, *, timeout: float | None = None
+        self, name: str, version: str, *, etag: str | None = None, timeout: float | None = None
     ) -> PublicVersion:
-        return self._sync(
-            _GET_CUSTOM_TOOL_VERSION,
-            get_custom_tool_version._get_kwargs(
+        detail = self._sync(
+            _GET_CUSTOM_TOOL,
+            get_custom_tool._get_kwargs(
                 name=name,
-                version=version_id,
+                version=version,
+                if_match=UNSET if etag is None else etag,
             ),
             timeout,
         )
+        return _selected_version(detail)
 
     def cancel_custom_tool_build(
-        self, name: str, version_id: str, etag: str, *, timeout: float | None = None
+        self, name: str, version: str, etag: str, *, timeout: float | None = None
     ) -> PublicVersion:
         return self._sync(
             _CANCEL_CUSTOM_TOOL_BUILD,
             cancel_custom_tool_build._get_kwargs(
                 name=name,
-                version=version_id,
+                version=version,
                 if_match=etag,
             ),
             timeout,
@@ -291,59 +297,65 @@ class GeneratedCustomToolsTransport:
     def list_custom_tool_build_logs(
         self,
         name: str,
-        version_id: str,
+        version: str,
         cursor: str | None = None,
         *,
+        etag: str | None = None,
         timeout: float | None = None,
     ) -> PublicBuildLogPage:
         return self._sync(
             _LIST_CUSTOM_TOOL_BUILD_LOGS,
             list_custom_tool_build_logs._get_kwargs(
                 name=name,
-                version=version_id,
+                if_match=UNSET if etag is None else etag,
+                version=version,
                 cursor=cursor,
             ),
             timeout,
         )
 
     def publish_custom_tool_version(
-        self, name: str, version_id: str, etag: str, *, timeout: float | None = None
+        self, name: str, version: str, etag: str, *, timeout: float | None = None
     ) -> PublicCustomTool:
         return self._sync(
             _PUBLISH_CUSTOM_TOOL_VERSION,
-            publish_custom_tool_version._get_kwargs(
+            publish_custom_tool._get_kwargs(
                 name=name,
-                version=version_id,
+                version=version,
                 if_match=etag,
             ),
             timeout,
         )
 
     async def get_custom_tool_version_async(
-        self, name: str, version_id: str, *, timeout: float | None = None
+        self, name: str, version: str, *, etag: str | None = None, timeout: float | None = None
     ) -> PublicVersion:
-        return await self._async(
-            _GET_CUSTOM_TOOL_VERSION,
-            get_custom_tool_version._get_kwargs(
+        detail = await self._async(
+            _GET_CUSTOM_TOOL,
+            get_custom_tool._get_kwargs(
                 name=name,
-                version=version_id,
+                version=version,
+                if_match=UNSET if etag is None else etag,
             ),
             timeout,
         )
+        return _selected_version(detail)
 
     async def list_custom_tool_build_logs_async(
         self,
         name: str,
-        version_id: str,
+        version: str,
         cursor: str | None = None,
         *,
+        etag: str | None = None,
         timeout: float | None = None,
     ) -> PublicBuildLogPage:
         return await self._async(
             _LIST_CUSTOM_TOOL_BUILD_LOGS,
             list_custom_tool_build_logs._get_kwargs(
                 name=name,
-                version=version_id,
+                if_match=UNSET if etag is None else etag,
+                version=version,
                 cursor=cursor,
             ),
             timeout,
@@ -367,3 +379,10 @@ def _http_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
         values["headers"] = forwarded_headers
     values["path"] = values.pop("url")
     return cast(dict[str, Any], values)
+
+
+def _selected_version(detail: dict[str, Any]) -> PublicVersion:
+    version = detail.get("version")
+    if not isinstance(version, dict):
+        raise TamarindError("Custom Tools response did not include the requested version")
+    return version

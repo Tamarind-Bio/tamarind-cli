@@ -24,12 +24,15 @@ def test_vendored_contract_is_the_dedicated_backend_artifact() -> None:
     conditional_operations = {
         ("/custom-tools/{name}", "delete"),
         ("/custom-tools/{name}", "patch"),
-        ("/custom-tools/{name}/versions", "post"),
-        ("/custom-tools/{name}/versions/{version}:publish", "post"),
+        ("/custom-tools/{name}/build", "post"),
+        ("/custom-tools/{name}/publish", "post"),
     }
     optional_operations = {
+        ("/custom-tools/{name}", "get"),
+        ("/custom-tools/{name}/versions", "get"),
+        ("/custom-tools/{name}/build-logs", "get"),
         ("/custom-tools/{name}/uploads", "post"),
-        ("/custom-tools/{name}/versions/{version}:cancel", "post"),
+        ("/custom-tools/{name}/cancel-build", "post"),
     }
     for path, item in document["paths"].items():
         for method, operation in item.items():
@@ -43,7 +46,7 @@ def test_vendored_contract_is_the_dedicated_backend_artifact() -> None:
             expected = [("If-Match", False)] if (path, method) in conditional_operations else []
             if (path, method) in optional_operations:
                 expected = [("If-Match", False)]
-            if (path, method) == ("/custom-tools/{name}/versions", "post"):
+            if (path, method) == ("/custom-tools/{name}/build", "post"):
                 expected = [("Idempotency-Key", False), *expected]
             assert [(header["name"], header["required"]) for header in headers] == expected
 
@@ -53,11 +56,11 @@ def test_vendored_contract_is_the_dedicated_backend_artifact() -> None:
 
 
 def test_generated_client_contains_sync_async_endpoints_and_attrs_models() -> None:
-    from tamarind.custom_tools._generated.api.custom_tools import get_custom_tool_version
+    from tamarind.custom_tools._generated.api.custom_tools import get_custom_tool
     from tamarind.custom_tools._generated.models.public_version import PublicVersion
 
-    assert callable(get_custom_tool_version.sync)
-    assert callable(get_custom_tool_version.asyncio)
+    assert callable(get_custom_tool.sync)
+    assert callable(get_custom_tool.asyncio)
     assert callable(PublicVersion.from_dict)
     assert callable(PublicVersion.to_dict)
 
@@ -222,6 +225,17 @@ def test_sync_provenance_reads_the_declared_git_object(tmp_path: Path) -> None:
     ).stdout.strip()
 
     _verify_committed_source(tmp_path, commit, EXPECTED_PATH, b"committed contract")
+    from check_custom_tools_provenance import verify_upstream
+
+    verify_upstream(tmp_path, EXPECTED_PATH, b"committed contract")
+    artifact.write_bytes(b"new upstream contract")
+    subprocess.run(["git", "add", EXPECTED_PATH], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "changed upstream"], cwd=tmp_path, check=True)
+    # Checking only the old pin still succeeds; checking producer HEAD catches drift.
+    _verify_committed_source(tmp_path, commit, EXPECTED_PATH, b"committed contract")
+    with pytest.raises(SystemExit, match="declared commit"):
+        verify_upstream(tmp_path, EXPECTED_PATH, b"committed contract")
+    verify_upstream(tmp_path, EXPECTED_PATH, b"new upstream contract")
     artifact.write_bytes(b"working tree contract")
     with pytest.raises(SystemExit, match="declared commit"):
         _verify_committed_source(tmp_path, commit, EXPECTED_PATH, b"working tree contract")

@@ -80,10 +80,9 @@ BuildRequest, queue, lease, claim, or repair state. An ambiguous build response
 is retried with the same caller-selected `Idempotency-Key`, or handled by listing Versions when
 the caller did not supply one.
 
-The resource layer treats the returned opaque `Version.id` as the sole machine
-selector for exact reads, logs, cancellation, and publication. The numbered
-`Version.name` remains presentation metadata and is never reconstructed into an
-endpoint path. Tool and Version ETags remain the mutation validators.
+The resource layer uses the returned numbered `Version.version`, such as `v3`,
+to select exact reads, logs, cancellation, and publication. Opaque, server-issued
+Tool and Version ETags remain the identity and mutation validators.
 
 The generated contract and public SDK signatures use standard `If-Match`. At the
 final HTTP adapter boundary, the CLI forwards that value as
