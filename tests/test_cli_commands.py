@@ -10,7 +10,7 @@ import respx
 from typer.testing import CliRunner
 
 from tamarind.cli.main import app
-from tamarind.cli.commands.files import _UPLOAD_CHUNK_SIZE, _iter_file_chunks
+from tamarind.uploads import _UPLOAD_CHUNK_SIZE, _iter_file_chunks
 from tamarind.errors import NotFoundError, TamarindError
 
 runner = CliRunner()
