@@ -21,10 +21,20 @@ from tamarind.errors import (
     StaleCustomToolError,
     ValidationError,
 )
+from tamarind import attribution
 from tamarind.http import HTTPClient
 
 BASE = "https://api.test/"
 CAT = "https://catalog.test/"
+
+
+@pytest.fixture(autouse=True)
+def _sdk_channel():
+    # These exercise the library/SDK path, so jobSource should be "sdk". Reset the module-global
+    # channel around each test so a CLI test (which flips it to "cli") can't leak in.
+    attribution.set_channel(attribution.CHANNEL_SDK)
+    yield
+    attribution.set_channel(attribution.CHANNEL_SDK)
 
 
 def client(base=BASE):
@@ -38,12 +48,12 @@ def test_submit_job_body():
     )
     rest.submit_job(client(), job_name="run1", job_type="boltz", settings={"sequence": "ABC"})
     body = json.loads(route.calls.last.request.content)
-    # jobSource="CLI" is stamped on every submission for usage tracking.
+    # jobSource is the channel ("sdk" for library use here, "cli" via the CLI entrypoint).
     assert body == {
         "jobName": "run1",
         "type": "boltz",
         "settings": {"sequence": "ABC"},
-        "jobSource": "CLI",
+        "jobSource": "sdk",
     }
     assert route.calls.last.request.headers["x-api-key"] == "test-key"
 
@@ -61,8 +71,19 @@ def test_submit_batch_body():
         job_names=["b1-1"],
     )
     body = json.loads(route.calls.last.request.content)
-    assert body["jobSource"] == "CLI"
+    assert body["jobSource"] == "sdk"
     assert body["batchName"] == "b1" and body["jobNames"] == ["b1-1"]
+
+
+@respx.mock
+def test_submit_job_uses_cli_channel_when_set():
+    # The CLI entry point flips the channel; the submission's jobSource follows it.
+    attribution.set_channel(attribution.CHANNEL_CLI)
+    route = respx.post(f"{BASE}submit-job").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    rest.submit_job(client(), job_name="r", job_type="boltz", settings={})
+    assert json.loads(route.calls.last.request.content)["jobSource"] == "cli"
 
 
 @respx.mock

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import attribution
 from .errors import APIError
 from .http import HTTPClient
 
@@ -17,10 +18,10 @@ from .http import HTTPClient
 # JSON boolean.
 _TRUE = "true"
 
-# Stamped onto every job the CLI creates so the backend can attribute usage by
-# origin (the MCP server sends "MCP"). Validation calls are NOT tagged — they
-# don't create a job.
-_JOB_SOURCE = "CLI"
+# Stamped onto every job this package creates so the backend can attribute usage by origin.
+# `attribution.channel()` is "cli" when run as the `tamarind` command and "sdk" when imported
+# as a library, so the two are distinguishable in reporting (the MCP server sends "mcp").
+# Validation calls are NOT tagged — they don't create a job.
 
 
 def submit_job(
@@ -33,7 +34,7 @@ def submit_job(
             "jobName": job_name,
             "type": job_type,
             "settings": settings,
-            "jobSource": _JOB_SOURCE,
+            "jobSource": attribution.channel(),
         },
     )
 
@@ -96,7 +97,7 @@ def submit_batch(
         "batchName": batch_name,
         "type": job_type,
         "settings": settings,
-        "jobSource": _JOB_SOURCE,
+        "jobSource": attribution.channel(),
     }
     if job_names is not None:
         body["jobNames"] = job_names

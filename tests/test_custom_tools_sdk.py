@@ -8,7 +8,7 @@ import httpx
 import pytest
 import respx
 
-from tamarind import Tamarind
+from tamarind import Tamarind, attribution
 from tamarind.custom_tools import resources
 from tamarind.custom_tools.packaging import build_source_tree_archive, inspect_source_tree
 from tamarind.errors import (
@@ -23,6 +23,14 @@ from tamarind.errors import (
 BASE = "https://api.test/"
 UPLOAD = "https://uploads.test/source.zip"
 VERSION = "v1"
+
+
+@pytest.fixture(autouse=True)
+def _sdk_channel():
+    # SDK path → jobSource "sdk". Reset the module-global channel so a CLI test can't leak in.
+    attribution.set_channel(attribution.CHANNEL_SDK)
+    yield
+    attribution.set_channel(attribution.CHANNEL_SDK)
 
 
 @pytest.mark.parametrize("value", [10**400, -(10**400)])
@@ -1337,7 +1345,7 @@ def test_test_command_pins_completed_version_and_marks_history(job_type):
         "toolLifetimeEtag": '"lifetime-etag"',
         "batch": "test-example",
         "settings": settings,
-        "jobSource": "CLI",
+        "jobSource": "sdk",
     }
     assert submit.call_count == 1
     assert submit.calls[0].request.headers["x-api-key"] == "key"
