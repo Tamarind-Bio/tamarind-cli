@@ -8,6 +8,7 @@ from tamarind.custom_tools.resources import CustomTools
 from tamarind.http import DEFAULT_TIMEOUT, HTTPClient
 from tamarind.pipelines.resources import Pipelines
 from tamarind.pipelines.transport import GeneratedPipelinesTransport
+from tamarind.resources import Files, Jobs, Tools
 
 
 class Tamarind:
@@ -28,6 +29,10 @@ class Tamarind:
             upload_timeout=timeout,
         )
         self.pipelines = Pipelines(GeneratedPipelinesTransport(self._http))
+        # Job / catalog / file surfaces, mirroring the `tamarind` CLI command groups.
+        self.jobs = Jobs(self._http)
+        self.tools = Tools(self._http)
+        self.files = Files(self._http)
 
     def close(self) -> None:
         self._http.close()
