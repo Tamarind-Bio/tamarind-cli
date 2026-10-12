@@ -31,6 +31,15 @@ def set_channel(channel: str) -> None:
     _channel = channel
 
 
+def channel() -> str:
+    """The current client channel: ``cli`` when run as the ``tamarind`` command, else ``sdk``.
+
+    This is also the ``jobSource`` stamped on submissions (see :mod:`tamarind.rest`), so usage
+    reporting can tell CLI invocations apart from library/SDK use.
+    """
+    return _channel
+
+
 def detect_agent(env: Mapping[str, str] | None = None) -> str | None:
     """The agent whose shell is running this process, or None.
 

@@ -10,7 +10,7 @@ import respx
 from typer.testing import CliRunner
 
 from tamarind.cli.main import app
-from tamarind.cli.commands.files import _UPLOAD_CHUNK_SIZE, _iter_file_chunks
+from tamarind.uploads import _UPLOAD_CHUNK_SIZE, _iter_file_chunks
 from tamarind.errors import NotFoundError, TamarindError
 
 runner = CliRunner()
@@ -286,7 +286,7 @@ def test_upload_maps_presigned_put_network_failure_without_leaking_url(tmp_path)
 
 @respx.mock
 def test_upload_maps_invalid_presigned_url_without_traceback_or_leak(tmp_path, monkeypatch):
-    from tamarind.cli.commands import files as files_commands
+    from tamarind import uploads
 
     f = tmp_path / "target.pdb"
     f.write_bytes(b"ATOM")
@@ -297,7 +297,7 @@ def test_upload_maps_invalid_presigned_url_without_traceback_or_leak(tmp_path, m
     def invalid_put(*args, **kwargs):
         raise httpx.InvalidURL("not-a-valid-secret-url")
 
-    monkeypatch.setattr(files_commands.httpx, "put", invalid_put)
+    monkeypatch.setattr(uploads.httpx, "put", invalid_put)
 
     res = runner.invoke(app, ["files", "upload", str(f)], env=ENV)
 
@@ -309,7 +309,7 @@ def test_upload_maps_invalid_presigned_url_without_traceback_or_leak(tmp_path, m
 
 @respx.mock
 def test_upload_maps_stream_protocol_failure_without_leaking_url(tmp_path, monkeypatch):
-    from tamarind.cli.commands import files as files_commands
+    from tamarind import uploads
 
     f = tmp_path / "target.pdb"
     f.write_bytes(b"ATOM")
@@ -321,7 +321,7 @@ def test_upload_maps_stream_protocol_failure_without_leaking_url(tmp_path, monke
     def broken_put(*args, **kwargs):
         raise httpx.StreamError("stream consumed")
 
-    monkeypatch.setattr(files_commands.httpx, "put", broken_put)
+    monkeypatch.setattr(uploads.httpx, "put", broken_put)
     result = runner.invoke(app, ["files", "upload", str(f)], env=ENV)
 
     assert result.exit_code != 0
