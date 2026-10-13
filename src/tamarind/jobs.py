@@ -82,8 +82,8 @@ def fetch_job(
 ) -> dict[str, Any]:
     """Fetch a single job by name. Raises NotFoundError if it doesn't exist.
 
-    ``organization`` searches every org member visible to the caller (newest match wins);
-    ``job_email`` reads one named member's job.
+    ``organization`` searches every org member visible to the caller and refuses a name that
+    several members share; ``job_email`` reads one named member's job.
     """
     if job_email is not None and not job_email.strip():
         raise ValidationError("Job owner email may not be blank.")
@@ -96,10 +96,28 @@ def fetch_job(
             # The org-wide name search skips batch subjobs and pipeline steps.
             exc.message = f"{exc.message} Batch subjobs and pipeline steps need the owner's email."
         raise
+    if organization and job_email is None:
+        owners = _matching_owners(resp, name)
+        if len(owners) > 1:
+            raise TamarindError(
+                f"Job '{name}' matches jobs from {len(owners)} org members "
+                f"({', '.join(owners)}); pass the owner's email."
+            )
     job = _extract_single(resp, name)
     if job is None:
         raise NotFoundError(f"Job '{name}' not found")
     return job
+
+
+def _matching_owners(resp: Any, name: str) -> list[str]:
+    if not isinstance(resp, dict):
+        return []
+    rows = resp.get("jobs") if "jobs" in resp else [
+        v for k, v in resp.items() if k.isdigit() and isinstance(v, dict)
+    ]
+    return sorted({
+        str(r["User"]) for r in rows or [] if job_name(r) == name and r.get("User")
+    })
 
 
 def resolve_owner(

@@ -76,7 +76,7 @@ class Jobs:
     ) -> Any:
         """Get a presigned result URL (POST /result).
 
-        ``organization`` finds the owner across your org's members first (newest match by name).
+        ``organization`` finds the owner across your org's members first.
         """
         if organization and job_email is None:
             job_email = resolve_owner(self._http, name, organization=True)

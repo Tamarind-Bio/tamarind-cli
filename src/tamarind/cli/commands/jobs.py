@@ -21,8 +21,8 @@ from ..guidance import rewrite_validation_guidance
 from ..inputs import effective_job_name, effective_job_type, resolve_job_input
 
 _ORG_LOOKUP_HELP = (
-    "Find the job across your org's members (newest match by name; "
-    "batch subjobs need --email)."
+    "Find the job across your org's members (a name several members share, "
+    "and batch subjobs, need --email)."
 )
 _EMAIL_LOOKUP_HELP = "The job belongs to this org member."
 

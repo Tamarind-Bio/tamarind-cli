@@ -195,3 +195,24 @@ def test_sdk_status_forwards_org_scope():
 
     assert job["User"] == MEMBER
     assert route.calls.last.request.url.params["organization"] == "true"
+
+
+@respx.mock
+def test_organization_name_shared_by_two_members_is_refused():
+    other = "other@example.com"
+    collision = {
+        "0": {"JobName": "job-1", "JobStatus": "Complete", "User": other},
+        "1": {"JobName": "job-1", "JobStatus": "Complete", "User": MEMBER},
+        "statuses": {"Complete": 2},
+    }
+    respx.get(f"{API}jobs").mock(return_value=httpx.Response(200, json=collision))
+    result = respx.post(f"{API}result").mock(
+        return_value=httpx.Response(200, json="https://storage.test/r.zip?signature=s")
+    )
+
+    for cmd in (["status", "job-1"], ["results", "job-1", "--show-url"]):
+        res = runner.invoke(app, ["--json", *cmd, "--organization"], env=ENV)
+        assert res.exit_code != 0
+        assert "pass the owner's email" in str(res.exception or res.output)
+
+    assert not result.called
