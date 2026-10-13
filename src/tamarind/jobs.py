@@ -73,14 +73,75 @@ def is_success(status: str | None) -> bool:
 
 
 def fetch_job(
-    client: HTTPClient, name: str, *, timeout: float | None = None
+    client: HTTPClient,
+    name: str,
+    *,
+    organization: bool = False,
+    job_email: str | None = None,
+    timeout: float | None = None,
 ) -> dict[str, Any]:
-    """Fetch a single job by name. Raises NotFoundError if it doesn't exist."""
-    resp = rest.get_jobs(client, job_name=name, timeout=timeout)
+    """Fetch a single job by name. Raises NotFoundError if it doesn't exist.
+
+    ``organization`` searches every org member visible to the caller and refuses a name that
+    several members share; ``job_email`` reads one named member's job.
+    """
+    if job_email is not None and not job_email.strip():
+        raise ValidationError("Job owner email may not be blank.")
+    try:
+        resp = rest.get_jobs(
+            client, job_name=name, organization=organization, job_email=job_email, timeout=timeout
+        )
+    except NotFoundError as exc:
+        if organization and job_email is None:
+            # The org-wide name search skips batch subjobs and pipeline steps.
+            exc.message = f"{exc.message} Batch subjobs and pipeline steps need the owner's email."
+        raise
+    if organization and job_email is None:
+        owners = _matching_owners(resp, name)
+        if len(owners) > 1:
+            # A usage problem, not a transport one: typed so `wait` never reports it as a timeout.
+            raise ValidationError(
+                f"Job '{name}' matches jobs from {len(owners)} org members "
+                f"({', '.join(owners)}); pass the owner's email."
+            )
     job = _extract_single(resp, name)
     if job is None:
         raise NotFoundError(f"Job '{name}' not found")
     return job
+
+
+def _matching_owners(resp: Any, name: str) -> list[str]:
+    if not isinstance(resp, dict):
+        return []
+    rows = resp.get("jobs") if "jobs" in resp else [
+        v for k, v in resp.items() if k.isdigit() and isinstance(v, dict)
+    ]
+    return sorted({
+        str(r["User"]) for r in rows or [] if job_name(r) == name and r.get("User")
+    })
+
+
+def resolve_owner(
+    client: HTTPClient,
+    name: str,
+    *,
+    organization: bool = False,
+    job_email: str | None = None,
+    job: dict[str, Any] | None = None,
+) -> str | None:
+    """The stored owner email of another member's job, or None for the caller's own job.
+
+    Read from the job row because ``/result`` matches the owner exactly and has no
+    org-wide mode.
+    """
+    if not organization and job_email is None:
+        return None
+    if job is None:
+        job = fetch_job(client, name, organization=organization, job_email=job_email)
+    owner = job.get("User") or job_email
+    if not owner:
+        raise TamarindError(f"Could not resolve the owner of job '{name}'.")
+    return str(owner)
 
 
 def _extract_single(resp: Any, name: str) -> dict[str, Any] | None:
@@ -129,6 +190,8 @@ def wait_for_job(
     poll_interval: float = 10.0,
     timeout: float | None = None,
     on_poll: Callable[[dict[str, Any]], None] | None = None,
+    organization: bool = False,
+    job_email: str | None = None,
 ) -> dict[str, Any]:
     """Block until ``name`` reaches a terminal status (or ``timeout`` elapses).
 
@@ -147,7 +210,13 @@ def wait_for_job(
                 f"Job '{name}'{status_text} after {timeout:.0f}s"
             )
         try:
-            job = fetch_job(client, name, timeout=remaining)
+            job = fetch_job(
+                client,
+                name,
+                organization=organization,
+                job_email=job_email,
+                timeout=remaining,
+            )
         except TamarindError as exc:
             # Only a generic transport timeout is eligible for deadline
             # translation. Preserve typed API failures (auth, budget, rate
@@ -162,6 +231,9 @@ def wait_for_job(
                     f"Job '{name}' did not return status before the {timeout:.0f}s deadline"
                 ) from exc
             raise
+        if organization and job_email is None and job.get("User"):
+            # Pin the first match so a same-named job submitted mid-wait can't take over.
+            job_email, organization = str(job["User"]), False
         if on_poll is not None:
             on_poll(job)
         last_status = job_status(job)

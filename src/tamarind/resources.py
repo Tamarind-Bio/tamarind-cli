@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 from . import catalog, rest, uploads
 from .http import HTTPClient
-from .jobs import fetch_job, wait_for_job
+from .jobs import fetch_job, resolve_owner, wait_for_job
 
 
 class Jobs:
@@ -50,22 +50,36 @@ class Jobs:
         """List jobs (GET /jobs). Accepts the same filters as :func:`tamarind.rest.get_jobs`."""
         return rest.get_jobs(self._http, **kwargs)
 
-    def status(self, name: str, *, timeout: float | None = None) -> dict[str, Any]:
+    def status(
+        self, name: str, *, organization: bool = False, job_email: str | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
         """Fetch one job by name (raises NotFoundError if absent)."""
-        return fetch_job(self._http, name, timeout=timeout)
+        return fetch_job(
+            self._http, name, organization=organization, job_email=job_email, timeout=timeout
+        )
 
     def wait(
         self, name: str, *, poll_interval: float = 10.0, timeout: float | None = None,
         on_poll: Callable[[dict[str, Any]], None] | None = None,
+        organization: bool = False, job_email: str | None = None,
     ) -> dict[str, Any]:
         """Block until ``name`` reaches a terminal status; returns the final job."""
-        return wait_for_job(self._http, name, poll_interval=poll_interval, timeout=timeout, on_poll=on_poll)
+        return wait_for_job(
+            self._http, name, poll_interval=poll_interval, timeout=timeout, on_poll=on_poll,
+            organization=organization, job_email=job_email,
+        )
 
     def results(
         self, name: str, *, job_email: str | None = None, file_name: str | None = None,
-        pdbs_only: bool | None = None,
+        pdbs_only: bool | None = None, organization: bool = False,
     ) -> Any:
-        """Get a presigned result URL (POST /result)."""
+        """Get a presigned result URL (POST /result).
+
+        ``organization`` finds the owner across your org's members first.
+        """
+        if organization and job_email is None:
+            job_email = resolve_owner(self._http, name, organization=True)
         return rest.get_result(
             self._http, job_name=name, job_email=job_email, file_name=file_name, pdbs_only=pdbs_only,
         )
