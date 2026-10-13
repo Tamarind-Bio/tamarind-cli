@@ -137,7 +137,7 @@ def resolve_owner(
         return None
     if job is None:
         job = fetch_job(client, name, organization=organization, job_email=job_email)
-    owner = job.get("User")
+    owner = job.get("User") or job_email
     if not owner:
         raise TamarindError(f"Could not resolve the owner of job '{name}'.")
     return str(owner)

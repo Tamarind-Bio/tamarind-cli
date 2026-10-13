@@ -216,3 +216,18 @@ def test_organization_name_shared_by_two_members_is_refused():
         assert "pass the owner's email" in str(res.exception or res.output)
 
     assert not result.called
+
+
+@respx.mock
+def test_results_email_falls_back_to_the_given_owner_when_user_is_absent():
+    respx.get(f"{API}jobs").mock(return_value=httpx.Response(200, json=_job(user=None)))
+    result = respx.post(f"{API}result").mock(
+        return_value=httpx.Response(200, json="https://storage.test/r.zip?signature=s")
+    )
+
+    res = runner.invoke(
+        app, ["--json", "results", "job-1", "--email", MEMBER, "--show-url"], env=ENV
+    )
+
+    assert res.exit_code == 0, res.stdout
+    assert json.loads(result.calls.last.request.content)["jobEmail"] == MEMBER
