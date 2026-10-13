@@ -20,7 +20,10 @@ from .. import output
 from ..guidance import rewrite_validation_guidance
 from ..inputs import effective_job_name, effective_job_type, resolve_job_input
 
-_ORG_LOOKUP_HELP = "Find the job across your org's members (newest match by name)."
+_ORG_LOOKUP_HELP = (
+    "Find the job across your org's members (newest match by name; "
+    "batch subjobs need --email)."
+)
 _EMAIL_LOOKUP_HELP = "The job belongs to this org member."
 
 
@@ -777,17 +780,9 @@ def register(app: typer.Typer) -> None:
                         human=f"{job_name}: {jobs_helpers.job_status(final)}",
                     )
                     raise typer.Exit(ExitCode.JOB_FAILED)
-            # /result has no org-wide mode, so an --organization lookup resolves the owner first.
-            owner = email
-            if owner is None and organization:
-                job = final if final is not None else jobs_helpers.fetch_job(
-                    client, job_name, organization=True
-                )
-                owner = job.get("User")
-                if not owner:
-                    raise TamarindError(
-                        f"Could not resolve the owner of job '{job_name}'; pass --email instead."
-                    )
+            owner = jobs_helpers.resolve_owner(
+                client, job_name, organization=organization, job_email=email, job=final
+            )
             url = _result_url(
                 rest.get_result(
                     client,

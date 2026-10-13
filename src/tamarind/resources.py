@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 from . import catalog, rest, uploads
 from .http import HTTPClient
-from .jobs import fetch_job, wait_for_job
+from .jobs import fetch_job, resolve_owner, wait_for_job
 
 
 class Jobs:
@@ -72,9 +72,14 @@ class Jobs:
 
     def results(
         self, name: str, *, job_email: str | None = None, file_name: str | None = None,
-        pdbs_only: bool | None = None,
+        pdbs_only: bool | None = None, organization: bool = False,
     ) -> Any:
-        """Get a presigned result URL (POST /result)."""
+        """Get a presigned result URL (POST /result).
+
+        ``organization`` finds the owner across your org's members first (newest match by name).
+        """
+        if organization and job_email is None:
+            job_email = resolve_owner(self._http, name, organization=True)
         return rest.get_result(
             self._http, job_name=name, job_email=job_email, file_name=file_name, pdbs_only=pdbs_only,
         )

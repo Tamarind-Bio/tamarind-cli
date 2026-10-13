@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 
 from tamarind import Tamarind
 from tamarind.cli.main import app
+from tamarind.errors import NotFoundError
 
 runner = CliRunner()
 
@@ -93,18 +94,80 @@ def test_results_organization_resolves_owner_then_requests_their_result():
 
 
 @respx.mock
-def test_results_email_skips_owner_lookup():
+def test_results_email_sends_the_stored_owner_not_the_typed_one():
     jobs = respx.get(f"{API}jobs").mock(return_value=httpx.Response(200, json=_job()))
     result = respx.post(f"{API}result").mock(
         return_value=httpx.Response(200, json="https://storage.test/r.zip?signature=s")
     )
 
     res = runner.invoke(
-        app, ["--json", "results", "job-1", "--email", MEMBER, "--show-url"], env=ENV
+        app, ["--json", "results", "job-1", "--email", MEMBER.upper(), "--show-url"], env=ENV
     )
 
     assert res.exit_code == 0, res.stdout
+    assert jobs.calls.last.request.url.params["jobEmail"] == MEMBER.upper()
+    assert json.loads(result.calls.last.request.content)["jobEmail"] == MEMBER
+
+
+@respx.mock
+def test_blank_email_is_refused_before_any_request():
+    jobs = respx.get(f"{API}jobs").mock(return_value=httpx.Response(200, json=_job()))
+    result = respx.post(f"{API}result").mock(
+        return_value=httpx.Response(200, json="https://storage.test/r.zip?signature=s")
+    )
+
+    for cmd in (["status", "job-1"], ["results", "job-1", "--show-url"]):
+        res = runner.invoke(app, ["--json", *cmd, "--email", " "], env=ENV)
+        assert res.exit_code != 0
+
     assert not jobs.called
+    assert not result.called
+
+
+@respx.mock
+def test_wait_organization_pins_the_first_match():
+    route = respx.get(f"{API}jobs").mock(
+        side_effect=[
+            httpx.Response(200, json=_job(status="Running")),
+            httpx.Response(200, json=_job(status="Complete")),
+        ]
+    )
+
+    res = runner.invoke(
+        app, ["--json", "wait", "job-1", "--organization", "--poll-interval", "0"], env=ENV
+    )
+
+    assert res.exit_code == 0, res.stdout
+    first, second = (call.request.url.params for call in route.calls)
+    assert first["organization"] == "true" and "jobEmail" not in first
+    assert second["jobEmail"] == MEMBER and "organization" not in second
+
+
+@respx.mock
+def test_organization_not_found_points_at_email():
+    respx.get(f"{API}jobs").mock(
+        return_value=httpx.Response(404, json={"error": "Job job-1 not found"})
+    )
+
+    with Tamarind(api_key="k", api_base=API) as tm:
+        try:
+            tm.jobs.status("job-1", organization=True)
+        except NotFoundError as exc:
+            assert "owner's email" in exc.message
+        else:
+            raise AssertionError("expected NotFoundError")
+
+
+@respx.mock
+def test_sdk_results_organization_resolves_owner():
+    respx.get(f"{API}jobs").mock(return_value=httpx.Response(200, json=_job()))
+    result = respx.post(f"{API}result").mock(
+        return_value=httpx.Response(200, json="https://storage.test/r.zip?signature=s")
+    )
+
+    with Tamarind(api_key="k", api_base=API) as tm:
+        tm.jobs.results("job-1", organization=True)
+
     assert json.loads(result.calls.last.request.content)["jobEmail"] == MEMBER
 
 
