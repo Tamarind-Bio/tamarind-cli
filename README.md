@@ -69,6 +69,11 @@ tamarind submit boltz --input job.yaml --name my-run \
 tamarind jobs
 tamarind status my-run
 tamarind results my-run --download ./out
+
+# A job run by another member of your organization
+tamarind jobs --organization
+tamarind status their-run --organization            # or --email teammate@example.com
+tamarind results their-run --organization --download ./out
 ```
 
 Set individual fields inline instead of a file:

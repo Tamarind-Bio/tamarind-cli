@@ -20,6 +20,9 @@ from .. import output
 from ..guidance import rewrite_validation_guidance
 from ..inputs import effective_job_name, effective_job_type, resolve_job_input
 
+_ORG_LOOKUP_HELP = "Find the job across your org's members (newest match by name)."
+_EMAIL_LOOKUP_HELP = "The job belongs to this org member."
+
 
 def _gen_name(tool: str) -> str:
     return f"{tool}-{uuid.uuid4().hex[:8]}"
@@ -677,11 +680,15 @@ def register(app: typer.Typer) -> None:
     def status(
         ctx: typer.Context,
         job_name: str = typer.Argument(..., help="Job name."),
+        organization: bool = typer.Option(False, "--organization", help=_ORG_LOOKUP_HELP),
+        email: Optional[str] = typer.Option(None, "--email", help=_EMAIL_LOOKUP_HELP),
     ) -> None:
         """Show one job's current status and metadata."""
         state = ctx.obj
         with state.rest_client() as client:
-            job = jobs_helpers.fetch_job(client, job_name)
+            job = jobs_helpers.fetch_job(
+                client, job_name, organization=organization, job_email=email
+            )
         output.emit(
             _sanitize_job_output(job),
             state.output,
@@ -694,6 +701,8 @@ def register(app: typer.Typer) -> None:
         job_name: str = typer.Argument(..., help="Job name."),
         poll_interval: float = typer.Option(10.0, "--poll-interval", help="Seconds between polls."),
         timeout: Optional[float] = typer.Option(None, "--timeout", help="Give up after N seconds."),
+        organization: bool = typer.Option(False, "--organization", help=_ORG_LOOKUP_HELP),
+        email: Optional[str] = typer.Option(None, "--email", help=_EMAIL_LOOKUP_HELP),
     ) -> None:
         """Block until a job reaches a terminal state."""
         state = ctx.obj
@@ -704,6 +713,8 @@ def register(app: typer.Typer) -> None:
                 poll_interval=poll_interval,
                 timeout=timeout,
                 on_poll=lambda j: output.info(f"  status: {jobs_helpers.job_status(j)}", state.output),
+                organization=organization,
+                job_email=email,
             )
         output.emit(
             _sanitize_job_output(final),
@@ -728,6 +739,8 @@ def register(app: typer.Typer) -> None:
         wait: bool = typer.Option(False, "--wait", help="Wait for the job to finish first."),
         poll_interval: float = typer.Option(10.0, "--poll-interval", help="Seconds between polls when --wait."),
         timeout: Optional[float] = typer.Option(None, "--timeout", help="With --wait, give up after N seconds."),
+        organization: bool = typer.Option(False, "--organization", help=_ORG_LOOKUP_HELP),
+        email: Optional[str] = typer.Option(None, "--email", help=_EMAIL_LOOKUP_HELP),
     ) -> None:
         """Download results, or explicitly request a credential-bearing URL."""
         state = ctx.obj
@@ -750,6 +763,8 @@ def register(app: typer.Typer) -> None:
                     on_poll=lambda j: output.info(
                         f"  status: {jobs_helpers.job_status(j)}", state.output
                     ),
+                    organization=organization,
+                    job_email=email,
                 )
                 if _failed_terminal(final):
                     result = {
@@ -762,9 +777,24 @@ def register(app: typer.Typer) -> None:
                         human=f"{job_name}: {jobs_helpers.job_status(final)}",
                     )
                     raise typer.Exit(ExitCode.JOB_FAILED)
+            # /result has no org-wide mode, so an --organization lookup resolves the owner first.
+            owner = email
+            if owner is None and organization:
+                job = final if final is not None else jobs_helpers.fetch_job(
+                    client, job_name, organization=True
+                )
+                owner = job.get("User")
+                if not owner:
+                    raise TamarindError(
+                        f"Could not resolve the owner of job '{job_name}'; pass --email instead."
+                    )
             url = _result_url(
                 rest.get_result(
-                    client, job_name=job_name, file_name=file, pdbs_only=pdbs_only or None
+                    client,
+                    job_name=job_name,
+                    job_email=owner,
+                    file_name=file,
+                    pdbs_only=pdbs_only or None,
                 )
             )
             result = {"jobName": job_name}

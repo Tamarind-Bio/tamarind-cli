@@ -50,16 +50,25 @@ class Jobs:
         """List jobs (GET /jobs). Accepts the same filters as :func:`tamarind.rest.get_jobs`."""
         return rest.get_jobs(self._http, **kwargs)
 
-    def status(self, name: str, *, timeout: float | None = None) -> dict[str, Any]:
+    def status(
+        self, name: str, *, organization: bool = False, job_email: str | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
         """Fetch one job by name (raises NotFoundError if absent)."""
-        return fetch_job(self._http, name, timeout=timeout)
+        return fetch_job(
+            self._http, name, organization=organization, job_email=job_email, timeout=timeout
+        )
 
     def wait(
         self, name: str, *, poll_interval: float = 10.0, timeout: float | None = None,
         on_poll: Callable[[dict[str, Any]], None] | None = None,
+        organization: bool = False, job_email: str | None = None,
     ) -> dict[str, Any]:
         """Block until ``name`` reaches a terminal status; returns the final job."""
-        return wait_for_job(self._http, name, poll_interval=poll_interval, timeout=timeout, on_poll=on_poll)
+        return wait_for_job(
+            self._http, name, poll_interval=poll_interval, timeout=timeout, on_poll=on_poll,
+            organization=organization, job_email=job_email,
+        )
 
     def results(
         self, name: str, *, job_email: str | None = None, file_name: str | None = None,

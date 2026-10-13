@@ -73,10 +73,21 @@ def is_success(status: str | None) -> bool:
 
 
 def fetch_job(
-    client: HTTPClient, name: str, *, timeout: float | None = None
+    client: HTTPClient,
+    name: str,
+    *,
+    organization: bool = False,
+    job_email: str | None = None,
+    timeout: float | None = None,
 ) -> dict[str, Any]:
-    """Fetch a single job by name. Raises NotFoundError if it doesn't exist."""
-    resp = rest.get_jobs(client, job_name=name, timeout=timeout)
+    """Fetch a single job by name. Raises NotFoundError if it doesn't exist.
+
+    ``organization`` searches every org member visible to the caller (newest match wins);
+    ``job_email`` reads one named member's job.
+    """
+    resp = rest.get_jobs(
+        client, job_name=name, organization=organization, job_email=job_email, timeout=timeout
+    )
     job = _extract_single(resp, name)
     if job is None:
         raise NotFoundError(f"Job '{name}' not found")
@@ -129,6 +140,8 @@ def wait_for_job(
     poll_interval: float = 10.0,
     timeout: float | None = None,
     on_poll: Callable[[dict[str, Any]], None] | None = None,
+    organization: bool = False,
+    job_email: str | None = None,
 ) -> dict[str, Any]:
     """Block until ``name`` reaches a terminal status (or ``timeout`` elapses).
 
@@ -147,7 +160,13 @@ def wait_for_job(
                 f"Job '{name}'{status_text} after {timeout:.0f}s"
             )
         try:
-            job = fetch_job(client, name, timeout=remaining)
+            job = fetch_job(
+                client,
+                name,
+                organization=organization,
+                job_email=job_email,
+                timeout=remaining,
+            )
         except TamarindError as exc:
             # Only a generic transport timeout is eligible for deadline
             # translation. Preserve typed API failures (auth, budget, rate
