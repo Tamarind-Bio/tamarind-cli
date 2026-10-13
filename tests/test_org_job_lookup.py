@@ -3,12 +3,14 @@
 import json
 
 import httpx
+import pytest
 import respx
 from typer.testing import CliRunner
 
 from tamarind import Tamarind
 from tamarind.cli.main import app
-from tamarind.errors import NotFoundError
+from tamarind import jobs as jh
+from tamarind.errors import NotFoundError, ValidationError
 
 runner = CliRunner()
 
@@ -212,8 +214,8 @@ def test_organization_name_shared_by_two_members_is_refused():
 
     for cmd in (["status", "job-1"], ["results", "job-1", "--show-url"]):
         res = runner.invoke(app, ["--json", *cmd, "--organization"], env=ENV)
-        assert res.exit_code != 0
-        assert "pass the owner's email" in str(res.exception or res.output)
+        assert isinstance(res.exception, ValidationError)
+        assert "pass the owner's email" in str(res.exception)
 
     assert not result.called
 
@@ -231,3 +233,20 @@ def test_results_email_falls_back_to_the_given_owner_when_user_is_absent():
 
     assert res.exit_code == 0, res.stdout
     assert json.loads(result.calls.last.request.content)["jobEmail"] == MEMBER
+
+
+@respx.mock
+def test_wait_does_not_report_an_owner_collision_as_a_timeout(monkeypatch):
+    collision = {
+        "0": {"JobName": "job-1", "JobStatus": "Running", "User": "other@example.com"},
+        "1": {"JobName": "job-1", "JobStatus": "Running", "User": MEMBER},
+        "statuses": {"Running": 2},
+    }
+    respx.get(f"{API}jobs").mock(return_value=httpx.Response(200, json=collision))
+    # The response lands after the wait deadline has passed.
+    ticks = iter([0.0, 0.1, 2.0])
+    monkeypatch.setattr(jh.time, "monotonic", lambda: next(ticks))
+
+    with Tamarind(api_key="k", api_base=API) as tm:
+        with pytest.raises(ValidationError, match="pass the owner's email"):
+            tm.jobs.wait("job-1", organization=True, timeout=1.0)

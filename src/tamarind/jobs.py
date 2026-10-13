@@ -99,7 +99,8 @@ def fetch_job(
     if organization and job_email is None:
         owners = _matching_owners(resp, name)
         if len(owners) > 1:
-            raise TamarindError(
+            # A usage problem, not a transport one: typed so `wait` never reports it as a timeout.
+            raise ValidationError(
                 f"Job '{name}' matches jobs from {len(owners)} org members "
                 f"({', '.join(owners)}); pass the owner's email."
             )
