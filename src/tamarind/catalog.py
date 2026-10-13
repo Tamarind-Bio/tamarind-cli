@@ -55,10 +55,100 @@ def get_schema(client: HTTPClient, job_type: str) -> dict:
 # -- helpers for rendering / example extraction ---------------------------
 
 
+def _conditional_true(conditionals: list[dict], values: dict[str, Any]) -> bool:
+    """Is a parameter's conditional gate satisfied by ``values``?
+
+    A direct port of `conditionalTrue` in the website's src/shared_utils.js, which is what
+    /submit-job enforces (via `inactiveSpecifiedFieldError`). The list is AND-ed, and a
+    controller missing from ``values`` fails the gate — same as there. Kept in step with
+    that function: a checkType it grows and we don't just means we prune nothing extra,
+    which is the safe direction (the server still rejects it) but is worth syncing.
+    """
+    for cond in conditionals:
+        other = cond.get("otherSettingName")
+        if other not in values:
+            return False
+        actual, expected = values[other], cond.get("otherSettingValue")
+        check = cond.get("checkType")
+        if check == "equals":
+            if actual != expected:
+                return False
+        elif check == "not-equals":
+            if actual == expected:
+                return False
+        elif check == "includes":
+            # An array `otherSettingValue` means "scalar is one of [...]"; otherwise the
+            # controller is a multiselect that must contain the value.
+            if isinstance(expected, list):
+                if actual not in expected:
+                    return False
+            elif isinstance(actual, list) and expected not in actual:
+                return False
+        elif check == "greaterThan":
+            if not _as_float(actual) > _as_float(expected):
+                return False
+        elif check == "lessThan":
+            if not _as_float(actual) < _as_float(expected):
+                return False
+        elif check == "exists":
+            if not actual and actual != 0:
+                return False
+        elif check == "notEmpty":
+            if isinstance(actual, (list, str)):
+                if len(actual) == 0:
+                    return False
+            else:
+                return False
+        # An unrecognized checkType is skipped, as the JS `default:` branch does.
+    return True
+
+
+def _as_float(value: Any) -> float:
+    """JS `parseFloat` semantics: unparseable compares false, never raises."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+
+
 def example_settings(schema: dict[str, Any]) -> dict[str, Any]:
-    """Pull a runnable ``settings`` dict out of a schema's exampleJob, if present."""
+    """Pull a *submittable* ``settings`` dict out of a schema's exampleJob, if present.
+
+    The catalog builds `exampleJob.settings` by collecting every parameter's `example`,
+    including ones gated behind a `conditionals` controller it does not also set. Submitting
+    that verbatim is rejected — boltz's example carries `ligands`, `dna` and `rna` without
+    `addLigands`/`addDNA`/`addRNA`, and /submit-job answers `boltz field "ligands" can only
+    be set when addLigands equals true`. So drop the fields whose gate is not satisfied,
+    leaving an example that actually submits.
+
+    Gates are evaluated against the example merged over the schema's defaults, because the
+    server validates post-autofill settings: a field gated on `useMSA: true` is legitimately
+    active when `useMSA` defaults to true and nobody overrode it. Pruning repeats to a fixed
+    point, since a dropped field can itself be another field's controller (boltz
+    `version` -> `predictAffinity` -> `binderChain`).
+    """
     example = schema.get("exampleJob") or {}
-    return dict(example.get("settings") or {})
+    settings = dict(example.get("settings") or {})
+    if not settings:
+        return settings
+
+    params = [p for p in schema.get("parameters", []) if p.get("name")]
+    gated = {p["name"]: p["conditionals"] for p in params if p.get("conditionals")}
+    if not gated:
+        return settings
+    defaults = {p["name"]: p["default"] for p in params if "default" in p}
+
+    while True:
+        values = {**defaults, **settings}
+        dropped = [
+            name
+            for name in settings
+            if name in gated and not _conditional_true(gated[name], values)
+        ]
+        if not dropped:
+            return settings
+        for name in dropped:
+            del settings[name]
 
 
 def required_param_names(schema: dict[str, Any]) -> list[str]:
