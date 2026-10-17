@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -146,20 +149,97 @@ def folders(
     output.emit(resp, state.output, human="\n".join(str(f) for f in folder_list) or "(none)")
 
 
+class _UploadProgress:
+    """One self-overwriting stderr line for humans at a terminal; silent otherwise."""
+
+    def __init__(self, label: str, enabled: bool) -> None:
+        self.label = label
+        self.enabled = enabled
+        self._started = time.monotonic()
+        self._last = 0.0
+        self._lock = threading.Lock()
+        self._drawn = False
+
+    def __call__(self, sent: int, total: int) -> None:
+        if not self.enabled:
+            return
+        now = time.monotonic()
+        with self._lock:
+            if sent < total and now - self._last < 0.2:
+                return
+            self._last = now
+            elapsed = max(now - self._started, 1e-6)
+            pct = int(sent * 100 / total) if total else 100
+            line = (
+                f"\r{self.label}: {pct:3d}%  {_human_bytes(sent)} / {_human_bytes(total)}"
+                f"  {_human_bytes(int(sent / elapsed))}/s"
+            )
+            sys.stderr.write(line.ljust(72))
+            sys.stderr.flush()
+            self._drawn = True
+
+    def finish(self) -> None:
+        if self._drawn:
+            sys.stderr.write("\n")
+            sys.stderr.flush()
+            self._drawn = False
+
+
+def _human_bytes(n: int) -> str:
+    if n >= 1024**3:
+        return f"{n / 1024**3:.2f} GB"
+    if n >= 1024**2:
+        return f"{n / 1024**2:.1f} MB"
+    return f"{n / 1024:.0f} KB"
+
+
 @app.command()
 def upload(
     ctx: typer.Context,
     path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True, help="Local file to upload."),
     name: Optional[str] = typer.Option(None, "--name", help="Remote filename (default: the local basename)."),
+    concurrency: int = typer.Option(
+        uploads.DEFAULT_CONCURRENCY, "--concurrency", min=1, max=uploads.MAX_CONCURRENCY,
+        help="Parts uploaded in parallel for large files.",
+    ),
+    no_resume: bool = typer.Option(
+        False, "--no-resume", help="Discard any saved partial upload of this file and start over.",
+    ),
 ) -> None:
-    """Upload a local file to your workspace (two-step presigned PUT)."""
+    """Upload a local file to your workspace.
+
+    Files up to 100 MB go up in one request. Larger files (up to 100 GB) are sent in parts,
+    in parallel, with per-part retries. If a large upload is interrupted (Ctrl-C, or the
+    network drops for good), its finished parts are kept: run the same command again to
+    resume. A file that changed since the interrupted run starts over.
+    """
     state = ctx.obj
     remote = name or path.name
-    output.info(f"Uploading {path} → {remote}…", state.output)
-    with state.rest_client() as client:
-        # Shared with the SDK's `client.files.upload` — one presign-then-PUT code path.
-        result = uploads.upload_file(client, path, remote=remote)
-    output.emit(result, state.output, human=f"uploaded {result['filename']}")
+    mode = state.output
+    output.info(f"Uploading {path} → {remote}…", mode)
+    progress = _UploadProgress(remote, enabled=not mode.json and not mode.quiet and sys.stderr.isatty())
+    try:
+        with state.rest_client() as client:
+            # Shared with the SDK's `client.files.upload` — one code path for both.
+            result = uploads.upload_file(
+                client, path, remote=remote, concurrency=concurrency,
+                resume=not no_resume, progress=progress,
+            )
+    except KeyboardInterrupt:
+        progress.finish()
+        if path.stat().st_size > uploads.MULTIPART_THRESHOLD_BYTES:
+            # Exit status stays 130; this tells an agent the upload can be resumed.
+            output.error(
+                "Upload interrupted. Finished parts are saved; rerun the same command to resume.",
+                mode, error_type="Interrupted", exit_code=130, detail={"resumable": True},
+            )
+        raise
+    finally:
+        progress.finish()
+    human = f"uploaded {result['filename']}"
+    if result.get("resumed"):
+        human += " (resumed)"
+    output.emit(result, mode, human=human)
 
 
 @app.command()

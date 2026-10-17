@@ -165,9 +165,19 @@ class Files:
     def upload(
         self, path: str | Path, *, remote: str | None = None,
         content_type: str = "application/octet-stream",
+        concurrency: int = uploads.DEFAULT_CONCURRENCY,
+        resume: bool = True,
+        progress: uploads.ProgressCallback | None = None,
     ) -> dict[str, Any]:
-        """Upload a local file via the presigned two-step PUT. Returns {ok, filename, bytes}."""
-        return uploads.upload_file(self._http, path, remote=remote, content_type=content_type)
+        """Upload a local file. Returns {ok, filename, bytes}.
+
+        Files over 100 MB go up as a resumable multipart upload, ``concurrency`` parts at a
+        time; ``progress(sent, total)`` is called as bytes go out.
+        """
+        return uploads.upload_file(
+            self._http, path, remote=remote, content_type=content_type,
+            concurrency=concurrency, resume=resume, progress=progress,
+        )
 
     def delete(self, *, file_path: str | None = None, folder: str | None = None) -> Any:
         """Delete a file, or every file under a folder (DELETE /delete-file)."""
