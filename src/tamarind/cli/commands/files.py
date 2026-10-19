@@ -193,7 +193,15 @@ def _human_bytes(n: int) -> str:
     return f"{n / 1024:.0f} KB"
 
 
-@app.command()
+@app.command(
+    help=(
+        "Upload a local file to your workspace.\n\n"
+        "Files up to 100 MB go up in one request. Larger files (up to 100 GB) are sent in "
+        "parts, in parallel, with per-part retries. If a large upload is interrupted (Ctrl-C, "
+        "or the network drops for good), its finished parts are kept: run the same command "
+        "again to resume. A file that changed since the interrupted run starts over."
+    )
+)
 def upload(
     ctx: typer.Context,
     path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True, help="Local file to upload."),
@@ -206,13 +214,7 @@ def upload(
         False, "--no-resume", help="Discard any saved partial upload of this file and start over.",
     ),
 ) -> None:
-    """Upload a local file to your workspace.
-
-    Files up to 100 MB go up in one request. Larger files (up to 100 GB) are sent in parts,
-    in parallel, with per-part retries. If a large upload is interrupted (Ctrl-C, or the
-    network drops for good), its finished parts are kept: run the same command again to
-    resume. A file that changed since the interrupted run starts over.
-    """
+    """Upload a local file to your workspace (see the command help for large files)."""
     state = ctx.obj
     remote = name or path.name
     mode = state.output
