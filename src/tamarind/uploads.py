@@ -337,6 +337,9 @@ class _MultipartUpload:
             "size": self.size,
             "mtimeNs": mtime_ns,
             "uploadId": created["uploadId"],
+            # Names this upload on the stored object, so a lost complete is confirmed
+            # against this upload and not an older file of the same size.
+            "uploadToken": created.get("uploadToken") if isinstance(created.get("uploadToken"), str) else None,
             "partSize": part_size,
             "partCount": part_count,
             "parts": {},
@@ -365,7 +368,7 @@ class _MultipartUpload:
             now = self.path.stat()
             if now.st_size != self.size or now.st_mtime_ns != state.data["mtimeNs"]:
                 raise _PartFailed(part_count, "the file changed while it was uploading", retryable=False)
-            self._complete(upload_id, parts)
+            self._complete(upload_id, state.data.get("uploadToken"), parts)
         except (_UploadGone, KeyboardInterrupt):
             raise
         except _PartFailed as exc:
@@ -397,28 +400,37 @@ class _MultipartUpload:
             "resumed": resumed,
         }
 
-    def _complete(self, upload_id: str, parts: dict[int, str]) -> None:
+    def _complete(self, upload_id: str, upload_token: str | None, parts: dict[int, str]) -> None:
         body = [{"partNumber": n, "etag": parts[n]} for n in sorted(parts)]
         try:
-            self._call("complete", uploadId=upload_id, size=self.size, parts=body)
+            completed = self._call("complete", uploadId=upload_id, uploadToken=upload_token, size=self.size, parts=body)
         except TamarindError as exc:
             # The object may have been assembled even though the response was lost.
             lost = _is_transient(exc) or isinstance(exc, NotFoundError)
-            if not lost or not self._confirmed():
+            if not lost or not self._confirmed(upload_token):
                 raise
             return
-        if not self._confirmed():
+        # The server checks the assembled size before answering; trust its answer.
+        if not isinstance(completed, dict) or completed.get("size") != self.size:
             raise TamarindError(
                 f"Upload of '{self.remote}' completed, but the stored size does not match "
                 f"the local file ({self.size} bytes)."
             )
 
-    def _confirmed(self) -> bool:
+    def _confirmed(self, upload_token: str | None) -> bool:
+        """True only if the stored object was written by this upload, at the expected size."""
+        if not upload_token:
+            return False
         try:
-            status = self._call("status", size=self.size)
+            status = self._call("status", size=self.size, uploadToken=upload_token)
         except TamarindError:
             return False
-        return isinstance(status, dict) and status.get("exists") is True and status.get("size") == self.size
+        return (
+            isinstance(status, dict)
+            and status.get("exists") is True
+            and status.get("size") == self.size
+            and status.get("matchesUpload") is True
+        )
 
     # -- parts ---------------------------------------------------------------
     def _upload_parts(self, state: _State, upload_id: str, part_size: int, todo: list[int]) -> None:
@@ -483,6 +495,7 @@ class _MultipartUpload:
     def _upload_part(self, http: httpx.Client, upload_id: str, n: int, part_size: int, todo: list[int]) -> str:
         start, length = _part_range(n, part_size, self.size)
         reason = "unknown error"
+        retryable = True
         for attempt in range(1, self.max_attempts + 1):
             if self._cancel.is_set():
                 raise _Cancelled()
@@ -511,9 +524,16 @@ class _MultipartUpload:
                     raise
                 reason = exc.message
             except httpx.HTTPStatusError as exc:
-                reason = f"HTTP {exc.response.status_code}"
+                code = exc.response.status_code
+                reason = f"HTTP {code}"
+                # Storage rejected the request itself; resending it cannot help. A 403 can be
+                # an expired URL, which the re-signed retry fixes, so it is retried first.
+                if 400 <= code < 500 and code not in (403, 408, 429):
+                    raise _PartFailed(n, f"storage rejected the part ({reason})", retryable=False) from None
+                retryable = code != 403
             except (httpx.RequestError, httpx.StreamError) as exc:
                 reason = type(exc).__name__
+                retryable = True
             except OSError as exc:
                 raise _PartFailed(n, f"could not read '{self.path}': {exc}", retryable=False) from None
             finally:
@@ -521,7 +541,7 @@ class _MultipartUpload:
                     self._add_progress(-sent[0])
             if attempt < self.max_attempts:
                 self._backoff(attempt)
-        raise _PartFailed(n, f"{reason} after {self.max_attempts} attempts", retryable=True)
+        raise _PartFailed(n, f"{reason} after {self.max_attempts} attempts", retryable=retryable)
 
     def _backoff(self, attempt: int) -> None:
         delay = min(30.0, _BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))) * (0.5 + random.random() / 2)

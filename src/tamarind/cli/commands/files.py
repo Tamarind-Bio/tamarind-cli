@@ -235,6 +235,8 @@ def upload(
                 "Upload interrupted. Finished parts are saved; rerun the same command to resume.",
                 mode, error_type="Interrupted", exit_code=130, detail={"resumable": True},
             )
+            # typer.Exit returns 130 from the app; re-raising would become Click's Abort (exit 1).
+            raise typer.Exit(130) from None
         raise
     finally:
         progress.finish()

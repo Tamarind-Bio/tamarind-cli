@@ -36,6 +36,8 @@ class FakeServer:
         self.max_bytes = max_bytes
         self.uploads = {}
         self.objects = {}
+        self.tokens = {}
+        self.status_fails = False
         self.calls = []
         self.put_failures = {}  # part number -> list of status codes to return first
         self.complete_override = None
@@ -59,10 +61,10 @@ class FakeServer:
                 return httpx.Response(413, json={"error": "File exceeds the maximum upload size"})
             self.next_id += 1
             upload_id = f"up{self.next_id}"
-            self.uploads[upload_id] = {"name": name, "parts": {}}
+            self.uploads[upload_id] = {"name": name, "parts": {}, "token": f"tok-{upload_id}"}
             count = -(-body["size"] // self.part_size)
             return httpx.Response(200, json={
-                "uploadId": upload_id, "key": f"u/{name}", "partSize": self.part_size,
+                "uploadId": upload_id, "uploadToken": f"tok-{upload_id}", "key": f"u/{name}", "partSize": self.part_size,
                 "partCount": self.part_count_override or count,
             })
         if action == "sign":
@@ -81,15 +83,21 @@ class FakeServer:
             data = b"".join(parts[p["partNumber"]][0] for p in body["parts"])
             assert [p["etag"] for p in body["parts"]] == [parts[p["partNumber"]][1] for p in body["parts"]]
             self.objects[name] = data
+            self.tokens[name] = upload["token"]
             return httpx.Response(200, json={"key": f"u/{name}", "size": len(data)})
         if action == "abort":
             self.uploads.pop(body["uploadId"], None)
             return httpx.Response(200, json={"aborted": True})
         if action == "status":
+            if self.status_fails:
+                return httpx.Response(503, json={"error": "unavailable"})
             data = self.objects.get(name)
             if data is None:
                 return httpx.Response(200, json={"key": f"u/{name}", "exists": False})
-            return httpx.Response(200, json={"key": f"u/{name}", "exists": True, "size": len(data)})
+            return httpx.Response(200, json={
+                "key": f"u/{name}", "exists": True, "size": len(data),
+                "matchesUpload": body.get("uploadToken") is not None and self.tokens.get(name) == body.get("uploadToken"),
+            })
         return httpx.Response(400, json={"error": "bad action"})
 
     def _put(self, request, upload, part):
@@ -140,8 +148,9 @@ def test_parts_cover_the_file_exactly(tmp_path, size, expected_parts):
     assert server.objects[f.name] == f.read_bytes()
     complete = server.actions("complete")[0]
     assert [p["partNumber"] for p in complete["parts"]] == list(range(1, expected_parts + 1))
-    # The size is confirmed through status after complete, and no state is left behind.
-    assert server.actions()[-1]["action"] == "status"
+    # The size the server reports from complete is trusted; no status call, no state left.
+    assert server.actions()[-1]["action"] == "complete"
+    assert complete["uploadToken"] == "tok-up1"
     assert _state_files(tmp_path / "state") == []
 
 
@@ -331,6 +340,7 @@ def test_lost_complete_response_is_recovered_through_status(tmp_path):
         server.objects[body["filename"]] = b"".join(
             upload["parts"][p["partNumber"]][0] for p in body["parts"]
         )
+        server.tokens[body["filename"]] = upload["token"]
         real_complete.append(body)
         return httpx.Response(504, text="Gateway Timeout")
 
@@ -342,6 +352,73 @@ def test_lost_complete_response_is_recovered_through_status(tmp_path):
     assert result["ok"] is True and real_complete
     assert server.actions("abort") == []
     assert _state_files(tmp_path / "state") == []
+
+
+def test_lost_complete_is_not_confirmed_by_an_older_same_sized_object(tmp_path):
+    server = FakeServer(part_size=10)
+    f = _file(tmp_path, 30)
+    server.objects[f.name] = b"x" * 30
+    server.tokens[f.name] = "tok-from-an-earlier-upload"
+    server.complete_override = lambda body: httpx.Response(502, text="Bad Gateway")
+    state_dir = tmp_path / "state"
+    with respx.mock(assert_all_called=False) as router:
+        server.install(router)
+        with pytest.raises(TamarindError, match="rerun the same command to resume"):
+            _upload(f, state_dir)
+    [status] = server.actions("status")
+    assert status["uploadToken"] == "tok-up1"
+    assert len(_state_files(state_dir)) == 1
+
+
+def test_status_failure_after_a_successful_complete_does_not_fail_the_upload(tmp_path):
+    server = FakeServer(part_size=10)
+    f = _file(tmp_path, 30)
+    server.status_fails = True
+    with respx.mock(assert_all_called=False) as router:
+        server.install(router)
+        result = _upload(f, tmp_path / "state")
+    assert result["ok"] is True
+    assert server.objects[f.name] == f.read_bytes()
+
+
+@pytest.mark.parametrize("code", [400, 413])
+def test_permanent_part_rejection_aborts_without_retrying(tmp_path, code):
+    server = FakeServer(part_size=10)
+    server.put_failures[2] = [code] * 10
+    f = _file(tmp_path, 30)
+    state_dir = tmp_path / "state"
+    with respx.mock(assert_all_called=False) as router:
+        server.install(router)
+        with pytest.raises(TamarindError, match=f"HTTP {code}") as info:
+            _upload(f, state_dir, concurrency=1)
+    assert "resume" not in str(info.value)
+    assert server.put_failures[2] == [code] * 9
+    assert len(server.actions("abort")) == 1
+    assert _state_files(state_dir) == []
+
+
+def test_persistent_403_is_retried_with_fresh_urls_then_aborted(tmp_path):
+    server = FakeServer(part_size=10)
+    server.put_failures[1] = [403] * 10
+    f = _file(tmp_path, 30)
+    state_dir = tmp_path / "state"
+    with respx.mock(assert_all_called=False) as router:
+        server.install(router)
+        with pytest.raises(TamarindError, match="HTTP 403"):
+            _upload(f, state_dir, concurrency=1)
+    assert server.put_failures[1] == [403] * (10 - uploads.MAX_PART_ATTEMPTS)
+    assert len(server.actions("abort")) == 1
+    assert _state_files(state_dir) == []
+
+
+def test_one_403_then_success_is_retried(tmp_path):
+    server = FakeServer(part_size=10)
+    server.put_failures[1] = [403]
+    f = _file(tmp_path, 30)
+    with respx.mock(assert_all_called=False) as router:
+        server.install(router)
+        result = _upload(f, tmp_path / "state", concurrency=1)
+    assert result["ok"] is True
 
 
 def test_lost_complete_without_an_object_keeps_state(tmp_path):
@@ -418,6 +495,31 @@ def test_cli_upload_uses_multipart_and_reports_json(tmp_path):
     assert out["multipart"] is True and out["parts"] == 5 and out["filename"] == "run1/reads.bam"
     assert server.objects["run1/reads.bam"] == f.read_bytes()
     assert not (tmp_path / "cfg" / "uploads").exists() or _state_files(tmp_path / "cfg" / "uploads") == []
+
+
+def test_cli_interrupt_exits_130_with_one_error_document(tmp_path, monkeypatch, capsys):
+    f = _file(tmp_path, 45)
+    env = {
+        "TAMARIND_API_KEY": "k",
+        "TAMARIND_API_BASE": API,
+        "TAMARIND_CATALOG_BASE": "https://cat.test/",
+        "TAMARIND_CONFIG_DIR": str(tmp_path / "cfg"),
+    }
+
+    def interrupted(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(uploads, "upload_file", interrupted)
+    monkeypatch.setattr("sys.argv", ["tamarind", "--json", "files", "upload", str(f)])
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    from tamarind.cli.main import run
+
+    with pytest.raises(SystemExit) as info:
+        run()
+    assert info.value.code == 130
+    err = capsys.readouterr().err
+    assert err.count('"error"') == 1 and '"Interrupted"' in err
 
 
 def test_file_changed_mid_upload_aborts(tmp_path):

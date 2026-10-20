@@ -167,10 +167,11 @@ def upload_file_url(
 def multipart_upload(client: HTTPClient, *, action: str, filename: str, **body: Any) -> Any:
     """POST /uploads/multipart — one step of a multipart upload of ``filename``.
 
-    ``action`` is ``create`` (returns {uploadId, key, partSize, partCount}), ``sign``
-    (``partNumbers`` -> {parts: [{partNumber, url}]}), ``complete`` (``parts`` as
-    [{partNumber, etag}]), ``abort``, or ``status`` (-> {exists, size?}). The destination is
-    the caller's workspace, derived server-side from the API key.
+    ``action`` is ``create`` (returns {uploadId, uploadToken, key, partSize, partCount}),
+    ``sign`` (``partNumbers`` -> {parts: [{partNumber, url}]}), ``complete`` (``parts`` as
+    [{partNumber, etag}] -> {key, size}), ``abort``, or ``status`` (``uploadToken`` ->
+    {exists, size?, matchesUpload}). The destination is the caller's workspace, derived
+    server-side from the API key.
     """
     return client.post_json(
         "uploads/multipart", json={"action": action, "filename": filename, **body}
