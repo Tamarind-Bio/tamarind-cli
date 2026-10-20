@@ -411,6 +411,29 @@ def test_persistent_403_is_retried_with_fresh_urls_then_aborted(tmp_path):
     assert _state_files(state_dir) == []
 
 
+def test_403_then_signing_outage_keeps_the_upload_resumable(tmp_path):
+    server = FakeServer(part_size=10)
+    server.put_failures[1] = [403]
+    real_api = server._api
+
+    def api(request):
+        body = json.loads(request.content)
+        if body["action"] == "sign" and body["partNumbers"] == [1]:
+            server.calls.append(body)
+            return httpx.Response(503, json={"error": "unavailable"})
+        return real_api(request)
+
+    server._api = api
+    f = _file(tmp_path, 30)
+    state_dir = tmp_path / "state"
+    with respx.mock(assert_all_called=False) as router:
+        server.install(router)
+        with pytest.raises(TamarindError, match="rerun the same command to resume"):
+            _upload(f, state_dir, concurrency=1)
+    assert server.actions("abort") == []
+    assert len(_state_files(state_dir)) == 1
+
+
 def test_one_403_then_success_is_retried(tmp_path):
     server = FakeServer(part_size=10)
     server.put_failures[1] = [403]

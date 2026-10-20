@@ -523,6 +523,7 @@ class _MultipartUpload:
                 if not _is_transient(exc):
                     raise
                 reason = exc.message
+                retryable = True
             except httpx.HTTPStatusError as exc:
                 code = exc.response.status_code
                 reason = f"HTTP {code}"
