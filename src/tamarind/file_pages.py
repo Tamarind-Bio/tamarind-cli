@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from .errors import TamarindError
 
 
 def collect_file_pages(client, *, folder=None, include_folders=False, include_metadata=False,
-                       max_pages=1000, max_bytes=32 * 1024 * 1024) -> list[Any]:
+                       max_pages=1000, max_bytes=32 * 1024 * 1024,
+                       timeout=120, clock=time.monotonic) -> list[Any]:
     """Return a complete catalog listing, or raise; never return a partial list.
 
     Older servers ignore version=2 and return the legacy array. Accept that only
@@ -21,11 +23,15 @@ def collect_file_pages(client, *, folder=None, include_folders=False, include_me
         params["includeFolders"] = "true"
     if include_metadata:
         params["includeMetadata"] = "true"
+    deadline = clock() + timeout
     files: list[Any] = []
     seen: set[str] = set()
     size = 0
     for page_number in range(max_pages):
-        page = client.get_json("files", params=params)
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise TamarindError("File listing deadline exceeded; use a narrower folder.")
+        page = client.get_json("files", params=params, timeout=min(15, remaining))
         size += len(json.dumps(page).encode())
         if size > max_bytes:
             raise TamarindError("File listing exceeded the response budget; use a narrower folder.")
@@ -36,6 +42,8 @@ def collect_file_pages(client, *, folder=None, include_folders=False, include_me
         cursor = page.get("nextCursor")
         if "nextCursor" not in page or page.get("hasMore") is not bool(cursor):
             raise TamarindError("Inconsistent paginated file response.")
+        if not all(isinstance(item, (str, dict)) for item in page["files"]):
+            raise TamarindError("Invalid file entries in listing.")
         files.extend(page["files"])
         if cursor is None:
             return files

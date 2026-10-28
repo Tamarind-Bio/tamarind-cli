@@ -279,5 +279,6 @@ complete array remain supported. New catalog listings are newest-first at the
 root and key-ordered within a folder; they may briefly lag uploads and omit raw
 intermediate paths/empty folder markers. `Files.list` / `rest.get_files` retain
 the legacy API contract for integrations requiring that behavior. Complete
-collection fails explicitly after 1,000 pages or 32 MiB rather than returning
+collection fails explicitly after 1,000 pages, 32 MiB or a 120-second collection
+deadline (each request has at most a 15-second timeout) rather than returning
 truncated counts. Use a narrower `--folder` for very large listings.
