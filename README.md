@@ -270,3 +270,15 @@ Questions or need help? Contact us at [info@tamarind.bio](mailto:info@tamarind.b
 
 Licensed under the
 [Apache License 2.0](https://github.com/Tamarind-Bio/tamarind-cli/blob/main/LICENSE).
+
+### File listing pagination
+
+`files list` and `files stats` consume `/api/files?version=2` cursor pages before
+applying the CLI's existing local filters and offsets. Old servers returning a
+complete array remain supported. New catalog listings are newest-first at the
+root and key-ordered within a folder; they may briefly lag uploads and omit raw
+intermediate paths/empty folder markers. `Files.list` / `rest.get_files` retain
+the legacy API contract for integrations requiring that behavior. Complete
+collection fails explicitly after 1,000 pages, 32 MiB or a 120-second collection
+deadline (each request has at most a 15-second timeout) rather than returning
+truncated counts. Use a narrower `--folder` for very large listings.

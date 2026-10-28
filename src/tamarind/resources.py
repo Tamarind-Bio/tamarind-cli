@@ -152,7 +152,8 @@ class Files:
 
     def stats(self) -> dict[str, Any]:
         """Summarize workspace files by type (counts), like the MCP getFileStats tool."""
-        resp = rest.get_files(self._http)
+        from .file_pages import collect_file_pages
+        resp = collect_file_pages(self._http)
         files = resp.get("files") if isinstance(resp, dict) else resp
         if not isinstance(files, list):
             files = []

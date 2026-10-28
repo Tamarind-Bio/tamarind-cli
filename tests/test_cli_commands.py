@@ -79,11 +79,11 @@ def test_folders_survives_non_list_response():
 
 
 @respx.mock
-def test_files_list_survives_non_list_response():
+def test_files_list_rejects_non_list_response():
     respx.get(f"{API}files").mock(return_value=httpx.Response(200, text="Redirecting..."))
     res = runner.invoke(app, ["files", "list"], env=ENV)
-    assert res.exit_code == 0
-    assert res.exception is None
+    assert res.exit_code != 0
+    assert isinstance(res.exception, TamarindError)
 
 
 @respx.mock
