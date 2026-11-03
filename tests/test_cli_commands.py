@@ -447,7 +447,7 @@ def test_jobs_all_respects_page_cap(monkeypatch):
 @respx.mock
 def test_files_stats_counts_by_type():
     files = ["a.pdb", "b.pdb", "c.cif", "readme", "notes.txt"]
-    respx.get(f"{API}files").mock(return_value=httpx.Response(200, json=files))
+    respx.get(f"{API}files").mock(return_value=httpx.Response(200, json={"files": files, "hasMore": False, "nextCursor": None}))
     out = json.loads(runner.invoke(app, ["--json", "files", "stats"], env=ENV).stdout)
     assert out["totalFiles"] == 5
     assert out["fileTypes"] == {"pdb": 2, "cif": 1, "no_extension": 1, "txt": 1}
