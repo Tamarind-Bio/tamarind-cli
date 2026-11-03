@@ -14,14 +14,14 @@ def test_collects_empty_and_nonempty_pages():
         {"files": ["b.pdb"], "hasMore": False, "nextCursor": None},
     ]
     assert collect_file_pages(client, folder="job") == ["a.pdb", "b.pdb"]
-    assert client.get_json.call_args.kwargs["params"] == {"version": "2", "limit": 100, "folder": "job", "cursor": "b"}
+    assert client.get_json.call_args.kwargs["params"] == {"limit": 100, "folder": "job", "cursor": "b"}
 
 
-def test_old_server_array_is_accepted_once():
+def test_array_response_is_rejected():
     client = Mock()
     client.get_json.return_value = ["legacy.pdb"]
-    assert collect_file_pages(client) == ["legacy.pdb"]
-    assert client.get_json.call_count == 1
+    with pytest.raises(TamarindError):
+        collect_file_pages(client)
 
 
 @pytest.mark.parametrize("pages", [

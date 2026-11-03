@@ -1,4 +1,4 @@
-"""Consume the versioned directory API without mistaking a page for a full list."""
+"""Consume the directory API without mistaking a page for a full list."""
 from __future__ import annotations
 
 import json
@@ -13,10 +13,9 @@ def collect_file_pages(client, *, folder=None, include_folders=False, include_me
                        timeout=120, clock=time.monotonic) -> list[Any]:
     """Return a complete catalog listing, or raise; never return a partial list.
 
-    Older servers ignore version=2 and return the legacy array. Accept that only
-    on the first request. Cursor pages may be empty while still having a successor.
+    Cursor pages may be empty while still having a successor.
     """
-    params = {"version": "2", "limit": 100}
+    params = {"limit": 100}
     if folder:
         params["folder"] = folder
     if include_folders:
@@ -27,7 +26,7 @@ def collect_file_pages(client, *, folder=None, include_folders=False, include_me
     files: list[Any] = []
     seen: set[str] = set()
     size = 0
-    for page_number in range(max_pages):
+    for _ in range(max_pages):
         remaining = deadline - clock()
         if remaining <= 0:
             raise TamarindError("File listing deadline exceeded; use a narrower folder.")
@@ -35,8 +34,6 @@ def collect_file_pages(client, *, folder=None, include_folders=False, include_me
         size += len(json.dumps(page).encode())
         if size > max_bytes:
             raise TamarindError("File listing exceeded the response budget; use a narrower folder.")
-        if isinstance(page, list) and page_number == 0:
-            return page
         if not isinstance(page, dict) or not isinstance(page.get("files"), list):
             raise TamarindError("Invalid paginated file response.")
         cursor = page.get("nextCursor")

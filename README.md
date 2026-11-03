@@ -273,12 +273,11 @@ Licensed under the
 
 ### File listing pagination
 
-`files list` and `files stats` consume `/api/files?version=2` cursor pages before
-applying the CLI's existing local filters and offsets. Old servers returning a
-complete array remain supported. New catalog listings are newest-first at the
-root and key-ordered within a folder; they may briefly lag uploads and omit raw
-intermediate paths/empty folder markers. `Files.list` / `rest.get_files` retain
-the legacy API contract for integrations requiring that behavior. Complete
-collection fails explicitly after 1,000 pages, 32 MiB or a 120-second collection
-deadline (each request has at most a 15-second timeout) rather than returning
-truncated counts. Use a narrower `--folder` for very large listings.
+`/api/files` returns `{files, hasMore, nextCursor}`. `Files.list` and
+`rest.get_files` return one page; pass `cursor=page["nextCursor"]` until null.
+`files list`, `files stats`, and SDK statistics collect all pages before local
+filtering/counting, with explicit page/byte/time budgets and no partial success.
+Root ordering is newest-first; folder contents use key order. Indexing may briefly
+lag uploads. The former SDK `offset`/`include_all` arguments and CLI `--all` are
+removed: use cursors, directory scoping and CLI local `--offset` as appropriate.
+This is a coordinated API migration; old array responses are rejected.

@@ -71,15 +71,12 @@ def list_files(
     limit: int = typer.Option(50, "--limit", help="Max files to return."),
     offset: int = typer.Option(0, "--offset", help="Pagination offset."),
     metadata: bool = typer.Option(False, "--metadata", help="Include size/lastModified."),
-    all_dirs: bool = typer.Option(False, "--all", help="Recurse into subdirectories."),
 ) -> None:
     """List files in your workspace."""
     state = ctx.obj
     # Collect bounded catalog pages before applying the established CLI filters.
-    # --all retains the legacy API path; version 2 is a directory listing.
     with state.rest_client() as client:
-        resp = (rest.get_files(client, folder=folder, include_all=True, include_metadata=metadata)
-                if all_dirs else collect_file_pages(client, folder=folder, include_metadata=metadata))
+        resp = collect_file_pages(client, folder=folder, include_metadata=metadata)
     files = resp.get("files") if isinstance(resp, dict) else resp
     if not isinstance(files, list):
         files = []
