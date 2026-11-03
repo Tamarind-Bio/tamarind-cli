@@ -101,3 +101,31 @@ def test_explicit_name_precedence_and_absence():
     assert effective_job_name("cli-name", False) == "cli-name"
     with pytest.raises(ValidationError):
         effective_job_name("", "file-name")
+
+
+def test_low_priority_in_an_envelope_is_a_request_field(tmp_path):
+    path = tmp_path / "job.json"
+    path.write_text(json.dumps({"jobName": "j", "type": "boltz", "lowPriority": True, "settings": {"sequence": "A"}}))
+    job = resolve_job_input(str(path), None)
+    assert job.low_priority is True
+    assert job.settings == {"sequence": "A"}
+
+
+def test_low_priority_among_the_settings_is_moved_out(tmp_path):
+    # Left there the server would ignore it, and the job would bill full price.
+    path = tmp_path / "job.json"
+    path.write_text(json.dumps({"sequence": "A", "lowPriority": True}))
+    job = resolve_job_input(str(path), None)
+    assert job.low_priority is True
+    assert job.settings == {"sequence": "A"}
+
+
+def test_low_priority_defaults_off():
+    assert resolve_job_input(None, ["sequence=A"]).low_priority is False
+
+
+def test_low_priority_that_is_not_a_boolean_is_refused(tmp_path):
+    path = tmp_path / "job.json"
+    path.write_text(json.dumps({"sequence": "A", "lowPriority": "yes"}))
+    with pytest.raises(ValidationError):
+        resolve_job_input(str(path), None)

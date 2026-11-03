@@ -27,6 +27,13 @@ _ORG_LOOKUP_HELP = (
 _EMAIL_LOOKUP_HELP = "The job belongs to this org member."
 
 
+_LOW_PRIORITY_HELP = (
+    "Run at low priority: 20% off, no completion guarantee, and a job not started "
+    "within 7 days stops with no charge. Refused if unavailable for this job."
+)
+_LOW_PRIORITY_NOTE = " at low priority (20% off, no completion guarantee, stops with no charge if not started within 7 days)"
+
+
 def _gen_name(tool: str) -> str:
     return f"{tool}-{uuid.uuid4().hex[:8]}"
 
@@ -415,10 +422,12 @@ def register(app: typer.Typer) -> None:
         poll_interval: float = typer.Option(10.0, "--poll-interval", help="Seconds between polls when --wait."),
         timeout: Optional[float] = typer.Option(None, "--timeout", help="With --wait, give up after N seconds."),
         download: Optional[Path] = typer.Option(None, "--download", help="With --wait, download results to this directory."),
+        low_priority: bool = typer.Option(False, "--low-priority", help=_LOW_PRIORITY_HELP),
     ) -> None:
         """Submit a single job. Validates first unless --skip-validate."""
         state = ctx.obj
         job = resolve_job_input(input, set_)
+        low_priority = low_priority or job.low_priority
         job_type = effective_job_type(tool, job.job_type)
         job_name = effective_job_name(name, job.job_name) or _gen_name(tool)
         if wait:
@@ -447,7 +456,11 @@ def register(app: typer.Typer) -> None:
             output.info(f"Submitting {job_type} job '{job_name}'…", state.output)
             try:
                 submit_resp = rest.submit_job(
-                    client, job_name=job_name, job_type=job_type, settings=job.settings
+                    client,
+                    job_name=job_name,
+                    job_type=job_type,
+                    settings=job.settings,
+                    low_priority=low_priority,
                 )
             except TamarindError as exc:
                 status_code = getattr(exc, "status_code", None)
@@ -469,6 +482,8 @@ def register(app: typer.Typer) -> None:
                 )
 
             result = {"jobName": job_name, "type": job_type, "submit": submit_resp}
+            if low_priority:
+                result["lowPriority"] = True
 
             if wait:
                 try:
@@ -500,7 +515,7 @@ def register(app: typer.Typer) -> None:
                         recoveryCommand=f"tamarind --json status {job_name}",
                     )
 
-        human = f"submitted: {job_name}" + (
+        human = f"submitted: {job_name}" + (_LOW_PRIORITY_NOTE if low_priority else "") + (
             f"  ({jobs_helpers.job_status(result['final'])})" if "final" in result else ""
         )
         output.emit(_sanitize_job_output(result), state.output, human=human)
@@ -511,7 +526,7 @@ def register(app: typer.Typer) -> None:
     def batch(
         ctx: typer.Context,
         tool: str = typer.Argument(..., help="Tool name applied to every job in the batch."),
-        input: str = typer.Option(..., "--input", "-i", help="YAML/JSON list of per-job settings, or a {batchName,type,settings[],jobNames} object."),
+        input: str = typer.Option(..., "--input", "-i", help="YAML/JSON list of per-job settings, or a {batchName,type,settings[],jobNames,lowPriority} object."),
         name: Optional[str] = typer.Option(None, "--name", "-n", help="Batch name (default: auto)."),
         max_runtime: Optional[int] = typer.Option(None, "--max-runtime", help="Max runtime seconds per job."),
         prevalidate: bool = typer.Option(
@@ -519,10 +534,11 @@ def register(app: typer.Typer) -> None:
             "--prevalidate",
             help="Validate every item before submitting.",
         ),
+        low_priority: bool = typer.Option(False, "--low-priority", help=_LOW_PRIORITY_HELP),
     ) -> None:
         """Submit many jobs as one batch (preferred over looping submit)."""
         state = ctx.obj
-        from ..inputs import _load_text, _parse_document  # internal reuse
+        from ..inputs import _load_text, _parse_document, parse_low_priority  # internal reuse
 
         doc = _parse_document(_load_text(input))
         batch_name = effective_job_name(name, None) or _gen_name(tool)
@@ -535,6 +551,7 @@ def register(app: typer.Typer) -> None:
             batch_name = effective_job_name(name, doc.get("batchName")) or batch_name
             job_type = effective_job_type(tool, doc.get("type"))
             job_names = doc.get("jobNames")
+            low_priority = parse_low_priority(doc.get("lowPriority", False)) or low_priority
         else:
             raise TamarindError("Batch --input must be a list of settings or a {settings:[...]} object.")
         if not isinstance(batch_name, str) or not batch_name.strip():
@@ -583,6 +600,7 @@ def register(app: typer.Typer) -> None:
                     settings=settings_list,
                     job_names=job_names,
                     max_runtime_seconds=max_runtime,
+                    low_priority=low_priority,
                 )
             except TamarindError as exc:
                 status_code = getattr(exc, "status_code", None)
@@ -603,10 +621,12 @@ def register(app: typer.Typer) -> None:
                     recoveryCommand=f"tamarind --json status {batch_name}",
                 )
         result = {"batchName": batch_name, "type": job_type, "count": len(settings_list), "submit": resp}
+        if low_priority:
+            result["lowPriority"] = True
         output.emit(
             _sanitize_job_output(result),
             state.output,
-            human=f"submitted batch '{batch_name}' ({len(settings_list)} jobs)",
+            human=f"submitted batch '{batch_name}' ({len(settings_list)} jobs)" + (_LOW_PRIORITY_NOTE if low_priority else ""),
         )
 
     @app.command()

@@ -30,6 +30,7 @@ class JobInput:
     settings: dict[str, Any]
     job_type: str | None = None
     job_name: str | None = None
+    low_priority: bool = False
 
 
 def _load_text(source: str) -> str:
@@ -113,6 +114,15 @@ def effective_job_name(cli_name: str | None, file_name: object | None) -> str | 
     return name
 
 
+def parse_low_priority(value: object) -> bool:
+    """Read a ``lowPriority`` from an input file. Anything but a boolean is refused, not guessed."""
+    if value is None:
+        return False
+    if not isinstance(value, bool):
+        raise ValidationError("lowPriority must be true or false.")
+    return value
+
+
 def resolve_job_input(
     input_source: str | None,
     set_pairs: list[str] | None,
@@ -121,6 +131,7 @@ def resolve_job_input(
     settings: dict[str, Any] = {}
     job_type: str | None = None
     job_name: str | None = None
+    low_priority: object = False
 
     if input_source:
         doc = _parse_document(_load_text(input_source))
@@ -134,6 +145,7 @@ def resolve_job_input(
         if _looks_like_envelope(doc):
             job_type = doc.get("type")
             job_name = doc.get("jobName")
+            low_priority = doc.get("lowPriority", False)
             doc = doc["settings"]
         if not isinstance(doc, dict):
             raise ValidationError("Job settings must be a mapping (an object).")
@@ -142,7 +154,17 @@ def resolve_job_input(
     if set_pairs:
         _apply_sets(settings, set_pairs)
 
-    return JobInput(settings=settings, job_type=job_type, job_name=job_name)
+    # A request field, not a tool setting: left in `settings` the server would ignore it, and the
+    # job would bill full price for a caller who asked for the discount.
+    if "lowPriority" in settings:
+        low_priority = settings.pop("lowPriority")
+
+    return JobInput(
+        settings=settings,
+        job_type=job_type,
+        job_name=job_name,
+        low_priority=parse_low_priority(low_priority),
+    )
 
 
 def dump_settings(settings: dict[str, Any]) -> str:
