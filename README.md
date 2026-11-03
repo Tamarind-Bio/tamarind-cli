@@ -282,6 +282,18 @@ lag uploads. The former SDK `offset`/`include_all` arguments and CLI `--all` are
 removed: use cursors, directory scoping and CLI local `--offset` as appropriate.
 This is a coordinated API migration; old array responses are rejected.
 
-Automatic file-page collection reuses the cancellable HTTP transport and spaces
+Automatic file-page collection reuses the configured synchronous HTTP transport and spaces
 continuations by 100 ms to stay below the published ten-request/second limit.
 Rate-limit errors still surface; no automatic resubmission or retries are added.
+
+The collection deadline is checked between requests; an in-flight request uses
+its configured SDK network timeout. No private event loop or worker is created.
+The response-byte budget measures received bytes, not reserialized JSON.
+
+Iteration amendment: review exposed that creating an event loop for a synchronous
+SDK call breaks notebook/async callers and overrides configured transport timeouts.
+Reuse the existing synchronous transport instead. This removes the private loop,
+async collection helper and per-request timeout override; production machinery
+added: none. Preserve complete pagination and failure semantics, with a cooperative
+between-page collection deadline and the client's own in-flight timeout. No new
+hard-cancellation guarantee or worker lifecycle is introduced.
