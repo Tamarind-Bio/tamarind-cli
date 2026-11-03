@@ -111,13 +111,22 @@ def test_low_priority_in_an_envelope_is_a_request_field(tmp_path):
     assert job.settings == {"sequence": "A"}
 
 
-def test_low_priority_among_the_settings_is_moved_out(tmp_path):
-    # Left there the server would ignore it, and the job would bill full price.
+def test_low_priority_among_the_settings_stays_a_setting(tmp_path):
+    # A custom tool may declare one, and the API refuses it on any other tool.
     path = tmp_path / "job.json"
     path.write_text(json.dumps({"sequence": "A", "lowPriority": True}))
+    job = resolve_job_input(str(path), ["other=1"])
+    assert job.low_priority is False
+    assert job.settings == {"sequence": "A", "lowPriority": True, "other": 1}
+
+    path.write_text(json.dumps({"jobName": "j", "settings": {"lowPriority": False}}))
     job = resolve_job_input(str(path), None)
-    assert job.low_priority is True
-    assert job.settings == {"sequence": "A"}
+    assert job.low_priority is False
+    assert job.settings == {"lowPriority": False}
+
+    job = resolve_job_input(None, ["lowPriority=true"])
+    assert job.low_priority is False
+    assert job.settings == {"lowPriority": True}
 
 
 def test_low_priority_defaults_off():
@@ -126,22 +135,15 @@ def test_low_priority_defaults_off():
 
 def test_low_priority_that_is_not_a_boolean_is_refused(tmp_path):
     path = tmp_path / "job.json"
-    path.write_text(json.dumps({"sequence": "A", "lowPriority": "yes"}))
+    path.write_text(json.dumps({"jobName": "j", "lowPriority": "yes", "settings": {"sequence": "A"}}))
     with pytest.raises(ValidationError):
         resolve_job_input(str(path), None)
 
 
-@pytest.mark.parametrize(
-    "doc",
-    [
-        {"sequence": "A", "lowPriority": None},
-        {"jobName": "j", "lowPriority": None, "settings": {"sequence": "A"}},
-    ],
-)
-def test_low_priority_that_is_null_is_refused(tmp_path, doc):
+def test_low_priority_that_is_null_is_refused(tmp_path):
     # An unfilled template must not quietly become a full-price job.
     path = tmp_path / "job.json"
-    path.write_text(json.dumps(doc))
+    path.write_text(json.dumps({"jobName": "j", "lowPriority": None, "settings": {"sequence": "A"}}))
     with pytest.raises(ValidationError):
         resolve_job_input(str(path), None)
 
@@ -152,24 +154,3 @@ def test_low_priority_alone_marks_an_envelope(tmp_path):
     job = resolve_job_input(str(path), None)
     assert job.low_priority is True
     assert job.settings == {"sequence": "A"}
-
-
-def test_low_priority_stays_a_setting_where_the_command_does_not_support_it(tmp_path):
-    path = tmp_path / "job.json"
-    path.write_text(json.dumps({"sequence": "A", "lowPriority": True}))
-    job = resolve_job_input(str(path), ["other=1"], supports_low_priority=False)
-    assert job.low_priority is False
-    assert job.settings == {"sequence": "A", "lowPriority": True, "other": 1}
-
-    job = resolve_job_input(None, ["lowPriority=true"], supports_low_priority=False)
-    assert job.low_priority is False
-    assert job.settings == {"lowPriority": True}
-
-
-def test_low_priority_alone_is_no_envelope_where_the_command_does_not_support_it(tmp_path):
-    path = tmp_path / "job.json"
-    doc = {"lowPriority": True, "settings": {"sequence": "A"}}
-    path.write_text(json.dumps(doc))
-    job = resolve_job_input(str(path), None, supports_low_priority=False)
-    assert job.low_priority is False
-    assert job.settings == doc

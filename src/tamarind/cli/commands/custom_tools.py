@@ -209,7 +209,7 @@ def test_tool(
     Returns after submission. Monitor with `tamarind status JOB` or `tamarind wait JOB`.
     """
     state = ctx.obj
-    job_input = resolve_job_input(input, set_, supports_low_priority=False)
+    job_input = resolve_job_input(input, set_)
     if job_input.low_priority:
         raise ValidationError("Custom tools can't run at low priority. Remove lowPriority from the input file.")
     tool_name = effective_job_type(tool_name, job_input.job_type)

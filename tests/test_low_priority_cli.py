@@ -117,22 +117,6 @@ def test_a_batch_value_that_is_null_is_refused_before_any_request(tmp_path):
     assert not route.called
 
 
-@pytest.mark.parametrize(
-    "doc",
-    [
-        [{"sequence": "MKT", "lowPriority": True}],
-        {"settings": [{"sequence": "MKT"}, {"sequence": "AAA", "lowPriority": True}]},
-    ],
-)
-@respx.mock
-def test_low_priority_on_one_batch_item_is_refused_before_any_request(tmp_path, doc):
-    # Left among the settings the server would ignore it, and the job would bill full price.
-    route = respx.post(f"{API}submit-batch").mock(return_value=httpx.Response(200, text="ok"))
-    result = _batch(tmp_path, doc)
-    assert result.exit_code != 0
-    assert not route.called
-
-
 @respx.mock
 def test_batch_without_the_flag_sends_nothing_new(tmp_path):
     route = respx.post(f"{API}submit-batch").mock(return_value=httpx.Response(200, text="ok"))
