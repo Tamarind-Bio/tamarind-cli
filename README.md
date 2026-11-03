@@ -281,3 +281,7 @@ Root ordering is newest-first; folder contents use key order. Indexing may brief
 lag uploads. The former SDK `offset`/`include_all` arguments and CLI `--all` are
 removed: use cursors, directory scoping and CLI local `--offset` as appropriate.
 This is a coordinated API migration; old array responses are rejected.
+
+Automatic file-page collection reuses the cancellable HTTP transport and spaces
+continuations by 100 ms to stay below the published ten-request/second limit.
+Rate-limit errors still surface; no automatic resubmission or retries are added.

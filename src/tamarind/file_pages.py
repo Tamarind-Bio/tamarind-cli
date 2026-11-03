@@ -1,6 +1,7 @@
 """Consume the directory API without mistaking a page for a full list."""
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from typing import Any
@@ -15,6 +16,13 @@ def collect_file_pages(client, *, folder=None, include_folders=False, include_me
 
     Cursor pages may be empty while still having a successor.
     """
+    return asyncio.run(_collect_file_pages(client, folder=folder, include_folders=include_folders,
+        include_metadata=include_metadata, max_pages=max_pages, max_bytes=max_bytes,
+        timeout=timeout, clock=clock))
+
+
+async def _collect_file_pages(client, *, folder, include_folders, include_metadata,
+                              max_pages, max_bytes, timeout, clock):
     params = {"limit": 100}
     if folder:
         params["folder"] = folder
@@ -30,7 +38,17 @@ def collect_file_pages(client, *, folder=None, include_folders=False, include_me
         remaining = deadline - clock()
         if remaining <= 0:
             raise TamarindError("File listing deadline exceeded; use a narrower folder.")
-        page = client.get_json("files", params=params, timeout=min(15, remaining))
+        try:
+            response = await asyncio.wait_for(
+                client.request_async("GET", "files", params=params, timeout=min(15, remaining)),
+                timeout=min(15, remaining),
+            )
+        except asyncio.TimeoutError as exc:
+            raise TamarindError("File listing deadline exceeded; use a narrower folder.") from exc
+        try:
+            page = response.json()
+        except ValueError as exc:
+            raise TamarindError("Invalid paginated file response.") from exc
         size += len(json.dumps(page).encode())
         if size > max_bytes:
             raise TamarindError("File listing exceeded the response budget; use a narrower folder.")
@@ -48,4 +66,5 @@ def collect_file_pages(client, *, folder=None, include_folders=False, include_me
             raise TamarindError("File listing returned a repeated or invalid cursor.")
         seen.add(cursor)
         params = {**params, "cursor": cursor}
+        await asyncio.sleep(min(0.1, max(0, deadline - clock())))
     raise TamarindError("File listing exceeded the page budget; use a narrower folder.")
