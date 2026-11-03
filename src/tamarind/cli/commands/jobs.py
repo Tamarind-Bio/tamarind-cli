@@ -568,6 +568,13 @@ def register(app: typer.Typer) -> None:
                     f"Batch settings item {index + 1} must be an object, "
                     f"not {type(settings).__name__}."
                 )
+            # A request field for the whole batch: left here the server would ignore it, and the
+            # job would bill full price for a caller who asked for the discount.
+            if "lowPriority" in settings:
+                raise ValidationError(
+                    f"Batch settings item {index + 1} has lowPriority. It applies to the whole "
+                    "batch: use --low-priority, or lowPriority beside settings."
+                )
         if job_names is not None and (
             not isinstance(job_names, list) or len(job_names) != len(settings_list)
         ):
