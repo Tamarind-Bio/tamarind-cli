@@ -609,6 +609,33 @@ def test_validation_error_preserves_echoed_user_tokens(token):
 
 
 @respx.mock
+def test_status_and_job_lists_show_low_priority_state_on_low_priority_jobs_only():
+    reason = "Stopped: no low-priority capacity was available within 7 days. You were not charged."
+    stopped = {"JobName": "low", "JobStatus": "Stopped", "LowPriority": True, "StoppedReasonUserFacing": reason}
+    queued = {"JobName": "waiting", "JobStatus": "In Queue", "LowPriority": True, "LowPriorityDeadline": "2026-11-10T00:00:00Z"}
+    normal = {"JobName": "normal", "JobStatus": "Stopped"}
+    respx.get(f"{API}jobs").mock(
+        side_effect=[
+            httpx.Response(200, json=stopped),
+            httpx.Response(200, json=stopped),
+            httpx.Response(200, json=queued),
+            httpx.Response(200, json=normal),
+            httpx.Response(200, json={"jobs": [stopped, normal]}),
+            httpx.Response(200, json={"jobs": [stopped, normal]}),
+        ]
+    )
+
+    assert json.loads(runner.invoke(app, ["--json", "status", "low"], env=ENV).output)["StoppedReasonUserFacing"] == reason
+    assert runner.invoke(app, ["--no-json", "status", "low"], env=ENV).output.strip() == f"low: Stopped (low priority) {reason}"
+    assert "2026-11-10T00:00:00Z" in runner.invoke(app, ["--no-json", "status", "waiting"], env=ENV).output
+    assert runner.invoke(app, ["--no-json", "status", "normal"], env=ENV).output.strip() == "normal: Stopped"
+    assert json.loads(runner.invoke(app, ["--json", "jobs"], env=ENV).output)["jobs"][0]["LowPriority"] is True
+    table = runner.invoke(app, ["--no-json", "jobs"], env=ENV).output
+    assert "Stopped (low priority)" in table
+    assert sum("low priority" in line for line in table.splitlines()) == 1
+
+
+@respx.mock
 def test_status_and_job_lists_redact_presigned_result_urls():
     secret = "https://storage.test/result.zip?signature=do-not-leak"
     respx.get(f"{API}jobs").mock(

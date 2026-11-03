@@ -679,7 +679,9 @@ def register(app: typer.Typer) -> None:
             {
                 "JobName": jobs_helpers.job_name(j),
                 "Type": j.get("Type"),
-                "JobStatus": jobs_helpers.job_status(j),
+                "JobStatus": f"{jobs_helpers.job_status(j)} (low priority)"
+                if j.get("LowPriority") is True
+                else jobs_helpers.job_status(j),
                 "Created": j.get("Created"),
             }
             for j in job_list
@@ -715,7 +717,7 @@ def register(app: typer.Typer) -> None:
         output.emit(
             _sanitize_job_output(job),
             state.output,
-            human=f"{job_name}: {jobs_helpers.job_status(job)}",
+            human=f"{job_name}: {jobs_helpers.job_status(job)}{jobs_helpers.low_priority_note(job)}",
         )
 
     @app.command()
@@ -742,7 +744,7 @@ def register(app: typer.Typer) -> None:
         output.emit(
             _sanitize_job_output(final),
             state.output,
-            human=f"{job_name}: {jobs_helpers.job_status(final)}",
+            human=f"{job_name}: {jobs_helpers.job_status(final)}{jobs_helpers.low_priority_note(final)}",
         )
         if _failed_terminal(final):
             raise typer.Exit(ExitCode.JOB_FAILED)
