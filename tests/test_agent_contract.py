@@ -636,6 +636,15 @@ def test_status_and_job_lists_show_low_priority_state_on_low_priority_jobs_only(
 
 
 @respx.mock
+def test_wait_shows_the_low_priority_deadline_while_it_polls():
+    queued = {"JobName": "low", "JobStatus": "In Queue", "LowPriority": True, "LowPriorityDeadline": "2026-11-10T00:00:00Z"}
+    done = {"JobName": "low", "JobStatus": "Complete", "LowPriority": True}
+    respx.get(f"{API}jobs").mock(side_effect=[httpx.Response(200, json=queued), httpx.Response(200, json=done)])
+    out = runner.invoke(app, ["--no-json", "wait", "low", "--poll-interval", "0"], env=ENV).output
+    assert "2026-11-10T00:00:00Z" in out
+
+
+@respx.mock
 def test_status_and_job_lists_redact_presigned_result_urls():
     secret = "https://storage.test/result.zip?signature=do-not-leak"
     respx.get(f"{API}jobs").mock(
