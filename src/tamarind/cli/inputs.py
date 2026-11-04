@@ -30,6 +30,7 @@ class JobInput:
     settings: dict[str, Any]
     job_type: str | None = None
     job_name: str | None = None
+    low_priority: bool = False
 
 
 def _load_text(source: str) -> str:
@@ -77,7 +78,7 @@ def _apply_sets(settings: dict[str, Any], pairs: list[str]) -> None:
 
 
 def _looks_like_envelope(doc: dict[str, Any]) -> bool:
-    return "settings" in doc and ("type" in doc or "jobName" in doc)
+    return "settings" in doc and ("type" in doc or "jobName" in doc or "lowPriority" in doc)
 
 
 def effective_job_type(cli_tool: str, file_type: object | None) -> str:
@@ -113,14 +114,26 @@ def effective_job_name(cli_name: str | None, file_name: object | None) -> str | 
     return name
 
 
+def parse_low_priority(value: object) -> bool:
+    """Read a ``lowPriority`` from an input file. Anything but a boolean is refused, not guessed."""
+    if not isinstance(value, bool):
+        raise ValidationError("lowPriority must be true or false.")
+    return value
+
+
 def resolve_job_input(
     input_source: str | None,
     set_pairs: list[str] | None,
 ) -> JobInput:
-    """Build a :class:`JobInput` from ``--input`` and ``--set`` options."""
+    """Build a :class:`JobInput` from ``--input`` and ``--set`` options.
+
+    ``lowPriority`` is a request field only beside an envelope's ``settings``. Among the settings
+    it stays a setting: a custom tool may declare one, and the API refuses it on any other tool.
+    """
     settings: dict[str, Any] = {}
     job_type: str | None = None
     job_name: str | None = None
+    low_priority: object = False
 
     if input_source:
         doc = _parse_document(_load_text(input_source))
@@ -134,6 +147,7 @@ def resolve_job_input(
         if _looks_like_envelope(doc):
             job_type = doc.get("type")
             job_name = doc.get("jobName")
+            low_priority = doc.get("lowPriority", False)
             doc = doc["settings"]
         if not isinstance(doc, dict):
             raise ValidationError("Job settings must be a mapping (an object).")
@@ -142,7 +156,12 @@ def resolve_job_input(
     if set_pairs:
         _apply_sets(settings, set_pairs)
 
-    return JobInput(settings=settings, job_type=job_type, job_name=job_name)
+    return JobInput(
+        settings=settings,
+        job_type=job_type,
+        job_name=job_name,
+        low_priority=parse_low_priority(low_priority),
+    )
 
 
 def dump_settings(settings: dict[str, Any]) -> str:

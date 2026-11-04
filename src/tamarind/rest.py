@@ -25,18 +25,27 @@ _TRUE = "true"
 
 
 def submit_job(
-    client: HTTPClient, *, job_name: str, job_type: str, settings: dict[str, Any]
+    client: HTTPClient,
+    *,
+    job_name: str,
+    job_type: str,
+    settings: dict[str, Any],
+    low_priority: bool = False,
 ) -> Any:
-    """POST /submit-job — submit a single job. Body: {jobName, type, settings, jobSource}."""
-    return client.post_json(
-        "submit-job",
-        json={
-            "jobName": job_name,
-            "type": job_type,
-            "settings": settings,
-            "jobSource": attribution.channel(),
-        },
-    )
+    """POST /submit-job — submit a single job. Body: {jobName, type, settings, jobSource}.
+
+    ``low_priority`` asks for the low-priority tier: 20% off, no completion guarantee, and a job
+    not started within 7 days stops with no charge. The server answers 422 if it can't honour it.
+    """
+    body: dict[str, Any] = {
+        "jobName": job_name,
+        "type": job_type,
+        "settings": settings,
+        "jobSource": attribution.channel(),
+    }
+    if low_priority:
+        body["lowPriority"] = True
+    return client.post_json("submit-job", json=body)
 
 
 def validate_job(
@@ -91,8 +100,9 @@ def submit_batch(
     settings: list[dict[str, Any]],
     job_names: list[str] | None = None,
     max_runtime_seconds: int | None = None,
+    low_priority: bool = False,
 ) -> Any:
-    """POST /submit-batch — submit many jobs as one batch."""
+    """POST /submit-batch — submit many jobs as one batch. See ``submit_job`` for ``low_priority``."""
     body: dict[str, Any] = {
         "batchName": batch_name,
         "type": job_type,
@@ -103,6 +113,8 @@ def submit_batch(
         body["jobNames"] = job_names
     if max_runtime_seconds is not None:
         body["maxRuntimeSeconds"] = max_runtime_seconds
+    if low_priority:
+        body["lowPriority"] = True
     return client.post_json("submit-batch", json=body)
 
 

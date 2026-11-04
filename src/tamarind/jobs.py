@@ -31,6 +31,19 @@ TERMINAL_STATUSES = {
 SUCCESS_STATUSES = {"complete", "completed"}
 
 
+def low_priority_note(job: dict[str, Any]) -> str:
+    """What the human status line adds for a low-priority job; empty on any other job."""
+    if job.get("LowPriority") is not True:
+        return ""
+    reason = job.get("StoppedReasonUserFacing")
+    if reason:
+        return f" (low priority) {reason}"
+    deadline = job.get("LowPriorityDeadline")
+    if deadline and (job_status(job) or "").lower() == "in queue":
+        return f" (low priority; stops at no charge if still queued at {deadline})"
+    return " (low priority)"
+
+
 def job_status(job: dict[str, Any]) -> str | None:
     """Read a job or batch-parent status regardless of API casing.
 
