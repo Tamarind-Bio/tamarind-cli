@@ -79,3 +79,13 @@ def test_files_upload_presign_then_put(tmp_path: Path):
         result = c.files.upload(p, remote="in.pdb")
     assert presign.called and put.called
     assert result == {"ok": True, "filename": "in.pdb", "bytes": 4}
+
+@respx.mock
+def test_files_list_exposes_cursor_contract():
+    route = respx.get(f"{BASE}files").mock(return_value=httpx.Response(200, json={
+        "files": ["next.pdb"], "hasMore": False, "nextCursor": None,
+    }))
+    with Tamarind(api_key="key", api_base=BASE) as c:
+        page = c.files.list(cursor="previous", limit=10)
+    assert page["files"] == ["next.pdb"]
+    assert route.calls[0].request.url.params["cursor"] == "previous"

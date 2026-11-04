@@ -9,6 +9,7 @@ import typer
 
 from ... import rest, uploads
 from ...errors import TamarindError
+from ...file_pages import collect_file_pages
 from .. import output
 
 app = typer.Typer(no_args_is_help=True)
@@ -70,19 +71,12 @@ def list_files(
     limit: int = typer.Option(50, "--limit", help="Max files to return."),
     offset: int = typer.Option(0, "--offset", help="Pagination offset."),
     metadata: bool = typer.Option(False, "--metadata", help="Include size/lastModified."),
-    all_dirs: bool = typer.Option(False, "--all", help="Recurse into subdirectories."),
 ) -> None:
     """List files in your workspace."""
     state = ctx.obj
-    # The /files endpoint ignores query filters and returns the whole list, so
-    # fetch it unfiltered (only folder scoping is server-side) and filter locally.
+    # Collect bounded catalog pages before applying the established CLI filters.
     with state.rest_client() as client:
-        resp = rest.get_files(
-            client,
-            folder=folder,
-            include_all=all_dirs,
-            include_metadata=metadata,
-        )
+        resp = collect_file_pages(client, folder=folder, include_metadata=metadata)
     files = resp.get("files") if isinstance(resp, dict) else resp
     if not isinstance(files, list):
         files = []
@@ -115,7 +109,7 @@ def stats(ctx: typer.Context) -> None:
     """Summarize workspace files by type (counts), like the MCP getFileStats tool."""
     state = ctx.obj
     with state.rest_client() as client:
-        resp = rest.get_files(client)
+        resp = collect_file_pages(client)
     files = resp.get("files") if isinstance(resp, dict) else resp
     if not isinstance(files, list):
         files = []

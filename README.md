@@ -270,3 +270,30 @@ Questions or need help? Contact us at [info@tamarind.bio](mailto:info@tamarind.b
 
 Licensed under the
 [Apache License 2.0](https://github.com/Tamarind-Bio/tamarind-cli/blob/main/LICENSE).
+
+### File listing pagination
+
+`/api/files` returns `{files, hasMore, nextCursor}`. `Files.list` and
+`rest.get_files` return one page; pass `cursor=page["nextCursor"]` until null.
+`files list`, `files stats`, and SDK statistics collect all pages before local
+filtering/counting, with explicit page/byte/time budgets and no partial success.
+Root ordering is newest-first; folder contents use key order. Indexing may briefly
+lag uploads. The former SDK `offset`/`include_all` arguments and CLI `--all` are
+removed: use cursors, directory scoping and CLI local `--offset` as appropriate.
+This is a coordinated API migration; old array responses are rejected.
+
+Automatic file-page collection reuses the configured synchronous HTTP transport and spaces
+continuations by 100 ms to stay below the published ten-request/second limit.
+Rate-limit errors still surface; no automatic resubmission or retries are added.
+
+The collection deadline is checked between requests; an in-flight request uses
+its configured SDK network timeout. No private event loop or worker is created.
+The response-byte budget measures received bytes, not reserialized JSON.
+
+Iteration amendment: review exposed that creating an event loop for a synchronous
+SDK call breaks notebook/async callers and overrides configured transport timeouts.
+Reuse the existing synchronous transport instead. This removes the private loop,
+async collection helper and per-request timeout override; production machinery
+added: none. Preserve complete pagination and failure semantics, with a cooperative
+between-page collection deadline and the client's own in-flight timeout. No new
+hard-cancellation guarantee or worker lifecycle is introduced.
