@@ -644,6 +644,18 @@ def test_wait_shows_the_low_priority_deadline_while_it_polls():
     assert "2026-11-10T00:00:00Z" in out
 
 
+def test_every_polling_status_line_carries_the_low_priority_note():
+    """submit --wait, wait and results --wait can each sit on a queued job for days."""
+    import re
+    from pathlib import Path
+
+    import tamarind.cli.commands.jobs as commands
+
+    source = Path(commands.__file__).read_text()
+    assert len(re.findall(r"status: \{jobs_helpers\.job_status\(j\)\}", source)) == 3
+    assert not re.findall(r"status: \{jobs_helpers\.job_status\(j\)\}(?!\{jobs_helpers\.low_priority_note\(j\)\})", source)
+
+
 @respx.mock
 def test_status_and_job_lists_redact_presigned_result_urls():
     secret = "https://storage.test/result.zip?signature=do-not-leak"

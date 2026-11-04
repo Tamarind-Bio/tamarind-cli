@@ -494,7 +494,7 @@ def register(app: typer.Typer) -> None:
                         poll_interval=poll_interval,
                         timeout=timeout,
                         on_poll=lambda j: output.info(
-                            f"  status: {jobs_helpers.job_status(j)}", state.output
+                            f"  status: {jobs_helpers.job_status(j)}{jobs_helpers.low_priority_note(j)}", state.output
                         ),
                     )
                     result["final"] = final
@@ -786,7 +786,7 @@ def register(app: typer.Typer) -> None:
                     poll_interval=poll_interval,
                     timeout=timeout,
                     on_poll=lambda j: output.info(
-                        f"  status: {jobs_helpers.job_status(j)}", state.output
+                        f"  status: {jobs_helpers.job_status(j)}{jobs_helpers.low_priority_note(j)}", state.output
                     ),
                     organization=organization,
                     job_email=email,
