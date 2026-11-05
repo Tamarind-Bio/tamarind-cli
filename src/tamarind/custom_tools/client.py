@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tamarind.agent.resources import Agent
+from tamarind.agent.transport import AgentTransport
 from tamarind.config import load_config
 from tamarind.custom_tools.transport import GeneratedCustomToolsTransport
 from tamarind.custom_tools.resources import CustomTools
@@ -33,6 +35,8 @@ class Tamarind:
         self.jobs = Jobs(self._http)
         self.tools = Tools(self._http)
         self.files = Files(self._http)
+        # The Agent API (chats, replies, approvals, files), on the same host and key.
+        self.agent = Agent(AgentTransport(self._http))
 
     def close(self) -> None:
         self._http.close()

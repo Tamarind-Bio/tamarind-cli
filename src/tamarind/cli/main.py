@@ -28,6 +28,7 @@ from . import output
 from .output import OutputMode
 from .commands import auth as auth_cmds
 from .commands import catalog as catalog_cmds
+from .commands import chat as chat_cmds
 from .commands import files as files_cmds
 from .commands import jobs as jobs_cmds
 from .commands import custom_tools as custom_tools_cmds
@@ -47,7 +48,7 @@ Abort = typer.Abort
 _active_output_mode = OutputMode(json=not output.is_tty(), quiet=False)
 _GLOBAL_VALUE_OPTIONS = {"--api-key", "--api-base", "--catalog-base", "--profile"}
 _GLOBAL_FLAG_OPTIONS = {"--json", "--no-json", "--quiet", "-q"}
-_COMMAND_GROUPS = {"auth", "custom-tools", "files"}
+_COMMAND_GROUPS = {"auth", "chat", "custom-tools", "files"}
 
 
 def _missing_command_message(argv: list[str]) -> str | None:
@@ -168,6 +169,11 @@ app.add_typer(
     help="Create, build, publish, and inspect organization Custom Tools.",
 )
 app.add_typer(files_cmds.app, name="files", help="List, upload, and delete workspace files.")
+app.add_typer(
+    chat_cmds.app,
+    name="chat",
+    help="Drive the Tamarind agent: chats, streamed replies, approvals and files.",
+)
 
 # Flat commands
 catalog_cmds.register(app)

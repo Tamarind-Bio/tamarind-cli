@@ -1,0 +1,7 @@
+{
+  "artifactSha256": "3e10f5813571c33de62c0d7e2b8f959972cd7009f9df6af7e1a0c8a5445ee647",
+  "schemaVersion": 1,
+  "sourceCommit": "e6ff665dbca1210c8aa9112bc9acd8c32281280e",
+  "sourcePath": "docs/public-api/openapi.yaml",
+  "sourceRepository": "Tamarind-Bio/tamarind-agent"
+}

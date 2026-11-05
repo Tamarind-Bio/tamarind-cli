@@ -45,6 +45,7 @@ jobs:
           uv run --extra dev mypy
           src/tamarind/custom_tools
           src/tamarind/pipelines
+          src/tamarind/agent
           src/tamarind/http.py
           src/tamarind/errors.py
           scripts/sync_custom_tools_contract.py
