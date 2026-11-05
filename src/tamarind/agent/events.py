@@ -29,7 +29,14 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from tamarind.errors import AuthError, NotFoundError, AgentStreamError, TamarindError
+from tamarind.errors import (
+    AgentStreamError,
+    APIError,
+    AuthError,
+    NotFoundError,
+    RateLimitError,
+    TamarindError,
+)
 
 from ._contract import EVENT_TYPES, FINAL_MESSAGE_EVENTS, FINAL_MESSAGE_STATUSES, OPERATIONS
 from .models import ContractError, Event, Message
@@ -334,10 +341,10 @@ class EventStream(Iterator[Event]):
                     "getMessage", {"chatId": self.chat_id, "messageId": self.message_id}
                 )
                 current = Message.from_wire(_object(resp))
-            except (AuthError, ContractError):
-                raise  # a revoked key or a broken contract is never "nothing to follow"
-            except TamarindError:
-                return None  # transient or gone (rewound): the followed reply itself ended fine
+            except TamarindError as exc:
+                if _transient_or_gone(exc):
+                    return None  # the followed reply itself ended fine; nothing more to find
+                raise  # a revoked key, a refusal (403) or a broken contract is never "done"
             if current.continued_by:
                 return current.continued_by
         self._pending = True
@@ -383,6 +390,16 @@ class EventStream(Iterator[Event]):
             self.stop_reason = "requires_action"
             return "stop"
         return None
+
+
+def _transient_or_gone(exc: TamarindError) -> bool:
+    """A re-read failure that means "nothing more to find" rather than a refusal: the reply
+    is gone (rewound), the server is briefly unavailable, or the connection was lost."""
+    if isinstance(exc, (NotFoundError, RateLimitError)):
+        return True
+    if isinstance(exc, APIError):
+        return exc.status_code >= 500
+    return type(exc) is TamarindError  # the transport's network-error wrapper
 
 
 def _frame_json(frame: SSEFrame) -> dict[str, Any]:

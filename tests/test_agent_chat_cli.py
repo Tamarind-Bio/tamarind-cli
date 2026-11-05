@@ -163,19 +163,21 @@ def test_files_upload_creates_a_slot_then_puts_the_bytes_without_the_api_key(tmp
 
 
 @respx.mock
-@pytest.mark.parametrize(("server_name", "saved_as"), [("model_0.cif", "model_0.cif"), ("../../evil", "evil")])
-def test_files_download_follows_the_redirect_without_the_api_key(server_name, saved_as, tmp_path):
-    respx.get(f"{API}chats/chat_7Q/files/file_k2/content").mock(
-        return_value=httpx.Response(302, headers={"Location": "https://s3.test/f/model_0.cif?sig=1"}))
-    respx.get(f"{API}chat-files/file_k2").mock(return_value=httpx.Response(200, json={
-        "id": "file_k2", "object": "file", "filename": server_name, "status": "ready"}))
-    s3 = respx.get("https://s3.test/f/model_0.cif").mock(return_value=httpx.Response(200, content=b"data_x\n"))
+@pytest.mark.parametrize(("location_leaf", "saved_as"), [
+    ("model_0.cif", "model_0.cif"),
+    ("..%2F..%2Fevil", "evil"),  # an encoded traversal in the URL's name never leaves the directory
+])
+def test_files_download_follows_the_redirect_without_the_api_key(location_leaf, saved_as, tmp_path):
+    # A listed (agent-made) file: no files.get lookup, which reads uploads only.
+    respx.get(f"{API}chats/chat_7Q/files/file_wboltz.0123456789abcdef0123456789abcdef/content").mock(
+        return_value=httpx.Response(302, headers={"Location": f"https://s3.test/f/{location_leaf}?sig=1"}))
+    s3 = respx.get(url__regex=r"^https://s3\.test/f/").mock(return_value=httpx.Response(200, content=b"data_x\n"))
     victim = tmp_path.parent / f"victim-{saved_as}"
     victim.write_bytes(b"keep me")
     (tmp_path / f"{saved_as}.part").symlink_to(victim)
 
-    res = runner.invoke(app, ["--json", "chat", "files", "download", "chat_7Q", "file_k2", "--out", str(tmp_path)],
-                        env=ENV)
+    res = runner.invoke(app, ["--json", "chat", "files", "download", "chat_7Q",
+                              "file_wboltz.0123456789abcdef0123456789abcdef", "--out", str(tmp_path)], env=ENV)
 
     assert res.exit_code == 0, res.output
     assert (tmp_path / saved_as).read_bytes() == b"data_x\n"

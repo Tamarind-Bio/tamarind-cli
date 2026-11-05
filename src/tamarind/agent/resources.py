@@ -18,7 +18,7 @@ from urllib.parse import unquote, urlsplit
 
 import httpx
 
-from tamarind.errors import NotFoundError, TamarindError
+from tamarind.errors import JobTimeoutError, NotFoundError, TamarindError
 from tamarind.uploads import put_presigned_upload
 
 from .events import EventStream, Until
@@ -252,6 +252,12 @@ class Messages(_Resource):
         stream = self.follow(chat_id, message_id, follow_continuations=follow_continuations)
         for _ in stream:
             pass
+        if stream.stop_reason == "continuation_pending":
+            reply = stream.message.id if stream.message else message_id
+            raise JobTimeoutError(
+                f"Reply {reply} ended on a decision whose answer has not started yet; wait again later.",
+                detail={"messageId": reply, "stopReason": "continuation_pending"},
+            )
         if stream.message is not None and stream.stop_reason == "final":
             return stream.message
         return self.get(chat_id, stream.message_id or message_id)
@@ -353,11 +359,14 @@ class Files(_Resource):
         return _location(self._t.call("downloadChatFile", {"chatId": chat_id, "fileId": file_id}))
 
     def download(self, chat_id: str, file_id: str, dest: str | Path) -> Path:
-        """Save the file to ``dest`` (a directory gets the file's own name)."""
+        """Save the file to ``dest`` (a directory gets the name the download URL carries).
+
+        Not ``files.get``: that reads uploads only (``file_u…``), and most files a chat
+        lists are the agent's or a job's."""
         url = self.download_url(chat_id, file_id)
         target = Path(dest)
         if target.is_dir():
-            target = target / safe_name(self.get(file_id).filename, fallback=file_id)
+            target = target / _url_name(url, fallback=file_id)
         return save_url(url, target)
 
 
@@ -405,8 +414,7 @@ class Campaigns(_Resource):
         url = self.candidate_structure_url(chat_id, candidate_id)
         target = Path(dest)
         if target.is_dir():
-            leaf = unquote(urlsplit(url).path.rsplit("/", 1)[-1])
-            target = target / safe_name(leaf, fallback=f"{candidate_id}.cif")
+            target = target / _url_name(url, fallback=f"{candidate_id}.cif")
         return save_url(url, target)
 
     def jobs(
@@ -456,6 +464,11 @@ class Agent:
         self.workflows = Workflows(transport)
         self.campaigns = Campaigns(transport)
         self.usage = UsageResource(transport)
+
+
+def _url_name(url: str, *, fallback: str) -> str:
+    """The file name a presigned download URL ends in, made safe to join to a directory."""
+    return safe_name(unquote(urlsplit(url).path.rsplit("/", 1)[-1]), fallback=fallback)
 
 
 def safe_name(name: str, *, fallback: str) -> str:

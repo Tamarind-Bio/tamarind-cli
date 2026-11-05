@@ -7,7 +7,7 @@ import pytest
 
 from agent_fakes import PING, FakeAgentServer, approval, frame, reply, sse
 from tamarind.agent.events import SSEFrame, parse_cursor, parse_sse
-from tamarind.errors import AgentStreamError, AuthError, NotFoundError, RateLimitError, TamarindError
+from tamarind.errors import AgentStreamError, APIError, AuthError, JobTimeoutError, NotFoundError, RateLimitError, TamarindError
 
 EVENTS = "/chats/chat_7Q/events"
 
@@ -316,6 +316,8 @@ def test_a_reply_that_just_completes_is_not_polled_for_a_continuation(before):
         (httpx.Response(404, json={"code": "not_found"}), None),
         # A revoked key is never "nothing to follow".
         (httpx.Response(401, json={"code": "invalid_api_key", "detail": "Invalid API key"}), AuthError),
+        # Nor is a refusal that maps to a plain APIError.
+        (httpx.Response(403, json={"code": "organization_read_disabled", "detail": "Read disabled"}), APIError),
     ],
 )
 def test_a_failed_reread_for_a_continuation_ends_cleanly_unless_it_is_an_auth_failure(reread, raises):
@@ -357,3 +359,22 @@ def test_a_reply_that_ended_before_the_cursor_is_followed_into_its_continuation(
     assert [e.id for e in stream] == ["8.0"]
     assert stream.message_id == "msg_2"
     assert server.requests_to("GET", EVENTS)[1].url.params["messageId"] == "msg_2"
+
+
+def test_wait_raises_rather_than_returning_the_old_reply_when_the_answer_is_pending():
+    server = FakeAgentServer()
+    server.on("GET", EVENTS, sse(frame("5.0", "approval.resolved", approval(status="approved"))
+                                 + _status("6.0", "completed")))
+    server.on("GET", "/chats/chat_7Q/messages/msg_1", httpx.Response(200, json=reply("completed")))
+    agent = server.agent()
+
+    from tamarind.agent.events import EventStream
+
+    original = EventStream.__init__.__kwdefaults__["continuation_wait"]
+    EventStream.__init__.__kwdefaults__["continuation_wait"] = 3.0
+    try:
+        with pytest.raises(JobTimeoutError) as raised:
+            agent.messages.wait("chat_7Q", "msg_1")
+    finally:
+        EventStream.__init__.__kwdefaults__["continuation_wait"] = original
+    assert raised.value.detail["stopReason"] == "continuation_pending"
