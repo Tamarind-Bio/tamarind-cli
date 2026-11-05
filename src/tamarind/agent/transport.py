@@ -106,12 +106,23 @@ class AgentTransport:
         json: Any | None = None,
         idempotency_key: str | None = None,
         timeout: float | None = None,
+        retry_safe: bool | None = None,
     ) -> httpx.Response:
-        """Send one logical call, retrying as its operation allows; non-2xx raises."""
+        """Send one logical call, retrying as its operation allows; non-2xx raises.
+
+        ``retry_safe`` narrows the operation's own flag for one call whose body makes a
+        repeat unsafe (an approval resolved with options is answered 409 the second time).
+        """
         op = OPERATIONS[operation_id]
+        if retry_safe is False:
+            op = op._replace(retry_safe=False)
         path = build_path(op.path, path_params or {})
         extra: dict[str, str | None] = {}
         if op.idempotency_key:
+            if idempotency_key is not None and not idempotency_key.strip():
+                # The server refuses a blank key; never swap in a fresh one, or a caller
+                # that persisted "" would get a new key, and a new effect, every retry.
+                raise ValueError("idempotency_key must not be blank")
             extra["Idempotency-Key"] = idempotency_key or str(uuid.uuid4())
         elif idempotency_key is not None:
             raise ValueError(f"{operation_id} does not take an Idempotency-Key")

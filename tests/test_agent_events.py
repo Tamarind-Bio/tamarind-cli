@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from agent_fakes import PING, FakeAgentServer, frame, reply, sse
+from agent_fakes import PING, FakeAgentServer, approval, frame, reply, sse
 from tamarind.agent.events import SSEFrame, parse_cursor, parse_sse
 from tamarind.errors import AgentStreamError, AuthError, NotFoundError, RateLimitError, TamarindError
 
@@ -113,7 +113,9 @@ def test_a_final_stream_error_raises_its_typed_error(code, error_type):
 def test_unknown_event_types_are_skipped_but_still_move_the_cursor():
     server = FakeAgentServer()
     server.on("GET", EVENTS,
-              sse(_delta("1.0", "a") + frame("2.0", "brand.new_thing", {"x": 1}), cut=True),
+              # A new `message.*` type whose data is not a Message is skipped, not parsed.
+              sse(_delta("1.0", "a") + frame("1.5", "message.progress", {"percent": 40})
+                  + frame("2.0", "brand.new_thing", {"x": 1}), cut=True),
               sse(_status("3.0", "completed")))
 
     events = list(server.agent().messages.follow("chat_7Q", "msg_1"))
@@ -271,3 +273,30 @@ def test_after_must_be_a_cursor():
     server = FakeAgentServer()
     with pytest.raises(ValueError):
         server.agent().events.stream("chat_7Q", after="not-a-cursor")
+
+
+def test_a_reply_ended_by_a_decided_card_is_followed_into_the_answer_once_it_starts():
+    server = FakeAgentServer()
+    server.on("GET", EVENTS,
+              sse(_status("4.0", "requires_action") + frame("5.0", "approval.resolved", approval(status="approved"))
+                  + _status("6.0", "completed")),
+              sse(frame("8.0", "message.completed", reply("completed", message_id="msg_2", text="Done."),
+                        message="msg_2")))
+    # The answer reply starts after the old reply's stream closed: named on a later read.
+    server.on("GET", "/chats/chat_7Q/messages/msg_1",
+              httpx.Response(200, json=reply("completed")),
+              httpx.Response(200, json=reply("completed", continued_by="msg_2")))
+
+    stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True)
+    assert [e.id for e in stream] == ["4.0", "5.0", "6.0", "8.0"]
+    assert stream.message is not None and stream.message.text == "Done."
+    assert len(server.requests_to("GET", "/chats/chat_7Q/messages/msg_1")) == 2
+
+
+def test_a_reply_that_just_completes_is_not_polled_for_a_continuation():
+    server = FakeAgentServer()
+    server.on("GET", EVENTS, sse(_status("6.0", "completed")))
+
+    stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True)
+    assert [e.id for e in stream] == ["6.0"]
+    assert server.requests_to("GET", "/chats/chat_7Q/messages/msg_1") == []

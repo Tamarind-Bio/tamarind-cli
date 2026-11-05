@@ -39,6 +39,14 @@ if TYPE_CHECKING:
     from .transport import AgentTransport
 
 DEFAULT_MAX_RECONNECTS = 10
+# How many times to re-read a reply that a decided approval ended, waiting for the reply
+# that answers the decision to start (about 40 s at 1, 2, ... 5 s apart).
+CONTINUATION_POLLS = 10
+# The ``message.*`` events whose data is a Message (``message.continued`` is not, and an
+# unknown ``message.*`` type is skipped, never parsed as one).
+STATUS_EVENTS = frozenset({"message.created"} | {
+    f"message.{s}" for s in ("in_progress", "requires_action", "completed", "failed", "cancelled", "incomplete")
+})
 _CURSOR = re.compile(r"^\s*(\d+)(?:\.(\d+))?\s*$")
 # A bare `<seq>` cursor means every event of that row (the server's own reading).
 _WHOLE_ROW = 1 << 30
@@ -145,6 +153,8 @@ class EventStream(Iterator[Event]):
         self.stop_reason: str | None = None
         self.message: Message | None = None
         self._status: str | None = None
+        self._continued_by: str | None = None
+        self._card_decided = False
         self._iterator = self._run()
 
     def __iter__(self) -> "EventStream":
@@ -222,8 +232,9 @@ class EventStream(Iterator[Event]):
                         return "stop"
                     if self._ends_followed_reply(event):
                         assert self.message is not None
-                        if self._follow_continuations and self.message.continued_by:
-                            self._switch(self.message.continued_by)
+                        following = self._continuation() if self._follow_continuations else None
+                        if following:
+                            self._switch(following)
                             return "switch"
                         self.stop_reason = "final"
                         return "stop"
@@ -270,9 +281,17 @@ class EventStream(Iterator[Event]):
         """Keep the followed reply as its last ``message.*`` status event showed it."""
         if self.message_id is None or event.message_id != self.message_id:
             return
-        if event.type.startswith("message.") and event.type != "message.continued":
+        if event.type in STATUS_EVENTS:
             self.message = event.message()
             self._status = self.message.status
+        elif event.type == "message.continued":
+            continued = event.data.get("continuedBy")
+            if isinstance(continued, str) and continued:
+                self._continued_by = continued
+        elif event.type in ("approval.resolved", "approval.requested"):
+            # A decided card ends this reply, and the answer comes as a NEW reply named by
+            # this one's continuedBy once it starts (after this stream has closed).
+            self._card_decided = event.type == "approval.resolved" or self._card_decided
 
     def _ends_followed_reply(self, event: Event) -> bool:
         return (
@@ -280,6 +299,28 @@ class EventStream(Iterator[Event]):
             and event.message_id == self.message_id
             and event.type in FINAL_MESSAGE_EVENTS
         )
+
+    def _continuation(self) -> str | None:
+        """The reply that carries this one's work on, if any.
+
+        Named on the final event when a steering message was read into it. When a decided
+        approval ended it, the answer reply starts after this stream closed, so the reply is
+        re-read until it names one (bounded: a reply that ends with nothing to follow is
+        just done)."""
+        assert self.message is not None
+        named = self.message.continued_by or self._continued_by
+        if named or not self._card_decided or self.message.status != "completed":
+            return named
+        assert self.message_id is not None
+        for attempt in range(1, CONTINUATION_POLLS + 1):
+            self._transport.sleep(min(attempt, 5))
+            resp = self._transport.call(
+                "getMessage", {"chatId": self.chat_id, "messageId": self.message_id}
+            )
+            current = Message.from_wire(_object(resp))
+            if current.continued_by:
+                return current.continued_by
+        return None
 
     def _switch(self, message_id: str) -> None:
         """Follow ``message_id`` from its own start: a filtered stream's cursor only skips
@@ -291,6 +332,8 @@ class EventStream(Iterator[Event]):
         self._cursor = None
         self.message = None
         self._status = None
+        self._continued_by = None
+        self._card_decided = False
 
     def _settled(self) -> bool:
         """After a clean close of a reply's stream: whether that reply ended or is waiting

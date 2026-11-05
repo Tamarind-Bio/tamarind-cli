@@ -47,10 +47,19 @@ def test_a_caller_supplied_idempotency_key_is_sent_as_is():
     assert server.requests[0].headers["Idempotency-Key"] == "mine-1"
 
 
-def test_an_operation_without_a_key_refuses_one():
+@pytest.mark.parametrize(
+    ("operation_id", "path_params", "key"),
+    [
+        ("getChat", {"chatId": "c"}, "k"),  # an operation that takes no key
+        ("sendMessage", {"chatId": "c"}, ""),  # a blank key is refused, never replaced
+        ("createChat", {}, "   "),
+    ],
+)
+def test_an_idempotency_key_the_call_cannot_use_is_refused_before_sending(operation_id, path_params, key):
     server = FakeAgentServer()
     with pytest.raises(ValueError):
-        server.agent().transport.call("getChat", {"chatId": "c"}, idempotency_key="k")
+        server.agent().transport.call(operation_id, path_params, idempotency_key=key, json={})
+    assert server.requests == []
 
 
 @pytest.mark.parametrize(
@@ -154,3 +163,25 @@ def test_a_redirect_is_returned_only_for_a_download_and_never_followed():
         server.agent().chats.get("chat_7Q")
     assert raised.value.status_code == 301  # the redirect itself, not a parse failure after it
     assert len(server.requests) == 1
+
+
+@pytest.mark.parametrize(
+    ("options", "attempts"),
+    [
+        ({}, 2),  # the same bare decision again returns the resolved approval: retried
+        ({"scope": "chat"}, 1),  # with options a repeat is 409 after a lost success: not retried
+        ({"scope": "once"}, 1),
+        ({"budget_hours": 10}, 1),
+        ({"workflow": "binder-design"}, 1),
+    ],
+)
+def test_a_lost_approval_answer_is_retried_only_for_a_bare_decision(options, attempts):
+    server = FakeAgentServer().on("POST", "/chats/chat_7Q/approvals/apr_x", httpx.ReadTimeout("lost"),
+                                  httpx.Response(200, json=approval(status="approved")))
+    agent = server.agent()
+    if attempts == 1:
+        with pytest.raises(TamarindError, match="may have been applied"):
+            agent.approvals.approve("chat_7Q", "apr_x", **options)
+    else:
+        assert agent.approvals.approve("chat_7Q", "apr_x").status == "approved"
+    assert len(server.requests) == attempts

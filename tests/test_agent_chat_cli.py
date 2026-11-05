@@ -154,6 +154,9 @@ def test_files_download_follows_the_redirect_without_the_api_key(server_name, sa
     respx.get(f"{API}chat-files/file_k2").mock(return_value=httpx.Response(200, json={
         "id": "file_k2", "object": "file", "filename": server_name, "status": "ready"}))
     s3 = respx.get("https://s3.test/f/model_0.cif").mock(return_value=httpx.Response(200, content=b"data_x\n"))
+    victim = tmp_path.parent / f"victim-{saved_as}"
+    victim.write_bytes(b"keep me")
+    (tmp_path / f"{saved_as}.part").symlink_to(victim)
 
     res = runner.invoke(app, ["--json", "chat", "files", "download", "chat_7Q", "file_k2", "--out", str(tmp_path)],
                         env=ENV)
@@ -161,7 +164,8 @@ def test_files_download_follows_the_redirect_without_the_api_key(server_name, sa
     assert res.exit_code == 0, res.output
     assert (tmp_path / saved_as).read_bytes() == b"data_x\n"
     assert "x-api-key" not in s3.calls.last.request.headers
-    assert not list(tmp_path.glob("*.part"))
+    assert [p.name for p in tmp_path.glob("*.part")] == [f"{saved_as}.part"]  # only the planted one
+    assert victim.read_bytes() == b"keep me"  # a planted <name>.part symlink is never opened
 
 
 @respx.mock
@@ -252,3 +256,42 @@ def test_structure_into_a_directory_takes_the_urls_file_name(tmp_path):
     assert res.exit_code == 0, res.output
     assert (tmp_path / "pdl1-b07.cif").read_bytes() == b"data_\n"
     assert "x-api-key" not in s3.calls.last.request.headers
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    ("frames", "expected"),
+    [
+        # Piped (not a terminal): only the authoritative text, never the corrected draft.
+        ([frame("1.0", "output_text.delta", {"partId": "p_0", "delta": "The answer is 5"}),
+          frame("2.0", "output_text.done", {"partId": "p_0", "text": "The answer is 6."})],
+         "The answer is 6.\n"),
+        # A discarded draft never reaches stdout.
+        ([frame("1.0", "output_text.delta", {"partId": "p_0", "delta": "draft"}),
+          frame("2.0", "output_text.discarded", {"partId": "p_0"}),
+          frame("3.0", "output_text.delta", {"partId": "p_1", "delta": "final"}),
+          frame("4.0", "output_text.done", {"partId": "p_1", "text": "final"})],
+         "final\n"),
+    ],
+)
+def test_piped_human_output_is_exactly_the_final_text(frames, expected):
+    respx.post(f"{API}chats/chat_7Q/messages").mock(return_value=httpx.Response(202, json=reply("queued")))
+    respx.get(f"{API}chats/chat_7Q/events").mock(return_value=_reply_stream(
+        *frames, frame("9.0", "message.completed", reply("completed"))))
+    res = runner.invoke(app, ["--no-json", "-q", "chat", "send", "chat_7Q", "x", "--wait"], env=ENV)
+    assert res.exit_code == 0, res.output
+    assert res.stdout == expected
+
+
+@respx.mock
+def test_wait_on_your_own_message_follows_its_reply():
+    user = {"id": "msg_0", "object": "message", "chatId": "chat_7Q", "role": "user", "content": [],
+            "createdAt": "2026-10-27T17:02:11Z"}
+    respx.get(f"{API}chats/chat_7Q/messages/msg_0").mock(return_value=httpx.Response(200, json=user))
+    respx.get(f"{API}chats/chat_7Q/messages").mock(return_value=httpx.Response(200, json={
+        "data": [user, reply("in_progress")], "nextCursor": None}))
+    events = respx.get(f"{API}chats/chat_7Q/events").mock(return_value=_reply_stream(
+        frame("5.0", "message.completed", reply("completed"))))
+    res = runner.invoke(app, ["--json", "chat", "wait", "chat_7Q", "msg_0"], env=ENV)
+    assert res.exit_code == 0, res.output
+    assert events.calls.last.request.url.params["messageId"] == "msg_1"

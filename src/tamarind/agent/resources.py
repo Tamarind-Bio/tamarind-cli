@@ -10,13 +10,15 @@ idempotency keys are :class:`~tamarind.agent.transport.AgentTransport`'s.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping, Sequence
+import os
 from pathlib import Path
+import tempfile
 from typing import Any, Callable, TypeVar
 from urllib.parse import unquote, urlsplit
 
 import httpx
 
-from tamarind.errors import TamarindError
+from tamarind.errors import NotFoundError, TamarindError
 from tamarind.uploads import put_presigned_upload
 
 from .events import EventStream, Until
@@ -213,6 +215,18 @@ class Messages(_Resource):
         resp = self._t.call("cancelMessage", {"chatId": chat_id, "messageId": message_id})
         return _one(resp, Message.from_wire)
 
+    def reply_to(self, chat_id: str, message_id: str) -> Message:
+        """The reply for ``message_id``: itself when it is a reply, else the reply that
+        answers it (a reply's ``inReplyTo``). Raises NotFoundError when none has started."""
+        current = self.get(chat_id, message_id)
+        if current.role != "user":
+            return current
+        for item in iterate(lambda cursor: self.list(chat_id, limit=200, cursor=cursor)):
+            if item.role == "assistant" and item.in_reply_to == message_id:
+                return item
+        raise NotFoundError(f"No reply to message {message_id} yet.",
+                            detail={"code": "not_found", "messageId": message_id})
+
     def follow(
         self, chat_id: str, message_id: str, *, after: str | None = None,
         follow_continuations: bool = False, until: Until | Iterable[str] | str | None = None,
@@ -265,8 +279,10 @@ class Approvals(_Resource):
             raise ValueError("decision must be 'approve' or 'deny'")
         body = _compact({"decision": decision, "scope": scope, "budgetHours": budget_hours,
                          "workflow": workflow})
+        # Only the same BARE decision is safe to repeat (it returns the resolved approval);
+        # with options, a repeat whose first answer was lost is 409 approval_not_pending.
         resp = self._t.call("resolveApproval", {"chatId": chat_id, "approvalId": approval_id},
-                            json=body)
+                            json=body, retry_safe=False if len(body) > 1 else None)
         return _one(resp, Approval.from_wire)
 
     def approve(self, chat_id: str, approval_id: str, **options: Any) -> Approval:
@@ -437,22 +453,30 @@ def safe_name(name: str, *, fallback: str) -> str:
 
 
 def save_url(url: str, target: Path) -> Path:
-    """Stream a presigned URL to ``target``, without the API key and without echoing the URL."""
-    partial = target.with_name(target.name + ".part")
+    """Stream a presigned URL to ``target``, without the API key and without echoing the URL.
+
+    Written to a fresh, exclusively created temp file beside ``target`` and renamed into
+    place, so two downloads cannot share a partial file and a planted symlink is never
+    opened.
+    """
+    partial: Path | None = None
     try:
         with httpx.stream("GET", url, timeout=_DOWNLOAD_TIMEOUT, follow_redirects=True) as resp:
             resp.raise_for_status()
-            with partial.open("wb") as fh:
+            fd, name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".part", dir=target.parent)
+            partial = Path(name)
+            with os.fdopen(fd, "wb") as fh:
                 for chunk in resp.iter_bytes(_DOWNLOAD_CHUNK):
                     fh.write(chunk)
-        partial.replace(target)
+        os.replace(partial, target)
+        partial = None
     except httpx.HTTPStatusError as exc:
-        partial.unlink(missing_ok=True)
         raise TamarindError(f"Download of '{target.name}' failed with HTTP {exc.response.status_code}.") from exc
     except httpx.HTTPError as exc:
-        partial.unlink(missing_ok=True)
         raise TamarindError(f"Download of '{target.name}' failed ({type(exc).__name__}).") from exc
     except OSError as exc:
-        partial.unlink(missing_ok=True)
         raise TamarindError(f"Could not write '{target}': {exc}.") from exc
+    finally:
+        if partial is not None:
+            partial.unlink(missing_ok=True)
     return target

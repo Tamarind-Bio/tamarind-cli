@@ -210,7 +210,9 @@ def wait_reply(
     """Follow a reply to its end, streaming its text (e.g. after approving a card)."""
     state = ctx.obj
     with state.sdk_client() as client:
-        _follow(client, chat_id, message_id, state)
+        # The stream filters by the exact id: a user message's id is mapped to its reply.
+        target = client.agent.messages.reply_to(chat_id, message_id)
+        _follow(client, chat_id, target.id, state)
 
 
 @app.command("messages")
@@ -298,14 +300,22 @@ def _summary(event: Event) -> str:
 
 @dataclass
 class _ReplyPrinter:
-    """Writes a reply's text as it streams: deltas as they come, ``output_text.done`` as
-    the authority (only what the deltas had not already shown), a blank line between parts."""
+    """Writes a reply's text to stdout as it is written.
+
+    ``live`` (stdout is a terminal): deltas as they come, then ``output_text.done`` as the
+    authority, writing only what the deltas had not shown; a correction or a discarded
+    draft already on screen cannot be taken back, so it is flagged on stderr and the
+    corrected text written. Not live (piped): each part is written once, as its
+    ``output_text.done`` text, so stdout holds exactly the final text and never a draft.
+    Parts are keyed by (reply, part): a continuing reply numbers its parts from p_0 again.
+    """
 
     json_mode: bool
     quiet: bool
-    # Keyed by (reply, part): a continuing reply numbers its parts from p_0 again.
+    live: bool = True
     printed: dict[tuple[Optional[str], str], str] = field(default_factory=dict)
     last_part: Optional[tuple[Optional[str], str]] = None
+    wrote: bool = False
 
     def handle(self, event: Event) -> None:
         if self.json_mode:
@@ -313,16 +323,21 @@ class _ReplyPrinter:
         data = event.data
         part = (event.message_id, str(data.get("partId") or ""))
         if event.type == "output_text.delta":
-            self._write(part, str(data.get("delta") or ""))
+            if self.live:
+                self._write(part, str(data.get("delta") or ""))
         elif event.type == "output_text.done":
             text = str(data.get("text") or "")
             seen = self.printed.get(part, "")
             if text.startswith(seen):
                 self._write(part, text[len(seen):])
             else:
-                self._write(part, "\n" + text)
+                self._status("(the agent corrected the text above; final text follows)")
+                self.printed[part] = ""
+                self._write(part, text)
         elif event.type == "output_text.discarded":
-            self._status("(the agent discarded that draft)")
+            if self.printed.get(part):
+                self._status("(the agent discarded the draft above)")
+            self.printed.pop(part, None)
         elif event.type == "step.started":
             self._status(f"> {data.get('title') or 'working'}")
         elif event.type == "approval.requested":
@@ -333,28 +348,30 @@ class _ReplyPrinter:
     def _write(self, part: tuple[Optional[str], str], text: str) -> None:
         if not text:
             return
-        if self.last_part is not None and part != self.last_part and self.printed.get(self.last_part):
+        if self.wrote and part != self.last_part:
             typer.echo("\n\n", nl=False)
         self.last_part = part
+        self.wrote = True
         self.printed[part] = self.printed.get(part, "") + text
         typer.echo(text, nl=False)
 
     def _status(self, line: str) -> None:
         if self.quiet:
             return
-        if self.last_part is not None and self.printed.get(self.last_part):
+        if self.wrote and self.last_part is not None:
             typer.echo("")  # end the text line before a status line
             self.last_part = None
+            self.wrote = False
         typer.secho(line, err=True, fg=typer.colors.BRIGHT_BLACK)
 
     def finish(self) -> None:
-        if any(self.printed.values()):
+        if self.wrote:
             typer.echo("")
 
 
 def _follow(client: Any, chat_id: str, message_id: str, state: Any) -> None:
     stream: EventStream = client.agent.messages.follow(chat_id, message_id, follow_continuations=True)
-    printer = _ReplyPrinter(json_mode=state.output.json, quiet=state.output.quiet)
+    printer = _ReplyPrinter(json_mode=state.output.json, quiet=state.output.quiet, live=output.is_tty())
     try:
         for event in stream:
             printer.handle(event)
