@@ -318,3 +318,16 @@ def test_a_failed_reread_for_a_continuation_still_ends_the_follow_cleanly():
     stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True)
     assert [e.id for e in stream] == ["5.0", "6.0"]
     assert stream.stop_reason == "final"
+
+
+def test_a_reply_that_ended_before_the_cursor_is_followed_into_its_continuation():
+    server = FakeAgentServer()
+    server.on("GET", EVENTS, sse(""),
+              sse(frame("8.0", "message.completed", reply("completed", message_id="msg_2"), message="msg_2")))
+    server.on("GET", "/chats/chat_7Q/messages/msg_1",
+              httpx.Response(200, json=reply("completed", continued_by="msg_2")))
+
+    stream = server.agent().messages.follow("chat_7Q", "msg_1", after="99.0", follow_continuations=True)
+    assert [e.id for e in stream] == ["8.0"]
+    assert stream.message_id == "msg_2"
+    assert server.requests_to("GET", EVENTS)[1].url.params["messageId"] == "msg_2"

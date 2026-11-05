@@ -185,3 +185,38 @@ def test_a_lost_approval_answer_is_retried_only_for_a_bare_decision(options, att
     else:
         assert agent.approvals.approve("chat_7Q", "apr_x").status == "approved"
     assert len(server.requests) == attempts
+
+
+@pytest.mark.parametrize(
+    ("headers", "slept_fixed"),
+    [
+        # The hourly counter's reset rides on every counted send; on a 500 it is not a wait.
+        ({"x-ratelimit-reset": "3500"}, None),
+        ({"Retry-After": "2", "x-ratelimit-reset": "3500"}, 2.0),
+    ],
+)
+def test_a_retryable_5xx_is_retried_on_retry_after_or_backoff_never_the_hourly_reset(headers, slept_fixed):
+    server = FakeAgentServer().on(
+        "POST", SEND,
+        httpx.Response(500, headers=headers, json={"code": "internal_error", "retryable": True}),
+        QUEUED,
+    )
+    server.agent().messages.send("chat_7Q", "hi")
+    keys = [r.headers["Idempotency-Key"] for r in server.requests_to("POST", SEND)]
+    assert len(keys) == 2 and keys[0] == keys[1]
+    assert len(server.sleeps) == 1
+    if slept_fixed is None:
+        assert server.sleeps[0] <= 30  # a backoff, not 3500 s
+    else:
+        assert server.sleeps == [slept_fixed]
+
+
+@pytest.mark.parametrize("parts", [
+    [{"type": "file", "fileId": "file_9f2"}],  # no text part
+    [{"type": "text", "text": "  "}, {"type": "file", "fileId": "file_9f2"}],  # blank text
+])
+def test_raw_input_parts_need_a_non_blank_text_part(parts):
+    server = FakeAgentServer().on("POST", SEND, QUEUED)
+    with pytest.raises(ValueError):
+        server.agent().messages.send("chat_7Q", input=parts)
+    assert server.requests == []

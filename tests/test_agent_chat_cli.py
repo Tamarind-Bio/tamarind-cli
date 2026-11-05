@@ -205,9 +205,12 @@ def test_answer_sends_answers_keyed_by_question_text():
     route = respx.post(f"{API}chats/chat_7Q/questions/q_8c").mock(return_value=httpx.Response(200, json={
         "id": "q_8c", "status": "answered", "questions": [], "createdAt": "x"}))
     res = runner.invoke(app, ["--json", "chat", "answer", "chat_7Q", "q_8c",
-                              "--answer", "Which chain is the target?=Chain A"], env=ENV)
+                              "--question", "Which chain is the target?", "--choice", "Chain A",
+                              "--question", "Buffer pH?", "--choice", "pH=7.4"], env=ENV)
     assert res.exit_code == 0, res.output
-    assert json.loads(route.calls.last.request.content) == {"answers": {"Which chain is the target?": "Chain A"}}
+    # Either side may hold an '='.
+    assert json.loads(route.calls.last.request.content) == {
+        "answers": {"Which chain is the target?": "Chain A", "Buffer pH?": "pH=7.4"}}
     assert route.calls.last.request.headers["Idempotency-Key"]
 
 

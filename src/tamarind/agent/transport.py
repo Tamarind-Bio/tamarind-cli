@@ -54,8 +54,11 @@ def build_path(template: str, path_params: Mapping[str, str]) -> str:
 
 
 def wait_seconds(resp: httpx.Response) -> float | None:
-    """How long the server asked us to wait: ``Retry-After``, else ``x-ratelimit-reset``."""
-    for name in ("Retry-After", "x-ratelimit-reset"):
+    """How long the server asked us to wait: ``Retry-After``, else, on a 429 only,
+    ``x-ratelimit-reset``. That header rides on every counted send (a retryable 500
+    included) and says when the hourly count resets, not when to retry."""
+    names = ("Retry-After", "x-ratelimit-reset") if resp.status_code == 429 else ("Retry-After",)
+    for name in names:
         raw = resp.headers.get(name)
         if raw is None:
             continue

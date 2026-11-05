@@ -243,8 +243,10 @@ class EventStream(Iterator[Event]):
             return "progress" if progressed else "lost"
         # A clean close. A chat-wide stream closes when idle; a reply's stream closes at its
         # end, or when it stopped on a card. Ask the reply which.
-        if self.message_id is not None and self._settled():
-            return "stop"
+        if self.message_id is not None:
+            settled = self._settled()
+            if settled is not None:
+                return settled
         return "progress" if progressed else "lost"
 
     # ── pieces ──
@@ -342,26 +344,33 @@ class EventStream(Iterator[Event]):
         self._continued_by = None
         self._card_decided = False
 
-    def _settled(self) -> bool:
-        """After a clean close of a reply's stream: whether that reply ended or is waiting
-        on a card (stop), rather than the connection having closed early (reconnect)."""
+    def _settled(self) -> str | None:
+        """After a clean close of a reply's stream: "stop" when that reply ended or waits on
+        a card, "switch" when it ended and a continuing reply is to be followed, None when
+        the connection closed early (reconnect)."""
         if self._status == "requires_action":
             self.stop_reason = "requires_action"
-            return True
+            return "stop"
         assert self.message_id is not None
         resp = self._transport.call(
             "getMessage", {"chatId": self.chat_id, "messageId": self.message_id}
         )
         current = Message.from_wire(_object(resp))
         if current.status in FINAL_MESSAGE_STATUSES:
+            # Read as if its final event had arrived (a resume from a cursor past it gets
+            # an empty stream), so a continuation is followed here too.
             self.message = current
+            following = self._continuation() if self._follow_continuations else None
+            if following:
+                self._switch(following)
+                return "switch"
             self.stop_reason = "final"
-            return True
+            return "stop"
         if current.status == "requires_action":
             self.message = current
             self.stop_reason = "requires_action"
-            return True
-        return False
+            return "stop"
+        return None
 
 
 def _frame_json(frame: SSEFrame) -> dict[str, Any]:

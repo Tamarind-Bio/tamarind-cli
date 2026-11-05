@@ -481,16 +481,15 @@ def answer(
     chat_id: str = typer.Argument(..., help="The chat id."),
     question_id: str = typer.Argument(..., help="The question id."),
     text: Optional[str] = typer.Option(None, "--text", help="One answer for every question on the card."),
-    choice: list[str] = typer.Option([], "--answer", help="'<question text>=<your answer>'. Repeatable."),
+    questions: list[str] = typer.Option([], "--question", help="A question's text. Repeatable; pairs with --choice."),
+    choices: list[str] = typer.Option([], "--choice", help="Your answer to the --question in the same position."),
 ) -> None:
-    """Answer a question the agent is waiting on."""
+    """Answer a question the agent is waiting on (--text, or --question/--choice pairs)."""
     state = ctx.obj
-    answers: dict[str, str] = {}
-    for item in choice:
-        question, sep, value = item.rpartition("=")
-        if not sep or not question:
-            raise typer.BadParameter("use --answer '<question text>=<your answer>'", param_hint="--answer")
-        answers[question] = value
+    # Paired options, not 'question=answer': either side may contain any character.
+    if len(questions) != len(choices):
+        raise typer.BadParameter("give one --choice for each --question", param_hint="--choice")
+    answers: dict[str, str] = dict(zip(questions, choices))
     with state.sdk_client() as client:
         result = client.agent.questions.answer(chat_id, question_id, answers=answers or None, text=text)
     output.emit(_raw(result), state.output, human=f"{result.id}  {result.status}")

@@ -196,7 +196,12 @@ class Messages(_Resource):
         resumes after a dropped connection, rather than on the POST's own response, which
         cannot be resumed once cut.
         """
-        parts = [dict(part) for part in input] if input is not None else text_input(text, file_ids)
+        if input is not None:
+            parts = [dict(part) for part in input]
+            if not any(p.get("type") == "text" and str(p.get("text") or "").strip() for p in parts):
+                raise ValueError("a message needs a non-blank text part")
+        else:
+            parts = text_input(text, file_ids)
         body: dict[str, Any] = {"input": parts, "stream": False}
         if interrupt:
             body["interrupt"] = True
