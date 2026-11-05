@@ -237,10 +237,15 @@ class Messages(_Resource):
     def follow(
         self, chat_id: str, message_id: str, *, after: str | None = None,
         follow_continuations: bool = False, until: Until | Iterable[str] | str | None = None,
+        continuation_wait: float | None = None,
     ) -> EventStream:
         """Stream one reply's events until it ends or stops on a card."""
+        if continuation_wait is None:
+            return EventStream(self._t, chat_id, message_id=message_id, after=after, until=until,
+                               follow_continuations=follow_continuations)
         return EventStream(self._t, chat_id, message_id=message_id, after=after, until=until,
-                           follow_continuations=follow_continuations)
+                           follow_continuations=follow_continuations,
+                           continuation_wait=continuation_wait)
 
     def wait(self, chat_id: str, message_id: str, *, follow_continuations: bool = True) -> Message:
         """Block until the reply ends, or stops on a card; returns it as it then stands."""

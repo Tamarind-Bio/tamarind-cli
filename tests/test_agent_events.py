@@ -309,15 +309,41 @@ def test_a_reply_that_just_completes_is_not_polled_for_a_continuation(before):
     assert server.sleeps == []
 
 
-def test_a_failed_reread_for_a_continuation_still_ends_the_follow_cleanly():
+@pytest.mark.parametrize(
+    ("reread", "raises"),
+    [
+        # Gone (a rewind hid it): nothing to follow, and the reply itself ended fine.
+        (httpx.Response(404, json={"code": "not_found"}), None),
+        # A revoked key is never "nothing to follow".
+        (httpx.Response(401, json={"code": "invalid_api_key", "detail": "Invalid API key"}), AuthError),
+    ],
+)
+def test_a_failed_reread_for_a_continuation_ends_cleanly_unless_it_is_an_auth_failure(reread, raises):
     server = FakeAgentServer()
     server.on("GET", EVENTS, sse(frame("5.0", "approval.resolved", approval(status="approved"))
                                  + _status("6.0", "completed")))
-    server.on("GET", "/chats/chat_7Q/messages/msg_1", httpx.Response(404, json={"code": "not_found"}))
+    server.on("GET", "/chats/chat_7Q/messages/msg_1", reread)
 
     stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True)
+    if raises is not None:
+        with pytest.raises(raises):
+            list(stream)
+        return
     assert [e.id for e in stream] == ["5.0", "6.0"]
     assert stream.stop_reason == "final"
+
+
+def test_an_answer_that_has_not_started_within_the_wait_is_reported_pending_not_over():
+    server = FakeAgentServer()
+    server.on("GET", EVENTS, sse(frame("5.0", "approval.resolved", approval(status="approved"))
+                                 + _status("6.0", "completed")))
+    server.on("GET", "/chats/chat_7Q/messages/msg_1", httpx.Response(200, json=reply("completed")))
+
+    stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True,
+                                            continuation_wait=10)
+    assert [e.id for e in stream] == ["5.0", "6.0"]
+    assert stream.stop_reason == "continuation_pending"
+    assert sum(server.sleeps) >= 10
 
 
 def test_a_reply_that_ended_before_the_cursor_is_followed_into_its_continuation():

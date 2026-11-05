@@ -17,7 +17,7 @@ import typer
 
 from ...agent import Approval, Chat, Event, EventStream, Message
 from ...agent._contract import FINAL_MESSAGE_EVENTS
-from ...errors import AgentActionRequiredError, AgentReplyFailedError, TamarindError
+from ...errors import AgentActionRequiredError, AgentReplyFailedError, JobTimeoutError, TamarindError
 from .. import output
 
 app = typer.Typer(no_args_is_help=True)
@@ -390,6 +390,12 @@ def _follow(client: Any, chat_id: str, message_id: str, state: Any) -> None:
         raise typer.Exit(130)
     printer.finish()
     reply: Message = stream.message or client.agent.messages.get(chat_id, stream.message_id or message_id)
+    if stream.stop_reason == "continuation_pending":
+        raise JobTimeoutError(
+            f"Reply {reply.id} ended on your decision, and the agent's answer has not started yet. "
+            f"Follow it later: tamarind chat wait {chat_id} {reply.id}",
+            detail={"messageId": reply.id, "status": reply.status},
+        )
     if stream.stop_reason == "requires_action" or reply.status == "requires_action":
         _requires_action(client, chat_id, reply, state)
     if state.output.json:

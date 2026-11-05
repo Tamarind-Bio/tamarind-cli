@@ -39,9 +39,10 @@ if TYPE_CHECKING:
     from .transport import AgentTransport
 
 DEFAULT_MAX_RECONNECTS = 10
-# How many times to re-read a reply that a decided approval ended, waiting for the reply
-# that answers the decision to start (about 40 s at 1, 2, ... 5 s apart).
-CONTINUATION_POLLS = 10
+# How long to keep re-reading a reply that a decided approval ended, waiting for the reply
+# that answers the decision to start. Past it, the stream stops with
+# ``stop_reason == "continuation_pending"`` rather than reporting the exchange over.
+DEFAULT_CONTINUATION_WAIT = 120.0
 # The ``message.*`` events whose data is a Message (``message.continued`` is not, and an
 # unknown ``message.*`` type is skipped, never parsed as one).
 STATUS_EVENTS = frozenset({"message.created"} | {
@@ -117,7 +118,8 @@ class EventStream(Iterator[Event]):
     gives up with :class:`~tamarind.errors.TamarindError`.
 
     Read ``last_event_id`` to resume later, ``stop_reason`` (``"final"``,
-    ``"requires_action"``, ``"until"``) and ``message`` (the followed reply as of its last
+    ``"requires_action"``, ``"until"``, or ``"continuation_pending"``: a decided card ended
+    the reply and its answer had not started within ``continuation_wait`` seconds) and ``message`` (the followed reply as of its last
     status event) when it ends.
     """
 
@@ -132,6 +134,7 @@ class EventStream(Iterator[Event]):
         follow_continuations: bool = False,
         include_unknown: bool = False,
         max_reconnects: int = DEFAULT_MAX_RECONNECTS,
+        continuation_wait: float = DEFAULT_CONTINUATION_WAIT,
     ):
         if after is not None and parse_cursor(after) is None:
             raise ValueError("after must be an event id such as '1042.0'")
@@ -149,6 +152,8 @@ class EventStream(Iterator[Event]):
         self._follow_continuations = follow_continuations
         self._include_unknown = include_unknown
         self._max_reconnects = max_reconnects
+        self._continuation_wait = continuation_wait
+        self._pending = False
         self._retry_base = 0.5
         self.stop_reason: str | None = None
         self.message: Message | None = None
@@ -236,7 +241,7 @@ class EventStream(Iterator[Event]):
                         if following:
                             self._switch(following)
                             return "switch"
-                        self.stop_reason = "final"
+                        self.stop_reason = "continuation_pending" if self._pending else "final"
                         return "stop"
         except (httpx.TransportError, httpx.StreamError) as exc:
             del exc  # a cut connection: resume from the cursor
@@ -318,17 +323,24 @@ class EventStream(Iterator[Event]):
         if named or not self._card_decided or self.message.status != "completed":
             return named
         assert self.message_id is not None
-        for attempt in range(1, CONTINUATION_POLLS + 1):
-            self._transport.sleep(min(attempt, 5))
+        waited, attempt = 0.0, 0
+        while waited < self._continuation_wait:
+            attempt += 1
+            pause = float(min(attempt, 5))
+            self._transport.sleep(pause)
+            waited += pause
             try:
                 resp = self._transport.call(
                     "getMessage", {"chatId": self.chat_id, "messageId": self.message_id}
                 )
                 current = Message.from_wire(_object(resp))
+            except (AuthError, ContractError):
+                raise  # a revoked key or a broken contract is never "nothing to follow"
             except TamarindError:
-                return None  # best effort: the followed reply itself has ended fine
+                return None  # transient or gone (rewound): the followed reply itself ended fine
             if current.continued_by:
                 return current.continued_by
+        self._pending = True
         return None
 
     def _switch(self, message_id: str) -> None:
@@ -364,7 +376,7 @@ class EventStream(Iterator[Event]):
             if following:
                 self._switch(following)
                 return "switch"
-            self.stop_reason = "final"
+            self.stop_reason = "continuation_pending" if self._pending else "final"
             return "stop"
         if current.status == "requires_action":
             self.message = current

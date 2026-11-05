@@ -319,3 +319,21 @@ def test_wait_on_your_own_message_follows_its_reply():
     res = runner.invoke(app, ["--json", "chat", "wait", "chat_7Q", "msg_0"], env=ENV)
     assert res.exit_code == 0, res.output
     assert events.calls.last.request.url.params["messageId"] == "msg_1"
+
+
+@respx.mock
+def test_approve_wait_exits_7_when_the_answer_has_not_started(monkeypatch, capsys):
+    from tamarind.agent.events import EventStream
+
+    monkeypatch.setitem(EventStream.__init__.__kwdefaults__, "continuation_wait", 0.0)
+    respx.post(f"{API}chats/chat_7Q/approvals/apr_x").mock(
+        return_value=httpx.Response(200, json=approval(status="approved")))
+    respx.get(f"{API}chats/chat_7Q/events").mock(return_value=_reply_stream(
+        frame("5.0", "approval.resolved", approval(status="approved")),
+        frame("6.0", "message.completed", reply("completed")),
+    ))
+    code, out, err = _run(["--json", "chat", "approve", "chat_7Q", "apr_x", "--wait"], monkeypatch, capsys)
+    assert code == ExitCode.TIMEOUT
+    error = json.loads(err)["error"]
+    assert error["type"] == "JobTimeoutError"
+    assert "tamarind chat wait chat_7Q msg_1" in error["message"]
