@@ -422,3 +422,24 @@ def test_the_continuation_wait_counts_time_spent_in_requests(monkeypatch):
     assert stream.stop_reason == "continuation_pending"
     # Pauses alone (1+2+3+4 s) would allow four re-reads; with the requests' own time, one.
     assert len(server.requests_to("GET", "/chats/chat_7Q/messages/msg_1")) == 1
+
+
+def test_the_continuation_wait_counts_a_real_pause_once(monkeypatch):
+    import tamarind.agent.events as events_module
+
+    now = [0.0]
+
+    def real_sleep(seconds: float) -> None:  # a sleep that passes (fake) wall-clock time
+        now[0] += seconds
+
+    monkeypatch.setattr(events_module, "_monotonic", lambda: now[0])
+    server = FakeAgentServer()
+    server.on("GET", EVENTS, sse(frame("5.0", "approval.resolved", approval(status="approved"))
+                                 + _status("6.0", "completed")))
+    server.on("GET", "/chats/chat_7Q/messages/msg_1", httpx.Response(200, json=reply("completed")))
+
+    stream = server.agent(sleep=real_sleep).messages.follow(
+        "chat_7Q", "msg_1", follow_continuations=True, continuation_wait=30)
+    list(stream)
+    assert stream.stop_reason == "continuation_pending"
+    assert now[0] >= 30  # the whole wait, not half of it

@@ -332,10 +332,11 @@ class EventStream(Iterator[Event]):
         if named or not self._card_decided or self.message.status != "completed":
             return named
         assert self.message_id is not None
-        # Wall clock plus the pauses: a fake sleep (tests) adds no time, a real one adds both.
+        # The wall clock, which counts the pauses and the requests alike; the pauses on their
+        # own as a floor, for an injected sleep that does not pass real time.
         started = _monotonic()
         paused, attempt = 0.0, 0
-        while paused + (_monotonic() - started) < self._continuation_wait:
+        while max(paused, _monotonic() - started) < self._continuation_wait:
             attempt += 1
             pause = float(min(attempt, 5))
             self._transport.sleep(pause)

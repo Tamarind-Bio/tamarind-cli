@@ -49,6 +49,8 @@ _active_output_mode = OutputMode(json=not output.is_tty(), quiet=False)
 _GLOBAL_VALUE_OPTIONS = {"--api-key", "--api-base", "--catalog-base", "--profile"}
 _GLOBAL_FLAG_OPTIONS = {"--json", "--no-json", "--quiet", "-q"}
 _COMMAND_GROUPS = {"auth", "chat", "custom-tools", "files"}
+# Groups inside a group, named by their path.
+_NESTED_GROUPS = {("chat", "files"), ("chat", "subagents")}
 
 
 def _missing_command_message(argv: list[str]) -> str | None:
@@ -78,6 +80,8 @@ def _missing_command_message(argv: list[str]) -> str | None:
         return "Missing command."
     if len(remaining) == 1 and remaining[0] in _COMMAND_GROUPS:
         return f"Missing command for '{remaining[0]}'."
+    if tuple(remaining) in _NESTED_GROUPS:
+        return f"Missing command for '{' '.join(remaining)}'."
     return None
 
 
