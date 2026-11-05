@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Callable, TypeVar
+from urllib.parse import unquote, urlsplit
 
 import httpx
 
@@ -370,6 +371,15 @@ class Campaigns(_Resource):
     def candidate_structure_url(self, chat_id: str, candidate_id: str) -> str:
         resp = self._t.call("getCandidateStructure", {"chatId": chat_id, "candidateId": candidate_id})
         return _location(resp)
+
+    def download_structure(self, chat_id: str, candidate_id: str, dest: str | Path) -> Path:
+        """Save the structure to ``dest`` (a directory gets the URL's file name)."""
+        url = self.candidate_structure_url(chat_id, candidate_id)
+        target = Path(dest)
+        if target.is_dir():
+            leaf = unquote(urlsplit(url).path.rsplit("/", 1)[-1])
+            target = target / safe_name(leaf, fallback=f"{candidate_id}.cif")
+        return save_url(url, target)
 
     def jobs(
         self, chat_id: str, *, limit: int | None = None, cursor: str | None = None,

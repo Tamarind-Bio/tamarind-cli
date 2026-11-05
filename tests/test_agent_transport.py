@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from agent_fakes import FakeAgentServer, approval, reply
-from tamarind.errors import BudgetError, NotFoundError, RateLimitError, TamarindError, ValidationError
+from tamarind.errors import APIError, BudgetError, NotFoundError, RateLimitError, TamarindError, ValidationError
 
 SEND = "/chats/chat_7Q/messages"
 QUEUED = httpx.Response(202, json=reply("queued"))
@@ -145,3 +145,12 @@ def test_resolve_sends_only_the_options_given():
     import json
 
     assert json.loads(server.requests[0].content) == {"decision": "approve", "scope": "chat"}
+
+
+def test_a_redirect_is_returned_only_for_a_download_and_never_followed():
+    server = FakeAgentServer().on(
+        "GET", "/chats/chat_7Q", httpx.Response(301, headers={"Location": "https://elsewhere.test/"}))
+    with pytest.raises(APIError) as raised:
+        server.agent().chats.get("chat_7Q")
+    assert raised.value.status_code == 301  # the redirect itself, not a parse failure after it
+    assert len(server.requests) == 1

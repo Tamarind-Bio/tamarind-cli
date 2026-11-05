@@ -36,6 +36,9 @@ from ._contract import API_VERSION, OPERATIONS, VERSION_HEADER, Operation
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_MAX_RATE_LIMIT_WAIT = 60.0
 _RETRYABLE_STATUS = frozenset({500, 502, 503, 504})
+# The operations whose answer is a 302 to a presigned URL. Any other redirect is an error:
+# it is not followed (it would carry the API key) and not returned as a success.
+REDIRECTING = frozenset({"downloadChatFile", "getCandidateStructure"})
 
 
 def build_path(template: str, path_params: Mapping[str, str]) -> str:
@@ -129,7 +132,7 @@ class AgentTransport:
                     f"Network error talking to {self.http.base_url}: {exc}"
                     + ("" if op.retry_safe else " The request may have been applied; check before retrying.")
                 ) from exc
-            if resp.is_success or resp.is_redirect:
+            if resp.is_success or (resp.is_redirect and operation_id in REDIRECTING):
                 return resp
             delay = self._retry_delay(op, resp, attempt)
             if delay is None:

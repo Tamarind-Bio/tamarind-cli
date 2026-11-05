@@ -220,3 +220,35 @@ def test_usage_without_a_chat_reads_the_month():
     assert res.exit_code == 0, res.output
     assert route.calls.last.request.url.params["month"] == "2026-10"
     assert "2026-10: 3 h total" in res.stdout
+
+
+@respx.mock
+def test_send_wait_keeps_a_continuing_replys_parts_apart():
+    # The continuing reply numbers its parts from p_0 again.
+    respx.post(f"{API}chats/chat_7Q/messages").mock(return_value=httpx.Response(202, json=reply("queued")))
+    respx.get(f"{API}chats/chat_7Q/events").mock(side_effect=[
+        _reply_stream(
+            frame("1.0", "output_text.delta", {"partId": "p_0", "delta": "First."}),
+            frame("2.0", "output_text.done", {"partId": "p_0", "text": "First."}),
+            frame("3.0", "message.completed", reply("completed", continued_by="msg_2")),
+        ),
+        _reply_stream(
+            frame("4.0", "output_text.delta", {"partId": "p_0", "delta": "Sec"}, message="msg_2"),
+            frame("5.0", "output_text.done", {"partId": "p_0", "text": "Second."}, message="msg_2"),
+            frame("6.0", "message.completed", reply("completed", message_id="msg_2"), message="msg_2"),
+        ),
+    ])
+    res = runner.invoke(app, ["--no-json", "-q", "chat", "send", "chat_7Q", "x", "--wait"], env=ENV)
+    assert res.exit_code == 0, res.output
+    assert res.stdout == "First.\n\nSecond.\n"
+
+
+@respx.mock
+def test_structure_into_a_directory_takes_the_urls_file_name(tmp_path):
+    respx.get(f"{API}chats/chat_7Q/candidates/cand_07/structure").mock(return_value=httpx.Response(
+        302, headers={"Location": "https://s3.test/u/candidates/pdl1-b07.cif?X-Amz-Signature=s"}))
+    s3 = respx.get("https://s3.test/u/candidates/pdl1-b07.cif").mock(return_value=httpx.Response(200, content=b"data_\n"))
+    res = runner.invoke(app, ["--json", "chat", "structure", "chat_7Q", "cand_07", "--out", str(tmp_path)], env=ENV)
+    assert res.exit_code == 0, res.output
+    assert (tmp_path / "pdl1-b07.cif").read_bytes() == b"data_\n"
+    assert "x-api-key" not in s3.calls.last.request.headers

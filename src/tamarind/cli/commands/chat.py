@@ -17,7 +17,6 @@ from typing import Any, Iterable, Optional
 import typer
 
 from ...agent import Approval, Chat, Event, EventStream, Message
-from ...agent.resources import save_url
 from ...errors import AgentActionRequiredError, AgentReplyFailedError, TamarindError
 from .. import output
 
@@ -304,14 +303,15 @@ class _ReplyPrinter:
 
     json_mode: bool
     quiet: bool
-    printed: dict[str, str] = field(default_factory=dict)
-    last_part: Optional[str] = None
+    # Keyed by (reply, part): a continuing reply numbers its parts from p_0 again.
+    printed: dict[tuple[Optional[str], str], str] = field(default_factory=dict)
+    last_part: Optional[tuple[Optional[str], str]] = None
 
     def handle(self, event: Event) -> None:
         if self.json_mode:
             return
         data = event.data
-        part = str(data.get("partId") or "")
+        part = (event.message_id, str(data.get("partId") or ""))
         if event.type == "output_text.delta":
             self._write(part, str(data.get("delta") or ""))
         elif event.type == "output_text.done":
@@ -330,11 +330,11 @@ class _ReplyPrinter:
         elif event.type == "question.asked":
             self._status(f"? question {data.get('id')}")
 
-    def _write(self, part: str, text: str) -> None:
+    def _write(self, part: tuple[Optional[str], str], text: str) -> None:
         if not text:
             return
         if self.last_part is not None and part != self.last_part and self.printed.get(self.last_part):
-            typer.echo("\n", nl=False)
+            typer.echo("\n\n", nl=False)
         self.last_part = part
         self.printed[part] = self.printed.get(part, "") + text
         typer.echo(text, nl=False)
@@ -622,13 +622,12 @@ def structure(
     ctx: typer.Context,
     chat_id: str = typer.Argument(..., help="The chat id."),
     candidate_id: str = typer.Argument(..., help="The candidate id."),
-    out: Path = typer.Option(..., "--out", "-o", help="Where to write the structure file."),
+    out: Path = typer.Option(Path("."), "--out", "-o", help="A directory, or the file path to write."),
 ) -> None:
     """Download a candidate's predicted structure."""
     state = ctx.obj
     with state.sdk_client() as client:
-        url = client.agent.campaigns.candidate_structure_url(chat_id, candidate_id)
-    saved = save_url(url, out)
+        saved = client.agent.campaigns.download_structure(chat_id, candidate_id, out)
     output.emit({"candidateId": candidate_id, "path": str(saved)}, state.output, human=str(saved))
 
 

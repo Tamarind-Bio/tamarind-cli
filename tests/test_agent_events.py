@@ -192,15 +192,20 @@ def test_a_reply_that_already_ended_before_the_cursor_stops_on_its_status():
 
 def test_follow_continuations_hands_over_to_the_continuing_reply_from_its_start():
     server = FakeAgentServer()
+    rewound = frame("3.0", "chat.rewound", {"fromSequence": 1, "toSequence": 2}, message=None)
+    # The new reply's stream replays from the start: its own early event (4.0, filtered
+    # out of the first stream) must come through, the chat.rewound already seen must not.
     server.on("GET", EVENTS,
-              sse(_status("5.0", "completed", continued_by="msg_2")),
-              sse(_status("6.0", "in_progress", message_id="msg_2").replace('"msg_1"', '"msg_2"', 1)
+              sse(rewound + _status("5.0", "completed", continued_by="msg_2")),
+              sse(rewound
+                  + frame("4.0", "message.created", reply("queued", message_id="msg_2"), message="msg_2")
+                  + frame("6.0", "message.in_progress", reply("in_progress", message_id="msg_2"), message="msg_2")
                   + frame("8.0", "message.completed", reply("completed", message_id="msg_2"), message="msg_2")))
 
     stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True)
     events = list(stream)
 
-    assert [e.id for e in events] == ["5.0", "6.0", "8.0"]
+    assert [e.id for e in events] == ["3.0", "5.0", "4.0", "6.0", "8.0"]
     second = server.requests_to("GET", EVENTS)[1]
     assert second.url.params["messageId"] == "msg_2"
     assert "Last-Event-ID" not in second.headers

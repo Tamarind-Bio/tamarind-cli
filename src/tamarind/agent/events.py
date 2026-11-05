@@ -133,6 +133,10 @@ class EventStream(Iterator[Event]):
         self.message_id = message_id
         self.last_event_id = after
         self._cursor = parse_cursor(after) if after is not None else None
+        # After a continuation switch: the old stream's cursor. The new reply's events at or
+        # before it were filtered out of the old stream, so they still pass; anything else
+        # there (a `chat.rewound`, whose messageId is null) was already yielded.
+        self._floor: tuple[int, int] | None = None
         self._until = _until(until)
         self._follow_continuations = follow_continuations
         self._include_unknown = include_unknown
@@ -202,6 +206,9 @@ class EventStream(Iterator[Event]):
                         if cursor is not None:
                             if self._cursor is not None and cursor <= self._cursor:
                                 continue  # replayed after a resume: already seen
+                            if (self._floor is not None and cursor <= self._floor
+                                    and wire.get("messageId") != self.message_id):
+                                continue  # seen before a continuation switch (chat.rewound)
                             self._cursor = cursor
                         self.last_event_id = frame.id
                         progressed = True
@@ -279,6 +286,8 @@ class EventStream(Iterator[Event]):
         what this one already read, and the new reply may have begun before it."""
         self.message_id = message_id
         self.last_event_id = None
+        if self._cursor is not None:
+            self._floor = max(self._floor or self._cursor, self._cursor)
         self._cursor = None
         self.message = None
         self._status = None
