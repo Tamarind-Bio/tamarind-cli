@@ -32,11 +32,7 @@ def submit_job(
     settings: dict[str, Any],
     low_priority: bool = False,
 ) -> Any:
-    """POST /submit-job — submit a single job. Body: {jobName, type, settings, jobSource}.
-
-    ``low_priority`` asks for the low-priority tier: 20% off, no completion guarantee, and a job
-    not started within 7 days stops with no charge. The server answers 422 if it can't honour it.
-    """
+    """POST /submit-job — submit a single job. Body: {jobName, type, settings, jobSource}."""
     body: dict[str, Any] = {
         "jobName": job_name,
         "type": job_type,
@@ -102,7 +98,7 @@ def submit_batch(
     max_runtime_seconds: int | None = None,
     low_priority: bool = False,
 ) -> Any:
-    """POST /submit-batch — submit many jobs as one batch. See ``submit_job`` for ``low_priority``."""
+    """POST /submit-batch — submit many jobs as one batch."""
     body: dict[str, Any] = {
         "batchName": batch_name,
         "type": job_type,
