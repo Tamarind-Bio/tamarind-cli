@@ -92,6 +92,8 @@ def test_send_wait_exits_10_with_the_approval_to_answer_when_the_reply_stops_on_
     respx.get(f"{API}chats/chat_7Q/events").mock(return_value=_reply_stream(
         frame("4.0", "message.requires_action", reply("requires_action", approvals=[approval()])),
     ))
+    respx.get(f"{API}chats/chat_7Q/messages/msg_1").mock(
+        return_value=httpx.Response(200, json=reply("requires_action", approvals=[approval()])))
 
     code, out, err = _run(["--json", "chat", "send", "chat_7Q", "x", "--wait"], monkeypatch, capsys)
 

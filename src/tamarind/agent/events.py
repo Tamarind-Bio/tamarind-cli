@@ -25,6 +25,7 @@ from collections.abc import Callable, Generator, Iterable, Iterator
 from dataclasses import dataclass
 import json
 import re
+import time
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -46,6 +47,7 @@ if TYPE_CHECKING:
     from .transport import AgentTransport
 
 DEFAULT_MAX_RECONNECTS = 10
+_monotonic = time.monotonic  # the continuation wait's clock (a test replaces it)
 # How long to keep re-reading a reply that a decided approval ended, waiting for the reply
 # that answers the decision to start. Past it, the stream stops with
 # ``stop_reason == "continuation_pending"`` rather than reporting the exchange over.
@@ -330,20 +332,24 @@ class EventStream(Iterator[Event]):
         if named or not self._card_decided or self.message.status != "completed":
             return named
         assert self.message_id is not None
-        waited, attempt = 0.0, 0
-        while waited < self._continuation_wait:
+        # Wall clock plus the pauses: a fake sleep (tests) adds no time, a real one adds both.
+        started = _monotonic()
+        paused, attempt = 0.0, 0
+        while paused + (_monotonic() - started) < self._continuation_wait:
             attempt += 1
             pause = float(min(attempt, 5))
             self._transport.sleep(pause)
-            waited += pause
+            paused += pause
             try:
                 resp = self._transport.call(
                     "getMessage", {"chatId": self.chat_id, "messageId": self.message_id}
                 )
                 current = Message.from_wire(_object(resp))
+            except NotFoundError:
+                return None  # gone (a rewind hid it): there is nothing left to follow
             except TamarindError as exc:
-                if _transient_or_gone(exc):
-                    return None  # the followed reply itself ended fine; nothing more to find
+                if _transient(exc):
+                    continue  # not an answer either way: ask again until the wait is spent
                 raise  # a revoked key, a refusal (403) or a broken contract is never "done"
             if current.continued_by:
                 return current.continued_by
@@ -366,10 +372,8 @@ class EventStream(Iterator[Event]):
     def _settled(self) -> str | None:
         """After a clean close of a reply's stream: "stop" when that reply ended or waits on
         a card, "switch" when it ended and a continuing reply is to be followed, None when
-        the connection closed early (reconnect)."""
-        if self._status == "requires_action":
-            self.stop_reason = "requires_action"
-            return "stop"
+        the connection closed early (reconnect). Always re-read, even after a
+        ``requires_action`` event: the card may have been decided elsewhere since."""
         assert self.message_id is not None
         resp = self._transport.call(
             "getMessage", {"chatId": self.chat_id, "messageId": self.message_id}
@@ -392,10 +396,10 @@ class EventStream(Iterator[Event]):
         return None
 
 
-def _transient_or_gone(exc: TamarindError) -> bool:
-    """A re-read failure that means "nothing more to find" rather than a refusal: the reply
-    is gone (rewound), the server is briefly unavailable, or the connection was lost."""
-    if isinstance(exc, (NotFoundError, RateLimitError)):
+def _transient(exc: TamarindError) -> bool:
+    """A re-read failure that says nothing about the reply: rate limited, the server briefly
+    unavailable, or the connection lost (a refusal or a broken contract is not)."""
+    if isinstance(exc, RateLimitError):
         return True
     if isinstance(exc, APIError):
         return exc.status_code >= 500

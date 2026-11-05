@@ -160,13 +160,22 @@ def test_a_chat_stream_closed_while_idle_reconnects_from_its_cursor():
     assert "messageId" not in connects[0].url.params
 
 
-def test_a_reply_that_stops_on_a_card_ends_the_follow_without_reconnecting():
+@pytest.mark.parametrize(
+    ("now", "stop_reason"),
+    [
+        ("requires_action", "requires_action"),
+        # Decided elsewhere between the event and the close: the re-read is the truth.
+        ("completed", "final"),
+    ],
+)
+def test_a_reply_that_stops_on_a_card_ends_the_follow_on_its_reread_status(now, stop_reason):
     server = FakeAgentServer()
     server.on("GET", EVENTS, sse(_status("4.0", "requires_action")))
+    server.on("GET", "/chats/chat_7Q/messages/msg_1", httpx.Response(200, json=reply(now)))
 
     stream = server.agent().messages.follow("chat_7Q", "msg_1")
     assert [e.type for e in stream] == ["message.requires_action"]
-    assert stream.stop_reason == "requires_action"
+    assert stream.stop_reason == stop_reason
     assert len(server.requests_to("GET", EVENTS)) == 1
 
 
@@ -378,3 +387,38 @@ def test_wait_raises_rather_than_returning_the_old_reply_when_the_answer_is_pend
     finally:
         EventStream.__init__.__kwdefaults__["continuation_wait"] = original
     assert raised.value.detail["stopReason"] == "continuation_pending"
+
+
+def test_a_transient_reread_failure_keeps_waiting_for_the_answer():
+    server = FakeAgentServer()
+    server.on("GET", EVENTS,
+              sse(frame("5.0", "approval.resolved", approval(status="approved")) + _status("6.0", "completed")),
+              sse(frame("8.0", "message.completed", reply("completed", message_id="msg_2"), message="msg_2")))
+    # Four 503s exhaust one re-read's retries; the next re-read names the answer.
+    unavailable = httpx.Response(503, json={"code": "unavailable", "retryable": True})
+    server.on("GET", "/chats/chat_7Q/messages/msg_1", unavailable, unavailable, unavailable, unavailable,
+              httpx.Response(200, json=reply("completed", continued_by="msg_2")))
+
+    stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True)
+    assert [e.id for e in stream] == ["5.0", "6.0", "8.0"]
+    assert stream.message_id == "msg_2"
+
+
+def test_the_continuation_wait_counts_time_spent_in_requests(monkeypatch):
+    import itertools
+
+    import tamarind.agent.events as events_module
+
+    clock = itertools.count(0, 6)  # each reading 6 s later: slow re-reads
+    monkeypatch.setattr(events_module, "_monotonic", lambda: float(next(clock)))
+    server = FakeAgentServer()
+    server.on("GET", EVENTS, sse(frame("5.0", "approval.resolved", approval(status="approved"))
+                                 + _status("6.0", "completed")))
+    server.on("GET", "/chats/chat_7Q/messages/msg_1", httpx.Response(200, json=reply("completed")))
+
+    stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True,
+                                            continuation_wait=10)
+    list(stream)
+    assert stream.stop_reason == "continuation_pending"
+    # Pauses alone (1+2+3+4 s) would allow four re-reads; with the requests' own time, one.
+    assert len(server.requests_to("GET", "/chats/chat_7Q/messages/msg_1")) == 1
