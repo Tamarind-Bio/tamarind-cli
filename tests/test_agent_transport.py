@@ -156,12 +156,19 @@ def test_resolve_sends_only_the_options_given():
     assert json.loads(server.requests[0].content) == {"decision": "approve", "scope": "chat"}
 
 
-def test_a_redirect_is_returned_only_for_a_download_and_never_followed():
-    server = FakeAgentServer().on(
-        "GET", "/chats/chat_7Q", httpx.Response(301, headers={"Location": "https://elsewhere.test/"}))
+@pytest.mark.parametrize(
+    ("method", "path", "call", "status"),
+    [
+        ("GET", "/chats/chat_7Q", lambda a: a.chats.get("chat_7Q"), 301),
+        # A download answers 302 only: a 307 (a proxy's login page) is not the file.
+        ("GET", "/chats/chat_7Q/files/file_k2/content", lambda a: a.files.download_url("chat_7Q", "file_k2"), 307),
+    ],
+)
+def test_a_redirect_is_returned_only_as_a_downloads_302_and_never_followed(method, path, call, status):
+    server = FakeAgentServer().on(method, path, httpx.Response(status, headers={"Location": "https://elsewhere.test/"}))
     with pytest.raises(APIError) as raised:
-        server.agent().chats.get("chat_7Q")
-    assert raised.value.status_code == 301  # the redirect itself, not a parse failure after it
+        call(server.agent())
+    assert raised.value.status_code == status  # the redirect itself, not a parse failure after it
     assert len(server.requests) == 1
 
 

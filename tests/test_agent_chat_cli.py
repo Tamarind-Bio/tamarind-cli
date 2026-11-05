@@ -253,12 +253,12 @@ def test_send_wait_keeps_a_continuing_replys_parts_apart():
         _reply_stream(
             frame("1.0", "output_text.delta", {"partId": "p_0", "delta": "First."}),
             frame("2.0", "output_text.done", {"partId": "p_0", "text": "First."}),
-            frame("3.0", "message.completed", reply("completed", continued_by="msg_2")),
+            frame("3.0", "message.completed", reply("completed", continued_by="msg_2", text="First.")),
         ),
         _reply_stream(
             frame("4.0", "output_text.delta", {"partId": "p_0", "delta": "Sec"}, message="msg_2"),
             frame("5.0", "output_text.done", {"partId": "p_0", "text": "Second."}, message="msg_2"),
-            frame("6.0", "message.completed", reply("completed", message_id="msg_2"), message="msg_2"),
+            frame("6.0", "message.completed", reply("completed", message_id="msg_2", text="Second."), message="msg_2"),
         ),
     ])
     res = runner.invoke(app, ["--no-json", "-q", "chat", "send", "chat_7Q", "x", "--wait"], env=ENV)
@@ -279,24 +279,29 @@ def test_structure_into_a_directory_takes_the_urls_file_name(tmp_path):
 
 @respx.mock
 @pytest.mark.parametrize(
-    ("frames", "expected"),
+    ("frames", "final", "expected"),
     [
         # Piped (not a terminal): only the authoritative text, never the corrected draft.
         ([frame("1.0", "output_text.delta", {"partId": "p_0", "delta": "The answer is 5"}),
           frame("2.0", "output_text.done", {"partId": "p_0", "text": "The answer is 6."})],
-         "The answer is 6.\n"),
+         "The answer is 6.", "The answer is 6.\n"),
         # A discarded draft never reaches stdout.
         ([frame("1.0", "output_text.delta", {"partId": "p_0", "delta": "draft"}),
           frame("2.0", "output_text.discarded", {"partId": "p_0"}),
           frame("3.0", "output_text.delta", {"partId": "p_1", "delta": "final"}),
           frame("4.0", "output_text.done", {"partId": "p_1", "text": "final"})],
-         "final\n"),
+         "final", "final\n"),
+        # ...even one discarded after its output_text.done.
+        ([frame("1.0", "output_text.done", {"partId": "p_0", "text": "draft"}),
+          frame("2.0", "output_text.discarded", {"partId": "p_0"}),
+          frame("3.0", "output_text.done", {"partId": "p_1", "text": "final"})],
+         "final", "final\n"),
     ],
 )
-def test_piped_human_output_is_exactly_the_final_text(frames, expected):
+def test_piped_human_output_is_exactly_the_final_text(frames, final, expected):
     respx.post(f"{API}chats/chat_7Q/messages").mock(return_value=httpx.Response(202, json=reply("queued")))
     respx.get(f"{API}chats/chat_7Q/events").mock(return_value=_reply_stream(
-        *frames, frame("9.0", "message.completed", reply("completed"))))
+        *frames, frame("9.0", "message.completed", reply("completed", text=final))))
     res = runner.invoke(app, ["--no-json", "-q", "chat", "send", "chat_7Q", "x", "--wait"], env=ENV)
     assert res.exit_code == 0, res.output
     assert res.stdout == expected

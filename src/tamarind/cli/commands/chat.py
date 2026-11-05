@@ -16,6 +16,7 @@ from typing import Any, Iterable, Optional
 import typer
 
 from ...agent import Approval, Chat, Event, EventStream, Message
+from ...agent._contract import FINAL_MESSAGE_EVENTS
 from ...errors import AgentActionRequiredError, AgentReplyFailedError, TamarindError
 from .. import output
 
@@ -304,8 +305,9 @@ class _ReplyPrinter:
     ``live`` (stdout is a terminal): deltas as they come, then ``output_text.done`` as the
     authority, writing only what the deltas had not shown; a correction or a discarded
     draft already on screen cannot be taken back, so it is flagged on stderr and the
-    corrected text written. Not live (piped): each part is written once, as its
-    ``output_text.done`` text, so stdout holds exactly the final text and never a draft.
+    corrected text written. Not live (piped): nothing until a reply ends, then that
+    reply's final text (its Message), so stdout holds exactly what the transcript keeps:
+    a part can still be discarded after its ``output_text.done``.
     Parts are keyed by (reply, part): a continuing reply numbers its parts from p_0 again.
     """
 
@@ -321,6 +323,13 @@ class _ReplyPrinter:
             return
         data = event.data
         part = (event.message_id, str(data.get("partId") or ""))
+        if not self.live:
+            if event.type in FINAL_MESSAGE_EVENTS:
+                self._write((event.message_id, ""), event.message().text)
+            elif event.type in ("step.started", "approval.requested", "question.asked"):
+                pass  # status lines below
+            else:
+                return
         if event.type == "output_text.delta":
             if self.live:
                 self._write(part, str(data.get("delta") or ""))
