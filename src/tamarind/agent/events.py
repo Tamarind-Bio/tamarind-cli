@@ -284,6 +284,10 @@ class EventStream(Iterator[Event]):
         if event.type in STATUS_EVENTS:
             self.message = event.message()
             self._status = self.message.status
+            if event.type == "message.in_progress":
+                # Decided while its turn still ran: the reply went on in place, so no new
+                # reply will answer that decision.
+                self._card_decided = False
         elif event.type == "message.continued":
             continued = event.data.get("continuedBy")
             if isinstance(continued, str) and continued:
@@ -314,10 +318,13 @@ class EventStream(Iterator[Event]):
         assert self.message_id is not None
         for attempt in range(1, CONTINUATION_POLLS + 1):
             self._transport.sleep(min(attempt, 5))
-            resp = self._transport.call(
-                "getMessage", {"chatId": self.chat_id, "messageId": self.message_id}
-            )
-            current = Message.from_wire(_object(resp))
+            try:
+                resp = self._transport.call(
+                    "getMessage", {"chatId": self.chat_id, "messageId": self.message_id}
+                )
+                current = Message.from_wire(_object(resp))
+            except TamarindError:
+                return None  # best effort: the followed reply itself has ended fine
             if current.continued_by:
                 return current.continued_by
         return None

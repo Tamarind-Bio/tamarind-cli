@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-import re
 from typing import Any, Iterable, Optional
 
 import typer
@@ -25,9 +24,6 @@ files_app = typer.Typer(no_args_is_help=True)
 subagents_app = typer.Typer(no_args_is_help=True)
 app.add_typer(files_app, name="files", help="Upload inputs and download what the agent made.")
 app.add_typer(subagents_app, name="subagents", help="Helper agents a reply started.")
-
-_FILE_ID = re.compile(r"^file_[A-Za-z0-9_-]+$")
-
 
 def _raw(obj: Any) -> Any:
     return dict(obj.raw) if hasattr(obj, "raw") else obj
@@ -166,10 +162,13 @@ def rewind(
 # ── messages ──
 
 def _file_ids(client: Any, files: list[str], state: Any) -> list[str]:
-    """``--file`` values: a ``file_…`` id is used as is; a path is uploaded first."""
+    """``--file`` values: an existing local file is uploaded first; anything else starting
+    ``file_`` is a file id, used as is (ids are opaque: a listed one is ``file_w<path>.<tag>``)."""
     ids: list[str] = []
     for value in files:
-        if _FILE_ID.match(value) and not Path(value).exists():
+        if not Path(value).is_file():
+            if not value.startswith("file_"):
+                raise TamarindError(f"--file {value!r} is neither a local file nor a file_ id.")
             ids.append(value)
             continue
         slot = client.agent.files.upload(value)
@@ -182,7 +181,7 @@ def _file_ids(client: Any, files: list[str], state: Any) -> list[str]:
 def send(
     ctx: typer.Context,
     chat_id: str = typer.Argument(..., help="The chat id."),
-    text: Optional[str] = typer.Argument(None, help="Your message. Omit to send only files."),
+    text: str = typer.Argument(..., help="Your message (also say what to do with any --file)."),
     file: list[str] = typer.Option([], "--file", "-f", help="A local path to upload, or a file_ id. Repeatable."),
     interrupt: bool = typer.Option(False, "--interrupt", help="Stop the reply in progress and run this next."),
     wait: bool = typer.Option(False, "--wait", help="Stream the reply and wait for it to finish."),

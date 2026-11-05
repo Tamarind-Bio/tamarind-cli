@@ -293,10 +293,28 @@ def test_a_reply_ended_by_a_decided_card_is_followed_into_the_answer_once_it_sta
     assert len(server.requests_to("GET", "/chats/chat_7Q/messages/msg_1")) == 2
 
 
-def test_a_reply_that_just_completes_is_not_polled_for_a_continuation():
+@pytest.mark.parametrize("before", [
+    "",  # nothing was decided
+    # Decided while the turn still ran: it went on in place, no new reply answers it.
+    frame("4.0", "approval.resolved", approval(status="approved")) + _status("5.0", "in_progress"),
+])
+def test_a_reply_that_just_completes_is_not_polled_for_a_continuation(before):
     server = FakeAgentServer()
-    server.on("GET", EVENTS, sse(_status("6.0", "completed")))
+    server.on("GET", EVENTS, sse(before + _status("6.0", "completed")))
 
     stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True)
-    assert [e.id for e in stream] == ["6.0"]
+    assert [e.id for e in stream][-1] == "6.0"
+    assert stream.stop_reason == "final"
     assert server.requests_to("GET", "/chats/chat_7Q/messages/msg_1") == []
+    assert server.sleeps == []
+
+
+def test_a_failed_reread_for_a_continuation_still_ends_the_follow_cleanly():
+    server = FakeAgentServer()
+    server.on("GET", EVENTS, sse(frame("5.0", "approval.resolved", approval(status="approved"))
+                                 + _status("6.0", "completed")))
+    server.on("GET", "/chats/chat_7Q/messages/msg_1", httpx.Response(404, json={"code": "not_found"}))
+
+    stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True)
+    assert [e.id for e in stream] == ["5.0", "6.0"]
+    assert stream.stop_reason == "final"

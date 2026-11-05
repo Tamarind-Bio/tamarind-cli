@@ -111,13 +111,15 @@ def iterate(fetch: Callable[[str | None], Page[T]]) -> Iterator[T]:
 
 
 def text_input(text: str | None, file_ids: Sequence[str] = ()) -> list[dict[str, str]]:
-    """A message ``input``: one text part, then one part per file id."""
-    parts: list[dict[str, str]] = []
-    if text:
-        parts.append({"type": "text", "text": text})
+    """A message ``input``: one text part, then one part per file id.
+
+    The text is required: the server refuses a message whose text is blank (400), files
+    or not, so a file needs a sentence saying what to do with it.
+    """
+    if not text or not text.strip():
+        raise ValueError("a message needs text (say what to do with any files)")
+    parts: list[dict[str, str]] = [{"type": "text", "text": text}]
     parts.extend({"type": "file", "fileId": file_id} for file_id in file_ids)
-    if not parts:
-        raise ValueError("a message needs text or at least one file")
     return parts
 
 

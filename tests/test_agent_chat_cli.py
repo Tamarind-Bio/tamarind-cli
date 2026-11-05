@@ -13,7 +13,7 @@ from typer.testing import CliRunner
 from agent_fakes import approval, frame, reply, sse
 from tamarind.cli import main as main_module
 from tamarind.cli.main import app
-from tamarind.errors import ExitCode
+from tamarind.errors import ExitCode, TamarindError
 
 runner = CliRunner()
 API = "https://api.test/api/"
@@ -117,11 +117,27 @@ def test_send_wait_exits_9_when_the_reply_ends_badly(status, monkeypatch, capsys
 
 
 @respx.mock
-def test_send_with_a_file_id_attaches_it_without_uploading():
+@pytest.mark.parametrize("file_id", [
+    "file_u0123456789abcdef0123456789abcdef",  # an upload
+    "file_wboltz-model_0.0123456789abcdef0123456789abcdef",  # a listed file: opaque, with a dot
+])
+def test_send_with_a_file_id_attaches_it_without_uploading(file_id):
     send = respx.post(f"{API}chats/chat_7Q/messages").mock(return_value=httpx.Response(202, json=reply("queued")))
-    res = runner.invoke(app, ["--json", "chat", "send", "chat_7Q", "look", "--file", "file_9f2"], env=ENV)
+    res = runner.invoke(app, ["--json", "chat", "send", "chat_7Q", "look", "--file", file_id], env=ENV)
     assert res.exit_code == 0, res.output
-    assert json.loads(send.calls.last.request.content)["input"][1] == {"type": "file", "fileId": "file_9f2"}
+    assert json.loads(send.calls.last.request.content)["input"][1] == {"type": "file", "fileId": file_id}
+
+
+@respx.mock
+@pytest.mark.parametrize(("argv", "code"), [
+    (["chat_7Q", "--file", "file_9f2"], 2),  # no text: the server refuses a blank message
+    (["chat_7Q", "look", "--file", "missing.pdb"], 1),  # neither a local file nor an id
+])
+def test_send_refuses_before_sending_what_the_api_would_reject(argv, code):
+    send = respx.post(f"{API}chats/chat_7Q/messages").mock(return_value=httpx.Response(202, json=reply("queued")))
+    res = runner.invoke(app, ["--json", "chat", "send", *argv], env=ENV)
+    assert res.exit_code == code or (code == 1 and isinstance(res.exception, TamarindError))
+    assert not send.called
 
 
 @respx.mock
