@@ -537,3 +537,20 @@ def test_a_refused_reconnect_still_waits_the_servers_retry():
 
     list(server.agent().messages.follow("chat_7Q", "msg_1"))
     assert server.sleeps[:2] == [server.sleeps[0], 3.0] and server.sleeps[0] >= 3.0
+
+
+@pytest.mark.parametrize(("expect", "followed"), [(True, True), (False, False)])
+def test_a_card_that_outlived_a_cancelled_turn_is_followed_when_its_decision_was_ours(expect, followed):
+    server = FakeAgentServer()
+    server.on("GET", EVENTS,
+              sse(frame("4.0", "approval.requested", approval()) + _status("5.0", "cancelled")),
+              sse(frame("8.0", "message.completed", reply("completed", message_id="msg_2"), message="msg_2")))
+    server.on("GET", "/chats/chat_7Q/messages/msg_1",
+              httpx.Response(200, json=reply("cancelled", continued_by="msg_2")))
+
+    stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True,
+                                            expect_continuation=expect)
+    ids = [e.id for e in stream]
+    assert (ids[-1] == "8.0") is followed
+    # Without the caller's decision, a cancelled reply is just over: not re-read.
+    assert bool(server.requests_to("GET", "/chats/chat_7Q/messages/msg_1")) is expect

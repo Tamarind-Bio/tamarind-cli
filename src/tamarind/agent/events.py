@@ -147,6 +147,7 @@ class EventStream(Iterator[Event]):
         include_unknown: bool = False,
         max_reconnects: int = DEFAULT_MAX_RECONNECTS,
         continuation_wait: float = DEFAULT_CONTINUATION_WAIT,
+        expect_continuation: bool = False,
     ):
         if after is not None and parse_cursor(after) is None:
             raise ValueError("after must be an event id such as '1042.0'")
@@ -165,6 +166,11 @@ class EventStream(Iterator[Event]):
         self._include_unknown = include_unknown
         self._max_reconnects = max_reconnects
         self._continuation_wait = continuation_wait
+        # The caller just decided a card of this reply (approve/deny --wait): a reply that
+        # raised one and ended cancelled or incomplete is still answered by a new reply,
+        # since a card outlives its turn, and that answer may start after its decision.
+        self._expect_continuation = expect_continuation
+        self._card_raised = False
         self._pending = False
         # The server's `retry:` (seconds): the least time to wait before reconnecting.
         self._retry_floor = 0.0
@@ -316,6 +322,7 @@ class EventStream(Iterator[Event]):
             if isinstance(continued, str) and continued:
                 self._continued_by = continued
         elif event.type in ("approval.resolved", "approval.requested"):
+            self._card_raised = True
             # A decided card ends this reply, and the answer comes as a NEW reply named by
             # this one's continuedBy once it starts (after this stream has closed).
             self._card_decided = event.type == "approval.resolved" or self._card_decided
@@ -336,8 +343,13 @@ class EventStream(Iterator[Event]):
         just done)."""
         assert self.message is not None
         named = self.message.continued_by or self._continued_by
-        if named or not self._card_decided or self.message.status != "completed":
+        if named:
             return named
+        decided = self._card_decided and self.message.status == "completed"
+        outlived = (self._expect_continuation and self._card_raised
+                    and self.message.status in ("cancelled", "incomplete"))
+        if not (decided or outlived):
+            return None
         assert self.message_id is not None
         # The wall clock, which counts the pauses and the requests alike; the pauses on their
         # own as a floor, for an injected sleep that does not pass real time.
@@ -390,6 +402,8 @@ class EventStream(Iterator[Event]):
         self._status = None
         self._continued_by = None
         self._card_decided = False
+        self._card_raised = False
+        self._expect_continuation = False  # that decision was this reply's, not the next's
 
     def _settled(self) -> str | None:
         """After a clean close of a reply's stream: "stop" when that reply ended or waits on
