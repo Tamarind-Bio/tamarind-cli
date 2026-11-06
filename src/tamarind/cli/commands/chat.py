@@ -62,6 +62,8 @@ def new(
     per_job_hours: Optional[float] = typer.Option(None, "--per-job-hours", help="Largest job auto-approve may submit."),
     auto_approve: Optional[bool] = typer.Option(None, "--auto-approve/--no-auto-approve", help="Submit jobs within budget without asking."),
     agent_id: Optional[str] = typer.Option(None, "--agent-id", help="A saved agent from the agent builder."),
+    idempotency_key: Optional[str] = typer.Option(
+        None, "--idempotency-key", help="Reuse the key from a failed attempt to make the retry safe."),
 ) -> None:
     """Create a chat."""
     state = ctx.obj
@@ -69,6 +71,7 @@ def new(
         chat = client.agent.chats.create(
             title=title, effort=effort, mode=mode, workflow=workflow, budget_hours=budget_hours,
             per_job_hours=per_job_hours, auto_approve=auto_approve, agent_id=agent_id,
+            idempotency_key=idempotency_key,
         )
     output.emit(_raw(chat), state.output, human=f"{chat.id}  {chat.web_url or ''}".rstrip())
 
@@ -505,6 +508,8 @@ def answer(
     text: Optional[str] = typer.Option(None, "--text", help="One answer for every question on the card."),
     questions: list[str] = typer.Option([], "--question", help="A question's text. Repeatable; pairs with --choice."),
     choices: list[str] = typer.Option([], "--choice", help="Your answer to the --question in the same position."),
+    idempotency_key: Optional[str] = typer.Option(
+        None, "--idempotency-key", help="Reuse the key from a failed attempt to make the retry safe."),
 ) -> None:
     """Answer a question the agent is waiting on (--text, or --question/--choice pairs)."""
     state = ctx.obj
@@ -513,7 +518,8 @@ def answer(
         raise typer.BadParameter("give one --choice for each --question", param_hint="--choice")
     answers: dict[str, str] = dict(zip(questions, choices))
     with state.sdk_client() as client:
-        result = client.agent.questions.answer(chat_id, question_id, answers=answers or None, text=text)
+        result = client.agent.questions.answer(chat_id, question_id, answers=answers or None, text=text,
+                                               idempotency_key=idempotency_key)
     output.emit(_raw(result), state.output, human=f"{result.id}  {result.status}")
 
 
@@ -704,6 +710,8 @@ def export(
     chat_id: str = typer.Argument(..., help="The chat id."),
     export_id: Optional[str] = typer.Option(None, "--id", help="Check an export already started."),
     format: Optional[str] = typer.Option(None, "--format", help="zip (default) or csv."),
+    idempotency_key: Optional[str] = typer.Option(
+        None, "--idempotency-key", help="Reuse the key from a failed attempt to make the retry safe."),
 ) -> None:
     """Start an export of the chat's campaign results, or check one with --id."""
     state = ctx.obj
@@ -711,7 +719,8 @@ def export(
         if export_id:
             result = client.agent.campaigns.get_export(chat_id, export_id)
         else:
-            result = client.agent.campaigns.create_export(chat_id, format=format)
+            result = client.agent.campaigns.create_export(chat_id, format=format,
+                                                          idempotency_key=idempotency_key)
     # downloadUrl is presigned: JSON carries it (that is what it is for), the human line does not.
     output.emit(_raw(result), state.output, human=f"{result.id}  {result.status}")
 

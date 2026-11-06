@@ -176,6 +176,7 @@ class EventStream(Iterator[Event]):
         self._decided_approval = decided_approval
         # This reply raised it: seen in the stream, or taken on the caller's word when the
         # follow resumes from a cursor that may be past its approval.requested.
+        self._resumed = after is not None
         self._decided_raised = decided_approval is not None and after is not None
         self._decided_resolved = False  # its approval.resolved is in this stream
         self._decided_spent = False  # ...and the reply then went on in place
@@ -331,7 +332,10 @@ class EventStream(Iterator[Event]):
             if event.type == "message.in_progress":
                 # Decided while its turn still ran: the reply went on in place, so no new
                 # reply will answer that decision (nor, if it then ends early, the card).
-                if self._decided_resolved:
+                # Taken up in place: its resolution is in this stream, or the follow resumed
+                # past it (the card raised before the cursor) and the reply runs again: a
+                # reply that ended on its card goes straight to its end once decided.
+                if self._decided_resolved or (self._resumed and self._decided_raised):
                     self._decided_spent = True
                 self._card_decided = False
         elif event.type == "message.continued":
@@ -340,6 +344,8 @@ class EventStream(Iterator[Event]):
                 self._continued_by = continued
         elif event.type in ("approval.resolved", "approval.requested"):
             if self._decided_approval is not None and event.data.get("id") == self._decided_approval:
+                if event.type == "approval.requested":
+                    self._decided_spent = False  # raised here: anything before is not its end
                 self._decided_raised = True
                 self._decided_resolved = self._decided_resolved or event.type == "approval.resolved"
             # A decided card ends this reply, and the answer comes as a NEW reply named by

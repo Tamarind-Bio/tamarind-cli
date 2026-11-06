@@ -651,3 +651,15 @@ def test_a_queued_replys_stream_closing_until_it_starts_is_never_counted_as_fail
     stream = EventStream(server.agent().transport, "chat_7Q", message_id="msg_1", max_reconnects=3)
     assert [e.id for e in stream] == ["9.0"]
     assert stream.stop_reason == "final"
+
+
+def test_a_follow_resumed_past_a_decision_taken_up_in_place_ends_at_once_on_completion():
+    server = FakeAgentServer()
+    # Resumed after the approval.resolved: the reply runs again, then completes. Nothing to await.
+    server.on("GET", EVENTS, sse(_status("6.0", "in_progress") + _status("7.0", "completed")))
+
+    stream = server.agent().messages.follow("chat_7Q", "msg_1", after="5.0", follow_continuations=True,
+                                            decided_approval="apr_x")
+    assert [e.id for e in stream] == ["6.0", "7.0"]
+    assert stream.stop_reason == "final"
+    assert server.requests_to("GET", "/chats/chat_7Q/messages/msg_1") == []

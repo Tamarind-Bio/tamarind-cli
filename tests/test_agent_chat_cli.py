@@ -423,3 +423,29 @@ def test_a_send_whose_answer_is_lost_names_its_idempotency_key(monkeypatch, caps
     assert code == 1
     assert error["detail"]["idempotencyKey"] == key
     assert f"--idempotency-key {key}" in error["message"]
+
+
+@respx.mock
+@pytest.mark.parametrize(("argv", "method", "path", "ok"), [
+    (["chat", "new", "--title", "t"], "POST", "chats", (201, CHAT)),
+    (["chat", "send", "chat_7Q", "hi"], "POST", "chats/chat_7Q/messages", (202, reply("queued"))),
+    (["chat", "answer", "chat_7Q", "q_8c", "--text", "A"], "POST", "chats/chat_7Q/questions/q_8c",
+     (200, {"id": "q_8c", "status": "answered", "questions": [], "createdAt": "x"})),
+    (["chat", "export", "chat_7Q"], "POST", "chats/chat_7Q/exports", (202, {"id": "exp_5d", "status": "pending"})),
+])
+def test_the_printed_idempotency_key_advice_is_runnable(argv, method, path, ok, monkeypatch, capsys):
+    """Every keyed command takes --idempotency-key, so the advice after a lost answer works."""
+    from tamarind.agent.transport import AgentTransport
+
+    monkeypatch.setitem(AgentTransport.__init__.__kwdefaults__, "sleep", lambda _s: None)  # no real backoff
+    route = respx.route(method=method, url=f"{API}{path}").mock(
+        side_effect=[httpx.ReadTimeout("lost")] * 4 + [httpx.Response(ok[0], json=ok[1])])
+
+    code, _, err = _run(["--json", *argv], monkeypatch, capsys)
+    assert code == 1
+    key = json.loads(err)["error"]["detail"]["idempotencyKey"]
+    assert f"--idempotency-key {key}" in json.loads(err)["error"]["message"]
+
+    code, _, err = _run(["--json", *argv, "--idempotency-key", key], monkeypatch, capsys)
+    assert code == 0, err
+    assert route.calls.last.request.headers["Idempotency-Key"] == key
