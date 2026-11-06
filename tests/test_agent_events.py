@@ -7,6 +7,7 @@ import pytest
 
 from agent_fakes import PING, FakeAgentServer, approval, frame, reply, sse
 from tamarind.agent.events import SSEFrame, parse_cursor, parse_sse
+from tamarind.agent.transport import DeadlineExceeded
 from tamarind.errors import AgentStreamError, APIError, AuthError, JobTimeoutError, NotFoundError, RateLimitError, TamarindError
 
 EVENTS = "/chats/chat_7Q/events"
@@ -513,8 +514,8 @@ def test_the_continuation_wait_is_a_deadline_for_pauses_and_requests(monkeypatch
     assert stream.stop_reason == "continuation_pending"
     assert now[0] <= 1.5  # never paused past the deadline
     timeouts = [r.extensions["timeout"]["read"] for r in server.requests_to("GET", "/chats/chat_7Q/messages/msg_1")]
-    # One re-read, at 1 s, given only the 0.5 s left; none once the wait is spent.
-    assert timeouts == [0.5]
+    # One re-read, at 1 s, given only the 0.5 s left (every phase capped at it); none once spent.
+    assert len(timeouts) == 1 and timeouts[0] == pytest.approx(0.5, abs=0.05)
 
 
 @pytest.mark.parametrize("retry_block", [
@@ -678,6 +679,12 @@ class _Trickle(httpx.SyncByteStream):
             yield b" "
 
 
+def _poll_worker_alive() -> bool:
+    import threading
+
+    return any(t.name == "agent-getMessage" and t.is_alive() for t in threading.enumerate())
+
+
 @pytest.mark.parametrize("how", ["stalls", "trickles"])
 def test_a_poll_that_will_not_finish_is_cut_at_the_wall_clock_deadline(how):
     """httpx's timeouts are per phase and per chunk; the continuation wait must still hold."""
@@ -707,3 +714,76 @@ def test_a_poll_that_will_not_finish_is_cut_at_the_wall_clock_deadline(how):
     # 1 s of (fake) pause leaves 0.4 s for the poll: back by then plus slack, not after 30 s.
     assert elapsed < 2.5
     assert stream.stop_reason == "continuation_pending"
+
+
+def test_a_trickling_server_does_not_keep_the_abandoned_worker_alive():
+    """The caller returning is not enough: the worker must end by itself, or a long-lived
+    client accumulates threads and pooled connections."""
+    import threading
+    import time as real_time
+
+    release = threading.Event()
+
+    def trickle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"Content-Type": "application/json"}, stream=_Trickle(release))
+
+    server = FakeAgentServer()
+    server.on("GET", EVENTS, sse(frame("5.0", "approval.resolved", approval(status="approved"))
+                                 + _status("6.0", "completed")))
+    server.on("GET", "/chats/chat_7Q/messages/msg_1", trickle)
+    try:
+        list(server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True,
+                                            continuation_wait=1.4))
+        gone_by = real_time.monotonic() + 1.0  # NOT released: the worker has to stop itself
+        while _poll_worker_alive() and real_time.monotonic() < gone_by:
+            real_time.sleep(0.02)
+        assert not _poll_worker_alive()
+    finally:
+        release.set()
+
+
+@pytest.mark.parametrize("supplied", [None, "mine-1"])
+def test_a_keyed_call_that_hits_its_deadline_names_the_key_it_may_have_committed_under(supplied):
+    """The write can commit before the deadline fires: the retry must reuse the same key."""
+    import threading
+
+    release = threading.Event()
+    seen: list[str] = []
+
+    def stall(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers["Idempotency-Key"])
+        release.wait(30)
+        return httpx.Response(202, json=reply("queued"))
+
+    server = FakeAgentServer().on("POST", "/chats/chat_7Q/messages", stall)
+    try:
+        with pytest.raises(DeadlineExceeded) as raised:
+            server.agent().transport.call_within(
+                0.3, "sendMessage", {"chatId": "chat_7Q"},
+                json={"input": [{"type": "text", "text": "hi"}], "stream": False}, idempotency_key=supplied)
+    finally:
+        release.set()
+    assert len(set(seen)) == 1
+    key = seen[0]
+    assert supplied in (None, key)
+    assert raised.value.detail["idempotencyKey"] == key
+    assert f"--idempotency-key {key}" in raised.value.message
+
+
+def test_an_unkeyed_call_that_hits_its_deadline_has_no_key_to_name():
+    import threading
+
+    release = threading.Event()
+
+    def stall(request: httpx.Request) -> httpx.Response:
+        release.wait(30)
+        return httpx.Response(200, json=reply("queued"))
+
+    server = FakeAgentServer().on("GET", "/chats/chat_7Q/messages/msg_1", stall)
+    try:
+        with pytest.raises(DeadlineExceeded) as raised:
+            server.agent().transport.call_within(0.3, "getMessage", {"chatId": "chat_7Q", "messageId": "msg_1"})
+    finally:
+        release.set()
+    assert "idempotencyKey" not in (raised.value.detail or {})
+    assert "Idempotency-Key" not in raised.value.message

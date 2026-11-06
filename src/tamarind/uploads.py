@@ -10,6 +10,7 @@ from typing import Any, BinaryIO
 import httpx
 
 from . import rest
+from ._logging import redact_signed_urls
 from .errors import TamarindError
 from .http import HTTPClient
 
@@ -30,6 +31,7 @@ def put_presigned_upload(url: str, path: Path, *, content_type: str, remote: str
     URL rather than echoing ``httpx``'s exception text, and the httpx error is not chained
     (``from None``): its message carries the full signed URL into any traceback. Returns the uploaded byte count.
     """
+    redact_signed_urls()  # httpx logs the URL at INFO, and the URL is the credential
     try:
         size = path.stat().st_size
         headers = {

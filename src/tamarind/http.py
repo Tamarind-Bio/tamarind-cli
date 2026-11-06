@@ -187,6 +187,7 @@ class HTTPClient:
         *,
         params: dict[str, Any] | None = None,
         headers: dict[str, str | None] | None = None,
+        json: Any | None = None,
         timeout: httpx.Timeout | float | None = None,
     ) -> Iterator[httpx.Response]:
         """A streamed response (SSE), with the same raw contract as :meth:`send`."""
@@ -196,6 +197,7 @@ class HTTPClient:
             path.lstrip("/"),
             params=_without_none_values(params),
             headers=_without_none_values(headers),
+            json=json,
             timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
             follow_redirects=False,
         ) as resp:

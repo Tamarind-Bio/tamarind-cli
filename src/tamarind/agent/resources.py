@@ -18,6 +18,7 @@ from urllib.parse import unquote, urlsplit
 
 import httpx
 
+from tamarind._logging import redact_signed_urls
 from tamarind.errors import ArgumentError, JobTimeoutError, NotFoundError, TamarindError
 from tamarind.uploads import put_presigned_upload
 
@@ -491,6 +492,7 @@ def save_url(url: str, target: Path) -> Path:
     place, so two downloads cannot share a partial file and a planted symlink is never
     opened.
     """
+    redact_signed_urls()  # httpx logs the URL at INFO, and the URL is the credential
     partial: Path | None = None
     try:
         with httpx.stream("GET", url, timeout=_DOWNLOAD_TIMEOUT, follow_redirects=True) as resp:

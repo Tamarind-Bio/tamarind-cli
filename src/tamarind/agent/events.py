@@ -395,11 +395,9 @@ class EventStream(Iterator[Event]):
             try:
                 # One attempt, bounded by what is left of the wait: this loop is the retry
                 # (the transport's own would sleep out a Retry-After past the deadline).
-                # `call_within` is the wall-clock bound; the per-phase `timeout` only lets
-                # the abandoned attempt end by itself.
+                # `call_within` is the hard wall-clock bound, and ends its own worker too.
                 resp = self._transport.call_within(
                     remaining, "getMessage", {"chatId": self.chat_id, "messageId": self.message_id},
-                    timeout=remaining,
                 )
                 current = Message.from_wire(_object(resp))
             except DeadlineExceeded:
