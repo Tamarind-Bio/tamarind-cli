@@ -173,10 +173,14 @@ def test_resolve_sends_only_the_options_given():
     ],
 )
 def test_a_redirect_is_returned_only_as_a_downloads_302_and_never_followed(method, path, call, status):
-    server = FakeAgentServer().on(method, path, httpx.Response(status, headers={"Location": "https://elsewhere.test/"}))
+    # A proxy's page may echo the URL it was sent: never in the error.
+    page = "<html>moved to https://s3.test/f?X-Amz-Signature=secret</html>"
+    server = FakeAgentServer().on(method, path, httpx.Response(
+        status, headers={"Location": "https://elsewhere.test/", "Content-Type": "text/html"}, text=page))
     with pytest.raises(APIError) as raised:
         call(server.agent())
     assert raised.value.status_code == status  # the redirect itself, not a parse failure after it
+    assert "secret" not in str(raised.value)
     assert len(server.requests) == 1
 
 
@@ -243,3 +247,29 @@ def test_an_answer_is_answers_or_text_exactly_one(kwargs):
     with pytest.raises(ValueError):
         server.agent().questions.answer("chat_7Q", "q_8c", **kwargs)
     assert server.requests == []
+
+
+@pytest.mark.parametrize("failure", [
+    httpx.ReadTimeout("lost"),
+    httpx.Response(503, json={"code": "unavailable", "retryable": True}),
+])
+def test_a_keyed_call_that_ends_unanswered_names_its_key_for_a_safe_retry(failure):
+    server = FakeAgentServer().on("POST", SEND, failure)
+    with pytest.raises(TamarindError) as raised:
+        server.agent(max_retries=1).messages.send("chat_7Q", "hi")
+    keys = {r.headers["Idempotency-Key"] for r in server.requests_to("POST", SEND)}
+    assert len(keys) == 1
+    (key,) = keys
+    assert raised.value.detail["idempotencyKey"] == key
+    assert f"--idempotency-key {key}" in raised.value.message
+
+
+@pytest.mark.parametrize("url", [
+    "https://a\x00b/x",  # httpx.InvalidURL
+    "http://" + "a" * 300 + ".com/x",  # a host label too long for idna: a bare UnicodeError
+])
+def test_a_malformed_download_url_is_a_typed_error(url, tmp_path):
+    from tamarind.agent.resources import save_url
+
+    with pytest.raises(TamarindError):
+        save_url(url, tmp_path / "x")

@@ -403,7 +403,10 @@ class Message:
             incomplete_reason=_str(wire, "incompleteReason"),
             error=_obj(wire, "error"),
             model=_str(wire, "model"),
-            pending_approvals=_objects(wire, "pendingApprovals", Approval.from_wire),
+            # A `message.requires_action` event carries the cards as `approvals` too; take
+            # them when `pendingApprovals` is empty, so the reply names its own cards.
+            pending_approvals=(_objects(wire, "pendingApprovals", Approval.from_wire)
+                               or _objects(wire, "approvals", Approval.from_wire)),
             pending_questions=_objects(wire, "pendingQuestions", Question.from_wire),
             usage=Usage.from_wire(usage) if usage is not None else None,
             completed_at=_str(wire, "completedAt"),

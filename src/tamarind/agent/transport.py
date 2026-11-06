@@ -28,7 +28,7 @@ import uuid
 
 import httpx
 
-from tamarind.errors import ArgumentError, BudgetError, RateLimitError, TamarindError
+from tamarind.errors import APIError, ArgumentError, BudgetError, RateLimitError, TamarindError
 from tamarind.http import HTTPClient, map_error
 
 from ._contract import API_VERSION, OPERATIONS, VERSION_HEADER, Operation
@@ -147,15 +147,27 @@ class AgentTransport:
                     attempt += 1
                     self.sleep(backoff(attempt))
                     continue
-                raise TamarindError(
-                    f"Network error talking to {self.http.base_url}: {exc}"
-                    + ("" if op.retry_safe else " The request may have been applied; check before retrying.")
-                ) from exc
+                message = f"Network error talking to {self.http.base_url}: {exc}."
+                if not op.retry_safe:
+                    message += " The request may have been applied; check before retrying."
+                key = extra.get("Idempotency-Key")
+                raise TamarindError(message + _retry_with(key), detail=_key_detail(key)) from exc
             if resp.is_success or (resp.status_code == 302 and operation_id in REDIRECTING):
                 return resp
+            if resp.is_redirect:
+                # Never the body: a proxy's HTML page can echo the URL, presigned or not.
+                raise APIError(f"The Agent API answered an unexpected redirect (HTTP {resp.status_code}).",
+                               status_code=resp.status_code)
             delay = self._retry_delay(op, resp, attempt, budget)
             if delay is None:
-                raise agent_error(resp, request_path=path)
+                error = agent_error(resp, request_path=path)
+                key = extra.get("Idempotency-Key")
+                if key and resp.status_code >= 500:
+                    # Unknown whether it was applied: the same key makes the retry safe.
+                    error.message = error.message + _retry_with(key)
+                    error.detail = {**(error.detail if isinstance(error.detail, dict) else {}),
+                                    **_key_detail(key)}
+                raise error
             attempt += 1
             self.sleep(delay)
 
@@ -192,6 +204,18 @@ class AgentTransport:
             if not resp.is_success:
                 resp.read()
             yield resp
+
+
+def _retry_with(key: str | None) -> str:
+    """The way back from a lost answer to a keyed call: the same key applies it once."""
+    if not key:
+        return ""
+    return (f" It may have been applied: retry with the same Idempotency-Key {key} "
+            f"(CLI: --idempotency-key {key}) so it is applied once.")
+
+
+def _key_detail(key: str | None) -> dict[str, str]:
+    return {"idempotencyKey": key} if key else {}
 
 
 def backoff(attempt: int, *, base: float = 0.5, cap: float = 30.0) -> float:

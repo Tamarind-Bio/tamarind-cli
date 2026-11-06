@@ -626,3 +626,28 @@ def test_a_follow_resumed_past_the_decision_still_follows_its_answer():
     stream = server.agent().messages.follow("chat_7Q", "msg_1", after="5.0", follow_continuations=True,
                                             decided_approval="apr_x")
     assert [e.id for e in stream][-1] == "9.0"
+
+
+def test_a_quiet_chat_streams_clean_closes_are_never_counted_as_failures():
+    server = FakeAgentServer()
+    # Twelve hourly idle closes, then an event: well past a budget of 3.
+    server.on("GET", EVENTS, *[sse("") for _ in range(12)],
+              sse(frame("10.0", "job.completed", {"jobName": "j", "status": "Complete"}, message=None)))
+
+    from tamarind.agent.events import EventStream
+
+    stream = EventStream(server.agent().transport, "chat_7Q", until="job.completed", max_reconnects=3)
+    assert [e.id for e in stream] == ["10.0"]
+    assert len(server.sleeps) == 12 and all(s >= 1.0 for s in server.sleeps)  # paced, not busy
+
+
+def test_a_queued_replys_stream_closing_until_it_starts_is_never_counted_as_failures():
+    server = FakeAgentServer()
+    server.on("GET", EVENTS, *[sse("") for _ in range(8)], sse(_status("9.0", "completed")))
+    server.on("GET", "/chats/chat_7Q/messages/msg_1", httpx.Response(200, json=reply("queued")))
+
+    from tamarind.agent.events import EventStream
+
+    stream = EventStream(server.agent().transport, "chat_7Q", message_id="msg_1", max_reconnects=3)
+    assert [e.id for e in stream] == ["9.0"]
+    assert stream.stop_reason == "final"

@@ -415,7 +415,11 @@ def _requires_action(client: Any, chat_id: str, reply: Message, state: Any) -> N
     """The reply stopped on a card: say what is waiting and how to answer, exit 10."""
     approvals = list(reply.pending_approvals)
     if not approvals and not reply.pending_questions:
-        approvals = list(client.agent.approvals.list(chat_id, status="pending"))
+        # Only THIS reply's cards: a card can outlive a cancelled turn, so the chat may hold
+        # another reply's pending approval, and naming it here would invite approving the
+        # wrong spend.
+        approvals = [a for a in client.agent.approvals.list(chat_id, status="pending")
+                     if a.message_id == reply.id]
     lines = [f"Reply {reply.id} is waiting on you."]
     for approval in approvals:
         lines.append(f"  approval {approval.id} ({approval.kind}): {approval.summary}")

@@ -388,3 +388,38 @@ def test_an_interrupted_events_follow_exits_130_not_0(monkeypatch):
     monkeypatch.setattr(EventStream, "__next__", interrupted)
     res = runner.invoke(app, ["--json", "chat", "events", "chat_7Q", "--follow"], env=ENV)
     assert res.exit_code == 130
+
+
+@respx.mock
+def test_requires_action_names_only_the_followed_replys_own_approvals(monkeypatch, capsys):
+    # A card outlived an earlier, cancelled turn: it is pending, but not this reply's.
+    stale = {**approval("apr_old"), "messageId": "msg_0"}
+    respx.post(f"{API}chats/chat_7Q/messages").mock(return_value=httpx.Response(202, json=reply("queued")))
+    respx.get(f"{API}chats/chat_7Q/events").mock(return_value=_reply_stream(
+        frame("4.0", "message.requires_action", reply("requires_action"))))
+    respx.get(f"{API}chats/chat_7Q/messages/msg_1").mock(
+        return_value=httpx.Response(200, json=reply("requires_action")))  # cards not inlined
+    respx.get(f"{API}chats/chat_7Q/approvals").mock(return_value=httpx.Response(200, json={
+        "data": [stale, approval("apr_x")]}))
+
+    code, out, err = _run(["--json", "chat", "send", "chat_7Q", "x", "--wait"], monkeypatch, capsys)
+
+    assert code == ExitCode.ACTION_REQUIRED
+    error = json.loads(err)["error"]
+    assert [a["id"] for a in error["detail"]["approvals"]] == ["apr_x"]
+    assert "apr_old" not in error["message"]
+
+
+@respx.mock
+def test_a_send_whose_answer_is_lost_names_its_idempotency_key(monkeypatch, capsys):
+    route = respx.post(f"{API}chats/chat_7Q/messages").mock(side_effect=httpx.ReadTimeout("lost"))
+    from tamarind.agent.transport import AgentTransport
+
+    monkeypatch.setitem(AgentTransport.__init__.__kwdefaults__, "sleep", lambda _s: None)  # no real backoff
+    code, out, err = _run(["--json", "chat", "send", "chat_7Q", "x"], monkeypatch, capsys)
+
+    key = route.calls.last.request.headers["Idempotency-Key"]
+    error = json.loads(err)["error"]
+    assert code == 1
+    assert error["detail"]["idempotencyKey"] == key
+    assert f"--idempotency-key {key}" in error["message"]

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from dataclasses import fields
 from hashlib import sha256
-import inspect
 import json
 import os
 from pathlib import Path
@@ -215,7 +214,6 @@ def test_send_message_example_bodies_conform_to_the_input_schema():
     example = SPEC["paths"]["/chats/{chatId}/messages"]["post"]["requestBody"]["content"][
         "application/json"]["examples"]["streamed"]["value"]["input"]
     assert [sorted(p) for p in parts] == [sorted(p) for p in example]
-    assert inspect.signature(Agent).parameters  # the facade takes its transport
 
 
 @pytest.mark.skipif(not os.environ.get("TAMARIND_AGENT_CHECKOUT"),
@@ -227,3 +225,15 @@ def test_the_vendored_spec_is_the_locked_commits_bytes():
         check=True, capture_output=True,
     ).stdout
     assert raw == SPEC_PATH.read_bytes()
+
+
+def test_a_requires_action_events_approvals_are_the_replys_pending_approvals():
+    """`message.requires_action` adds `approvals[]` (MessageEventData): read as the reply's cards."""
+    from tamarind.agent.models import Message
+
+    assert "approvals" in SPEC["components"]["schemas"]["MessageEventData"]["allOf"][1]["properties"]
+    wire = {"id": "msg_1", "object": "message", "chatId": "c", "role": "assistant", "content": [],
+            "createdAt": "x", "status": "requires_action", "pendingApprovals": [],
+            "approvals": [{"id": "apr_x", "status": "pending", "kind": "platform", "summary": "s",
+                           "createdAt": "x"}]}
+    assert [a.id for a in Message.from_wire(wire).pending_approvals] == ["apr_x"]

@@ -504,7 +504,7 @@ def save_url(url: str, target: Path) -> Path:
         partial = None
     except httpx.HTTPStatusError as exc:
         raise TamarindError(f"Download of '{target.name}' failed with HTTP {exc.response.status_code}.") from None  # the cause names the signed URL
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:  # ValueError: a bad host (idna)
         raise TamarindError(f"Download of '{target.name}' failed ({type(exc).__name__}).") from None  # the cause names the signed URL
     except OSError as exc:
         raise TamarindError(f"Could not write '{target}': {exc}.") from exc

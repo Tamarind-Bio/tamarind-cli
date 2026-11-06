@@ -48,6 +48,8 @@ if TYPE_CHECKING:
     from .transport import AgentTransport
 
 DEFAULT_MAX_RECONNECTS = 10
+# The pause before reconnecting after a clean close (not a failure, so not backed off).
+IDLE_RECONNECT_DELAY = 1.0
 _monotonic = time.monotonic  # the continuation wait's clock (a test replaces it)
 # How long to keep re-reading a reply that a decided approval ended, waiting for the reply
 # that answers the decision to start. Past it, the stream stops with
@@ -207,6 +209,13 @@ class EventStream(Iterator[Event]):
             if outcome == "switch":
                 failures = 0
                 continue
+            if outcome == "idle":
+                # A clean close is a healthy server, not a failure: a quiet chat's hourly
+                # close, or a queued reply's stream that closes until it starts. Never
+                # counted, but paced so it cannot busy-loop.
+                failures = 0
+                self._transport.sleep(max(self._retry_floor, IDLE_RECONNECT_DELAY))
+                continue
             if outcome == "progress":
                 failures = 0
             failures += 1
@@ -219,9 +228,9 @@ class EventStream(Iterator[Event]):
                 self._transport.sleep(max(self._retry_floor, backoff(failures)))
 
     def _connect(self) -> Generator[Event, None, str]:
-        """One connection. Returns "stop", "switch" (follow a continuation now), "progress"
-        (new events, then lost or closed), "lost" (nothing new) or "waited" (refused, and
-        already waited the server's ``Retry-After``)."""
+        """One connection. Returns "stop", "switch" (follow a continuation now), "idle" (a
+        clean close: never a failure), "progress" (new events, then lost), "lost" (lost with
+        nothing new) or "waited" (refused, and already waited the server's ``Retry-After``)."""
         params: dict[str, Any] = {"stream": "true"}
         if self.message_id is not None:
             params["messageId"] = self.message_id
@@ -279,7 +288,7 @@ class EventStream(Iterator[Event]):
             settled = self._settled()
             if settled is not None:
                 return settled
-        return "progress" if progressed else "lost"
+        return "idle"
 
     # ── pieces ──
 
