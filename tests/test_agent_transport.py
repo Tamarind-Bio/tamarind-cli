@@ -105,17 +105,19 @@ def test_a_429_is_retried_even_for_an_operation_that_is_not_retry_safe():
     "failure",
     [httpx.ReadTimeout("lost"), httpx.Response(503, json={"code": "unavailable", "retryable": True})],
 )
-@pytest.mark.parametrize(("method", "path", "call"), [
-    ("POST", "/chats/chat_7Q/rewind", lambda a: a.chats.rewind("chat_7Q", "msg_0")),
-    # An archived chat reads as not found: a retry after a lost success would say 404.
-    ("DELETE", "/chats/chat_7Q", lambda a: a.chats.archive("chat_7Q")),
-])
-def test_an_operation_that_is_not_retry_safe_is_not_retried(failure, method, path, call):
-    server = FakeAgentServer().on(method, path, failure, httpx.Response(404, json={"code": "not_found"}))
-    with pytest.raises(TamarindError) as raised:
-        call(server.agent())
-    assert not isinstance(raised.value, NotFoundError)
-    assert len(server.requests_to(method, path)) == 1
+def test_an_operation_that_is_not_retry_safe_is_not_retried(failure):
+    server = FakeAgentServer().on("POST", "/chats/chat_7Q/rewind", failure)
+    with pytest.raises(TamarindError):
+        server.agent().chats.rewind("chat_7Q", "msg_0")
+    assert len(server.requests_to("POST", "/chats/chat_7Q/rewind")) == 1
+
+
+def test_an_archive_whose_answer_was_lost_is_retried():
+    # The server answers a second DELETE of an archived chat 200 (its retry), not 404.
+    server = FakeAgentServer().on("DELETE", "/chats/chat_7Q", httpx.ReadTimeout("lost"),
+                                  httpx.Response(200, json={"id": "chat_7Q", "status": "archived"}))
+    assert server.agent().chats.archive("chat_7Q").status == "archived"
+    assert len(server.requests_to("DELETE", "/chats/chat_7Q")) == 2
 
 
 def test_retries_stop_at_max_retries():

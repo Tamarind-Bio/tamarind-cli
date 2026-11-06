@@ -38,9 +38,9 @@ OPERATIONS: dict[str, Operation] = {
     "listChats": Operation("GET", "/chats", False, True, "chats.list"),
     "getChat": Operation("GET", "/chats/{chatId}", False, True, "chats.get"),
     "updateChat": Operation("PATCH", "/chats/{chatId}", False, True, "chats.update"),
-    # Not retried: an archived chat reads as not found, so a retry after a lost success
-    # would report a 404 for an archive that worked.
-    "archiveChat": Operation("DELETE", "/chats/{chatId}", False, False, "chats.archive"),
+    # Retried: the server takes a second DELETE of an archived chat as the retry it is (it
+    # re-stops a turn whose stop failed) and answers it 200, not the archived chat's 404.
+    "archiveChat": Operation("DELETE", "/chats/{chatId}", False, True, "chats.archive"),
     "sendMessage": Operation("POST", "/chats/{chatId}/messages", True, True, "messages.send"),
     "listMessages": Operation("GET", "/chats/{chatId}/messages", False, True, "messages.list"),
     "getMessage": Operation("GET", "/chats/{chatId}/messages/{messageId}", False, True, "messages.get"),
