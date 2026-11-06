@@ -554,3 +554,16 @@ def test_a_card_that_outlived_a_cancelled_turn_is_followed_when_its_decision_was
     assert (ids[-1] == "8.0") is followed
     # Without the caller's decision, a cancelled reply is just over: not re-read.
     assert bool(server.requests_to("GET", "/chats/chat_7Q/messages/msg_1")) is expect
+
+
+def test_a_decision_taken_up_in_place_is_not_awaited_even_when_the_reply_then_ends_early():
+    server = FakeAgentServer()
+    server.on("GET", EVENTS, sse(frame("4.0", "approval.requested", approval())
+                                 + frame("5.0", "approval.resolved", approval(status="approved"))
+                                 + _status("6.0", "in_progress") + _status("7.0", "incomplete")))
+
+    stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True,
+                                            expect_continuation=True)
+    assert [e.id for e in stream][-1] == "7.0"
+    assert stream.stop_reason == "final"
+    assert server.requests_to("GET", "/chats/chat_7Q/messages/msg_1") == []

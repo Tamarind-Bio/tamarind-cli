@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from tamarind.errors import (
+    ArgumentError,
     AgentStreamError,
     APIError,
     AuthError,
@@ -150,7 +151,7 @@ class EventStream(Iterator[Event]):
         expect_continuation: bool = False,
     ):
         if after is not None and parse_cursor(after) is None:
-            raise ValueError("after must be an event id such as '1042.0'")
+            raise ArgumentError("after must be an event id such as '1042.0'")
         self._transport = transport
         self._path = build_path(OPERATIONS["listChatEvents"].path, {"chatId": chat_id})
         self.chat_id = chat_id
@@ -315,7 +316,9 @@ class EventStream(Iterator[Event]):
             self._status = self.message.status
             if event.type == "message.in_progress":
                 # Decided while its turn still ran: the reply went on in place, so no new
-                # reply will answer that decision.
+                # reply will answer that decision (nor, if it then ends early, the card).
+                if self._card_decided:
+                    self._card_raised = False
                 self._card_decided = False
         elif event.type == "message.continued":
             continued = event.data.get("continuedBy")

@@ -368,3 +368,11 @@ def test_a_failed_presigned_transfer_never_carries_the_signed_url(direction, tmp
             action()
     rendered = "".join(traceback.format_exception(raised.value))
     assert "X-Amz-Signature" not in rendered and "secret" not in rendered
+
+
+@pytest.mark.parametrize("extra", [["--text", "A", "--question", "Which?", "--choice", "A"], []])
+def test_an_answer_with_both_forms_or_neither_is_a_structured_error(extra, monkeypatch, capsys):
+    code, out, err = _run(["--json", "chat", "answer", "chat_7Q", "q_8c", *extra], monkeypatch, capsys)
+    assert code == ExitCode.VALIDATION
+    assert out == ""
+    assert json.loads(err)["error"]["type"] == "ArgumentError"

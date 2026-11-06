@@ -18,7 +18,7 @@ from urllib.parse import unquote, urlsplit
 
 import httpx
 
-from tamarind.errors import JobTimeoutError, NotFoundError, TamarindError
+from tamarind.errors import ArgumentError, JobTimeoutError, NotFoundError, TamarindError
 from tamarind.uploads import put_presigned_upload
 
 from .events import EventStream, Until
@@ -83,7 +83,7 @@ def _one(resp: httpx.Response, parse: Callable[[dict[str, Any]], T]) -> T:
 
 def _page_params(limit: int | None, cursor: str | None, **extra: Any) -> dict[str, Any]:
     if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200):
-        raise ValueError("limit must be an integer from 1 to 200")
+        raise ArgumentError("limit must be an integer from 1 to 200")
     return {"limit": limit, "cursor": cursor, **extra}
 
 
@@ -117,7 +117,7 @@ def text_input(text: str | None, file_ids: Sequence[str] = ()) -> list[dict[str,
     or not, so a file needs a sentence saying what to do with it.
     """
     if not text or not text.strip():
-        raise ValueError("a message needs text (say what to do with any files)")
+        raise ArgumentError("a message needs text (say what to do with any files)")
     parts: list[dict[str, str]] = [{"type": "text", "text": text}]
     parts.extend({"type": "file", "fileId": file_id} for file_id in file_ids)
     return parts
@@ -169,7 +169,7 @@ class Chats(_Resource):
         if campaign_status is not None:
             body["campaign"] = {"status": campaign_status}
         if not body:
-            raise ValueError("update needs at least one field")
+            raise ArgumentError("update needs at least one field")
         resp = self._t.call("updateChat", {"chatId": chat_id}, json=body)
         return _one(resp, Chat.from_wire)
 
@@ -199,7 +199,7 @@ class Messages(_Resource):
         if input is not None:
             parts = [dict(part) for part in input]
             if not any(p.get("type") == "text" and str(p.get("text") or "").strip() for p in parts):
-                raise ValueError("a message needs a non-blank text part")
+                raise ArgumentError("a message needs a non-blank text part")
         else:
             parts = text_input(text, file_ids)
         body: dict[str, Any] = {"input": parts, "stream": False}
@@ -300,7 +300,7 @@ class Approvals(_Resource):
         budget_hours: float | None = None, workflow: str | None = None,
     ) -> Approval:
         if decision not in ("approve", "deny"):
-            raise ValueError("decision must be 'approve' or 'deny'")
+            raise ArgumentError("decision must be 'approve' or 'deny'")
         body = _compact({"decision": decision, "scope": scope, "budgetHours": budget_hours,
                          "workflow": workflow})
         # Only the same BARE decision is safe to repeat (it returns the resolved approval);
@@ -325,7 +325,7 @@ class Questions(_Resource):
         body = _compact({"answers": dict(answers) if answers is not None else None, "text": text})
         if len(body) != 1:
             # The server refuses both together (400): one or the other.
-            raise ValueError("answer needs answers or text, not both")
+            raise ArgumentError("answer needs answers or text, not both")
         resp = self._t.call("answerQuestion", {"chatId": chat_id, "questionId": question_id},
                             json=body, idempotency_key=idempotency_key)
         return _one(resp, Question.from_wire)
@@ -347,7 +347,7 @@ class Files(_Resource):
         except OSError as exc:
             raise TamarindError(f"Could not read '{path}': {exc}.") from exc
         if size < 1 or size > MAX_UPLOAD_BYTES:
-            raise ValueError("a chat file must be 1 byte to 200 MB")
+            raise ArgumentError("a chat file must be 1 byte to 200 MB")
         kind = content_type or content_type_for(name)
         slot = self.create_upload(name, size, content_type=kind)
         # The same Content-Type the slot was created with, as the presigned PUT requires.

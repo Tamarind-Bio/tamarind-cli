@@ -28,7 +28,7 @@ import uuid
 
 import httpx
 
-from tamarind.errors import BudgetError, RateLimitError, TamarindError
+from tamarind.errors import ArgumentError, BudgetError, RateLimitError, TamarindError
 from tamarind.http import HTTPClient, map_error
 
 from ._contract import API_VERSION, OPERATIONS, VERSION_HEADER, Operation
@@ -47,10 +47,10 @@ def build_path(template: str, path_params: Mapping[str, str]) -> str:
     path = template
     for name, value in path_params.items():
         if not isinstance(value, str) or not value:
-            raise ValueError(f"{name} must be a non-empty string")
+            raise ArgumentError(f"{name} must be a non-empty string")
         path = path.replace("{" + name + "}", quote(value, safe=""))
     if "{" in path:
-        raise ValueError(f"missing path parameter for {template}")
+        raise ArgumentError(f"missing path parameter for {template}")
     return path
 
 
@@ -130,10 +130,10 @@ class AgentTransport:
             if idempotency_key is not None and not idempotency_key.strip():
                 # The server refuses a blank key; never swap in a fresh one, or a caller
                 # that persisted "" would get a new key, and a new effect, every retry.
-                raise ValueError("idempotency_key must not be blank")
+                raise ArgumentError("idempotency_key must not be blank")
             extra["Idempotency-Key"] = idempotency_key or str(uuid.uuid4())
         elif idempotency_key is not None:
-            raise ValueError(f"{operation_id} does not take an Idempotency-Key")
+            raise ArgumentError(f"{operation_id} does not take an Idempotency-Key")
         headers = self.headers(extra)
         attempt = 0
         while True:

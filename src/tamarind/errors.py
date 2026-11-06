@@ -145,6 +145,13 @@ class CustomToolBuildTimeoutError(CustomToolError):
     exit_code = ExitCode.TIMEOUT
 
 
+class ArgumentError(ValidationError, ValueError):
+    """An SDK call's own arguments are invalid, refused before any request is sent.
+
+    A ``ValueError`` for Python callers, and a validation error (exit 5) for the CLI.
+    """
+
+
 class AgentStreamError(TamarindError):
     """The Agent API ended an event stream with a non-retryable ``error`` event."""
 
