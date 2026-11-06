@@ -148,7 +148,7 @@ class EventStream(Iterator[Event]):
         include_unknown: bool = False,
         max_reconnects: int = DEFAULT_MAX_RECONNECTS,
         continuation_wait: float = DEFAULT_CONTINUATION_WAIT,
-        expect_continuation: bool = False,
+        decided_approval: str | None = None,
     ):
         if after is not None and parse_cursor(after) is None:
             raise ArgumentError("after must be an event id such as '1042.0'")
@@ -167,11 +167,14 @@ class EventStream(Iterator[Event]):
         self._include_unknown = include_unknown
         self._max_reconnects = max_reconnects
         self._continuation_wait = continuation_wait
-        # The caller just decided a card of this reply (approve/deny --wait): a reply that
-        # raised one and ended cancelled or incomplete is still answered by a new reply,
-        # since a card outlives its turn, and that answer may start after its decision.
-        self._expect_continuation = expect_continuation
-        self._card_raised = False
+        # The approval the caller just decided (approve/deny --wait). If this reply raised it
+        # and ended cancelled or incomplete, the decision is still answered by a new reply
+        # (a card outlives its turn), which may start after it. By id: an earlier card of
+        # the same reply, decided and taken up in place, says nothing about this one.
+        self._decided_approval = decided_approval
+        self._decided_raised = False  # this reply raised it
+        self._decided_resolved = False  # its approval.resolved is in this stream
+        self._decided_spent = False  # ...and the reply then went on in place
         self._pending = False
         # The server's `retry:` (seconds): the least time to wait before reconnecting.
         self._retry_floor = 0.0
@@ -317,18 +320,17 @@ class EventStream(Iterator[Event]):
             if event.type == "message.in_progress":
                 # Decided while its turn still ran: the reply went on in place, so no new
                 # reply will answer that decision (nor, if it then ends early, the card).
-                if self._card_decided:
-                    self._card_raised = False
-                    # The caller's decision was this card's: it is spent, so a later card
-                    # this reply raises is not one the caller decided.
-                    self._expect_continuation = False
+                if self._decided_resolved:
+                    self._decided_spent = True
                 self._card_decided = False
         elif event.type == "message.continued":
             continued = event.data.get("continuedBy")
             if isinstance(continued, str) and continued:
                 self._continued_by = continued
         elif event.type in ("approval.resolved", "approval.requested"):
-            self._card_raised = True
+            if self._decided_approval is not None and event.data.get("id") == self._decided_approval:
+                self._decided_raised = True
+                self._decided_resolved = self._decided_resolved or event.type == "approval.resolved"
             # A decided card ends this reply, and the answer comes as a NEW reply named by
             # this one's continuedBy once it starts (after this stream has closed).
             self._card_decided = event.type == "approval.resolved" or self._card_decided
@@ -352,7 +354,7 @@ class EventStream(Iterator[Event]):
         if named:
             return named
         decided = self._card_decided and self.message.status == "completed"
-        outlived = (self._expect_continuation and self._card_raised
+        outlived = (self._decided_raised and not self._decided_spent
                     and self.message.status in ("cancelled", "incomplete"))
         if not (decided or outlived):
             return None
@@ -408,8 +410,9 @@ class EventStream(Iterator[Event]):
         self._status = None
         self._continued_by = None
         self._card_decided = False
-        self._card_raised = False
-        self._expect_continuation = False  # that decision was this reply's, not the next's
+        # The caller's decision was the old reply's, not the next's.
+        self._decided_approval = None
+        self._decided_raised = self._decided_resolved = self._decided_spent = False
 
     def _settled(self) -> str | None:
         """After a clean close of a reply's stream: "stop" when that reply ended or waits on

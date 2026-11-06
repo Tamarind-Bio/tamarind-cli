@@ -378,9 +378,10 @@ class _ReplyPrinter:
             typer.echo("")
 
 
-def _follow(client: Any, chat_id: str, message_id: str, state: Any, *, decided: bool = False) -> None:
+def _follow(client: Any, chat_id: str, message_id: str, state: Any, *,
+            decided: Optional[str] = None) -> None:
     stream: EventStream = client.agent.messages.follow(
-        chat_id, message_id, follow_continuations=True, expect_continuation=decided)
+        chat_id, message_id, follow_continuations=True, decided_approval=decided)
     printer = _ReplyPrinter(json_mode=state.output.json, quiet=state.output.quiet, live=output.is_tty())
     try:
         for event in stream:
@@ -463,7 +464,7 @@ def _resolve(ctx: typer.Context, chat_id: str, approval_id: str, decision: str, 
         if approval.message_id is None:
             output.emit(_raw(approval), state.output, human="(no reply to follow)")
             return
-        _follow(client, chat_id, approval.message_id, state, decided=True)
+        _follow(client, chat_id, approval.message_id, state, decided=approval.id)
 
 
 @app.command("approve")

@@ -237,21 +237,21 @@ class Messages(_Resource):
     def follow(
         self, chat_id: str, message_id: str, *, after: str | None = None,
         follow_continuations: bool = False, until: Until | Iterable[str] | str | None = None,
-        continuation_wait: float | None = None, expect_continuation: bool = False,
+        continuation_wait: float | None = None, decided_approval: str | None = None,
     ) -> EventStream:
         """Stream one reply's events until it ends or stops on a card.
 
-        ``expect_continuation``: you just decided one of its cards, so its answer is a new
+        ``decided_approval``: the approval of this reply you just decided; its answer is a new
         reply even when this one had ended cancelled or incomplete (a card outlives its turn).
         """
         if continuation_wait is None:
             return EventStream(self._t, chat_id, message_id=message_id, after=after, until=until,
                                follow_continuations=follow_continuations,
-                               expect_continuation=expect_continuation)
+                               decided_approval=decided_approval)
         return EventStream(self._t, chat_id, message_id=message_id, after=after, until=until,
                            follow_continuations=follow_continuations,
                            continuation_wait=continuation_wait,
-                           expect_continuation=expect_continuation)
+                           decided_approval=decided_approval)
 
     def wait(self, chat_id: str, message_id: str, *, follow_continuations: bool = True) -> Message:
         """Block until the reply ends, or stops on a card; returns it as it then stands."""

@@ -549,7 +549,7 @@ def test_a_card_that_outlived_a_cancelled_turn_is_followed_when_its_decision_was
               httpx.Response(200, json=reply("cancelled", continued_by="msg_2")))
 
     stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True,
-                                            expect_continuation=expect)
+                                            decided_approval="apr_x" if expect else None)
     ids = [e.id for e in stream]
     assert (ids[-1] == "8.0") is followed
     # Without the caller's decision, a cancelled reply is just over: not re-read.
@@ -563,7 +563,7 @@ def test_a_decision_taken_up_in_place_is_not_awaited_even_when_the_reply_then_en
                                  + _status("6.0", "in_progress") + _status("7.0", "incomplete")))
 
     stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True,
-                                            expect_continuation=True)
+                                            decided_approval="apr_x")
     assert [e.id for e in stream][-1] == "7.0"
     assert stream.stop_reason == "final"
     assert server.requests_to("GET", "/chats/chat_7Q/messages/msg_1") == []
@@ -578,7 +578,26 @@ def test_a_decision_spent_in_place_does_not_carry_to_a_later_card():
                                  + _status("8.0", "cancelled")))
 
     stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True,
-                                            expect_continuation=True)
+                                            decided_approval="apr_a")
     assert [e.id for e in stream][-1] == "8.0"
     assert stream.stop_reason == "final"
     assert server.requests_to("GET", "/chats/chat_7Q/messages/msg_1") == []
+
+
+def test_the_decided_approval_is_followed_even_after_an_earlier_card_was_taken_up_in_place():
+    # A decided in place earlier; B, the one just decided, outlived the cancelled turn.
+    server = FakeAgentServer()
+    server.on("GET", EVENTS,
+              sse(frame("4.0", "approval.requested", approval("apr_a"))
+                  + frame("5.0", "approval.resolved", approval("apr_a", "approved"))
+                  + _status("6.0", "in_progress")
+                  + frame("7.0", "approval.requested", approval("apr_b"))
+                  + _status("8.0", "cancelled")),
+              sse(frame("9.0", "message.completed", reply("completed", message_id="msg_2"), message="msg_2")))
+    server.on("GET", "/chats/chat_7Q/messages/msg_1",
+              httpx.Response(200, json=reply("cancelled", continued_by="msg_2")))
+
+    stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True,
+                                            decided_approval="apr_b")
+    assert [e.id for e in stream][-1] == "9.0"
+    assert stream.message_id == "msg_2"
