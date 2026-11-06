@@ -111,12 +111,16 @@ class AgentTransport:
         idempotency_key: str | None = None,
         timeout: float | None = None,
         retry_safe: bool | None = None,
+        max_retries: int | None = None,
     ) -> httpx.Response:
         """Send one logical call, retrying as its operation allows; non-2xx raises.
 
         ``retry_safe`` narrows the operation's own flag for one call whose body makes a
         repeat unsafe (an approval resolved with options is answered 409 the second time).
+        ``max_retries`` overrides the transport's budget for one call (0: a caller that
+        runs its own bounded loop).
         """
+        budget = self.max_retries if max_retries is None else max_retries
         op = OPERATIONS[operation_id]
         if retry_safe is False:
             op = op._replace(retry_safe=False)
@@ -139,7 +143,7 @@ class AgentTransport:
                     timeout=timeout,
                 )
             except httpx.HTTPError as exc:
-                if op.retry_safe and attempt < self.max_retries:
+                if op.retry_safe and attempt < budget:
                     attempt += 1
                     self.sleep(backoff(attempt))
                     continue
@@ -149,15 +153,16 @@ class AgentTransport:
                 ) from exc
             if resp.is_success or (resp.status_code == 302 and operation_id in REDIRECTING):
                 return resp
-            delay = self._retry_delay(op, resp, attempt)
+            delay = self._retry_delay(op, resp, attempt, budget)
             if delay is None:
                 raise agent_error(resp, request_path=path)
             attempt += 1
             self.sleep(delay)
 
-    def _retry_delay(self, op: Operation, resp: httpx.Response, attempt: int) -> float | None:
+    def _retry_delay(self, op: Operation, resp: httpx.Response, attempt: int,
+                     budget: int) -> float | None:
         """Seconds to wait before retrying ``resp``, or None to raise it now."""
-        if attempt >= self.max_retries:
+        if attempt >= budget:
             return None
         if resp.status_code == 429:
             # A 429 is a refusal before anything ran, so it is safe to retry for any op.

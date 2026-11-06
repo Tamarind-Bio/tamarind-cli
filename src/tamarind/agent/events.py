@@ -341,9 +341,13 @@ class EventStream(Iterator[Event]):
             pause = float(min(attempt, 5))
             self._transport.sleep(pause)
             paused += pause
+            remaining = self._continuation_wait - max(paused, _monotonic() - started)
             try:
+                # One attempt, bounded by what is left of the wait: this loop is the retry
+                # (the transport's own would sleep out a Retry-After past the deadline).
                 resp = self._transport.call(
-                    "getMessage", {"chatId": self.chat_id, "messageId": self.message_id}
+                    "getMessage", {"chatId": self.chat_id, "messageId": self.message_id},
+                    timeout=max(remaining, 1.0), max_retries=0,
                 )
                 current = Message.from_wire(_object(resp))
             except NotFoundError:

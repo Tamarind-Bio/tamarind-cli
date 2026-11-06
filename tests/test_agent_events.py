@@ -473,3 +473,18 @@ def test_a_question_answered_elsewhere_after_the_close_is_not_waited_on():
     assert [e.id for e in stream] == ["4.0"]
     assert stream.stop_reason == "final"
     assert server.sleeps == []
+
+
+def test_a_rate_limited_reread_is_not_slept_out_past_the_wait():
+    server = FakeAgentServer()
+    server.on("GET", EVENTS,
+              sse(frame("5.0", "approval.resolved", approval(status="approved")) + _status("6.0", "completed")),
+              sse(frame("8.0", "message.completed", reply("completed", message_id="msg_2"), message="msg_2")))
+    server.on("GET", "/chats/chat_7Q/messages/msg_1",
+              httpx.Response(429, headers={"Retry-After": "60"}, json={"code": "rate_limited"}),
+              httpx.Response(200, json=reply("completed", continued_by="msg_2")))
+
+    stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True,
+                                            continuation_wait=30)
+    assert [e.id for e in stream][-1] == "8.0"
+    assert 60.0 not in server.sleeps  # the poll is the retry, inside the wait

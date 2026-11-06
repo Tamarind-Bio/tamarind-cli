@@ -496,9 +496,9 @@ def save_url(url: str, target: Path) -> Path:
         os.replace(partial, target)
         partial = None
     except httpx.HTTPStatusError as exc:
-        raise TamarindError(f"Download of '{target.name}' failed with HTTP {exc.response.status_code}.") from exc
+        raise TamarindError(f"Download of '{target.name}' failed with HTTP {exc.response.status_code}.") from None  # the cause names the signed URL
     except httpx.HTTPError as exc:
-        raise TamarindError(f"Download of '{target.name}' failed ({type(exc).__name__}).") from exc
+        raise TamarindError(f"Download of '{target.name}' failed ({type(exc).__name__}).") from None  # the cause names the signed URL
     except OSError as exc:
         raise TamarindError(f"Could not write '{target}': {exc}.") from exc
     finally:

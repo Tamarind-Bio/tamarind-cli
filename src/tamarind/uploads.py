@@ -27,7 +27,8 @@ def put_presigned_upload(url: str, path: Path, *, content_type: str, remote: str
     """Stream ``path`` to a presigned URL and translate transport failures.
 
     Presigned URLs contain temporary credentials, so error messages deliberately omit the
-    URL rather than echoing ``httpx``'s exception text. Returns the uploaded byte count.
+    URL rather than echoing ``httpx``'s exception text, and the httpx error is not chained
+    (``from None``): its message carries the full signed URL into any traceback. Returns the uploaded byte count.
     """
     try:
         size = path.stat().st_size
@@ -40,12 +41,12 @@ def put_presigned_upload(url: str, path: Path, *, content_type: str, remote: str
         with path.open("rb") as fh:
             put = httpx.put(url, content=_iter_file_chunks(fh), headers=headers, timeout=_UPLOAD_TIMEOUT)
         put.raise_for_status()
-    except httpx.TimeoutException as exc:
-        raise TamarindError(f"Upload of '{remote}' timed out after {_UPLOAD_TIMEOUT:g} seconds.") from exc
+    except httpx.TimeoutException:
+        raise TamarindError(f"Upload of '{remote}' timed out after {_UPLOAD_TIMEOUT:g} seconds.") from None
     except httpx.HTTPStatusError as exc:
-        raise TamarindError(f"Upload of '{remote}' failed with HTTP {exc.response.status_code}.") from exc
+        raise TamarindError(f"Upload of '{remote}' failed with HTTP {exc.response.status_code}.") from None
     except (httpx.RequestError, httpx.InvalidURL, httpx.StreamError) as exc:
-        raise TamarindError(f"Upload transfer failed for '{remote}' ({type(exc).__name__}).") from exc
+        raise TamarindError(f"Upload transfer failed for '{remote}' ({type(exc).__name__}).") from None
     except OSError as exc:
         raise TamarindError(f"Could not read '{path}' during upload: {exc}.") from exc
     return size

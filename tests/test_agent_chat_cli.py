@@ -341,3 +341,30 @@ def test_approve_wait_exits_7_when_the_answer_has_not_started(monkeypatch, capsy
     error = json.loads(err)["error"]
     assert error["type"] == "JobTimeoutError"
     assert "tamarind chat wait chat_7Q msg_1" in error["message"]
+
+
+@respx.mock
+@pytest.mark.parametrize("direction", ["download", "upload"])
+def test_a_failed_presigned_transfer_never_carries_the_signed_url(direction, tmp_path):
+    import traceback
+
+    from tamarind import Tamarind
+
+    signed = "https://s3.test/f/model_0.cif?X-Amz-Credential=AKIA&X-Amz-Signature=secret"
+    with Tamarind(api_key="k", api_base=API) as client:
+        if direction == "download":
+            respx.get(f"{API}chats/chat_7Q/files/file_k2/content").mock(
+                return_value=httpx.Response(302, headers={"Location": signed}))
+            respx.get(url__regex=r"^https://s3\.test/").mock(return_value=httpx.Response(403))
+            action = lambda: client.agent.files.download("chat_7Q", "file_k2", tmp_path / "out.cif")  # noqa: E731
+        else:
+            target = tmp_path / "target.pdb"
+            target.write_bytes(b"ATOM\n")
+            respx.post(f"{API}chat-files").mock(return_value=httpx.Response(201, json={
+                "fileId": "file_u0", "uploadUrl": signed, "expiresAt": "x"}))
+            respx.put(url__regex=r"^https://s3\.test/").mock(return_value=httpx.Response(403))
+            action = lambda: client.agent.files.upload(target)  # noqa: E731
+        with pytest.raises(TamarindError) as raised:
+            action()
+    rendered = "".join(traceback.format_exception(raised.value))
+    assert "X-Amz-Signature" not in rendered and "secret" not in rendered
