@@ -357,6 +357,13 @@ class EventStream(Iterator[Event]):
         self._pending = True
         return None
 
+    def _waiting_on_approval(self) -> bool:
+        """Whether the reply, as its ``requires_action`` event showed it, waited on an
+        approval (``pendingApprovals``, or the event's own ``approvals``)."""
+        if self.message is None:
+            return False
+        return bool(self.message.pending_approvals or self.message.raw.get("approvals"))
+
     def _switch(self, message_id: str) -> None:
         """Follow ``message_id`` from its own start: a filtered stream's cursor only skips
         what this one already read, and the new reply may have begun before it."""
@@ -383,9 +390,11 @@ class EventStream(Iterator[Event]):
         if current.status in FINAL_MESSAGE_STATUSES:
             # Read as if its final event had arrived (a resume from a cursor past it gets
             # an empty stream), so a continuation is followed here too.
-            if self._status == "requires_action" and current.status == "completed":
-                # Waiting on a card when the stream closed, completed now: the card was
-                # decided elsewhere, and its answer is a new reply still to start.
+            if (self._status == "requires_action" and current.status == "completed"
+                    and self._waiting_on_approval()):
+                # Waiting on an approval when the stream closed, completed now: it was
+                # decided elsewhere, and its answer is a new reply still to start. (An
+                # answered question goes on in the same reply: nothing new to wait for.)
                 self._card_decided = True
             self.message = current
             following = self._continuation() if self._follow_continuations else None
