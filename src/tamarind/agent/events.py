@@ -42,7 +42,7 @@ from tamarind.errors import (
 
 from ._contract import EVENT_TYPES, FINAL_MESSAGE_EVENTS, FINAL_MESSAGE_STATUSES, OPERATIONS
 from .models import ContractError, Event, Message
-from .transport import agent_error, backoff, build_path, wait_seconds
+from .transport import DeadlineExceeded, agent_error, backoff, build_path, wait_seconds
 
 if TYPE_CHECKING:
     from .transport import AgentTransport
@@ -395,11 +395,15 @@ class EventStream(Iterator[Event]):
             try:
                 # One attempt, bounded by what is left of the wait: this loop is the retry
                 # (the transport's own would sleep out a Retry-After past the deadline).
-                resp = self._transport.call(
-                    "getMessage", {"chatId": self.chat_id, "messageId": self.message_id},
-                    timeout=remaining, max_retries=0,
+                # `call_within` is the wall-clock bound; the per-phase `timeout` only lets
+                # the abandoned attempt end by itself.
+                resp = self._transport.call_within(
+                    remaining, "getMessage", {"chatId": self.chat_id, "messageId": self.message_id},
+                    timeout=remaining,
                 )
                 current = Message.from_wire(_object(resp))
+            except DeadlineExceeded:
+                break  # the wait is spent mid-request: the same result as running out of time
             except NotFoundError:
                 return None  # gone (a rewind hid it): there is nothing left to follow
             except TamarindError as exc:

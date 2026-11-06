@@ -663,3 +663,47 @@ def test_a_follow_resumed_past_a_decision_taken_up_in_place_ends_at_once_on_comp
     assert [e.id for e in stream] == ["6.0", "7.0"]
     assert stream.stop_reason == "final"
     assert server.requests_to("GET", "/chats/chat_7Q/messages/msg_1") == []
+
+
+class _Trickle(httpx.SyncByteStream):
+    """A body that arrives a few bytes at a time, never finishing until released."""
+
+    def __init__(self, release):
+        self._release = release
+
+    def __iter__(self):
+        for _ in range(600):
+            if self._release.wait(0.05):
+                return
+            yield b" "
+
+
+@pytest.mark.parametrize("how", ["stalls", "trickles"])
+def test_a_poll_that_will_not_finish_is_cut_at_the_wall_clock_deadline(how):
+    """httpx's timeouts are per phase and per chunk; the continuation wait must still hold."""
+    import threading
+    import time as real_time
+
+    release = threading.Event()
+
+    def slow(request: httpx.Request) -> httpx.Response:
+        if how == "stalls":
+            release.wait(30)  # a connect or first byte that never comes
+            return httpx.Response(200, json=reply("completed"))
+        return httpx.Response(200, headers={"Content-Type": "application/json"}, stream=_Trickle(release))
+
+    server = FakeAgentServer()
+    server.on("GET", EVENTS, sse(frame("5.0", "approval.resolved", approval(status="approved"))
+                                 + _status("6.0", "completed")))
+    server.on("GET", "/chats/chat_7Q/messages/msg_1", slow)
+    try:
+        started = real_time.monotonic()
+        stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True,
+                                                continuation_wait=1.4)
+        list(stream)
+        elapsed = real_time.monotonic() - started
+    finally:
+        release.set()
+    # 1 s of (fake) pause leaves 0.4 s for the poll: back by then plus slack, not after 30 s.
+    assert elapsed < 2.5
+    assert stream.stop_reason == "continuation_pending"

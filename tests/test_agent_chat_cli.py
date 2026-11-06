@@ -449,3 +449,38 @@ def test_the_printed_idempotency_key_advice_is_runnable(argv, method, path, ok, 
     code, _, err = _run(["--json", *argv, "--idempotency-key", key], monkeypatch, capsys)
     assert code == 0, err
     assert route.calls.last.request.headers["Idempotency-Key"] == key
+
+
+@respx.mock
+def test_approve_wait_exits_7_when_the_poll_hangs_past_the_deadline(monkeypatch, capsys):
+    import threading
+    import time as real_time
+
+    from tamarind.agent.events import EventStream
+
+    release = threading.Event()
+    monkeypatch.setitem(EventStream.__init__.__kwdefaults__, "continuation_wait", 1.4)
+    from tamarind.agent.transport import AgentTransport
+
+    monkeypatch.setitem(AgentTransport.__init__.__kwdefaults__, "sleep", lambda _s: None)
+    respx.post(f"{API}chats/chat_7Q/approvals/apr_x").mock(
+        return_value=httpx.Response(200, json=approval(status="approved")))
+    respx.get(f"{API}chats/chat_7Q/events").mock(return_value=_reply_stream(
+        frame("5.0", "approval.resolved", approval(status="approved")),
+        frame("6.0", "message.completed", reply("completed")),
+    ))
+
+    def hang(request: httpx.Request) -> httpx.Response:
+        release.wait(30)
+        return httpx.Response(200, json=reply("completed"))
+
+    respx.get(f"{API}chats/chat_7Q/messages/msg_1").mock(side_effect=hang)
+    try:
+        started = real_time.monotonic()
+        code, out, err = _run(["--json", "chat", "approve", "chat_7Q", "apr_x", "--wait"], monkeypatch, capsys)
+        elapsed = real_time.monotonic() - started
+    finally:
+        release.set()
+    assert elapsed < 3
+    assert code == ExitCode.TIMEOUT
+    assert json.loads(err)["error"]["type"] == "JobTimeoutError"

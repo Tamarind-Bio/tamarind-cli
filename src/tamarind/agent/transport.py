@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 import random
+import threading
 import time
 from typing import Any
 from urllib.parse import quote
@@ -28,7 +29,14 @@ import uuid
 
 import httpx
 
-from tamarind.errors import APIError, ArgumentError, BudgetError, RateLimitError, TamarindError
+from tamarind.errors import (
+    APIError,
+    ArgumentError,
+    BudgetError,
+    JobTimeoutError,
+    RateLimitError,
+    TamarindError,
+)
 from tamarind.http import HTTPClient, map_error
 
 from ._contract import API_VERSION, OPERATIONS, VERSION_HEADER, Operation
@@ -78,6 +86,10 @@ def _problem(resp: httpx.Response) -> Mapping[str, Any]:
     except ValueError:
         return {}
     return body if isinstance(body, dict) else {}
+
+
+class DeadlineExceeded(JobTimeoutError):
+    """A call did not finish inside its wall-clock deadline (see ``call_within``)."""
 
 
 class AgentTransport:
@@ -170,6 +182,37 @@ class AgentTransport:
                 raise error
             attempt += 1
             self.sleep(delay)
+
+    def call_within(self, seconds: float, operation_id: str, path_params: Mapping[str, str] | None = None,
+                    **kwargs: Any) -> httpx.Response:
+        """One attempt of ``call`` that gives up ``seconds`` of wall-clock time after it starts.
+
+        httpx's timeouts are per phase (connect, write, pool, and read as inactivity between
+        chunks), so on their own a slow connect plus a slow answer, or a body trickled a byte
+        at a time, runs far past any one number. This is the hard bound: the attempt runs on
+        a daemon thread and the caller stops waiting for it at the deadline
+        (:class:`DeadlineExceeded`). The abandoned attempt ends on its own at its per-phase
+        timeouts and its answer is dropped. No retries (a caller bounding by time is its own
+        retry loop).
+        """
+        outcome: list[Any] = []
+        done = threading.Event()
+
+        def attempt() -> None:
+            try:
+                outcome.append((True, self.call(operation_id, path_params, max_retries=0, **kwargs)))
+            except BaseException as exc:  # noqa: BLE001 - handed to the waiting caller
+                outcome.append((False, exc))
+            finally:
+                done.set()
+
+        threading.Thread(target=attempt, name=f"agent-{operation_id}", daemon=True).start()
+        if not done.wait(max(seconds, 0.0)):
+            raise DeadlineExceeded(f"{operation_id} did not finish within {seconds:g}s.")
+        ok, value = outcome[0]
+        if ok:
+            return value  # type: ignore[no-any-return]
+        raise value
 
     def _retry_delay(self, op: Operation, resp: httpx.Response, attempt: int,
                      budget: int) -> float | None:
