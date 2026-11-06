@@ -567,3 +567,18 @@ def test_a_decision_taken_up_in_place_is_not_awaited_even_when_the_reply_then_en
     assert [e.id for e in stream][-1] == "7.0"
     assert stream.stop_reason == "final"
     assert server.requests_to("GET", "/chats/chat_7Q/messages/msg_1") == []
+
+
+def test_a_decision_spent_in_place_does_not_carry_to_a_later_card():
+    server = FakeAgentServer()
+    server.on("GET", EVENTS, sse(frame("4.0", "approval.requested", approval("apr_a"))
+                                 + frame("5.0", "approval.resolved", approval("apr_a", "approved"))
+                                 + _status("6.0", "in_progress")
+                                 + frame("7.0", "approval.requested", approval("apr_b"))
+                                 + _status("8.0", "cancelled")))
+
+    stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True,
+                                            expect_continuation=True)
+    assert [e.id for e in stream][-1] == "8.0"
+    assert stream.stop_reason == "final"
+    assert server.requests_to("GET", "/chats/chat_7Q/messages/msg_1") == []

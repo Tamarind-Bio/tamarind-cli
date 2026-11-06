@@ -319,6 +319,9 @@ class EventStream(Iterator[Event]):
                 # reply will answer that decision (nor, if it then ends early, the card).
                 if self._card_decided:
                     self._card_raised = False
+                    # The caller's decision was this card's: it is spent, so a later card
+                    # this reply raises is not one the caller decided.
+                    self._expect_continuation = False
                 self._card_decided = False
         elif event.type == "message.continued":
             continued = event.data.get("continuedBy")
