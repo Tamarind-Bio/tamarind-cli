@@ -172,7 +172,9 @@ class EventStream(Iterator[Event]):
         # (a card outlives its turn), which may start after it. By id: an earlier card of
         # the same reply, decided and taken up in place, says nothing about this one.
         self._decided_approval = decided_approval
-        self._decided_raised = False  # this reply raised it
+        # This reply raised it: seen in the stream, or taken on the caller's word when the
+        # follow resumes from a cursor that may be past its approval.requested.
+        self._decided_raised = decided_approval is not None and after is not None
         self._decided_resolved = False  # its approval.resolved is in this stream
         self._decided_spent = False  # ...and the reply then went on in place
         self._pending = False

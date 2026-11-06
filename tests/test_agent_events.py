@@ -601,3 +601,15 @@ def test_the_decided_approval_is_followed_even_after_an_earlier_card_was_taken_u
                                             decided_approval="apr_b")
     assert [e.id for e in stream][-1] == "9.0"
     assert stream.message_id == "msg_2"
+
+
+def test_a_resumed_follow_trusts_the_decided_approval_it_cannot_see_raised():
+    server = FakeAgentServer()
+    server.on("GET", EVENTS, sse(_status("8.0", "cancelled")),
+              sse(frame("9.0", "message.completed", reply("completed", message_id="msg_2"), message="msg_2")))
+    server.on("GET", "/chats/chat_7Q/messages/msg_1",
+              httpx.Response(200, json=reply("cancelled", continued_by="msg_2")))
+
+    stream = server.agent().messages.follow("chat_7Q", "msg_1", after="7.0", follow_continuations=True,
+                                            decided_approval="apr_b")
+    assert [e.id for e in stream][-1] == "9.0"
