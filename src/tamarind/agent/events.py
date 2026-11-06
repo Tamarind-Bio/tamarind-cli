@@ -383,6 +383,10 @@ class EventStream(Iterator[Event]):
         if current.status in FINAL_MESSAGE_STATUSES:
             # Read as if its final event had arrived (a resume from a cursor past it gets
             # an empty stream), so a continuation is followed here too.
+            if self._status == "requires_action" and current.status == "completed":
+                # Waiting on a card when the stream closed, completed now: the card was
+                # decided elsewhere, and its answer is a new reply still to start.
+                self._card_decided = True
             self.message = current
             following = self._continuation() if self._follow_continuations else None
             if following:

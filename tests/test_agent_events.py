@@ -443,3 +443,17 @@ def test_the_continuation_wait_counts_a_real_pause_once(monkeypatch):
     list(stream)
     assert stream.stop_reason == "continuation_pending"
     assert now[0] >= 30  # the whole wait, not half of it
+
+
+def test_a_card_decided_elsewhere_after_the_close_is_followed_into_its_answer():
+    server = FakeAgentServer()
+    server.on("GET", EVENTS, sse(_status("4.0", "requires_action")),
+              sse(frame("8.0", "message.completed", reply("completed", message_id="msg_2"), message="msg_2")))
+    # Decided by another client after the close: completed, the answer not yet named.
+    server.on("GET", "/chats/chat_7Q/messages/msg_1",
+              httpx.Response(200, json=reply("completed")),
+              httpx.Response(200, json=reply("completed", continued_by="msg_2")))
+
+    stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True)
+    assert [e.id for e in stream] == ["4.0", "8.0"]
+    assert stream.message_id == "msg_2"
