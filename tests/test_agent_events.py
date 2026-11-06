@@ -527,3 +527,13 @@ def test_the_servers_retry_is_the_least_wait_before_reconnecting(retry_block):
 
     list(server.agent().messages.follow("chat_7Q", "msg_1"))
     assert server.sleeps and server.sleeps[0] >= 3.0
+
+
+def test_a_refused_reconnect_still_waits_the_servers_retry():
+    server = FakeAgentServer()
+    server.on("GET", EVENTS, sse("retry: 3000\n\n", cut=True),
+              httpx.Response(503, headers={"Retry-After": "1"}, json={"code": "unavailable"}),
+              sse(_status("9.0", "completed")))
+
+    list(server.agent().messages.follow("chat_7Q", "msg_1"))
+    assert server.sleeps[:2] == [server.sleeps[0], 3.0] and server.sleeps[0] >= 3.0

@@ -281,7 +281,8 @@ class EventStream(Iterator[Event]):
                 return False
             if asked > self._transport.max_rate_limit_wait:
                 raise agent_error(resp, request_path=self._path)
-            self._transport.sleep(asked)
+            # The server's SSE `retry:` still holds: the longer of the two.
+            self._transport.sleep(max(asked, self._retry_floor))
             return True
         raise agent_error(resp, request_path=self._path)
 

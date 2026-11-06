@@ -227,3 +227,11 @@ def test_raw_input_parts_need_a_non_blank_text_part(parts):
     with pytest.raises(ValueError):
         server.agent().messages.send("chat_7Q", input=parts)
     assert server.requests == []
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"answers": {"Which chain?": "A"}, "text": "A"}])
+def test_an_answer_is_answers_or_text_exactly_one(kwargs):
+    server = FakeAgentServer()
+    with pytest.raises(ValueError):
+        server.agent().questions.answer("chat_7Q", "q_8c", **kwargs)
+    assert server.requests == []

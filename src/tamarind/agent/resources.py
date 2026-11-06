@@ -317,8 +317,9 @@ class Questions(_Resource):
     ) -> Question:
         """Answer by question text (``answers``) or one ``text`` for every question."""
         body = _compact({"answers": dict(answers) if answers is not None else None, "text": text})
-        if not body:
-            raise ValueError("answer needs answers or text")
+        if len(body) != 1:
+            # The server refuses both together (400): one or the other.
+            raise ValueError("answer needs answers or text, not both")
         resp = self._t.call("answerQuestion", {"chatId": chat_id, "questionId": question_id},
                             json=body, idempotency_key=idempotency_key)
         return _one(resp, Question.from_wire)
