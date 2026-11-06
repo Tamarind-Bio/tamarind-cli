@@ -165,9 +165,11 @@ def rewind(
 
 # ── messages ──
 
-def _file_ids(client: Any, files: list[str], state: Any) -> list[str]:
+def _file_ids(client: Any, files: list[str], state: Any,
+              uploaded: Optional[list[dict[str, str]]] = None) -> list[str]:
     """``--file`` values: an existing local file is uploaded first; anything else starting
-    ``file_`` is a file id, used as is (ids are opaque: a listed one is ``file_w<path>.<tag>``)."""
+    ``file_`` is a file id, used as is (ids are opaque: a listed one is ``file_w<path>.<tag>``).
+    Each upload is appended to ``uploaded`` as ``{"path", "fileId"}``."""
     ids: list[str] = []
     for value in files:
         if not Path(value).is_file():
@@ -177,8 +179,28 @@ def _file_ids(client: Any, files: list[str], state: Any) -> list[str]:
             continue
         slot = client.agent.files.upload(value)
         output.info(f"uploaded {value} as {slot.file_id}", state.output)
+        if uploaded is not None:
+            uploaded.append({"path": value, "fileId": slot.file_id})
         ids.append(slot.file_id)
     return ids
+
+
+def _name_uploads(exc: TamarindError, uploaded: list[dict[str, str]]) -> None:
+    """After a keyed send ends unanswered, say which ids its uploads got.
+
+    The retry has to send the SAME body: the Idempotency-Key is bound to it, and a rerun with
+    the local paths would upload the files again, get new ids, and be refused
+    (409 ``idempotency_key_reused``). Passing the ids back as ``--file`` keeps the body.
+    """
+    if not uploaded or not isinstance(exc.detail, dict) or not exc.detail.get("idempotencyKey"):
+        return
+    exc.detail = {**exc.detail, "uploadedFiles": uploaded}
+    pairs = ", ".join(f"{item['path']} -> {item['fileId']}" for item in uploaded)
+    exc.message = (
+        f"{exc.message} Its files are already uploaded ({pairs}): retry with each local path "
+        "replaced by `--file <file id>`, or the retried body differs from the one the key is "
+        "bound to and is refused (409 idempotency_key_reused)."
+    )
 
 
 @app.command("send")
@@ -194,9 +216,14 @@ def send(
     """Send a message. With --wait, stream the reply's text to stdout."""
     state = ctx.obj
     with state.sdk_client() as client:
-        file_ids = _file_ids(client, file, state)
-        reply = client.agent.messages.send(chat_id, text, file_ids=file_ids, interrupt=interrupt,
-                                           idempotency_key=idempotency_key)
+        uploaded: list[dict[str, str]] = []
+        file_ids = _file_ids(client, file, state, uploaded)
+        try:
+            reply = client.agent.messages.send(chat_id, text, file_ids=file_ids, interrupt=interrupt,
+                                               idempotency_key=idempotency_key)
+        except TamarindError as exc:
+            _name_uploads(exc, uploaded)
+            raise
         if not wait:
             output.emit(_raw(reply), state.output, human=f"{reply.id}  {reply.status}")
             return

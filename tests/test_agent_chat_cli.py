@@ -484,3 +484,35 @@ def test_approve_wait_exits_7_when_the_poll_hangs_past_the_deadline(monkeypatch,
     assert elapsed < 3
     assert code == ExitCode.TIMEOUT
     assert json.loads(err)["error"]["type"] == "JobTimeoutError"
+
+
+@respx.mock
+def test_a_send_with_an_uploaded_file_can_be_retried_with_the_same_key_and_body(tmp_path, monkeypatch, capsys):
+    """The key is bound to the body: rerunning with the local path would re-upload (a new
+    file id) and be refused 409; the error names the ids so the retry sends the same body."""
+    from tamarind.agent.transport import AgentTransport
+
+    monkeypatch.setitem(AgentTransport.__init__.__kwdefaults__, "sleep", lambda _s: None)  # no real backoff
+    target = tmp_path / "target.pdb"
+    target.write_bytes(b"ATOM\n")
+    file_id = "file_u0123456789abcdef0123456789abcdef"
+    create = respx.post(f"{API}chat-files").mock(return_value=httpx.Response(201, json={
+        "fileId": file_id, "uploadUrl": "https://s3.test/u/x?X-Amz-Signature=s", "expiresAt": "x"}))
+    respx.put("https://s3.test/u/x").mock(return_value=httpx.Response(200))
+    send = respx.post(f"{API}chats/chat_7Q/messages").mock(
+        side_effect=[httpx.ReadTimeout("lost")] * 4 + [httpx.Response(202, json=reply("queued"))])
+
+    code, _, err = _run(["--json", "chat", "send", "chat_7Q", "look", "--file", str(target)], monkeypatch, capsys)
+    error = json.loads(err)["error"]
+    assert code == 1
+    key = error["detail"]["idempotencyKey"]
+    assert error["detail"]["uploadedFiles"] == [{"path": str(target), "fileId": file_id}]
+    assert f"--idempotency-key {key}" in error["message"] and file_id in error["message"]
+    first_body = send.calls.last.request.content
+
+    code, _, err = _run(["--json", "chat", "send", "chat_7Q", "look", "--file", file_id,
+                         "--idempotency-key", key], monkeypatch, capsys)
+    assert code == 0, err
+    assert create.call_count == 1  # not uploaded again
+    assert send.calls.last.request.content == first_body  # the body the key is bound to
+    assert send.calls.last.request.headers["Idempotency-Key"] == key
