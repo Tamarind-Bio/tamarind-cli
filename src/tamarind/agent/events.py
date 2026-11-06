@@ -355,7 +355,10 @@ class EventStream(Iterator[Event]):
         named = self.message.continued_by or self._continued_by
         if named:
             return named
-        decided = self._card_decided and self.message.status == "completed"
+        # The caller's own decision counts as seen: a follow resumed past its
+        # approval.resolved cannot see it.
+        decided = ((self._card_decided or (self._decided_approval is not None and not self._decided_spent))
+                   and self.message.status == "completed")
         outlived = (self._decided_raised and not self._decided_spent
                     and self.message.status in ("cancelled", "incomplete"))
         if not (decided or outlived):

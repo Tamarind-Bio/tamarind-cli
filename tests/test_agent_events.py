@@ -613,3 +613,16 @@ def test_a_resumed_follow_trusts_the_decided_approval_it_cannot_see_raised():
     stream = server.agent().messages.follow("chat_7Q", "msg_1", after="7.0", follow_continuations=True,
                                             decided_approval="apr_b")
     assert [e.id for e in stream][-1] == "9.0"
+
+
+def test_a_follow_resumed_past_the_decision_still_follows_its_answer():
+    server = FakeAgentServer()
+    server.on("GET", EVENTS, sse(_status("6.0", "completed")),
+              sse(frame("9.0", "message.completed", reply("completed", message_id="msg_2"), message="msg_2")))
+    server.on("GET", "/chats/chat_7Q/messages/msg_1",
+              httpx.Response(200, json=reply("completed")),
+              httpx.Response(200, json=reply("completed", continued_by="msg_2")))
+
+    stream = server.agent().messages.follow("chat_7Q", "msg_1", after="5.0", follow_continuations=True,
+                                            decided_approval="apr_x")
+    assert [e.id for e in stream][-1] == "9.0"
