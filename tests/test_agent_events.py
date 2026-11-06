@@ -405,23 +405,26 @@ def test_a_transient_reread_failure_keeps_waiting_for_the_answer():
 
 
 def test_the_continuation_wait_counts_time_spent_in_requests(monkeypatch):
-    import itertools
-
     import tamarind.agent.events as events_module
 
-    clock = itertools.count(0, 6)  # each reading 6 s later: slow re-reads
-    monkeypatch.setattr(events_module, "_monotonic", lambda: float(next(clock)))
+    now = [0.0]
+    monkeypatch.setattr(events_module, "_monotonic", lambda: now[0])
+
+    def slow_reread(request: httpx.Request) -> httpx.Response:
+        now[0] += 6  # each re-read takes 6 s; the (fake) pauses take none
+        return httpx.Response(200, json=reply("completed"))
+
     server = FakeAgentServer()
     server.on("GET", EVENTS, sse(frame("5.0", "approval.resolved", approval(status="approved"))
                                  + _status("6.0", "completed")))
-    server.on("GET", "/chats/chat_7Q/messages/msg_1", httpx.Response(200, json=reply("completed")))
+    server.on("GET", "/chats/chat_7Q/messages/msg_1", slow_reread)
 
     stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True,
                                             continuation_wait=10)
     list(stream)
     assert stream.stop_reason == "continuation_pending"
-    # Pauses alone (1+2+3+4 s) would allow four re-reads; with the requests' own time, one.
-    assert len(server.requests_to("GET", "/chats/chat_7Q/messages/msg_1")) == 1
+    # Pauses alone (1, 2, 3 s) would allow three re-reads; with the requests' own time, two.
+    assert len(server.requests_to("GET", "/chats/chat_7Q/messages/msg_1")) == 2
 
 
 def test_the_continuation_wait_counts_a_real_pause_once(monkeypatch):
@@ -488,3 +491,39 @@ def test_a_rate_limited_reread_is_not_slept_out_past_the_wait():
                                             continuation_wait=30)
     assert [e.id for e in stream][-1] == "8.0"
     assert 60.0 not in server.sleeps  # the poll is the retry, inside the wait
+
+
+def test_the_continuation_wait_is_a_deadline_for_pauses_and_requests(monkeypatch):
+    import tamarind.agent.events as events_module
+
+    now = [0.0]
+    monkeypatch.setattr(events_module, "_monotonic", lambda: now[0])
+
+    def real_sleep(seconds: float) -> None:
+        now[0] += seconds
+
+    server = FakeAgentServer()
+    server.on("GET", EVENTS, sse(frame("5.0", "approval.resolved", approval(status="approved"))
+                                 + _status("6.0", "completed")))
+    server.on("GET", "/chats/chat_7Q/messages/msg_1", httpx.Response(200, json=reply("completed")))
+
+    stream = server.agent(sleep=real_sleep).messages.follow(
+        "chat_7Q", "msg_1", follow_continuations=True, continuation_wait=1.5)
+    list(stream)
+    assert stream.stop_reason == "continuation_pending"
+    assert now[0] <= 1.5  # never paused past the deadline
+    timeouts = [r.extensions["timeout"]["read"] for r in server.requests_to("GET", "/chats/chat_7Q/messages/msg_1")]
+    # One re-read, at 1 s, given only the 0.5 s left; none once the wait is spent.
+    assert timeouts == [0.5]
+
+
+@pytest.mark.parametrize("retry_block", [
+    "retry: 3000\n\n",  # on its own
+    "retry: 3000\n" + frame("1.0", "output_text.delta", {"partId": "p_0", "delta": "a"}),  # on a frame
+])
+def test_the_servers_retry_is_the_least_wait_before_reconnecting(retry_block):
+    server = FakeAgentServer()
+    server.on("GET", EVENTS, sse(retry_block, cut=True), sse(_status("9.0", "completed")))
+
+    list(server.agent().messages.follow("chat_7Q", "msg_1"))
+    assert server.sleeps and server.sleeps[0] >= 3.0

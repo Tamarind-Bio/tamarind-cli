@@ -80,6 +80,9 @@ def parse_sse(lines: Iterable[str]) -> Iterator[SSEFrame]:
         if line == "":
             if data or frame_id is not None:
                 yield SSEFrame(event or "message", "\n".join(data), frame_id, retry)
+            elif retry is not None:
+                # `retry` sets the reconnection time on its own, dispatched or not.
+                yield SSEFrame("", "", None, retry)
             event, data, frame_id, retry = "", [], None, None
             continue
         if line.startswith(":"):
@@ -163,7 +166,8 @@ class EventStream(Iterator[Event]):
         self._max_reconnects = max_reconnects
         self._continuation_wait = continuation_wait
         self._pending = False
-        self._retry_base = 0.5
+        # The server's `retry:` (seconds): the least time to wait before reconnecting.
+        self._retry_floor = 0.0
         self.stop_reason: str | None = None
         self.message: Message | None = None
         self._status: str | None = None
@@ -200,7 +204,7 @@ class EventStream(Iterator[Event]):
                     f"{self._max_reconnects} reconnects. Resume later with after={self.last_event_id!r}."
                 )
             if outcome != "waited":
-                self._transport.sleep(backoff(failures, base=self._retry_base))
+                self._transport.sleep(max(self._retry_floor, backoff(failures)))
 
     def _connect(self) -> Generator[Event, None, str]:
         """One connection. Returns "stop", "switch" (follow a continuation now), "progress"
@@ -218,7 +222,9 @@ class EventStream(Iterator[Event]):
                     return "waited" if self._refused(resp) else "lost"
                 for frame in parse_sse(resp.iter_lines()):
                     if frame.retry is not None:
-                        self._retry_base = max(frame.retry / 1000.0, 0.1)
+                        self._retry_floor = frame.retry / 1000.0
+                    if frame.event == "":
+                        continue  # a bare `retry:` block
                     if frame.event == "ping":
                         continue
                     wire = _frame_json(frame)
@@ -338,16 +344,19 @@ class EventStream(Iterator[Event]):
         paused, attempt = 0.0, 0
         while max(paused, _monotonic() - started) < self._continuation_wait:
             attempt += 1
-            pause = float(min(attempt, 5))
+            left = self._continuation_wait - max(paused, _monotonic() - started)
+            pause = max(0.0, min(float(min(attempt, 5)), left))
             self._transport.sleep(pause)
             paused += pause
             remaining = self._continuation_wait - max(paused, _monotonic() - started)
+            if remaining <= 0:
+                break  # the wait is spent: no request that could only land after it
             try:
                 # One attempt, bounded by what is left of the wait: this loop is the retry
                 # (the transport's own would sleep out a Retry-After past the deadline).
                 resp = self._transport.call(
                     "getMessage", {"chatId": self.chat_id, "messageId": self.message_id},
-                    timeout=max(remaining, 1.0), max_retries=0,
+                    timeout=remaining, max_retries=0,
                 )
                 current = Message.from_wire(_object(resp))
             except NotFoundError:
