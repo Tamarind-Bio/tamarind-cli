@@ -285,6 +285,7 @@ def events(
                            else f"{event.id}  {event.type}  {_summary(event)}".rstrip())
         except KeyboardInterrupt:
             output.info(f"stopped; resume with --after {stream.last_event_id}", state.output)
+            raise typer.Exit(130)  # a partial feed is not a finished one
 
 
 def _summary(event: Event) -> str:

@@ -376,3 +376,15 @@ def test_an_answer_with_both_forms_or_neither_is_a_structured_error(extra, monke
     assert code == ExitCode.VALIDATION
     assert out == ""
     assert json.loads(err)["error"]["type"] == "ArgumentError"
+
+
+@respx.mock
+def test_an_interrupted_events_follow_exits_130_not_0(monkeypatch):
+    from tamarind.agent.events import EventStream
+
+    def interrupted(self):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(EventStream, "__next__", interrupted)
+    res = runner.invoke(app, ["--json", "chat", "events", "chat_7Q", "--follow"], env=ENV)
+    assert res.exit_code == 130
