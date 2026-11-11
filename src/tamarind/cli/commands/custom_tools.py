@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import json
 from pathlib import Path
 from typing import Any, Optional
 
@@ -16,6 +17,7 @@ from ...custom_tools.transport import (
     PublicVersionStatus,
 )
 from ...custom_tools.validation import ValidationProblem, ValidationReport, validate_folder
+from ...finetune.compile import FinetuneCompileError, sync_config_json
 from ...errors import ExitCode, TamarindError, ValidationError
 from ..inputs import effective_job_name, effective_job_type, resolve_job_input
 from .. import output
@@ -211,7 +213,9 @@ def test_tool(
     state = ctx.obj
     job_input = resolve_job_input(input, set_)
     if job_input.low_priority:
-        raise ValidationError("Custom tools can't run at low priority. Remove lowPriority from the input file.")
+        raise ValidationError(
+            "Custom tools can't run at low priority. Remove lowPriority from the input file."
+        )
     tool_name = effective_job_type(tool_name, job_input.job_type)
     job_name = effective_job_name(name, job_input.job_name)
     with state.sdk_client() as client:
@@ -320,6 +324,65 @@ def validate(
     )
     output.emit(result, state.output, human=human)
     if not report.valid:
+        raise typer.Exit(ExitCode.VALIDATION)
+
+
+@app.command(name="sync-finetune")
+def sync_finetune(
+    ctx: typer.Context,
+    folder: Path = typer.Argument(
+        ..., exists=True, file_okay=False, readable=True, resolve_path=True
+    ),
+    check: bool = typer.Option(
+        False, "--check", help="Report whether config.json is stale without writing it."
+    ),
+) -> None:
+    """Write the `finetune` block of config.json from the @tm decorators in the folder's scripts.
+
+    Build does this automatically; run it to see the compiled block, or with --check in CI.
+    """
+    state = ctx.obj
+    try:
+        result = sync_config_json(folder, write=not check)
+    except FinetuneCompileError as exc:
+        report = ValidationReport(
+            errors=(
+                ValidationProblem(
+                    code="finetune_decorator_invalid", path=exc.path, message=str(exc)
+                ),
+            )
+        )
+        output.emit(
+            _report(report),
+            state.output,
+            human=output.render_table(
+                [{"severity": "error", **_problem(item)} for item in report.errors],
+                ["severity", "code", "path", "message"],
+            ),
+        )
+        raise typer.Exit(ExitCode.VALIDATION)
+    if result.compiled is None:
+        output.emit(
+            {"finetune": None, "changed": False},
+            state.output,
+            human="no @tm decorators found; config.json left as it is",
+        )
+        return
+    payload = {
+        "finetune": result.compiled.block,
+        "resources": result.compiled.resources,
+        "sources": list(result.compiled.sources),
+        "changed": result.changed,
+        "written": result.changed and not check,
+    }
+    if check:
+        human = "config.json is stale" if result.changed else "config.json is up to date"
+    else:
+        human = "wrote config.json" if result.changed else "config.json already up to date"
+    output.emit(
+        payload, state.output, human=human + "\n" + json.dumps(result.compiled.block, indent=2)
+    )
+    if check and result.changed:
         raise typer.Exit(ExitCode.VALIDATION)
 
 

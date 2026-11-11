@@ -209,6 +209,7 @@ confirm the mutation is still appropriate, and retry with the refreshed state.
 | `custom-tools create NAME` | Create a tool identity | `--display-name` |
 | `custom-tools update NAME` | Change tool metadata | metadata options |
 | `custom-tools validate FOLDER` | Validate local source without auth or upload | — |
+| `custom-tools sync-finetune FOLDER` | Write config.json's `finetune` block from the `@tm` decorators (see [finetune.md](finetune.md)) | `--check` |
 | `custom-tools build NAME FOLDER` | Package, upload, build, and optionally monitor a Version | `--idempotency-key`, `--wait`, monitoring `--timeout`, `--poll-interval` |
 | `custom-tools versions NAME` | Read one page of a tool's Versions | `--limit`, `--cursor` |
 | `custom-tools version NAME VERSION` | Read or monitor one exact Version | `--wait`, monitoring `--timeout`, `--poll-interval` |
