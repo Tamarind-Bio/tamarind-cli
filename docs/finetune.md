@@ -13,7 +13,7 @@ You keep the training loop. Nothing here owns your data loader, your loss, or yo
 import tamarind as tm
 
 @tm.training_run(
-    gpu="H100",
+    gpu="A100",
     timeout_hours=12,
     hyperparameters={
         "lr": tm.Float(1e-4, 1e-6, 1e-2),
@@ -87,7 +87,9 @@ tamarind custom-tools build my-trainer ./my-trainer       # syncs the block, the
 ```
 
 `build` (and `CustomTool.build()` in the SDK) rewrites the block before packaging unless you
-pass `sync_finetune=False`. The resulting `config.json` is what the platform reads; you can
+pass `sync_finetune=False`. The platform compiles the decorators again at build time, so a folder
+uploaded without the SDK (an agent calling `deployCustomTool`) gets the same block derived; a
+config.json whose block disagrees with the decorators is refused. The resulting `config.json` is what the platform reads; you can
 also write the block by hand, in any language, and skip the decorators entirely:
 
 ```json

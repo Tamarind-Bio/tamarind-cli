@@ -55,7 +55,7 @@ def training_run(
 ) -> Callable[[F], F]:
     """Mark the function the platform invokes to train.
 
-        @tm.training_run(gpu="H100", timeout_hours=12,
+        @tm.training_run(gpu="A100", timeout_hours=12,
                          hyperparameters={"lr": tm.Float(1e-4, 1e-6, 1e-2), "epochs": tm.Int(10)},
                          objective=("val/spearman", "max"), artifact="checkpoints/best")
         def main():

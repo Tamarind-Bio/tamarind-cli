@@ -5,7 +5,7 @@ like, and deploy the folder as a custom tool. See ``docs/finetune.md``.
 
     import tamarind as tm
 
-    @tm.training_run(gpu="H100", timeout_hours=12,
+    @tm.training_run(gpu="A100", timeout_hours=12,
                      hyperparameters={"lr": tm.Float(1e-4, 1e-6, 1e-2), "epochs": tm.Int(10)},
                      objective=("val/spearman", "max"))
     def main():
