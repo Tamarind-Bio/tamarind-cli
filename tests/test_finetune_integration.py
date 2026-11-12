@@ -49,5 +49,5 @@ def test_build_ships_the_folder_exactly_as_it_is(tmp_path: Path) -> None:
     object.__setattr__(tool, "_collection", FakeCollection())
     assert tool.build(folder) == "built"
     assert seen["config"] == config
-    assert seen["train"] == TRAIN
+    assert seen["train"] == (folder / "train.py").read_bytes().decode()  # byte-for-byte, any OS
     assert json.loads((folder / "config.json").read_text()) == config
