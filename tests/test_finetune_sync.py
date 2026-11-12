@@ -220,8 +220,12 @@ def test_sources_skip_environments_and_caches_and_honour_declared_encodings(tmp_
         "# -*- coding: latin-1 -*-\nNAME = 'caf\xe9'\n".encode("latin-1")
     )
     (tmp_path / "binary.py").write_bytes(b"\xff\xfe not text")
+    (tmp_path / "crlf.py").write_bytes(b"import tamarind\r\nx = 1\r\n")
     sources = {s.relative: s.text for s in iter_python_sources(tmp_path)}
-    assert sorted(sources) == ["binary.py", "legacy.py", "train.py"]
+    assert sorted(sources) == ["binary.py", "crlf.py", "legacy.py", "train.py"]
+    assert (
+        sources["crlf.py"] == "import tamarind\nx = 1\n"
+    )  # a Windows checkout sends the same text
     assert "caf\xe9" in sources["legacy.py"]  # decoded as Python would, not as UTF-8
     assert "\ufffd" in sources["binary.py"]  # undecodable bytes replaced, never an exception
 

@@ -100,9 +100,11 @@ def _decode_source(data: bytes) -> str:
     except SyntaxError:  # a bad coding cookie: let the server's parse name the problem
         encoding = "utf-8"
     try:
-        return data.decode(encoding)
+        text = data.decode(encoding)
     except (UnicodeDecodeError, LookupError):
-        return data.decode("utf-8", errors="replace")
+        text = data.decode("utf-8", errors="replace")
+    # Universal newlines, as a text-mode read gives them: a Windows checkout sends the same source.
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def mentions_decorators(sources: list[SourceText]) -> bool:
