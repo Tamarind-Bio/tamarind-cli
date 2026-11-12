@@ -10,9 +10,13 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass, field
 import json
+import os
 from pathlib import Path
+import stat
+import sys
 from typing import Any, Iterable
 
+from tamarind.custom_tools.strict_json import load_strict_json
 from tamarind.finetune import spec as _spec
 
 DECORATOR_KINDS = ("training_run", "predictor", "evaluator", "splitter")
@@ -57,28 +61,74 @@ class SourceText:
     text: str
 
 
-def _is_tamarind_module(tree: ast.Module) -> bool:
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import) and any(
-            a.name.split(".")[0] == "tamarind" for a in node.names
-        ):
-            return True
-        if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "tamarind":
-            return True
-    return False
+TAMARIND_MODULES = (
+    "tamarind",
+    "tamarind.finetune",
+    "tamarind.finetune.decorators",
+    "tamarind.finetune.spec",
+)
+#: Decorators that take keyword arguments and return a decorator: `@tm.training_run` without
+#: parentheses would hand the function itself as `gpu=` and fail at import.
+CALL_REQUIRED = ("training_run", "predictor")
 
 
-def _terminal_name(node: ast.expr) -> str | None:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        return node.attr
-    return None
+class _Bindings:
+    """What the module's imports bind to Tamarind, so a decorator is matched by binding, not name.
+
+    `from ray import training_run` beside `import tamarind as tm` must not compile as ours.
+    """
+
+    def __init__(self, tree: ast.Module) -> None:
+        self.modules: set[str] = set()  # local names bound to a tamarind module
+        self.names: dict[
+            str, str
+        ] = {}  # local name -> tamarind attribute (training_run, Float, ...)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name in TAMARIND_MODULES:
+                        self.modules.add(alias.asname or alias.name.split(".")[0])
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.module in TAMARIND_MODULES
+                and node.level == 0
+            ):
+                for alias in node.names:
+                    self.names[alias.asname or alias.name] = alias.name
+
+    def resolve(self, node: ast.expr) -> str | None:
+        """The tamarind attribute `node` names (`training_run`, `Float`, ...), or None."""
+        if isinstance(node, ast.Name):
+            bound = self.names.get(node.id)
+            if bound in ("finetune", "decorators", "spec"):
+                return None
+            return bound
+        if isinstance(node, ast.Attribute):
+            chain: list[str] = [node.attr]
+            base: ast.expr = node.value
+            while isinstance(base, ast.Attribute):
+                chain.append(base.attr)
+                base = base.value
+            if not isinstance(base, ast.Name):
+                return None
+            if base.id in self.modules:
+                root_ok = True
+            elif self.names.get(base.id) in ("finetune", "decorators", "spec"):
+                root_ok = True  # from tamarind import finetune; finetune.training_run
+            else:
+                root_ok = False
+            if not root_ok:
+                return None
+            intermediates = chain[1:]
+            if any(part not in ("finetune", "decorators", "spec") for part in intermediates):
+                return None
+            return chain[0]
+        return None
 
 
-def _decorator_kind(decorator: ast.expr) -> tuple[str, ast.Call | None] | None:
+def _decorator_kind(decorator: ast.expr, bindings: _Bindings) -> tuple[str, ast.Call | None] | None:
     target = decorator.func if isinstance(decorator, ast.Call) else decorator
-    name = _terminal_name(target)
+    name = bindings.resolve(target)
     if name in DECORATOR_KINDS:
         return name, decorator if isinstance(decorator, ast.Call) else None
     return None
@@ -87,15 +137,16 @@ def _decorator_kind(decorator: ast.expr) -> tuple[str, ast.Call | None] | None:
 class _Literal:
     """Evaluate a decorator argument: literals plus the spec helpers with literal arguments."""
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, bindings: _Bindings) -> None:
         self.path = path
+        self.bindings = bindings
 
     def fail(self, node: ast.AST, message: str) -> FinetuneCompileError:
         return FinetuneCompileError(self.path, getattr(node, "lineno", None), message)
 
     def value(self, node: ast.expr) -> Any:
         if isinstance(node, ast.Call):
-            helper = _spec.SPEC_HELPERS.get(_terminal_name(node.func) or "")
+            helper = _spec.SPEC_HELPERS.get(self.bindings.resolve(node.func) or "")
             if helper is None:
                 raise self.fail(
                     node, "decorator arguments must be literals or tm.Float/Int/Str/Bool/Choice"
@@ -132,26 +183,53 @@ class _Literal:
         )
 
 
+_Definition = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+
+
+def _parse(source: SourceText) -> ast.Module:
+    try:
+        return ast.parse(source.text, filename=source.relative)
+    except SyntaxError as exc:
+        version = ".".join(str(v) for v in sys.version_info[:2])
+        raise FinetuneCompileError(
+            source.relative,
+            exc.lineno,
+            f"syntax error: {exc.msg} (parsed with Python {version}; if the script targets a newer "
+            "Python, run `tamarind custom-tools sync-finetune` under that version, or write the "
+            "finetune block in config.json by hand)",
+        ) from None
+
+
 def _collect(sources: Iterable[SourceText]) -> list[_Found]:
     found: list[_Found] = []
     for source in sources:
-        try:
-            tree = ast.parse(source.text, filename=source.relative)
-        except SyntaxError as exc:
-            raise FinetuneCompileError(
-                source.relative, exc.lineno, f"syntax error: {exc.msg}"
-            ) from None
-        if not _is_tamarind_module(tree):
+        if "tamarind" not in source.text:
+            continue  # never parsed: a file that cannot mention us cannot carry our decorators
+        tree = _parse(source)
+        bindings = _Bindings(tree)
+        if not bindings.modules and not bindings.names:
             continue
-        literal = _Literal(source.relative)
+        literal = _Literal(source.relative, bindings)
+        top_level = {id(node) for node in tree.body if isinstance(node, _Definition)}
         for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if not isinstance(node, _Definition):
                 continue
             for decorator in node.decorator_list:
-                matched = _decorator_kind(decorator)
+                matched = _decorator_kind(decorator, bindings)
                 if matched is None:
                     continue
                 kind, call = matched
+                if id(node) not in top_level:
+                    raise literal.fail(
+                        node,
+                        f"@tm.{kind} on {node.name!r} must be defined at module level: the platform "
+                        f"invokes it as {source.relative}:{node.name}",
+                    )
+                if call is None and kind in CALL_REQUIRED:
+                    raise literal.fail(
+                        node,
+                        f"@tm.{kind} needs parentheses: @tm.{kind}(...) (it takes keyword arguments)",
+                    )
                 kwargs: dict[str, Any] = {}
                 if call is not None:
                     if call.args:
@@ -284,22 +362,34 @@ def sync_config_json(folder: str | Path, *, write: bool) -> SyncResult:
     """Compile the decorators and merge the block into `<folder>/config.json`.
 
     With `write`, the file is rewritten only when the block changed, keeping the rest of the
-    document as it was.
+    document as it was. The folder and config.json must be real (no symlink at either), and the
+    JSON is parsed with the same strictness as `custom-tools validate`, so a sync can never
+    rewrite a file outside the folder or launder a duplicate-key config past validation.
     """
     root = Path(folder)
+    if root.is_symlink() or not root.is_dir():
+        raise FinetuneCompileError(
+            str(folder), None, "the source folder must be a real directory, not a symlink"
+        )
     config_path = root / "config.json"
     compiled = compile_folder(root)
-    if not config_path.is_file():
+    try:
+        metadata = os.lstat(config_path)
+    except FileNotFoundError:
         if compiled is None:
             return SyncResult(None, False, "")
         raise FinetuneCompileError(
             "config.json",
             None,
             "config.json is required; the decorators only fill its finetune block",
+        ) from None
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        raise FinetuneCompileError(
+            "config.json", None, "config.json must be a regular file, not a symlink"
         )
     text = config_path.read_text(encoding="utf-8")
     try:
-        config = json.loads(text)
+        config = load_strict_json(text)
     except ValueError as exc:
         raise FinetuneCompileError("config.json", None, f"not valid JSON: {exc}") from None
     if not isinstance(config, dict):
@@ -310,5 +400,15 @@ def sync_config_json(folder: str | Path, *, write: bool) -> SyncResult:
     changed = updated != config
     new_text = json.dumps(updated, indent=2) + "\n" if changed else text
     if changed and write:
-        config_path.write_text(new_text, encoding="utf-8")
+        _write_nofollow(config_path, new_text)
     return SyncResult(compiled, changed, new_text)
+
+
+def _write_nofollow(path: Path, text: str) -> None:
+    """Rewrite `path` in place without following a link that appeared since the lstat above."""
+    flags = os.O_WRONLY | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        os.write(fd, text.encode("utf-8"))
+    finally:
+        os.close(fd)

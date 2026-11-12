@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
 from pathlib import Path
 import re
-from typing import NoReturn
 
 from tamarind.custom_tools.packaging import (
     SourceTree,
     inspect_source_tree,
     validate_source_tree_manifest,
 )
+from tamarind.custom_tools.strict_json import load_strict_json
 from tamarind.errors import CustomToolUploadError
 from tamarind.finetune.compile import (
     FinetuneCompileError,
@@ -31,27 +30,6 @@ _NETWORK_PATTERN = re.compile(
 )
 _MAX_NETWORK_SCAN_BYTES = 1024 * 1024
 _MAX_CONFIG_BYTES = 8 * 1024 * 1024
-
-
-def _reject_json_constant(value: str) -> NoReturn:
-    raise ValueError(f"non-standard JSON constant {value!r}")
-
-
-def _object_without_duplicate_members(pairs: list[tuple[str, object]]) -> dict[str, object]:
-    value: dict[str, object] = {}
-    for name, member in pairs:
-        if name in value:
-            raise ValueError(f"duplicate JSON object member {name!r}")
-        value[name] = member
-    return value
-
-
-def _load_strict_json(raw: str) -> object:
-    return json.loads(
-        raw,
-        parse_constant=_reject_json_constant,
-        object_pairs_hook=_object_without_duplicate_members,
-    )
 
 
 @dataclass(frozen=True)
@@ -123,7 +101,7 @@ def validate_source_tree(tree: SourceTree) -> ValidationReport:
             )
         else:
             try:
-                value = _load_strict_json(config_file.read_text())
+                value = load_strict_json(config_file.read_text())
             except CustomToolUploadError as exc:
                 error("invalid_source_tree", ".", str(exc))
                 return ValidationReport(tuple(errors), tuple(warnings))

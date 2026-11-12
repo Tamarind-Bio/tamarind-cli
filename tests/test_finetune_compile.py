@@ -239,3 +239,124 @@ def test_apply_keeps_max_runtime_when_the_block_sets_no_timeout() -> None:
     updated = apply_to_config({"maxRuntimeSeconds": 60}, compiled)
     assert updated["maxRuntimeSeconds"] == 60
     assert updated["finetune"] == {"entrypoint": "t.py:main", "hyperparameters": {}}
+
+
+# ---- decorators are matched by binding, at module level, with parentheses where required -------
+
+
+def _one(source: str):
+    return compile_sources([SourceText("main.py", source)])
+
+
+def test_a_same_named_decorator_from_another_library_is_ignored_even_beside_tamarind() -> None:
+    source = (
+        "import tamarind as tm\n"
+        "from ray import training_run\n"
+        "@training_run(gpu='x')\n"
+        "def other(): ...\n"
+        "@tm.training_run(gpu='L4')\n"
+        "def main(): ...\n"
+    )
+    compiled = _one(source)
+    assert compiled is not None
+    assert compiled.block["entrypoint"] == "main.py:main"
+    assert compiled.resources == {"gpuType": "L4"}
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from tamarind import training_run as tr\n@tr(gpu='L4')\ndef main(): ...\n",
+        "import tamarind.finetune as tf\n@tf.training_run(gpu='L4')\ndef main(): ...\n",
+        "import tamarind\n@tamarind.finetune.training_run(gpu='L4')\ndef main(): ...\n",
+        "from tamarind import finetune\n@finetune.training_run(gpu='L4')\ndef main(): ...\n",
+        "from tamarind.finetune.decorators import training_run\n@training_run(gpu='L4')\ndef main(): ...\n",
+    ],
+)
+def test_every_tamarind_binding_is_recognized(source: str) -> None:
+    compiled = _one(source)
+    assert compiled is not None
+    assert compiled.resources == {"gpuType": "L4"}
+
+
+def test_spec_helpers_are_matched_by_binding_too() -> None:
+    source = (
+        "from tamarind import training_run, Float\n"
+        "from other import Int\n"
+        "@training_run(hyperparameters={'lr': Float(0.1)})\n"
+        "def main(): ...\n"
+    )
+    assert _one(source).block["hyperparameters"] == {"lr": {"type": "float", "default": 0.1}}
+    with pytest.raises(FinetuneCompileError, match="must be literals or tm.Float"):
+        _one(
+            "from tamarind import training_run\nfrom other import Int\n@training_run(hyperparameters={'n': Int(1)})\ndef main(): ...\n"
+        )
+
+
+@pytest.mark.parametrize(
+    ("source", "message"),
+    [
+        ("import tamarind as tm\n@tm.training_run\ndef main(): ...\n", "needs parentheses"),
+        (
+            "import tamarind as tm\n@tm.training_run()\ndef main(): ...\n@tm.predictor\nclass M:\n    def load(self, d): ...\n    def predict(self, x): ...\n",
+            "needs parentheses",
+        ),
+        (
+            "import tamarind as tm\ndef outer():\n    @tm.training_run()\n    def main(): ...\n",
+            "must be defined at module level",
+        ),
+        (
+            "import tamarind as tm\n@tm.training_run()\ndef main(): ...\nclass Holder:\n    @tm.evaluator\n    def score(p, t): ...\n",
+            "must be defined at module level",
+        ),
+        ("import tamarind as tm\n@tm.training_run(\ndef main(): ...\n", "parsed with Python"),
+    ],
+)
+def test_bare_nested_and_unparseable_decorators_are_refused(source: str, message: str) -> None:
+    with pytest.raises(FinetuneCompileError, match=message):
+        _one(source)
+
+
+def test_bare_evaluator_and_splitter_still_compile() -> None:
+    source = "import tamarind as tm\n@tm.training_run()\ndef main(): ...\n@tm.evaluator\ndef s(p, t): ...\n@tm.splitter\ndef sp(d): ...\n"
+    block = _one(source).block
+    assert block["evaluator"] == "main.py:s"
+    assert block["splitter"] == "main.py:sp"
+
+
+def test_files_that_never_mention_tamarind_are_not_parsed() -> None:
+    assert (
+        compile_sources([SourceText("legacy.py", "def f(:\n")]) is None
+    )  # a syntax error we never see
+
+
+# ---- sync is strict and never writes through a link ---------------------------------------------
+
+
+def test_sync_refuses_duplicate_keys_instead_of_laundering_them(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        {
+            "train.py": TRAIN,
+            "config.json": '{"displayName": "a", "displayName": "b", "inputs": []}',
+        },
+    )
+    with pytest.raises(FinetuneCompileError, match="duplicate JSON object member"):
+        sync_config_json(tmp_path, write=True)
+    assert '"displayName": "a", "displayName": "b"' in (tmp_path / "config.json").read_text()
+
+
+def test_sync_refuses_a_symlinked_config_json_and_folder(tmp_path: Path) -> None:
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"displayName": "victim", "inputs": []}')
+    folder = tmp_path / "tool"
+    _write(folder, {"train.py": TRAIN})
+    (folder / "config.json").symlink_to(outside)
+    with pytest.raises(FinetuneCompileError, match="not a symlink"):
+        sync_config_json(folder, write=True)
+    assert outside.read_text() == '{"displayName": "victim", "inputs": []}'
+
+    linked = tmp_path / "linked"
+    linked.symlink_to(folder)
+    with pytest.raises(FinetuneCompileError, match="real directory"):
+        sync_config_json(linked, write=True)
