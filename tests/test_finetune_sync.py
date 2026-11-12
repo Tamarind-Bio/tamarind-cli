@@ -199,7 +199,7 @@ def test_sync_refuses_a_symlinked_config_json_and_folder(tmp_path: Path) -> None
     folder.mkdir()
     (folder / "train.py").write_text(TRAIN)
     (folder / "config.json").symlink_to(outside)
-    with pytest.raises(FinetuneCompileError, match="not a symlink"):
+    with pytest.raises(FinetuneCompileError, match="symlink"):
         _client().custom_tools.sync_finetune(folder, write=True)
     assert outside.read_text() == '{"displayName": "victim"}'
     linked = tmp_path / "linked"
@@ -208,7 +208,7 @@ def test_sync_refuses_a_symlinked_config_json_and_folder(tmp_path: Path) -> None
         _client().custom_tools.sync_finetune(linked, write=True)
 
 
-def test_sources_skip_environments_caches_and_links(tmp_path: Path) -> None:
+def test_sources_skip_environments_and_caches_and_honour_declared_encodings(tmp_path: Path) -> None:
     from tamarind.finetune.compile import iter_python_sources
 
     (tmp_path / "train.py").write_text(TRAIN)
@@ -216,5 +216,20 @@ def test_sources_skip_environments_caches_and_links(tmp_path: Path) -> None:
     (tmp_path / ".venv" / "lib" / "x.py").write_text("x")
     (tmp_path / "__pycache__").mkdir()
     (tmp_path / "__pycache__" / "y.py").write_text("y")
+    (tmp_path / "legacy.py").write_bytes(
+        "# -*- coding: latin-1 -*-\nNAME = 'caf\xe9'\n".encode("latin-1")
+    )
+    (tmp_path / "binary.py").write_bytes(b"\xff\xfe not text")
+    sources = {s.relative: s.text for s in iter_python_sources(tmp_path)}
+    assert sorted(sources) == ["binary.py", "legacy.py", "train.py"]
+    assert "caf\xe9" in sources["legacy.py"]  # decoded as Python would, not as UTF-8
+    assert "\ufffd" in sources["binary.py"]  # undecodable bytes replaced, never an exception
+
+
+def test_sources_refuse_links_before_anything_is_sent(tmp_path: Path) -> None:
+    from tamarind.finetune.compile import iter_python_sources
+
+    (tmp_path / "train.py").write_text(TRAIN)
     (tmp_path / "link.py").symlink_to(tmp_path / "train.py")
-    assert [s.relative for s in iter_python_sources(tmp_path)] == ["train.py"]
+    with pytest.raises(FinetuneCompileError, match="symlinks or junctions"):
+        iter_python_sources(tmp_path)

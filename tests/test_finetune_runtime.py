@@ -65,6 +65,12 @@ def test_config_off_platform_is_defaults_then_env(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("epochs", "7")
     monkeypatch.setenv("lr", "0.5")
     assert tm.hyperparameters() == {"lr": 0.5, "epochs": 7, "on": False, "tag": "a"}
+    monkeypatch.setenv("on", "yes")
+    assert tm.hyperparameters()["on"] is True
+    monkeypatch.setenv("on", "treu")  # a typo is ignored like a malformed int, never read as False
+    assert tm.hyperparameters()["on"] is False
+    monkeypatch.setenv("on", "off")
+    assert tm.hyperparameters()["on"] is False
     assert not tm.is_platform()
 
 

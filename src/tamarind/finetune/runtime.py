@@ -58,7 +58,12 @@ def _coerce(hp_type: str, raw: str) -> Any:
     if hp_type == "float":
         return float(raw)
     if hp_type == "boolean":
-        return raw.strip().lower() in ("1", "true", "yes", "on")
+        text = raw.strip().lower()
+        if text in ("1", "true", "yes", "on"):
+            return True
+        if text in ("0", "false", "no", "off"):
+            return False
+        raise ValueError(f"not a boolean: {raw!r}")  # "treu" must not quietly flip the setting
     return raw
 
 

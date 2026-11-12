@@ -10,10 +10,14 @@ that could drift from the server's.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import io
 import os
 from pathlib import Path
 import stat
+import tokenize
 from typing import Any, Protocol
+
+from tamarind.custom_tools.packaging import CustomToolUploadError, inspect_source_tree
 
 SKIPPED_DIRS = {"__pycache__", "node_modules", "venv", ".venv", "site-packages", "build", "dist"}
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
@@ -60,19 +64,45 @@ class ConfigValidator(Protocol):
 
 
 def iter_python_sources(folder: str | Path) -> list[SourceText]:
-    """Every .py file under `folder`, as (relative path, text), skipping environments, caches and links."""
-    root = Path(folder)
+    """Every .py file under `folder`, as (relative path, text), skipping environments and caches.
+
+    The files come from the same inspected tree a build packages (`inspect_source_tree`), so a
+    link or junction anywhere in the folder is refused here, before any content is sent, exactly
+    as the build would refuse it; and each file is read through its verified descriptor. Text is
+    decoded by the file's declared source encoding (PEP 263), as Python itself reads it, with
+    undecodable bytes replaced the way the server decodes an archive.
+    """
+    try:
+        tree = inspect_source_tree(folder)
+    except CustomToolUploadError as exc:
+        raise FinetuneCompileError(str(folder), None, str(exc)) from None
     out: list[SourceText] = []
-    for path in sorted(root.rglob("*.py")):
-        parts = path.relative_to(root).parts
-        if any(p.startswith(".") or p in SKIPPED_DIRS for p in parts[:-1]) or path.is_symlink():
+    for file in sorted(tree.files, key=lambda f: f.relative):
+        parts = file.relative.split("/")
+        if not file.relative.endswith(".py") or file.size > MAX_SOURCE_BYTES:
             continue
-        if path.stat().st_size > MAX_SOURCE_BYTES:
+        if any(p.startswith(".") or p in SKIPPED_DIRS for p in parts[:-1]):
             continue
-        out.append(SourceText(path.relative_to(root).as_posix(), path.read_text(encoding="utf-8")))
+        try:
+            with file.open_verified() as handle:
+                data = handle.read()
+        except CustomToolUploadError as exc:
+            raise FinetuneCompileError(file.relative, None, str(exc)) from None
+        out.append(SourceText(file.relative, _decode_source(data)))
         if len(out) >= MAX_SOURCES:
             break
     return out
+
+
+def _decode_source(data: bytes) -> str:
+    try:
+        encoding, _ = tokenize.detect_encoding(io.BytesIO(data).readline)
+    except SyntaxError:  # a bad coding cookie: let the server's parse name the problem
+        encoding = "utf-8"
+    try:
+        return data.decode(encoding)
+    except (UnicodeDecodeError, LookupError):
+        return data.decode("utf-8", errors="replace")
 
 
 def mentions_decorators(sources: list[SourceText]) -> bool:
