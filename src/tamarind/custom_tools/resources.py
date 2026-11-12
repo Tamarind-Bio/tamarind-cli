@@ -55,7 +55,6 @@ from tamarind.errors import (
     ValidationError,
 )
 from tamarind.http import DEFAULT_TIMEOUT
-from tamarind.finetune.compile import FinetuneCompileError, SyncResult, sync_config_json
 
 T = TypeVar("T")
 EventCallback = Callable[["BuildEvent"], None]
@@ -226,28 +225,8 @@ class CustomTool:
         *,
         idempotency_key: str | None = None,
         source_timeout: float = 180.0,
-        sync_finetune: bool = True,
     ) -> BuildResult:
-        """Upload source and return what the server did plus the durable Version.
-
-        With `sync_finetune` (the default), a folder whose scripts carry `@tm` decorators has
-        its config.json `finetune` block rewritten from them first, so the build never ships a
-        stale block. Pass False to build the folder exactly as it is.
-        """
-        if sync_finetune:
-            try:
-                self._collection.sync_finetune(folder, write=True)
-            except FinetuneCompileError as exc:
-                report = ValidationReport(
-                    errors=(
-                        ValidationProblem(
-                            code="finetune_decorator_invalid", path=exc.path, message=str(exc)
-                        ),
-                    )
-                )
-                raise ValidationError(
-                    "Custom Tool source validation failed", detail=report
-                ) from None
+        """Upload source and return what the server did plus the durable Version."""
         try:
             tree = inspect_source_tree(folder)
         except CustomToolUploadError as exc:
@@ -494,11 +473,6 @@ class CustomTools:
     ):
         self._transport = transport
         self._upload_timeout = upload_timeout
-
-    def sync_finetune(self, folder: str | Path, *, write: bool = True) -> SyncResult:
-        """Write config.json's `finetune` block from the `@tm` decorators in `folder`, as the server
-        compiles them (`POST /custom-tools/validate-config`). With `write=False`, only report."""
-        return sync_config_json(folder, write=write, validator=self._transport)
 
     def create(
         self,

@@ -725,9 +725,7 @@ def test_validation_translates_parser_recursion(tmp_path: Path, monkeypatch) -> 
     def raise_recursion(_raw: str, **_kwargs: object) -> object:
         raise RecursionError("excessive nesting")
 
-    from tamarind.custom_tools import strict_json
-
-    monkeypatch.setattr(strict_json.json, "loads", raise_recursion)
+    monkeypatch.setattr(validation.json, "loads", raise_recursion)
 
     report = validate_folder(tmp_path)
 

@@ -1,7 +1,7 @@
 """Hyperparameter specs and the `finetune` block shape.
 
 Specs are plain dicts so that the same expression works in three places: as a decorator
-argument at runtime, as a literal the compiler can evaluate from source without importing the
+argument at runtime, as a literal the platform's build can evaluate from source without importing the
 user's script, and as JSON in config.json. The backend (tamarind-website
 `custom_tool_finetune.py`) is the strict validator; this module keeps the shape and names.
 """

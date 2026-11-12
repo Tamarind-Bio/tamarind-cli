@@ -1,14 +1,15 @@
 """The four decorators. They attach metadata and return the object unchanged.
 
-The platform never calls through a decorator: at build time the compiler reads the decorator
-arguments out of the source (without importing it) and writes the `finetune` block of
-config.json; at run time the platform invokes the entrypoint the block names. So a decorated
+The platform never calls through a decorator: at build time it reads the decorator arguments
+out of the uploaded source (without importing it) and stores the `finetune` block they describe
+on the tool's version, leaving the source as it was; at run time it invokes the entrypoint the
+block names. So a decorated
 script runs identically on a laptop, where the decorators only register defaults for
 `tm.hyperparameters()` and the evaluator for `tm.evaluate()`.
 
 Every argument must be a literal: a number, string, bool, tuple, list or dict of those, or one
 of the `tm.Float` / `tm.Int` / `tm.Str` / `tm.Bool` / `tm.Choice` helpers with literal
-arguments. The compiler refuses anything else with the file and line, because the config is
+arguments. The build refuses anything else with the file and line, because the config is
 needed before the image that holds the script's dependencies exists.
 """
 

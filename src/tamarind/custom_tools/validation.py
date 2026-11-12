@@ -3,22 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import re
+from typing import NoReturn
 
 from tamarind.custom_tools.packaging import (
     SourceTree,
     inspect_source_tree,
     validate_source_tree_manifest,
 )
-from tamarind.custom_tools.strict_json import load_strict_json
 from tamarind.errors import CustomToolUploadError
-from tamarind.finetune.compile import (
-    MAX_SOURCE_BYTES,
-    SKIPPED_DIRS,
-    SourceText,
-    mentions_decorators,
-)
 
 
 _NETWORK_PATTERN = re.compile(
@@ -29,6 +24,27 @@ _NETWORK_PATTERN = re.compile(
 )
 _MAX_NETWORK_SCAN_BYTES = 1024 * 1024
 _MAX_CONFIG_BYTES = 8 * 1024 * 1024
+
+
+def _reject_json_constant(value: str) -> NoReturn:
+    raise ValueError(f"non-standard JSON constant {value!r}")
+
+
+def _object_without_duplicate_members(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for name, member in pairs:
+        if name in value:
+            raise ValueError(f"duplicate JSON object member {name!r}")
+        value[name] = member
+    return value
+
+
+def _load_strict_json(raw: str) -> object:
+    return json.loads(
+        raw,
+        parse_constant=_reject_json_constant,
+        object_pairs_hook=_object_without_duplicate_members,
+    )
 
 
 @dataclass(frozen=True)
@@ -100,7 +116,7 @@ def validate_source_tree(tree: SourceTree) -> ValidationReport:
             )
         else:
             try:
-                value = load_strict_json(config_file.read_text())
+                value = _load_strict_json(config_file.read_text())
             except CustomToolUploadError as exc:
                 error("invalid_source_tree", ".", str(exc))
                 return ValidationReport(tuple(errors), tuple(warnings))
@@ -109,8 +125,6 @@ def validate_source_tree(tree: SourceTree) -> ValidationReport:
             else:
                 if not isinstance(value, dict):
                     error("invalid_config", "config.json", "config.json must contain a JSON object")
-                else:
-                    _check_finetune(tree, value, error, warning)
 
     runtime_files = [
         source_file
@@ -136,33 +150,3 @@ def validate_source_tree(tree: SourceTree) -> ValidationReport:
             )
 
     return ValidationReport(tuple(errors), tuple(warnings))
-
-
-def finetune_sources(tree: SourceTree) -> list[SourceText]:
-    """The .py files of the archive the finetune compiler reads, in archive order."""
-    out: list[SourceText] = []
-    for source_file in tree.files:
-        parts = source_file.relative.split("/")
-        if not source_file.relative.endswith(".py") or source_file.size > MAX_SOURCE_BYTES:
-            continue
-        if any(part.startswith(".") or part in SKIPPED_DIRS for part in parts[:-1]):
-            continue
-        try:
-            out.append(SourceText(source_file.relative, source_file.read_text()))
-        except (CustomToolUploadError, OSError, UnicodeError):
-            continue
-    return out
-
-
-def _check_finetune(tree: SourceTree, config: dict[str, object], error, warning) -> None:  # type: ignore[no-untyped-def]
-    """The decorators are compiled by the server, not here: say so when the folder carries them."""
-    if not mentions_decorators(finetune_sources(tree)):
-        return
-    if config.get("finetune") is None:
-        warning(
-            "finetune_not_checked_offline",
-            "config.json",
-            "This folder carries @tm finetune decorators, which the platform compiles at build. "
-            "`tamarind custom-tools sync-finetune <folder>` writes the finetune block they describe "
-            "into config.json now; `build` does so automatically.",
-        )

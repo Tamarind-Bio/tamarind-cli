@@ -57,8 +57,9 @@ if __name__ == "__main__":
 
 Every decorator argument must be a literal: a number, string, bool, list, tuple or dict of
 those, or `tm.Float` / `tm.Int` / `tm.Str` / `tm.Bool` / `tm.Choice` with literal arguments.
-The platform reads the folder without importing it (the config is needed before the image
-that holds your dependencies exists), so `gpu=os.environ["GPU"]` is refused with the file and line.
+The platform's build reads the folder without importing it (the block is needed before the
+image that holds your dependencies exists), so `gpu=os.environ["GPU"]` fails the build with the
+file and line.
 
 ## At run time
 
@@ -78,23 +79,23 @@ runs on a laptop unchanged.
 ## Deploy
 
 A training tool is a custom tool: a folder with a `Dockerfile`, a `run.sh` that starts your
-script, and a `config.json`. The platform reads the decorators out of your `.py` files and fills
-in the `finetune` block of `config.json`, the same way at a build and at a dry run, so there is
-one grammar and it lives on the server:
+script, and a `config.json`. Deploy it like any other custom tool:
 
 ```
-tamarind custom-tools sync-finetune ./my-trainer          # asks the platform; writes the block (--check only reports)
-tamarind custom-tools validate ./my-trainer               # offline: notes that the decorators will be compiled at build
-tamarind custom-tools build my-trainer ./my-trainer       # syncs the block, then builds
+tamarind custom-tools build my-trainer ./my-trainer
 ```
 
-`build` (and `CustomTool.build()` in the SDK) syncs the block before packaging unless you pass
-`sync_finetune=False`; a folder uploaded without the SDK (an agent calling `deployCustomTool`)
-gets the same block derived at build. A `config.json` whose block disagrees with the decorators
-is refused by the build, and `sync-finetune` rewrites it from the platform's answer.
+At build, the platform reads the decorators out of your `.py` files and stores the `finetune`
+block they describe on the version it builds. Your files are never rewritten: `config.json` needs
+no `finetune` block, and the block lives on the version and on every run submitted against it.
+An agent deploying through `deployCustomTool`, the SDK's `CustomTool.build()` and the web editor
+all go through that same build, so there is one reading of the decorators and it is the
+platform's. A decorator the build cannot read (a non-literal argument, say) fails the build with
+the file and line.
 
-The resulting `config.json` is what the platform reads; you can also write the block by hand, in
-any language, and skip the decorators entirely:
+You can also write the block by hand in `config.json`, in any language, and skip the decorators
+entirely. If a folder has both, they must agree; a block that contradicts the decorators fails
+the build naming both, rather than one silently winning:
 
 ```json
 "finetune": {

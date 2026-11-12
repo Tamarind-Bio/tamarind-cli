@@ -23,12 +23,6 @@ like, and deploy the folder as a custom tool. See ``docs/finetune.md``.
     def score(predictions, truths): ...
 """
 
-from tamarind.finetune.compile import (
-    CompiledFinetune,
-    FinetuneCompileError,
-    SyncResult,
-    sync_config_json,
-)
 from tamarind.finetune.decorators import evaluator, predictor, splitter, training_run
 from tamarind.finetune.runtime import (
     artifact_dir,
@@ -44,13 +38,10 @@ from tamarind.finetune.spec import Bool, Choice, FinetuneSpecError, Float, Int, 
 __all__ = [
     "Bool",
     "Choice",
-    "CompiledFinetune",
-    "FinetuneCompileError",
     "FinetuneSpecError",
     "Float",
     "Int",
     "Str",
-    "SyncResult",
     "artifact_dir",
     "checkpoint",
     "evaluate",
@@ -61,6 +52,5 @@ __all__ = [
     "predictor",
     "run_dir",
     "splitter",
-    "sync_config_json",
     "training_run",
 ]

@@ -96,22 +96,6 @@ class GeneratedCustomToolsTransport:
         self._client = client
         self._parser = GeneratedClient(base_url=client.base_url)
 
-    def validate_config(self, *, config: str, sources: list[dict[str, str]]) -> dict[str, Any]:
-        """`POST /custom-tools/validate-config` with the tool's .py files, so the server compiles the
-        `@tm` finetune decorators exactly as a build does. A plain call rather than a generated
-        operation: the pinned contract predates `sources`, and the website's sync workflow
-        regenerates the client once the server change is on main."""
-        response = self._client.request(
-            "POST", "custom-tools/validate-config", json={"config": config, "sources": sources}
-        )
-        try:
-            body = response.json()
-        except ValueError as exc:
-            raise TamarindError("validate-config returned a non-JSON response") from exc
-        if not isinstance(body, dict) or "valid" not in body:
-            raise TamarindError("validate-config response did not match the public contract")
-        return cast(dict[str, Any], body)
-
     def _sync(
         self, operation: _Operation, kwargs: dict[str, Any], timeout: float | None = None
     ) -> Any:
