@@ -55,7 +55,7 @@ from tamarind.errors import (
     ValidationError,
 )
 from tamarind.http import DEFAULT_TIMEOUT
-from tamarind.finetune.compile import FinetuneCompileError, sync_config_json
+from tamarind.finetune.compile import FinetuneCompileError, SyncResult, sync_config_json
 
 T = TypeVar("T")
 EventCallback = Callable[["BuildEvent"], None]
@@ -236,7 +236,7 @@ class CustomTool:
         """
         if sync_finetune:
             try:
-                sync_config_json(folder, write=True)
+                self._collection.sync_finetune(folder, write=True)
             except FinetuneCompileError as exc:
                 report = ValidationReport(
                     errors=(
@@ -494,6 +494,11 @@ class CustomTools:
     ):
         self._transport = transport
         self._upload_timeout = upload_timeout
+
+    def sync_finetune(self, folder: str | Path, *, write: bool = True) -> SyncResult:
+        """Write config.json's `finetune` block from the `@tm` decorators in `folder`, as the server
+        compiles them (`POST /custom-tools/validate-config`). With `write=False`, only report."""
+        return sync_config_json(folder, write=write, validator=self._transport)
 
     def create(
         self,

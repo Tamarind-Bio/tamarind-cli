@@ -17,7 +17,7 @@ from ...custom_tools.transport import (
     PublicVersionStatus,
 )
 from ...custom_tools.validation import ValidationProblem, ValidationReport, validate_folder
-from ...finetune.compile import FinetuneCompileError, sync_config_json
+from ...finetune.compile import FinetuneCompileError
 from ...errors import ExitCode, TamarindError, ValidationError
 from ..inputs import effective_job_name, effective_job_type, resolve_job_input
 from .. import output
@@ -339,11 +339,13 @@ def sync_finetune(
 ) -> None:
     """Write the `finetune` block of config.json from the @tm decorators in the folder's scripts.
 
-    Build does this automatically; run it to see the compiled block, or with --check in CI.
+    The platform compiles the decorators (the same way a build does) and returns the config.json
+    a build would use. Build does this automatically; run it to see the block, or with --check in CI.
     """
     state = ctx.obj
     try:
-        result = sync_config_json(folder, write=not check)
+        with state.sdk_client() as client:
+            result = client.custom_tools.sync_finetune(folder, write=not check)
     except FinetuneCompileError as exc:
         report = ValidationReport(
             errors=(

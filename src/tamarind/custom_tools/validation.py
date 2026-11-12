@@ -14,11 +14,10 @@ from tamarind.custom_tools.packaging import (
 from tamarind.custom_tools.strict_json import load_strict_json
 from tamarind.errors import CustomToolUploadError
 from tamarind.finetune.compile import (
-    FinetuneCompileError,
-    SKIPPED_DIRS,
     MAX_SOURCE_BYTES,
+    SKIPPED_DIRS,
     SourceText,
-    compile_sources,
+    mentions_decorators,
 )
 
 
@@ -156,19 +155,14 @@ def finetune_sources(tree: SourceTree) -> list[SourceText]:
 
 
 def _check_finetune(tree: SourceTree, config: dict[str, object], error, warning) -> None:  # type: ignore[no-untyped-def]
-    """The decorators in the source and the `finetune` block in config.json must agree."""
-    try:
-        compiled = compile_sources(finetune_sources(tree))
-    except FinetuneCompileError as exc:
-        error("finetune_decorator_invalid", exc.path, str(exc))
+    """The decorators are compiled by the server, not here: say so when the folder carries them."""
+    if not mentions_decorators(finetune_sources(tree)):
         return
-    if compiled is None:
-        return
-    if config.get("finetune") != compiled.block:
+    if config.get("finetune") is None:
         warning(
-            "finetune_block_stale",
+            "finetune_not_checked_offline",
             "config.json",
-            "config.json's finetune block does not match the @tm decorators in "
-            + ", ".join(compiled.sources)
-            + ". `tamarind custom-tools sync-finetune <folder>` rewrites it; build does so automatically.",
+            "This folder carries @tm finetune decorators, which the platform compiles at build. "
+            "`tamarind custom-tools sync-finetune <folder>` writes the finetune block they describe "
+            "into config.json now; `build` does so automatically.",
         )

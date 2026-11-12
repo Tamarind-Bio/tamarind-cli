@@ -27,8 +27,6 @@ from tamarind.finetune.compile import (
     CompiledFinetune,
     FinetuneCompileError,
     SyncResult,
-    compile_folder,
-    compile_sources,
     sync_config_json,
 )
 from tamarind.finetune.decorators import evaluator, predictor, splitter, training_run
@@ -55,8 +53,6 @@ __all__ = [
     "SyncResult",
     "artifact_dir",
     "checkpoint",
-    "compile_folder",
-    "compile_sources",
     "evaluate",
     "evaluator",
     "hyperparameters",
