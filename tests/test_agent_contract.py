@@ -176,7 +176,13 @@ def test_dangling_global_value_option_keeps_precise_json_usage_error(monkeypatch
     assert "Missing command" not in payload["error"]["message"]
 
 
-@pytest.mark.parametrize("argv", [["tamarind"], ["tamarind", "--json", "files"]])
+@pytest.mark.parametrize("argv", [
+    ["tamarind"],
+    ["tamarind", "--json", "files"],
+    ["tamarind", "--json", "chat"],
+    ["tamarind", "--json", "chat", "files"],  # a group inside a group
+    ["tamarind", "--json", "chat", "subagents"],
+])
 def test_json_no_command_is_clean_and_machine_readable(argv, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", argv)
 

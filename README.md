@@ -85,6 +85,42 @@ tamarind submit boltz \
   --name quick-fold
 ```
 
+## Agent
+
+Drive the Tamarind AI agent from the terminal: the same chats the web app shows.
+
+```bash
+tamarind chat new --title "PD-L1 binders"                  # prints the chat id
+tamarind chat send chat_7Q "Fold this and summarize pLDDT" --file target.pdb --wait
+tamarind chat approvals chat_7Q --status pending
+tamarind chat approve chat_7Q apr_x --wait                 # or: tamarind chat deny chat_7Q apr_x
+tamarind chat files list chat_7Q
+tamarind chat files download chat_7Q file_k2 --out ./out
+tamarind chat events chat_7Q --follow                      # every event, one JSON line each
+```
+
+`send --wait` streams the reply's text to stdout (in `--json` mode it prints the finished
+reply). A reply that stops on an approval or a question exits `10` with the ids to answer in
+the error; approve or answer it, then `tamarind chat wait <chat> <reply>`. A reply that
+ends `failed`, `cancelled` or `incomplete` exits `9`.
+
+From Python:
+
+```python
+from tamarind import Tamarind
+
+with Tamarind() as client:
+    chat = client.agent.chats.create(title="PD-L1 binders")
+    reply = client.agent.messages.send(chat.id, "Fold this and summarize pLDDT")
+    stream = client.agent.messages.follow(chat.id, reply.id, follow_continuations=True)
+    for event in stream:                     # resumes by itself after a dropped connection
+        if event.type == "output_text.delta":
+            print(event.data["delta"], end="", flush=True)
+    if stream.stop_reason == "requires_action":
+        for approval in client.agent.approvals.list(chat.id, status="pending"):
+            client.agent.approvals.approve(chat.id, approval.id)
+```
+
 ## Python SDK
 
 The package exposes typed Pipelines and Custom Tools resources. Pipeline runs use
@@ -198,7 +234,8 @@ stdout with exit 5, and a terminal unsuccessful job remains on stdout with exit
 9 so callers can inspect its status. Exit codes are stable: `0` ok, `1`
 generic failure, `2` usage, `3` auth, `4` not-found, `5` validation, `6`
 rate-limit, `7` timeout (a bounded wait elapsed while the remote job may still
-run), `8` budget/quota exhaustion, and `9` remote job failure.
+run), `8` budget/quota exhaustion, `9` remote job failure (or an agent reply that
+ended badly), and `10` an agent reply waiting on your approval or answer.
 
 For agent workflows, always put a deadline on blocking commands. `submit --wait`
 and `results --wait` accept `--timeout`; the standalone `wait` command remains

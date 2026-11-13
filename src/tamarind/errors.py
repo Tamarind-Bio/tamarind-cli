@@ -12,6 +12,7 @@ Exit codes are stable so agents and CI can branch on them:
     7  timed out (a --wait / --timeout deadline elapsed before a terminal state)
     8  budget/quota exhausted (a 403 that explicitly names usage or credits)
     9  remote job reached an unsuccessful terminal state
+   10  an agent reply is waiting on you (an approval or a question)
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ class ExitCode:
     TIMEOUT = 7
     BUDGET = 8
     JOB_FAILED = 9
+    ACTION_REQUIRED = 10
 
 
 class TamarindError(Exception):
@@ -47,6 +49,12 @@ class TamarindError(Exception):
     @message.setter
     def message(self, value: str) -> None:
         self.args = (value,)
+
+    @property
+    def code(self) -> str | None:
+        """The problem+json ``code`` (e.g. ``reply_in_progress``), when the server sent one."""
+        value = self.detail.get("code") if isinstance(self.detail, dict) else None
+        return str(value) if value else None
 
 
 class AuthError(TamarindError):
@@ -135,3 +143,26 @@ class CustomToolBuildTimeoutError(CustomToolError):
     """Local monitoring timed out without cancelling the remote build."""
 
     exit_code = ExitCode.TIMEOUT
+
+
+class ArgumentError(ValidationError, ValueError):
+    """An SDK call's own arguments are invalid, refused before any request is sent.
+
+    A ``ValueError`` for Python callers, and a validation error (exit 5) for the CLI.
+    """
+
+
+class AgentStreamError(TamarindError):
+    """The Agent API ended an event stream with a non-retryable ``error`` event."""
+
+
+class AgentReplyFailedError(TamarindError):
+    """An agent reply ended ``failed``."""
+
+    exit_code = ExitCode.JOB_FAILED
+
+
+class AgentActionRequiredError(TamarindError):
+    """An agent reply stopped on an approval or a question that needs an answer."""
+
+    exit_code = ExitCode.ACTION_REQUIRED

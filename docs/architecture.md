@@ -5,7 +5,7 @@ The CLI, the [MCP server](https://mcp.tamarind.bio), and the web app are all
 logic; it only knows how to call four well-defined surfaces. This is what keeps
 the CLI and the MCP from drifting as the platform evolves.
 
-## Four surfaces, four single sources of truth
+## Five surfaces, five single sources of truth
 
 ### 1. Job/file REST surface — source of truth: the OpenAPI spec
 
@@ -103,6 +103,40 @@ Custom Tools contract.
 Generated endpoint code owns URL encoding and wire-model parsing. A small resource
 adapter adds strict runtime checks and composes `PipelineRun` → `NodeRun` → molecule
 pages without introducing another public vocabulary.
+
+### 5. Agent API surface — source of truth: the agent's published OpenAPI spec
+
+`Tamarind().agent` and `tamarind chat` drive the AI agent: chats (campaign mode
+included), replies and their event stream, approvals, questions, files, subagents,
+workflows, campaign collections and usage. The contract is tamarind-agent's
+`docs/public-api/openapi.yaml`, vendored byte-for-byte as `openapi/agent-v1.yaml` with
+its producer commit and SHA-256 in `openapi/agent-v1.lock.json`. Requests go to the same
+host and `x-api-key` as the jobs API, with `Tamarind-Version: 2026-11-01` on every one.
+
+The client is hand-written, not generated: the pinned generator emits no endpoint for
+this spec (it refuses the date-typed `Tamarind-Version` header every path takes) and
+drops `Message`/`Approval`. Drift is caught instead by
+`tests/test_agent_api_contract.py`, which reads the vendored spec and fails when:
+
+- an `operationId` is added, removed, or changes method, path or `Idempotency-Key`
+  (each maps to one row of `src/tamarind/agent/_contract.py` and one SDK method);
+- the `EventType` enum changes;
+- a model schema names a property the matching dataclass does not read;
+- an SDK call does not hit its operation's path, or cannot parse the spec's own example.
+
+Re-sync: `git -C <tamarind-agent> show <sha>:docs/public-api/openapi.yaml >
+openapi/agent-v1.yaml`, set `sourceCommit`/`artifactSha256` in the lock, and run the
+contract test (with `TAMARIND_AGENT_CHECKOUT=<path>` it also checks the bytes are that
+commit's).
+
+The handwritten layer owns only what a client must: the retry policy (a 429 waits
+`Retry-After`/`x-ratelimit-reset`; a lost response or 5xx is retried only where the
+operation cannot apply twice), one `Idempotency-Key` per logical POST reused across its
+retries, and the event stream, which resumes with `Last-Event-ID` after a cut or a
+retryable `stream_interrupted` event, drops frames replayed at or before its cursor, and
+skips unknown event types as the contract requires. Replies are always sent with
+`stream: false` and followed on the events stream, because that one can be resumed and the
+POST's own body cannot. Presigned upload and download URLs never receive the API key.
 
 ## Why not a single binary that re-encodes the API?
 
