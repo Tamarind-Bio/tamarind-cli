@@ -157,6 +157,10 @@ def rows_from(result: Any, columns: Sequence[str]) -> list[dict[str, Any]]:
     if isinstance(result, Mapping):
         return [dict(result)]
     if isinstance(result, (list, tuple)):
+        if not result:
+            raise PredictError(
+                "predict() returned no rows; a prediction job must produce at least one"
+            )
         rows: list[dict[str, Any]] = []
         for index, item in enumerate(result):
             if not isinstance(item, Mapping):

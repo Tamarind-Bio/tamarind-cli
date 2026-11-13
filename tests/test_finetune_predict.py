@@ -208,6 +208,19 @@ def test_a_list_of_dicts_is_many_rows_and_a_bare_value_is_one(tmp_path: Path) ->
     assert _rows(out) == [{"score": "0.5"}]
 
 
+def test_no_rows_fails_the_prediction(tmp_path: Path) -> None:
+    @tm.predictor(outputs={"score": "number"})
+    class Empty:
+        def load(self, weights_dir): ...
+
+        def predict(self, inputs):
+            return []
+
+    with pytest.raises(predict.PredictError, match="returned no rows"):
+        predict.run(Empty, weights_dir=_weights(tmp_path), inputs={}, out=tmp_path / "e.csv")
+    assert not (tmp_path / "e.csv").exists()
+
+
 def test_a_missing_declared_column_fails_the_prediction(tmp_path: Path) -> None:
     @tm.predictor(outputs={"score": "number", "label": "string"})
     class Partial:
