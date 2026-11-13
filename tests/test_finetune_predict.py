@@ -149,24 +149,16 @@ def test_local_command_reports_a_missing_weights_directory(
     assert "weights directory" in capsys.readouterr().err
 
 
-def test_an_already_imported_predictor_is_not_imported_twice(
+def test_an_already_imported_predictor_from_the_named_file_is_not_imported_twice(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    loads: list[int] = []
-
-    @tm.predictor(outputs={"score": "number"})
-    class Scorer:
-        def load(self, weights_dir):
-            loads.append(1)
-
-        def predict(self, inputs):
-            return {"score": 1}
-
-    (tmp_path / "model.py").write_text("raise AssertionError('must not be imported')\n")
+    (tmp_path / "model.py").write_text(PREDICTOR_SOURCE)
+    first = predict.resolve_predictor_class("model.py:Scorer")  # imports and registers it
+    (tmp_path / "model.py").write_text("raise AssertionError('must not be imported again')\n")
     out = _platform_env(monkeypatch, tmp_path, predictor="model.py:Scorer")
     predict.run_from_environment()
-    assert loads == [1]
-    assert _rows(out) == [{"score": "1"}]
+    assert decorators.registered("predictor")["target"] is first
+    assert _rows(out) == [{"score": "8.0", "note": "ok"}]
 
 
 def test_a_same_named_class_from_another_file_is_not_reused(

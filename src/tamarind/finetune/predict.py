@@ -86,7 +86,9 @@ def _same_source(cls: type, path: Path) -> bool:
     """Is `cls` defined in the file `path` names? A same-named class from another file is not it."""
     try:
         source = inspect.getsourcefile(cls)
-        return bool(source) and Path(source).resolve() == path.resolve()
+        if not source:
+            return False
+        return Path(source).resolve() == path.resolve()
     except (TypeError, OSError):
         return False
 
