@@ -64,8 +64,12 @@ def _apply_file_filters(
 @app.command("list")
 def list_files(
     ctx: typer.Context,
-    types: Optional[str] = typer.Option(None, "--types", help="Comma-separated extensions, e.g. 'pdb,cif'."),
-    search: Optional[str] = typer.Option(None, "--search", "-s", help="Filter filenames by substring."),
+    types: Optional[str] = typer.Option(
+        None, "--types", help="Comma-separated extensions, e.g. 'pdb,cif'."
+    ),
+    search: Optional[str] = typer.Option(
+        None, "--search", "-s", help="Filter filenames by substring."
+    ),
     folder: Optional[str] = typer.Option(None, "--folder", help="List within this folder."),
     limit: int = typer.Option(50, "--limit", help="Max files to return."),
     offset: int = typer.Option(0, "--offset", help="Pagination offset."),
@@ -89,7 +93,10 @@ def list_files(
     result = _apply_file_filters(files, types=types, search=search, limit=limit, offset=offset)
     page = result["files"]
     if page and isinstance(page[0], dict):
-        rows = [{"name": _file_name(f), "size": f.get("size"), "lastModified": f.get("lastModified")} for f in page]
+        rows = [
+            {"name": _file_name(f), "size": f.get("size"), "lastModified": f.get("lastModified")}
+            for f in page
+        ]
         human = output.render_table(rows, ["name", "size", "lastModified"])
     else:
         human = "\n".join(_file_name(f) for f in page) or "(none)"
@@ -149,8 +156,12 @@ def folders(
 @app.command()
 def upload(
     ctx: typer.Context,
-    path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True, help="Local file to upload."),
-    name: Optional[str] = typer.Option(None, "--name", help="Remote filename (default: the local basename)."),
+    path: Path = typer.Argument(
+        ..., exists=True, dir_okay=False, readable=True, help="Local file to upload."
+    ),
+    name: Optional[str] = typer.Option(
+        None, "--name", help="Remote filename (default: the local basename)."
+    ),
 ) -> None:
     """Upload a local file to your workspace (two-step presigned PUT)."""
     state = ctx.obj
@@ -166,7 +177,9 @@ def upload(
 def delete(
     ctx: typer.Context,
     path: Optional[str] = typer.Argument(None, help="File path to delete."),
-    folder: Optional[str] = typer.Option(None, "--folder", help="Delete every file under this folder instead."),
+    folder: Optional[str] = typer.Option(
+        None, "--folder", help="Delete every file under this folder instead."
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     """Delete a file, or every file under a folder."""

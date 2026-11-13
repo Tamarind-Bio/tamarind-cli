@@ -240,6 +240,18 @@ def test_serves_models_from_is_recorded_on_the_block() -> None:
         tm.finetune.spec.predictor_block(serves_models_from="binder-train")
 
 
+def test_task_is_recorded_as_the_task_type() -> None:
+    @tm.predictor(task="score", outputs={"score": "number"})
+    class Scored:
+        def load(self, weights_dir): ...
+
+        def predict(self, inputs): ...
+
+    assert getattr(Scored, decorators.METADATA_ATTR)["block"]["taskType"] == "score"
+    with pytest.raises(tm.finetune.FinetuneSpecError, match="task must be"):
+        tm.finetune.spec.predictor_block(task="  ")
+
+
 def test_module_entry_point_is_runnable(tmp_path: Path) -> None:
     import subprocess
     import sys

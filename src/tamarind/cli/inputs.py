@@ -95,8 +95,7 @@ def effective_job_type(cli_tool: str, file_type: object | None) -> str:
     every supplied value must be a string that agrees with the selected tool.
     """
     if file_type is not None and (
-        not isinstance(file_type, str)
-        or file_type.strip().lower() != cli_tool.strip().lower()
+        not isinstance(file_type, str) or file_type.strip().lower() != cli_tool.strip().lower()
     ):
         raise ValidationError(
             f"Tool mismatch: the command targets '{cli_tool}' but the input "
@@ -141,8 +140,7 @@ def resolve_job_input(
             doc = {}
         if not isinstance(doc, dict):
             raise ValidationError(
-                "Input must be a mapping (the job settings, or a "
-                "{jobName, type, settings} object)."
+                "Input must be a mapping (the job settings, or a {jobName, type, settings} object)."
             )
         if _looks_like_envelope(doc):
             job_type = doc.get("type")

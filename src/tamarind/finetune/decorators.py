@@ -114,10 +114,12 @@ def predictor(
     inputs: Mapping[str, str] | Sequence[Mapping[str, Any]] | None = None,
     outputs: Mapping[str, str] | None = None,
     serves_models_from: Sequence[str] | None = None,
+    task: str | None = None,
 ) -> Callable[[C], C]:
     """Mark the class that serves the trained artifact.
 
-        @tm.predictor(gpu="L4", inputs={"sequence": "sequence"}, outputs={"affinity": "number"})
+        @tm.predictor(gpu="L4", task="score",
+                      inputs={"sequence": "sequence"}, outputs={"affinity": "number"})
         class BindingModel:
             def load(self, artifact_dir): ...
             def predict(self, inputs): ...   # -> {"affinity": 0.42} or a list of such dicts
@@ -127,8 +129,11 @@ def predictor(
     `outputs` the trained model becomes a custom tool endpoint the API, pipelines and benchmarks
     can call: a prediction job stages the model's weights, calls `load(weights_dir)` then
     `predict(inputs)` with each declared input by name, and writes the returned columns to
-    `predictions.csv`. `serves_models_from` lists the training tools whose models this class may
-    serve when it is deployed as a separate tool; by default it serves its own tool's models.
+    `predictions.csv`. `task` names the prediction's task type ("score" for a property
+    predictor); with `outputs` it gives the predictions a result contract, so they are ingested
+    as molecule properties and read by pipelines and benchmarks. `serves_models_from` lists the
+    training tools whose models this class may serve when it is deployed as a separate tool; by
+    default it serves its own tool's models.
     """
     block = _spec.predictor_block(
         gpu=gpu,
@@ -136,6 +141,7 @@ def predictor(
         inputs=inputs,
         outputs=outputs,
         serves_models_from=serves_models_from,
+        task=task,
     )
 
     def decorate(cls: C) -> C:

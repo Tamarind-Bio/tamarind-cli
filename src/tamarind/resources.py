@@ -23,7 +23,12 @@ class Jobs:
         self._http = http
 
     def submit(
-        self, job_type: str, settings: dict[str, Any], *, name: str, low_priority: bool = False,
+        self,
+        job_type: str,
+        settings: dict[str, Any],
+        *,
+        name: str,
+        low_priority: bool = False,
     ) -> Any:
         """Submit a single job (POST /submit-job). jobSource is stamped ``sdk``.
 
@@ -31,36 +36,62 @@ class Jobs:
         stops with no charge. Raises if the tier isn't available for this job.
         """
         return rest.submit_job(
-            self._http, job_name=name, job_type=job_type, settings=settings, low_priority=low_priority,
+            self._http,
+            job_name=name,
+            job_type=job_type,
+            settings=settings,
+            low_priority=low_priority,
         )
 
     def submit_batch(
-        self, job_type: str, settings: list[dict[str, Any]], *, name: str,
-        job_names: list[str] | None = None, max_runtime_seconds: int | None = None,
+        self,
+        job_type: str,
+        settings: list[dict[str, Any]],
+        *,
+        name: str,
+        job_names: list[str] | None = None,
+        max_runtime_seconds: int | None = None,
         low_priority: bool = False,
     ) -> Any:
         """Submit many jobs as one batch (POST /submit-batch). See :meth:`submit` for ``low_priority``."""
         return rest.submit_batch(
-            self._http, batch_name=name, job_type=job_type, settings=settings,
-            job_names=job_names, max_runtime_seconds=max_runtime_seconds, low_priority=low_priority,
+            self._http,
+            batch_name=name,
+            job_type=job_type,
+            settings=settings,
+            job_names=job_names,
+            max_runtime_seconds=max_runtime_seconds,
+            low_priority=low_priority,
         )
 
-    def validate(self, job_type: str, settings: dict[str, Any], *, name: str = "validation") -> dict:
+    def validate(
+        self, job_type: str, settings: dict[str, Any], *, name: str = "validation"
+    ) -> dict:
         """Validate one settings dict without creating a job (POST /validate-job)."""
         return rest.validate_job(self._http, job_name=name, job_type=job_type, settings=settings)
 
     def validate_batch(
-        self, job_type: str, settings: list[dict[str, Any]], *, job_names: list[str] | None = None,
+        self,
+        job_type: str,
+        settings: list[dict[str, Any]],
+        *,
+        job_names: list[str] | None = None,
     ) -> dict:
         """Validate many settings rows in ONE request (one verdict per row)."""
-        return rest.validate_jobs(self._http, job_type=job_type, settings=settings, job_names=job_names)
+        return rest.validate_jobs(
+            self._http, job_type=job_type, settings=settings, job_names=job_names
+        )
 
     def list(self, **kwargs: Any) -> Any:
         """List jobs (GET /jobs). Accepts the same filters as :func:`tamarind.rest.get_jobs`."""
         return rest.get_jobs(self._http, **kwargs)
 
     def status(
-        self, name: str, *, organization: bool = False, job_email: str | None = None,
+        self,
+        name: str,
+        *,
+        organization: bool = False,
+        job_email: str | None = None,
         timeout: float | None = None,
     ) -> dict[str, Any]:
         """Fetch one job by name (raises NotFoundError if absent)."""
@@ -69,19 +100,34 @@ class Jobs:
         )
 
     def wait(
-        self, name: str, *, poll_interval: float = 10.0, timeout: float | None = None,
+        self,
+        name: str,
+        *,
+        poll_interval: float = 10.0,
+        timeout: float | None = None,
         on_poll: Callable[[dict[str, Any]], None] | None = None,
-        organization: bool = False, job_email: str | None = None,
+        organization: bool = False,
+        job_email: str | None = None,
     ) -> dict[str, Any]:
         """Block until ``name`` reaches a terminal status; returns the final job."""
         return wait_for_job(
-            self._http, name, poll_interval=poll_interval, timeout=timeout, on_poll=on_poll,
-            organization=organization, job_email=job_email,
+            self._http,
+            name,
+            poll_interval=poll_interval,
+            timeout=timeout,
+            on_poll=on_poll,
+            organization=organization,
+            job_email=job_email,
         )
 
     def results(
-        self, name: str, *, job_email: str | None = None, file_name: str | None = None,
-        pdbs_only: bool | None = None, organization: bool = False,
+        self,
+        name: str,
+        *,
+        job_email: str | None = None,
+        file_name: str | None = None,
+        pdbs_only: bool | None = None,
+        organization: bool = False,
     ) -> Any:
         """Get a presigned result URL (POST /result).
 
@@ -90,7 +136,11 @@ class Jobs:
         if organization and job_email is None:
             job_email = resolve_owner(self._http, name, organization=True)
         return rest.get_result(
-            self._http, job_name=name, job_email=job_email, file_name=file_name, pdbs_only=pdbs_only,
+            self._http,
+            job_name=name,
+            job_email=job_email,
+            file_name=file_name,
+            pdbs_only=pdbs_only,
         )
 
     def cancel(self, *, name: str | None = None, job_id: str | None = None) -> dict:
@@ -113,12 +163,20 @@ class Tools:
         self._http = http
 
     def list(
-        self, *, modality: str | None = None, function: str | None = None,
-        search: str | None = None, custom: bool | None = None,
+        self,
+        *,
+        modality: str | None = None,
+        function: str | None = None,
+        search: str | None = None,
+        custom: bool | None = None,
     ) -> dict:
         """The filtered tool catalog (GET /catalog/tools)."""
         return catalog.list_tools(
-            self._http, modality=modality, function=function, search=search, custom=custom,
+            self._http,
+            modality=modality,
+            function=function,
+            search=search,
+            custom=custom,
         )
 
     def modalities(self) -> dict:
@@ -142,7 +200,11 @@ def _file_type_counts(files: list) -> dict:
     """Count workspace files by extension (top 20), mirroring the CLI/getFileStats."""
     counts: dict = {}
     for f in files:
-        name = f if isinstance(f, str) else (f.get("name") or f.get("fileName") or "" if isinstance(f, dict) else "")
+        name = (
+            f
+            if isinstance(f, str)
+            else (f.get("name") or f.get("fileName") or "" if isinstance(f, dict) else "")
+        )
         ext = name.rsplit(".", 1)[1].lower() if "." in name else "no_extension"
         counts[ext] = counts.get(ext, 0) + 1
     ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:20]
@@ -172,7 +234,10 @@ class Files:
         return rest.get_folders(self._http, **kwargs)
 
     def upload(
-        self, path: str | Path, *, remote: str | None = None,
+        self,
+        path: str | Path,
+        *,
+        remote: str | None = None,
         content_type: str = "application/octet-stream",
     ) -> dict[str, Any]:
         """Upload a local file via the presigned two-step PUT. Returns {ok, filename, bytes}."""

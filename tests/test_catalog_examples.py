@@ -22,7 +22,11 @@ def test_drops_field_whose_controller_is_absent():
             {
                 "name": "ligands",
                 "conditionals": [
-                    {"checkType": "equals", "otherSettingName": "addLigands", "otherSettingValue": True}
+                    {
+                        "checkType": "equals",
+                        "otherSettingName": "addLigands",
+                        "otherSettingValue": True,
+                    }
                 ],
             },
         ],
@@ -58,13 +62,21 @@ def test_prunes_transitively_to_a_fixed_point():
             {
                 "name": "predictAffinity",
                 "conditionals": [
-                    {"checkType": "equals", "otherSettingName": "version", "otherSettingValue": "2.2.1"}
+                    {
+                        "checkType": "equals",
+                        "otherSettingName": "version",
+                        "otherSettingValue": "2.2.1",
+                    }
                 ],
             },
             {
                 "name": "binderChain",
                 "conditionals": [
-                    {"checkType": "equals", "otherSettingName": "predictAffinity", "otherSettingValue": True}
+                    {
+                        "checkType": "equals",
+                        "otherSettingName": "predictAffinity",
+                        "otherSettingValue": True,
+                    }
                 ],
             },
         ],
@@ -83,7 +95,11 @@ def test_supports_the_other_check_types_the_catalog_uses():
                 "name": "verifyTopK",
                 "conditionals": [
                     {"checkType": "notEmpty", "otherSettingName": "verify"},
-                    {"checkType": "not-equals", "otherSettingName": "verify", "otherSettingValue": "none"},
+                    {
+                        "checkType": "not-equals",
+                        "otherSettingName": "verify",
+                        "otherSettingValue": "none",
+                    },
                 ],
             },
         ],
@@ -99,12 +115,17 @@ def test_unknown_check_type_is_not_a_reason_to_prune():
     # Matches the JS `default:` branch: an unrecognized checkType is skipped, so we keep the
     # field and let the server decide rather than silently dropping a valid one.
     schema = _schema(
-        [{"name": "x", "conditionals": [{"checkType": "someNewThing", "otherSettingName": "y"}]}, {"name": "y"}],
+        [
+            {"name": "x", "conditionals": [{"checkType": "someNewThing", "otherSettingName": "y"}]},
+            {"name": "y"},
+        ],
         {"x": 1, "y": 2},
     )
     assert catalog.example_settings(schema) == {"x": 1, "y": 2}
 
 
 def test_ungated_and_empty_examples_pass_through():
-    assert catalog.example_settings({"parameters": [{"name": "a"}], "exampleJob": {"settings": {"a": 1}}}) == {"a": 1}
+    assert catalog.example_settings(
+        {"parameters": [{"name": "a"}], "exampleJob": {"settings": {"a": 1}}}
+    ) == {"a": 1}
     assert catalog.example_settings({}) == {}

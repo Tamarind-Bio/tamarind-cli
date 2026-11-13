@@ -220,16 +220,23 @@ def predictor_block(
     inputs: Mapping[str, str] | Sequence[Mapping[str, Any]] | None = None,
     outputs: Mapping[str, str] | None = None,
     serves_models_from: Sequence[str] | None = None,
+    task: str | None = None,
 ) -> dict[str, Any]:
     """The `finetune.predictor` keys a @predictor contributes, minus the class the caller adds.
 
     `inputs={"sequence": "sequence"}` is shorthand for one input per entry; a list of full input
     dicts is passed through. `outputs={"affinity": "number"}` becomes the primary predictions CSV.
+    `task` is the prediction's task type (for example "score"); with `outputs` it gives the
+    predictions a result contract the platform ingests, pipes and benchmarks.
     `serves_models_from` names the training tools whose models this class may serve when the
     predictor is deployed as its own tool (a different image); by default it serves the models of
     the tool it is deployed in.
     """
     block: dict[str, Any] = {}
+    if task is not None:
+        if not isinstance(task, str) or not task.strip():
+            raise FinetuneSpecError('task must be a non-empty string such as "score"')
+        block["taskType"] = task.strip()
     if serves_models_from is not None:
         if isinstance(serves_models_from, str) or not all(
             isinstance(name, str) and name.strip() for name in serves_models_from

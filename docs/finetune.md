@@ -113,6 +113,11 @@ python -m tamarind.finetune predict --predictor model.py:BindingModel \
     --weights ./tamarind_run/model --input sequence=ACDEFGH --out preds.csv
 ```
 
+`task` names what the predictions are, `"score"` for a property predictor. With `outputs` it
+gives `predictions.csv` a result contract: the declared columns are ingested as molecule
+properties, so pipelines and benchmarks read them. Without `task` the file is still written and
+downloadable, as for any tool without a task type.
+
 A predictor can also live in its own tool with its own image, for example a slim CPU image for
 inference. Deploy that folder as a separate custom tool and say whose models it serves:
 

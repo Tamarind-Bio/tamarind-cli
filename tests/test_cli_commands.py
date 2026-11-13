@@ -151,15 +151,11 @@ def test_schema_replaces_mcp_only_server_hints_with_cli_guidance():
 def test_auth_status_never_emits_even_a_masked_key_fragment():
     secret = "codex-super-secret-key"
     endpoint_secret = "endpoint-secret"
-    respx.get(f"{API}jobs").mock(
-        return_value=httpx.Response(200, json={"jobs": []})
-    )
+    respx.get(f"{API}jobs").mock(return_value=httpx.Response(200, json={"jobs": []}))
     env = {
         **ENV,
         "TAMARIND_API_KEY": secret,
-        "TAMARIND_CATALOG_BASE": (
-            f"https://catalog.test/?X-Amz-Signature={endpoint_secret}"
-        ),
+        "TAMARIND_CATALOG_BASE": (f"https://catalog.test/?X-Amz-Signature={endpoint_secret}"),
     }
 
     machine = runner.invoke(app, ["--json", "auth", "status"], env=env)
@@ -193,7 +189,12 @@ def test_upload_gets_presigned_url_then_puts_to_s3(tmp_path):
     post_route = respx.post(f"{API}getPresignedUploadUrl").mock(
         return_value=httpx.Response(
             200,
-            json={"uploadUrl": upload_url, "headUrl": "https://h", "key": "user@x.com/target.pdb", "bucket": "b"},
+            json={
+                "uploadUrl": upload_url,
+                "headUrl": "https://h",
+                "key": "user@x.com/target.pdb",
+                "bucket": "b",
+            },
         )
     )
     put_route = respx.put(upload_url).mock(return_value=httpx.Response(200))
@@ -371,11 +372,15 @@ def test_files_list_filters_by_search():
 def test_files_list_paginates_client_side():
     respx.get(f"{API}files").mock(return_value=httpx.Response(200, json=_WORKSPACE_FILES))
     page1 = json.loads(
-        runner.invoke(app, ["--json", "files", "list", "--limit", "2", "--offset", "0"], env=ENV).stdout
+        runner.invoke(
+            app, ["--json", "files", "list", "--limit", "2", "--offset", "0"], env=ENV
+        ).stdout
     )
     assert page1["count"] == 2 and page1["total"] == 6 and page1["hasMore"] is True
     page3 = json.loads(
-        runner.invoke(app, ["--json", "files", "list", "--limit", "2", "--offset", "4"], env=ENV).stdout
+        runner.invoke(
+            app, ["--json", "files", "list", "--limit", "2", "--offset", "4"], env=ENV
+        ).stdout
     )
     assert page3["count"] == 2 and page3["hasMore"] is False
 
@@ -405,7 +410,9 @@ def test_jobs_forwards_and_surfaces_start_key():
 
 @respx.mock
 def test_jobs_omits_start_key_when_backend_has_none():
-    respx.get(f"{API}jobs").mock(return_value=httpx.Response(200, json={"jobs": [], "statuses": {}}))
+    respx.get(f"{API}jobs").mock(
+        return_value=httpx.Response(200, json={"jobs": [], "statuses": {}})
+    )
     out = json.loads(runner.invoke(app, ["--json", "jobs"], env=ENV).stdout)
     assert "startKey" not in out
 
@@ -413,7 +420,10 @@ def test_jobs_omits_start_key_when_backend_has_none():
 @respx.mock
 def test_jobs_all_follows_cursor_to_exhaustion():
     page1 = {
-        "jobs": [{"JobName": "a", "JobStatus": "Complete"}, {"JobName": "b", "JobStatus": "Running"}],
+        "jobs": [
+            {"JobName": "a", "JobStatus": "Complete"},
+            {"JobName": "b", "JobStatus": "Running"},
+        ],
         "startKey": "K1",
         "statuses": {"Complete": 1, "Running": 1},
     }

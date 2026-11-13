@@ -38,9 +38,7 @@ def _with_cli_schema_hints(response: object, tool: str) -> object:
         "completed outputs with `tamarind --json results JOB --download DIR`."
     )
     if "exampleJobNote" in result:
-        result["exampleJobNote"] = rewrite_legacy_guidance(
-            result["exampleJobNote"]
-        )
+        result["exampleJobNote"] = rewrite_legacy_guidance(result["exampleJobNote"])
     return result
 
 
@@ -48,9 +46,15 @@ def register(app: typer.Typer) -> None:
     @app.command()
     def tools(
         ctx: typer.Context,
-        modality: Optional[str] = typer.Option(None, "--modality", "-m", help="Filter by molecule type (see `tamarind modalities`)."),
-        function: Optional[str] = typer.Option(None, "--function", "-f", help="Filter by function/tag (see `tamarind functions`)."),
-        search: Optional[str] = typer.Option(None, "--search", "-s", help="Free-text search in name/description."),
+        modality: Optional[str] = typer.Option(
+            None, "--modality", "-m", help="Filter by molecule type (see `tamarind modalities`)."
+        ),
+        function: Optional[str] = typer.Option(
+            None, "--function", "-f", help="Filter by function/tag (see `tamarind functions`)."
+        ),
+        search: Optional[str] = typer.Option(
+            None, "--search", "-s", help="Free-text search in name/description."
+        ),
         custom: bool = typer.Option(False, "--custom", help="Show only your org's custom tools."),
     ) -> None:
         """List available tools. Filter to narrow the (large) catalog."""
@@ -85,7 +89,9 @@ def register(app: typer.Typer) -> None:
             {"value": m.get("value"), "label": m.get("label"), "tools": m.get("toolCount")}
             for m in resp.get("modalities", [])
         ]
-        output.emit(resp, state.output, human=output.render_table(rows, ["value", "label", "tools"]))
+        output.emit(
+            resp, state.output, human=output.render_table(rows, ["value", "label", "tools"])
+        )
 
     @app.command()
     def functions(ctx: typer.Context) -> None:
@@ -97,13 +103,19 @@ def register(app: typer.Typer) -> None:
             {"value": f.get("value"), "label": f.get("label"), "tools": f.get("toolCount")}
             for f in resp.get("functions", [])
         ]
-        output.emit(resp, state.output, human=output.render_table(rows, ["value", "label", "tools"]))
+        output.emit(
+            resp, state.output, human=output.render_table(rows, ["value", "label", "tools"])
+        )
 
     @app.command()
     def schema(
         ctx: typer.Context,
         tool: str = typer.Argument(..., help="Tool name (lowercase, e.g. 'boltz')."),
-        example: bool = typer.Option(False, "--example", help="Print only the runnable example settings (YAML). Not every tool ships an example."),
+        example: bool = typer.Option(
+            False,
+            "--example",
+            help="Print only the runnable example settings (YAML). Not every tool ships an example.",
+        ),
     ) -> None:
         """Show a tool's parameters and a runnable example job."""
         state = ctx.obj
@@ -148,13 +160,18 @@ def register(app: typer.Typer) -> None:
                     "required": "yes" if p.get("required") else "",
                     "default": p.get("default"),
                     # Full text — render_table truncates it (with an ellipsis) to fit.
-                    "description": p.get("descr") or p.get("description") or p.get("displayName") or "",
+                    "description": p.get("descr")
+                    or p.get("description")
+                    or p.get("displayName")
+                    or "",
                 }
             )
         human = (
             f"{resp.get('displayName', tool)}  [{tool}]\n"
             f"{resp.get('description', '')}\n\n"
-            + output.render_table(param_rows, ["name", "type", "required", "default", "description"])
+            + output.render_table(
+                param_rows, ["name", "type", "required", "default", "description"]
+            )
             + "\n\nRun `tamarind schema "
             + tool
             + " --example` for runnable example settings."

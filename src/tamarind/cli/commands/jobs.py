@@ -203,8 +203,7 @@ def _sanitize_job_output(value: object) -> object:
         normalized = _normalized_key(key)
         if normalized in _SENSITIVE_JOB_URL_KEYS or (
             _is_credential_url(item)
-            and (normalized.endswith(("url", "uri", "link", "location"))
-                 or "signed" in normalized)
+            and (normalized.endswith(("url", "uri", "link", "location")) or "signed" in normalized)
         ):
             removed.append(str(key))
             continue
@@ -234,6 +233,7 @@ def _chunk_for_validate(
     entry per row ride along with the rows, and a budget that ignores them is not the
     budget the edge applies.
     """
+
     def fits(offset: int, count: int) -> bool:
         body: dict = {"type": job_type, "settings": settings_list[offset : offset + count]}
         if names is not None:
@@ -386,8 +386,12 @@ def register(app: typer.Typer) -> None:
     def validate(
         ctx: typer.Context,
         tool: str = typer.Argument(..., help="Tool name (e.g. 'boltz')."),
-        input: Optional[str] = typer.Option(None, "--input", "-i", help="Settings file (YAML/JSON), '-' for stdin, or @yaml://path."),
-        set_: list[str] = typer.Option([], "--set", help="Override a setting: key=value (repeatable)."),
+        input: Optional[str] = typer.Option(
+            None, "--input", "-i", help="Settings file (YAML/JSON), '-' for stdin, or @yaml://path."
+        ),
+        set_: list[str] = typer.Option(
+            [], "--set", help="Override a setting: key=value (repeatable)."
+        ),
         name: Optional[str] = typer.Option(None, "--name", "-n", help="Job name (default: auto)."),
     ) -> None:
         """Validate a job's settings without submitting (catches errors early)."""
@@ -414,14 +418,30 @@ def register(app: typer.Typer) -> None:
     def submit(
         ctx: typer.Context,
         tool: str = typer.Argument(..., help="Tool name (e.g. 'boltz'). See `tamarind tools`."),
-        input: Optional[str] = typer.Option(None, "--input", "-i", help="Settings file (YAML/JSON), '-' for stdin, or @yaml://path."),
-        set_: list[str] = typer.Option([], "--set", help="Override a setting: key=value (repeatable)."),
-        name: Optional[str] = typer.Option(None, "--name", "-n", help="Job name (default: auto-generated)."),
-        skip_validate: bool = typer.Option(False, "--skip-validate", help="Skip the pre-submit validate-job check."),
-        wait: bool = typer.Option(False, "--wait", help="Block until the job reaches a terminal state."),
-        poll_interval: float = typer.Option(10.0, "--poll-interval", help="Seconds between polls when --wait."),
-        timeout: Optional[float] = typer.Option(None, "--timeout", help="With --wait, give up after N seconds."),
-        download: Optional[Path] = typer.Option(None, "--download", help="With --wait, download results to this directory."),
+        input: Optional[str] = typer.Option(
+            None, "--input", "-i", help="Settings file (YAML/JSON), '-' for stdin, or @yaml://path."
+        ),
+        set_: list[str] = typer.Option(
+            [], "--set", help="Override a setting: key=value (repeatable)."
+        ),
+        name: Optional[str] = typer.Option(
+            None, "--name", "-n", help="Job name (default: auto-generated)."
+        ),
+        skip_validate: bool = typer.Option(
+            False, "--skip-validate", help="Skip the pre-submit validate-job check."
+        ),
+        wait: bool = typer.Option(
+            False, "--wait", help="Block until the job reaches a terminal state."
+        ),
+        poll_interval: float = typer.Option(
+            10.0, "--poll-interval", help="Seconds between polls when --wait."
+        ),
+        timeout: Optional[float] = typer.Option(
+            None, "--timeout", help="With --wait, give up after N seconds."
+        ),
+        download: Optional[Path] = typer.Option(
+            None, "--download", help="With --wait, download results to this directory."
+        ),
         low_priority: bool = typer.Option(False, "--low-priority", help=_LOW_PRIORITY_HELP),
     ) -> None:
         """Submit a single job. Validates first unless --skip-validate."""
@@ -433,9 +453,7 @@ def register(app: typer.Typer) -> None:
         if wait:
             # A local wait-option error must never occur after creating a
             # remote, potentially billable job.
-            jobs_helpers.validate_wait_options(
-                poll_interval=poll_interval, timeout=timeout
-            )
+            jobs_helpers.validate_wait_options(poll_interval=poll_interval, timeout=timeout)
 
         with state.rest_client() as client:
             if not skip_validate:
@@ -448,7 +466,9 @@ def register(app: typer.Typer) -> None:
                     )
                 )
                 if not v.get("valid"):
-                    raise ValidationError(f"Settings invalid: {v.get('error', 'unknown error')}", detail=v)
+                    raise ValidationError(
+                        f"Settings invalid: {v.get('error', 'unknown error')}", detail=v
+                    )
                 # NB: submit the user's original settings, NOT validate-job's
                 # `normalized` output — the normalizer injects backend-internal
                 # fields (e.g. submit_method, msa) that submit-job rejects.
@@ -494,7 +514,8 @@ def register(app: typer.Typer) -> None:
                         poll_interval=poll_interval,
                         timeout=timeout,
                         on_poll=lambda j: output.info(
-                            f"  status: {jobs_helpers.job_status(j)}{jobs_helpers.low_priority_note(j)}", state.output
+                            f"  status: {jobs_helpers.job_status(j)}{jobs_helpers.low_priority_note(j)}",
+                            state.output,
                         ),
                     )
                     result["final"] = final
@@ -515,8 +536,10 @@ def register(app: typer.Typer) -> None:
                         recoveryCommand=f"tamarind --json status {job_name}",
                     )
 
-        human = f"submitted: {job_name}" + (_LOW_PRIORITY_NOTE if low_priority else "") + (
-            f"  ({jobs_helpers.job_status(result['final'])})" if "final" in result else ""
+        human = (
+            f"submitted: {job_name}"
+            + (_LOW_PRIORITY_NOTE if low_priority else "")
+            + (f"  ({jobs_helpers.job_status(result['final'])})" if "final" in result else "")
         )
         output.emit(_sanitize_job_output(result), state.output, human=human)
         if "final" in result and _failed_terminal(result["final"]):
@@ -526,9 +549,18 @@ def register(app: typer.Typer) -> None:
     def batch(
         ctx: typer.Context,
         tool: str = typer.Argument(..., help="Tool name applied to every job in the batch."),
-        input: str = typer.Option(..., "--input", "-i", help="YAML/JSON list of per-job settings, or a {batchName,type,settings[],jobNames,lowPriority} object."),
-        name: Optional[str] = typer.Option(None, "--name", "-n", help="Batch name (default: auto)."),
-        max_runtime: Optional[int] = typer.Option(None, "--max-runtime", help="Max runtime seconds per job."),
+        input: str = typer.Option(
+            ...,
+            "--input",
+            "-i",
+            help="YAML/JSON list of per-job settings, or a {batchName,type,settings[],jobNames,lowPriority} object.",
+        ),
+        name: Optional[str] = typer.Option(
+            None, "--name", "-n", help="Batch name (default: auto)."
+        ),
+        max_runtime: Optional[int] = typer.Option(
+            None, "--max-runtime", help="Max runtime seconds per job."
+        ),
         prevalidate: bool = typer.Option(
             False,
             "--prevalidate",
@@ -553,7 +585,9 @@ def register(app: typer.Typer) -> None:
             job_names = doc.get("jobNames")
             low_priority = parse_low_priority(doc.get("lowPriority", False)) or low_priority
         else:
-            raise TamarindError("Batch --input must be a list of settings or a {settings:[...]} object.")
+            raise TamarindError(
+                "Batch --input must be a list of settings or a {settings:[...]} object."
+            )
         if not isinstance(batch_name, str) or not batch_name.strip():
             raise ValidationError("Batch name must be a non-empty string.")
         if batch_name != batch_name.strip():
@@ -576,9 +610,7 @@ def register(app: typer.Typer) -> None:
             if any(not isinstance(job_name, str) or not job_name.strip() for job_name in job_names):
                 raise ValidationError("Every batch jobName must be a non-empty string.")
             if any(job_name != job_name.strip() for job_name in job_names):
-                raise ValidationError(
-                    "Batch jobNames may not have leading or trailing whitespace."
-                )
+                raise ValidationError("Batch jobNames may not have leading or trailing whitespace.")
             normalized_names = [job_name.strip() for job_name in job_names]
             if len(set(normalized_names)) != len(normalized_names):
                 raise ValidationError("Batch jobNames must be unique.")
@@ -620,19 +652,27 @@ def register(app: typer.Typer) -> None:
                     outcomeMayBeAmbiguous=ambiguous,
                     recoveryCommand=f"tamarind --json status {batch_name}",
                 )
-        result = {"batchName": batch_name, "type": job_type, "count": len(settings_list), "submit": resp}
+        result = {
+            "batchName": batch_name,
+            "type": job_type,
+            "count": len(settings_list),
+            "submit": resp,
+        }
         if low_priority:
             result["lowPriority"] = True
         output.emit(
             _sanitize_job_output(result),
             state.output,
-            human=f"submitted batch '{batch_name}' ({len(settings_list)} jobs)" + (_LOW_PRIORITY_NOTE if low_priority else ""),
+            human=f"submitted batch '{batch_name}' ({len(settings_list)} jobs)"
+            + (_LOW_PRIORITY_NOTE if low_priority else ""),
         )
 
     @app.command()
     def jobs(
         ctx: typer.Context,
-        status: Optional[str] = typer.Option(None, "--status", help="Filter by status (client-side)."),
+        status: Optional[str] = typer.Option(
+            None, "--status", help="Filter by status (client-side)."
+        ),
         batch: Optional[str] = typer.Option(None, "--batch", help="Only jobs in this batch."),
         limit: int = typer.Option(50, "--limit", help="Max jobs to return (page size when --all)."),
         start_key: Optional[str] = typer.Option(
@@ -641,8 +681,12 @@ def register(app: typer.Typer) -> None:
         all_jobs: bool = typer.Option(
             False, "--all", help="Auto-paginate: follow startKey until every job is fetched."
         ),
-        organization: bool = typer.Option(False, "--organization", help="All jobs across your org."),
-        include_subjobs: bool = typer.Option(False, "--include-subjobs", help="Include batch subjobs."),
+        organization: bool = typer.Option(
+            False, "--organization", help="All jobs across your org."
+        ),
+        include_subjobs: bool = typer.Option(
+            False, "--include-subjobs", help="Include batch subjobs."
+        ),
         email: Optional[str] = typer.Option(None, "--email", help="Jobs for another org member."),
     ) -> None:
         """List your jobs. When more remain, a 'startKey' is returned; pass it to --start-key (or use --all)."""
@@ -672,7 +716,9 @@ def register(app: typer.Typer) -> None:
                 statuses = resp.get("statuses") if isinstance(resp, dict) else None
                 next_key = resp.get("startKey") if isinstance(resp, dict) else None
         if status:
-            job_list = [j for j in job_list if (jobs_helpers.job_status(j) or "").lower() == status.lower()]
+            job_list = [
+                j for j in job_list if (jobs_helpers.job_status(j) or "").lower() == status.lower()
+            ]
         # The raw Score is a large per-tool JSON blob — keep it out of the human
         # table (it's noise there) but retain it in the --json payload / `status`.
         rows = [
@@ -737,7 +783,10 @@ def register(app: typer.Typer) -> None:
                 job_name,
                 poll_interval=poll_interval,
                 timeout=timeout,
-                on_poll=lambda j: output.info(f"  status: {jobs_helpers.job_status(j)}{jobs_helpers.low_priority_note(j)}", state.output),
+                on_poll=lambda j: output.info(
+                    f"  status: {jobs_helpers.job_status(j)}{jobs_helpers.low_priority_note(j)}",
+                    state.output,
+                ),
                 organization=organization,
                 job_email=email,
             )
@@ -753,8 +802,12 @@ def register(app: typer.Typer) -> None:
     def results(
         ctx: typer.Context,
         job_name: str = typer.Argument(..., help="Job name."),
-        download: Optional[Path] = typer.Option(None, "--download", help="Download the results bundle to this directory."),
-        file: Optional[str] = typer.Option(None, "--file", help="A specific file within the results."),
+        download: Optional[Path] = typer.Option(
+            None, "--download", help="Download the results bundle to this directory."
+        ),
+        file: Optional[str] = typer.Option(
+            None, "--file", help="A specific file within the results."
+        ),
         pdbs_only: bool = typer.Option(False, "--pdbs-only", help="Only PDB outputs."),
         show_url: bool = typer.Option(
             False,
@@ -762,8 +815,12 @@ def register(app: typer.Typer) -> None:
             help="Print the credential-bearing presigned URL instead of downloading it.",
         ),
         wait: bool = typer.Option(False, "--wait", help="Wait for the job to finish first."),
-        poll_interval: float = typer.Option(10.0, "--poll-interval", help="Seconds between polls when --wait."),
-        timeout: Optional[float] = typer.Option(None, "--timeout", help="With --wait, give up after N seconds."),
+        poll_interval: float = typer.Option(
+            10.0, "--poll-interval", help="Seconds between polls when --wait."
+        ),
+        timeout: Optional[float] = typer.Option(
+            None, "--timeout", help="With --wait, give up after N seconds."
+        ),
         organization: bool = typer.Option(False, "--organization", help=_ORG_LOOKUP_HELP),
         email: Optional[str] = typer.Option(None, "--email", help=_EMAIL_LOOKUP_HELP),
     ) -> None:
@@ -786,7 +843,8 @@ def register(app: typer.Typer) -> None:
                     poll_interval=poll_interval,
                     timeout=timeout,
                     on_poll=lambda j: output.info(
-                        f"  status: {jobs_helpers.job_status(j)}{jobs_helpers.low_priority_note(j)}", state.output
+                        f"  status: {jobs_helpers.job_status(j)}{jobs_helpers.low_priority_note(j)}",
+                        state.output,
                     ),
                     organization=organization,
                     job_email=email,
@@ -854,7 +912,9 @@ def register(app: typer.Typer) -> None:
     def cancel(
         ctx: typer.Context,
         job_name: Optional[str] = typer.Argument(None, help="Job name to cancel."),
-        batch: Optional[str] = typer.Option(None, "--batch", help="Cancel an entire batch/pipeline instead."),
+        batch: Optional[str] = typer.Option(
+            None, "--batch", help="Cancel an entire batch/pipeline instead."
+        ),
     ) -> None:
         """Cancel a running/queued job, or an entire batch."""
         state = ctx.obj

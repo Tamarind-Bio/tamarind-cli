@@ -119,9 +119,7 @@ def test_get_run_rejects_malformed_contract_values(
 @pytest.mark.parametrize("limit", [0, 101, True, 1.5])
 @respx.mock
 def test_node_run_molecules_validates_page_size_before_request(limit: object) -> None:
-    respx.get(f"{BASE}pipelines/runs/run%2Fone").mock(
-        return_value=httpx.Response(200, json=_run())
-    )
+    respx.get(f"{BASE}pipelines/runs/run%2Fone").mock(return_value=httpx.Response(200, json=_run()))
     with Tamarind(api_key="key", api_base=BASE) as client:
         node_run = client.pipelines.get_run("run/one").node_runs[0]
         with pytest.raises(ValueError, match="1 to 100"):
@@ -130,14 +128,12 @@ def test_node_run_molecules_validates_page_size_before_request(limit: object) ->
 
 @respx.mock
 def test_node_run_molecules_rejects_malformed_page() -> None:
-    respx.get(f"{BASE}pipelines/runs/run%2Fone").mock(
-        return_value=httpx.Response(200, json=_run())
-    )
+    respx.get(f"{BASE}pipelines/runs/run%2Fone").mock(return_value=httpx.Response(200, json=_run()))
     malformed = _page()
     malformed["nextCursor"] = 2
-    respx.get(
-        f"{BASE}pipelines/runs/run%2Fone/node-runs/node%2Frun%20one/molecules"
-    ).mock(return_value=httpx.Response(200, json=malformed))
+    respx.get(f"{BASE}pipelines/runs/run%2Fone/node-runs/node%2Frun%20one/molecules").mock(
+        return_value=httpx.Response(200, json=malformed)
+    )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
         with pytest.raises(TamarindError, match="generated contract"):

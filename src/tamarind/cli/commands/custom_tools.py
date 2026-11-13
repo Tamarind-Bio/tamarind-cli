@@ -211,7 +211,9 @@ def test_tool(
     state = ctx.obj
     job_input = resolve_job_input(input, set_)
     if job_input.low_priority:
-        raise ValidationError("Custom tools can't run at low priority. Remove lowPriority from the input file.")
+        raise ValidationError(
+            "Custom tools can't run at low priority. Remove lowPriority from the input file."
+        )
     tool_name = effective_job_type(tool_name, job_input.job_type)
     job_name = effective_job_name(name, job_input.job_name)
     with state.sdk_client() as client:

@@ -21,7 +21,10 @@ def _sdk_channel():
         ({"CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "claude-vscode"}, "claude-code"),
         ({"CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "sdk-py"}, "claude-agent-sdk"),
         # Claude Science runs on the Agent SDK, so its own marker must win.
-        ({"OPERON_ARTIFACTS_ROOTS": "/x", "CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "sdk-ts"}, "claude-science"),
+        (
+            {"OPERON_ARTIFACTS_ROOTS": "/x", "CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "sdk-ts"},
+            "claude-science",
+        ),
         ({"CODEX_THREAD_ID": "019a"}, "codex"),
         ({"CODEX_SANDBOX": "seatbelt"}, "codex"),
         ({"GEMINI_CLI": "1"}, "gemini-cli"),

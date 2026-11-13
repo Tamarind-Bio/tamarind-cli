@@ -31,20 +31,31 @@ def _batch_file(tmp_path, n):
 def _run(tmp_path, n):
     return runner.invoke(
         app,
-        ["--json", "batch", "boltz", "--name", "b", "--input",
-         str(_batch_file(tmp_path, n)), "--prevalidate"],
+        [
+            "--json",
+            "batch",
+            "boltz",
+            "--name",
+            "b",
+            "--input",
+            str(_batch_file(tmp_path, n)),
+            "--prevalidate",
+        ],
         env=ENV,
     )
 
 
 def _all_valid(offset, count):
     return {
-        "valid": True, "count": count, "valid_count": count,
+        "valid": True,
+        "count": count,
+        "valid_count": count,
         "results": [{"index": i, "valid": True} for i in range(count)],
     }
 
 
 # --- the chunker, on its own -------------------------------------------------
+
 
 def test_chunks_respect_the_row_cap(monkeypatch):
     monkeypatch.setattr(rest, "VALIDATE_BATCH_MAX_ROWS", 3)
@@ -74,6 +85,7 @@ def test_a_single_oversized_row_is_still_emitted(monkeypatch):
 
 
 # --- end to end --------------------------------------------------------------
+
 
 @respx.mock
 def test_many_jobs_cost_few_requests(tmp_path, monkeypatch):
@@ -106,13 +118,18 @@ def test_a_bad_row_in_a_LATER_chunk_keeps_its_original_index(tmp_path, monkeypat
     respx.post(f"{API}validate-job").mock(
         side_effect=[
             httpx.Response(200, json=_all_valid(0, 2)),
-            httpx.Response(200, json={
-                "valid": False, "count": 2, "valid_count": 1,
-                "results": [
-                    {"index": 0, "valid": True},
-                    {"index": 1, "valid": False, "error": "bad sequence"},
-                ],
-            }),
+            httpx.Response(
+                200,
+                json={
+                    "valid": False,
+                    "count": 2,
+                    "valid_count": 1,
+                    "results": [
+                        {"index": 0, "valid": True},
+                        {"index": 1, "valid": False, "error": "bad sequence"},
+                    ],
+                },
+            ),
         ]
     )
     submit = respx.post(f"{API}submit-batch").mock(
@@ -121,8 +138,15 @@ def test_a_bad_row_in_a_LATER_chunk_keeps_its_original_index(tmp_path, monkeypat
 
     result = runner.invoke(
         app,
-        ["batch", "boltz", "--name", "b", "--input",
-         str(_batch_file(tmp_path, 5)), "--prevalidate"],
+        [
+            "batch",
+            "boltz",
+            "--name",
+            "b",
+            "--input",
+            str(_batch_file(tmp_path, 5)),
+            "--prevalidate",
+        ],
         env=ENV,
     )
     assert result.exit_code != 0
@@ -136,21 +160,33 @@ def test_a_bad_row_in_a_LATER_chunk_keeps_its_original_index(tmp_path, monkeypat
 @respx.mock
 def test_the_FIRST_bad_row_is_reported_when_several_fail(tmp_path):
     respx.post(f"{API}validate-job").mock(
-        return_value=httpx.Response(200, json={
-            "valid": False, "count": 3, "valid_count": 1,
-            "results": [
-                {"index": 0, "valid": True},
-                {"index": 1, "valid": False, "error": "first problem"},
-                {"index": 2, "valid": False, "error": "second problem"},
-            ],
-        })
+        return_value=httpx.Response(
+            200,
+            json={
+                "valid": False,
+                "count": 3,
+                "valid_count": 1,
+                "results": [
+                    {"index": 0, "valid": True},
+                    {"index": 1, "valid": False, "error": "first problem"},
+                    {"index": 2, "valid": False, "error": "second problem"},
+                ],
+            },
+        )
     )
     respx.post(f"{API}submit-batch").mock(return_value=httpx.Response(200, json={}))
 
     result = runner.invoke(
         app,
-        ["batch", "boltz", "--name", "b", "--input",
-         str(_batch_file(tmp_path, 3)), "--prevalidate"],
+        [
+            "batch",
+            "boltz",
+            "--name",
+            "b",
+            "--input",
+            str(_batch_file(tmp_path, 3)),
+            "--prevalidate",
+        ],
         env=ENV,
     )
     assert result.exception.detail["index"] == 1
@@ -162,10 +198,13 @@ def test_a_batch_WIDE_refusal_is_not_blamed_on_row_one(tmp_path):
     """Out of quota / over a cap answers valid:false with NO `results`. Branching on
     `valid` instead of on `results` would report it as 'Batch item 1 invalid'."""
     respx.post(f"{API}validate-job").mock(
-        return_value=httpx.Response(200, json={
-            "valid": False,
-            "error": "You have reached your monthly job limit.",
-        })
+        return_value=httpx.Response(
+            200,
+            json={
+                "valid": False,
+                "error": "You have reached your monthly job limit.",
+            },
+        )
     )
     submit = respx.post(f"{API}submit-batch").mock(
         return_value=httpx.Response(200, json={"message": "should not happen"})
@@ -173,8 +212,15 @@ def test_a_batch_WIDE_refusal_is_not_blamed_on_row_one(tmp_path):
 
     result = runner.invoke(
         app,
-        ["batch", "boltz", "--name", "b", "--input",
-         str(_batch_file(tmp_path, 2)), "--prevalidate"],
+        [
+            "batch",
+            "boltz",
+            "--name",
+            "b",
+            "--input",
+            str(_batch_file(tmp_path, 2)),
+            "--prevalidate",
+        ],
         env=ENV,
     )
     assert result.exit_code != 0
@@ -205,7 +251,8 @@ def test_the_byte_budget_counts_jobNames_and_type(monkeypatch):
     rows = [{"s": "A" * 50} for _ in range(6)]
     names = ["N" * 200 for _ in range(6)]
     monkeypatch.setattr(
-        rest, "VALIDATE_BATCH_MAX_BYTES",
+        rest,
+        "VALIDATE_BATCH_MAX_BYTES",
         len(json.dumps({"type": "t", "settings": rows}).encode()) + 20,
     )
     assert len(jobs_commands._chunk_for_validate(rows, job_type="t")) == 1
@@ -217,18 +264,30 @@ def test_a_SHORT_results_list_refuses_instead_of_submitting(tmp_path):
     """A verdict per row is the contract. Two rows answered for three means one was never
     judged, and "no invalid rows" would be a false pass on it."""
     respx.post(f"{API}validate-job").mock(
-        return_value=httpx.Response(200, json={
-            "valid": True, "count": 3, "valid_count": 2,
-            "results": [{"index": 0, "valid": True}, {"index": 1, "valid": True}],
-        })
+        return_value=httpx.Response(
+            200,
+            json={
+                "valid": True,
+                "count": 3,
+                "valid_count": 2,
+                "results": [{"index": 0, "valid": True}, {"index": 1, "valid": True}],
+            },
+        )
     )
     submit = respx.post(f"{API}submit-batch").mock(
         return_value=httpx.Response(200, json={"message": "should not happen"})
     )
     result = runner.invoke(
         app,
-        ["batch", "boltz", "--name", "b", "--input",
-         str(_batch_file(tmp_path, 3)), "--prevalidate"],
+        [
+            "batch",
+            "boltz",
+            "--name",
+            "b",
+            "--input",
+            str(_batch_file(tmp_path, 3)),
+            "--prevalidate",
+        ],
         env=ENV,
     )
     assert result.exit_code != 0
@@ -241,18 +300,30 @@ def test_a_SHORT_results_list_refuses_instead_of_submitting(tmp_path):
 def test_verdicts_with_no_usable_index_do_not_count_as_judged(tmp_path):
     """A malformed entry is not a verdict. Counting it would let a row through unchecked."""
     respx.post(f"{API}validate-job").mock(
-        return_value=httpx.Response(200, json={
-            "valid": True, "count": 2, "valid_count": 2,
-            "results": [{"index": 0, "valid": True}, {"valid": True}],
-        })
+        return_value=httpx.Response(
+            200,
+            json={
+                "valid": True,
+                "count": 2,
+                "valid_count": 2,
+                "results": [{"index": 0, "valid": True}, {"valid": True}],
+            },
+        )
     )
     submit = respx.post(f"{API}submit-batch").mock(
         return_value=httpx.Response(200, json={"message": "should not happen"})
     )
     result = runner.invoke(
         app,
-        ["batch", "boltz", "--name", "b", "--input",
-         str(_batch_file(tmp_path, 2)), "--prevalidate"],
+        [
+            "batch",
+            "boltz",
+            "--name",
+            "b",
+            "--input",
+            str(_batch_file(tmp_path, 2)),
+            "--prevalidate",
+        ],
         env=ENV,
     )
     assert result.exit_code != 0 and not submit.called
