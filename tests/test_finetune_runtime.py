@@ -20,6 +20,7 @@ def _clean(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         runtime.ENV_ARTIFACT_DIR,
         "lr",
         "epochs",
+        "rank",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.chdir(tmp_path)
@@ -255,3 +256,22 @@ def test_unserializable_records_are_reported_not_raised(
     tm.log({"bad": cyclic}, step=1)
     tm.checkpoint(step=1, metrics={"bad": cyclic})
     assert capsys.readouterr().err.count("could not serialize") == 2
+
+
+def test_local_overrides_respect_declared_options_and_bounds(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    @tm.training_run(
+        hyperparameters={"rank": tm.Choice(8, [4, 8, 16]), "lr": tm.Float(1e-3, 1e-5, 1e-2)}
+    )
+    def main() -> None: ...
+
+    monkeypatch.setenv("rank", "99")
+    monkeypatch.setenv("lr", "0.5")
+    assert tm.hyperparameters() == {"rank": 8, "lr": 1e-3}
+    err = capsys.readouterr().err
+    assert "not one of [4, 8, 16]" in err
+    assert "above the maximum" in err
+    monkeypatch.setenv("rank", "16")
+    monkeypatch.setenv("lr", "0.005")
+    assert tm.hyperparameters() == {"rank": 16, "lr": 0.005}

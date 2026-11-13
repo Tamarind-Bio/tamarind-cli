@@ -97,10 +97,29 @@ def hyperparameters() -> dict[str, Any]:
         raw = os.environ.get(name)
         if raw is not None and not file_path:
             try:
-                values[name] = _coerce(spec["type"], raw)
+                value = _coerce(spec["type"], raw)
             except ValueError:
                 print(f"[tamarind] ignoring ${name}={raw!r}: not a {spec['type']}", file=sys.stderr)
+                continue
+            problem = _outside_declaration(spec, value)
+            if problem:
+                print(f"[tamarind] ignoring ${name}={raw!r}: {problem}", file=sys.stderr)
+                continue
+            values[name] = value
     return values
+
+
+def _outside_declaration(spec: Mapping[str, Any], value: Any) -> str | None:
+    """Why `value` is not one the declaration allows, or None: the same rule the submit form applies."""
+    options = spec.get("options")
+    if options is not None and value not in options:
+        return f"not one of {list(options)}"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if spec.get("min") is not None and value < spec["min"]:
+            return f"below the minimum {spec['min']}"
+        if spec.get("max") is not None and value > spec["max"]:
+            return f"above the maximum {spec['max']}"
+    return None
 
 
 def _json_safe(value: Any) -> Any:
