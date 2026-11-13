@@ -44,6 +44,7 @@ jobs:
         run: >-
           uv run --extra dev mypy
           src/tamarind/custom_tools
+          src/tamarind/finetune
           src/tamarind/pipelines
           src/tamarind/http.py
           src/tamarind/errors.py
