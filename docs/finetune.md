@@ -72,8 +72,9 @@ file and line.
 | `tm.artifact_dir()` / `tm.run_dir()` | Where the model and the run's outputs go (`/app/out/...` on the platform, `./tamarind_run/...` locally) |
 | `tm.is_platform()` | True inside a Tamarind run |
 
-The platform sets `TAMARIND_RUN_DIR`, `TAMARIND_HYPERPARAMETERS` (a JSON file) and
-`TAMARIND_METRICS_FILE`. Off the platform the SDK only writes local files, so the same script
+The platform sets `TAMARIND_RUN_DIR`, `TAMARIND_HYPERPARAMETERS` (a JSON file),
+`TAMARIND_METRICS_FILE` and `TAMARIND_ARTIFACT_DIR` (the directory the run's `artifact` names,
+which `tm.artifact_dir()` returns, so a hand-written block works without decorators). Off the platform the SDK only writes local files, so the same script
 runs on a laptop unchanged.
 
 ## Deploy

@@ -27,6 +27,7 @@ from tamarind.finetune.decorators import registered
 ENV_RUN_DIR = "TAMARIND_RUN_DIR"
 ENV_HYPERPARAMETERS = "TAMARIND_HYPERPARAMETERS"
 ENV_METRICS_FILE = "TAMARIND_METRICS_FILE"
+ENV_ARTIFACT_DIR = "TAMARIND_ARTIFACT_DIR"
 
 LOCAL_RUN_DIR = "tamarind_run"
 METRICS_FILENAME = "metrics.jsonl"
@@ -147,7 +148,18 @@ def log(metrics: Mapping[str, Any], step: int | None = None, **more: Any) -> Non
 
 
 def artifact_dir() -> Path:
-    """The directory the trained model must be saved to. Created on first use."""
+    """The directory the trained model must be saved to. Created on first use.
+
+    On the platform this is the directory the run's pinned `finetune` block names, which the
+    platform exports as TAMARIND_ARTIFACT_DIR: the same place registration looks, whether the
+    block came from decorators or was written by hand. Locally it is the decorator's
+    `artifact` under the run dir.
+    """
+    pinned = os.environ.get(ENV_ARTIFACT_DIR)
+    if pinned:
+        path = Path(pinned)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
     record = registered("training_run")
     name = (record or {}).get("block", {}).get("artifact") or "model"
     path = run_dir() / name

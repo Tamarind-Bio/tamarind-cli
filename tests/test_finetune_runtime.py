@@ -17,6 +17,7 @@ def _clean(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         runtime.ENV_RUN_DIR,
         runtime.ENV_HYPERPARAMETERS,
         runtime.ENV_METRICS_FILE,
+        runtime.ENV_ARTIFACT_DIR,
         "lr",
         "epochs",
     ):
@@ -117,6 +118,21 @@ def test_log_honours_the_platform_metrics_file(
     monkeypatch.setenv(runtime.ENV_METRICS_FILE, str(target))
     tm.log({"a": 1})
     assert json.loads(target.read_text())["a"] == 1
+
+
+def test_artifact_dir_follows_the_platform_for_a_hand_written_block(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # No decorators at all: the block was written by hand in config.json.
+    run = tmp_path / "out"
+    monkeypatch.setenv(runtime.ENV_RUN_DIR, str(run))
+    monkeypatch.setenv(runtime.ENV_ARTIFACT_DIR, str(run / "checkpoints" / "best"))
+    assert tm.artifact_dir() == run / "checkpoints" / "best"
+    assert tm.artifact_dir().is_dir()
+    assert tm.checkpoint(step=1) == run / "checkpoints" / "best"
+    # The platform's pin wins over a decorator default that disagrees.
+    _declare()
+    assert tm.artifact_dir() == run / "checkpoints" / "best"
 
 
 def test_log_never_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
