@@ -222,12 +222,16 @@ def run(
             predictor if predictor is not None else os.environ.get(ENV_PREDICTOR)
         )
     )
-    weights = Path(weights_dir or os.environ.get(ENV_WEIGHTS_DIR) or "")
-    if not str(weights) or not weights.is_dir():
+    chosen = weights_dir or os.environ.get(ENV_WEIGHTS_DIR)
+    if not chosen:
+        # Checked before Path(): Path("") is the working directory, which exists, and load()
+        # would then read whatever happens to be there instead of the trained artifact.
         raise PredictError(
-            f"weights directory {str(weights) or '(unset)'} does not exist; "
-            f"the platform sets {ENV_WEIGHTS_DIR}, locally pass --weights"
+            f"no weights directory: the platform sets {ENV_WEIGHTS_DIR}, locally pass --weights"
         )
+    weights = Path(chosen)
+    if not weights.is_dir():
+        raise PredictError(f"weights directory {weights} does not exist")
     for required in ("load", "predict"):
         if not callable(getattr(cls, required, None)):
             raise PredictError(f"predictor {cls.__name__} needs a callable {required}()")

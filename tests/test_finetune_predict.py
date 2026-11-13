@@ -129,6 +129,15 @@ def test_local_command_takes_weights_and_inputs(tmp_path: Path) -> None:
     assert _rows(out) == [{"score": "6.0", "note": "ok"}]
 
 
+def test_an_unset_weights_directory_is_refused_not_read_as_the_working_directory(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "model.py").write_text(PREDICTOR_SOURCE)
+    (tmp_path / "weights.json").write_text(json.dumps({"scale": 1.0}))  # a loadable cwd
+    with pytest.raises(predict.PredictError, match="no weights directory"):
+        predict.run("model.py:Scorer", inputs={"sequence": "AC"}, out=tmp_path / "p.csv")
+
+
 def test_local_command_reports_a_missing_weights_directory(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
