@@ -197,8 +197,12 @@ def normalize_artifact(artifact: Any) -> str:
         raise FinetuneSpecError("artifact must be a relative directory under the run's output")
     text = artifact.strip()
     parts = [part for part in text.split("/") if part and part != "."]
+    # Backslashes and ":" are refused outright: on a Windows laptop they are a separator and a
+    # drive (C:/x, ..\x, \\host\share), so a path that is relative on Linux escapes there.
     if (
         text.startswith("/")
+        or "\\" in text
+        or ":" in text
         or not parts
         or any(part == ".." or part.startswith(".") for part in parts)
     ):

@@ -212,7 +212,19 @@ def test_checkpoint_never_raises_when_its_directory_cannot_be_created(
     assert "could not create checkpoint directory" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("bad", ["../model", "/abs", "ckpt/.cache", "./", "a/../b"])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "../model",
+        "/abs",
+        "ckpt/.cache",
+        "./",
+        "a/../b",
+        "..\\model",
+        "C:/outside/model",
+        "\\\\host\\share",
+    ],
+)
 def test_artifact_paths_outside_the_run_are_refused(bad: str) -> None:
     from tamarind.finetune.spec import FinetuneSpecError, normalize_artifact
 
@@ -225,3 +237,21 @@ def test_artifact_paths_are_canonical() -> None:
 
     assert normalize_artifact("checkpoints/./best/") == "checkpoints/best"
     assert normalize_artifact("checkpoints//best") == "checkpoints/best"
+
+
+def test_explicit_step_and_time_win_over_same_named_metrics(tmp_path: Path) -> None:
+    tm.log({"step": 99, "time": 0, "loss": 1.0}, step=3)
+    line = json.loads((tmp_path / "tamarind_run" / "metrics.jsonl").read_text().splitlines()[0])
+    assert line["step"] == 3
+    assert line["time"] > 0
+    assert line["loss"] == 1.0
+
+
+def test_unserializable_records_are_reported_not_raised(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cyclic: dict[str, object] = {}
+    cyclic["self"] = cyclic
+    tm.log({"bad": cyclic}, step=1)
+    tm.checkpoint(step=1, metrics={"bad": cyclic})
+    assert capsys.readouterr().err.count("could not serialize") == 2

@@ -125,9 +125,14 @@ def _json_safe(value: Any) -> Any:
 
 def _append_line(path: Path, record: Mapping[str, Any]) -> None:
     try:
+        line = json.dumps(_json_safe(record), separators=(",", ":")) + "\n"
+    except Exception as exc:  # noqa: BLE001 - a cyclic or exotic value must not end a training run
+        print(f"[tamarind] could not serialize a record for {path}: {exc}", file=sys.stderr)
+        return
+    try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(_json_safe(record), separators=(",", ":")) + "\n")
+            handle.write(line)
     except OSError as exc:
         print(f"[tamarind] could not write {path}: {exc}", file=sys.stderr)
 
@@ -142,11 +147,14 @@ def log(metrics: Mapping[str, Any], step: int | None = None, **more: Any) -> Non
     Appends one JSON line per call. Non-finite numbers become null. Never raises.
     """
     try:
-        record: dict[str, Any] = {"time": time.time()}
-        if step is not None:
-            record["step"] = step
+        record: dict[str, Any] = {}
         record.update(metrics)
         record.update(more)
+        # The SDK's own fields go last: a metric named "time" or "step" must not move the
+        # observation to another time or step, which would misorder curves and checkpoints.
+        record["time"] = time.time()
+        if step is not None:
+            record["step"] = step
         path = metrics_file()  # may create the local run dir, which can fail
     except Exception as exc:  # noqa: BLE001 - logging must never end a training run
         print(f"[tamarind] could not log metrics: {exc}", file=sys.stderr)
