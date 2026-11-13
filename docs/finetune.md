@@ -55,6 +55,7 @@ if __name__ == "__main__":
 | `@tm.evaluator` | `score(predictions, truths)` | The same scoring for validation during training and for benchmarks |
 | `@tm.splitter` | `split(dataset)` | A custom train/validation split |
 
+`memory` must be one of the platform's sizes: 8Gi, 12Gi, 24Gi, 32Gi, 48Gi, 64Gi, 90Gi, 96Gi or 180Gi.
 Every decorator argument must be a literal: a number, string, bool, list, tuple or dict of
 those, or `tm.Float` / `tm.Int` / `tm.Str` / `tm.Bool` / `tm.Choice` with literal arguments.
 The platform's build reads the folder without importing it (the block is needed before the
@@ -133,7 +134,14 @@ A model trained by `binder-train` can then be attached to a job on this tool. Wi
 ## Deploy
 
 A training tool is a custom tool: a folder with a `Dockerfile`, a `run.sh` that starts your
-script, and a `config.json`. Deploy it like any other custom tool:
+script, and a `config.json`. The image needs the SDK, so the Dockerfile installs it:
+
+```dockerfile
+RUN pip install --no-cache-dir tamarind-cli
+```
+
+(`python:*-slim` images have no `git`, so install from PyPI or a tarball URL, not `git+https://`.)
+Deploy it like any other custom tool:
 
 ```
 tamarind custom-tools build my-trainer ./my-trainer
