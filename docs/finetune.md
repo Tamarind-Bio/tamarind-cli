@@ -71,11 +71,64 @@ file and line.
 | `tm.evaluate(predictions, truths)` | Calls your `@tm.evaluator` |
 | `tm.artifact_dir()` / `tm.run_dir()` | Where the model and the run's outputs go (`/app/out/...` on the platform, `./tamarind_run/...` locally) |
 | `tm.is_platform()` | True inside a Tamarind run |
+| `tm.is_predicting()` | True when the run serves a trained model instead of training one (see Prediction mode) |
 
 The platform sets `TAMARIND_RUN_DIR`, `TAMARIND_HYPERPARAMETERS` (a JSON file),
 `TAMARIND_METRICS_FILE` and `TAMARIND_ARTIFACT_DIR` (the directory the run's `artifact` names,
 which `tm.artifact_dir()` returns, so a hand-written block works without decorators). Off the platform the SDK only writes local files, so the same script
 runs on a laptop unchanged.
+
+## Prediction mode
+
+A trained model is served by the `@tm.predictor` class, in the same image and through the same
+`run.sh` as training. When a job is submitted with a model attached, the platform stages that
+model's weights into the container and starts the script in prediction mode:
+
+| The platform sets | Meaning |
+|---|---|
+| `TAMARIND_MODE=predict` | this run serves a model; `tm.is_predicting()` is true |
+| `TAMARIND_WEIGHTS_DIR` | the directory holding the trained artifact, exactly as `tm.artifact_dir()` left it |
+| `TAMARIND_PREDICTOR` | the `<file>.py:<Class>` of your predictor, from the tool's `finetune` block |
+| `TAMARIND_INPUTS_FILE` | the job's inputs as a JSON object, each declared input by name (a file input as its path) |
+| `TAMARIND_PREDICTIONS_FILE` | where the predictions CSV goes (`/app/out/predictions.csv`) |
+
+In that mode, calling your `@tm.training_run` function does not train: the SDK imports the
+predictor class, calls `load(weights_dir)`, then `predict(inputs)` once with the job's inputs, and
+writes what it returns to the predictions CSV. `predict` returns a dict of column name to value
+(`{"affinity": 0.42}`), or a list of such dicts for several rows. The declared `outputs` must all
+be present; extra keys become extra columns. A `load` or `predict` that raises fails the job with
+the exception.
+
+Nothing in your script changes. If you would rather see the switch in `run.sh`, the explicit
+entry does the same thing:
+
+```
+python -m tamarind.finetune predict
+```
+
+The same command tests a predictor on a laptop against a local artifact:
+
+```
+python -m tamarind.finetune predict --predictor model.py:BindingModel \
+    --weights ./tamarind_run/model --input sequence=ACDEFGH --out preds.csv
+```
+
+`task` names what the predictions are, `"score"` for a property predictor. With `outputs` it
+gives `predictions.csv` a result contract: the declared columns are ingested as molecule
+properties, so pipelines and benchmarks read them. Without `task` the file is still written and
+downloadable, as for any tool without a task type.
+
+A predictor can also live in its own tool with its own image, for example a slim CPU image for
+inference. Deploy that folder as a separate custom tool and say whose models it serves:
+
+```python
+@tm.predictor(inputs={"sequence": "sequence"}, outputs={"affinity": "number"},
+              serves_models_from=["binder-train"])
+class BindingModel: ...
+```
+
+A model trained by `binder-train` can then be attached to a job on this tool. Without
+`serves_models_from`, a predictor serves the models of the tool it is deployed in.
 
 ## Deploy
 

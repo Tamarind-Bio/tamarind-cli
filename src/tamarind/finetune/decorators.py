@@ -1,4 +1,6 @@
-"""The four decorators. They attach metadata and return the object unchanged.
+"""The four decorators. They attach metadata and return the object as it was, except that the
+training function learns one thing: in prediction mode (``TAMARIND_MODE=predict``, set by the
+platform when a job serves a trained model) calling it runs the ``@tm.predictor`` class instead.
 
 The platform never calls through a decorator: at build time it reads the decorator arguments
 out of the uploaded source (without importing it) and stores the `finetune` block they describe
@@ -15,6 +17,8 @@ needed before the image that holds the script's dependencies exists.
 
 from __future__ import annotations
 
+import functools
+import sys
 from typing import Any, Callable, Mapping, Sequence, TypeVar
 
 from tamarind.finetune import spec as _spec
@@ -80,8 +84,25 @@ def training_run(
     }
 
     def decorate(fn: F) -> F:
-        _attach(fn, "training_run", {"block": block, "resources": resources})
-        return fn
+        @functools.wraps(fn)
+        def entry(*args: Any, **kwargs: Any) -> Any:
+            # A prediction job runs the same image and the same `run.sh`, so the switch lives
+            # here: the platform sets the mode and the predictor class, and the training body
+            # is not entered. Imported lazily so a laptop run never pays for it.
+            from tamarind.finetune import predict as _predict
+
+            if _predict.is_predicting():
+                print(
+                    "[tamarind] prediction mode: serving the @tm.predictor class instead of "
+                    f"training with {fn.__name__}()",
+                    file=sys.stderr,
+                )
+                _predict.run_from_environment()
+                return None
+            return fn(*args, **kwargs)
+
+        _attach(entry, "training_run", {"block": block, "resources": resources})
+        return entry  # type: ignore[return-value]
 
     return decorate
 
@@ -92,20 +113,36 @@ def predictor(
     memory: str | None = None,
     inputs: Mapping[str, str] | Sequence[Mapping[str, Any]] | None = None,
     outputs: Mapping[str, str] | None = None,
+    serves_models_from: Sequence[str] | None = None,
+    task: str | None = None,
 ) -> Callable[[C], C]:
     """Mark the class that serves the trained artifact.
 
-        @tm.predictor(gpu="L4", inputs={"sequence": "sequence"}, outputs={"affinity": "number"})
+        @tm.predictor(gpu="L4", task="score",
+                      inputs={"sequence": "sequence"}, outputs={"affinity": "number"})
         class BindingModel:
             def load(self, artifact_dir): ...
-            def predict(self, inputs): ...
-            def embed(self, inputs): ...   # optional
+            def predict(self, inputs): ...   # -> {"affinity": 0.42} or a list of such dicts
+            def embed(self, inputs): ...     # optional
 
     `load` and `predict` are required; `embed` turns on feature extraction. With `inputs` and
     `outputs` the trained model becomes a custom tool endpoint the API, pipelines and benchmarks
-    can call.
+    can call: a prediction job stages the model's weights, calls `load(weights_dir)` then
+    `predict(inputs)` with each declared input by name, and writes the returned columns to
+    `predictions.csv`. `task` names the prediction's task type ("score" for a property
+    predictor); with `outputs` it gives the predictions a result contract, so they are ingested
+    as molecule properties and read by pipelines and benchmarks. `serves_models_from` lists the
+    training tools whose models this class may serve when it is deployed as a separate tool; by
+    default it serves its own tool's models.
     """
-    block = _spec.predictor_block(gpu=gpu, memory=memory, inputs=inputs, outputs=outputs)
+    block = _spec.predictor_block(
+        gpu=gpu,
+        memory=memory,
+        inputs=inputs,
+        outputs=outputs,
+        serves_models_from=serves_models_from,
+        task=task,
+    )
 
     def decorate(cls: C) -> C:
         for required in ("load", "predict"):
