@@ -236,6 +236,11 @@ place them before the command name.
 
 Run `tamarind <command> --help` for full options.
 
+`files upload` sends files over 100 MB (up to 100 GB) in parallel parts with per-part
+retries; `--concurrency` sets how many parts are in flight. An interrupted large upload
+keeps its finished parts in `~/.tamarind/uploads/`, so rerunning the same command resumes
+it; `--no-resume` starts over.
+
 ## Configuration
 
 | Setting | Flag | Env var | Default |
