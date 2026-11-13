@@ -169,6 +169,30 @@ def test_an_already_imported_predictor_is_not_imported_twice(
     assert _rows(out) == [{"score": "1"}]
 
 
+def test_a_same_named_class_from_another_file_is_not_reused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "model.py").write_text(PREDICTOR_SOURCE)
+    other = PREDICTOR_SOURCE.replace('self.scale * len(inputs["sequence"])', "-1.0")
+    (tmp_path / "other.py").write_text(other)
+    out = _platform_env(monkeypatch, tmp_path, predictor="other.py:Scorer")
+    predict.run("model.py:Scorer", out=tmp_path / "first.csv")  # registers model.py's Scorer
+    predict.run_from_environment()  # other.py:Scorer must be imported, not the registered one
+    assert _rows(out) == [{"score": "-1.0", "note": "ok"}]
+
+
+def test_a_bare_string_is_one_row_of_a_single_string_column(tmp_path: Path) -> None:
+    @tm.predictor(outputs={"label": "string"})
+    class Classifier:
+        def load(self, weights_dir): ...
+
+        def predict(self, inputs):
+            return "active"
+
+    out = predict.run(Classifier, weights_dir=_weights(tmp_path), inputs={}, out=tmp_path / "c.csv")
+    assert _rows(out) == [{"label": "active"}]
+
+
 def test_a_list_of_dicts_is_many_rows_and_a_bare_value_is_one(tmp_path: Path) -> None:
     @tm.predictor(outputs={"score": "number"})
     class Many:

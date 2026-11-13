@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import csv
 import importlib.util
+import inspect
 import json
 import os
 from pathlib import Path
@@ -81,6 +82,15 @@ def _import_by_path(path: Path) -> Any:
     return module
 
 
+def _same_source(cls: type, path: Path) -> bool:
+    """Is `cls` defined in the file `path` names? A same-named class from another file is not it."""
+    try:
+        source = inspect.getsourcefile(cls)
+        return bool(source) and Path(source).resolve() == path.resolve()
+    except (TypeError, OSError):
+        return False
+
+
 def resolve_predictor_class(ref: str | None = None) -> type:
     """The ``@tm.predictor`` class named by ``ref`` (``model.py:Class``), or the one already imported.
 
@@ -93,7 +103,7 @@ def resolve_predictor_class(ref: str | None = None) -> type:
             raise PredictError(f"no @tm.predictor class is imported and {ENV_PREDICTOR} is not set")
         return record["target"]
     path, class_name = _parse_class_ref(ref)
-    if record and record["target"].__name__ == class_name:
+    if record and record["target"].__name__ == class_name and _same_source(record["target"], path):
         return record["target"]
     module = _import_by_path(path.resolve())
     cls = getattr(module, class_name, None)
@@ -154,7 +164,7 @@ def rows_from(result: Any, columns: Sequence[str]) -> list[dict[str, Any]]:
                 )
             rows.append(dict(item))
         return rows
-    if len(columns) == 1 and result is not None and not isinstance(result, (str, bytes)):
+    if len(columns) == 1 and result is not None and not isinstance(result, bytes):
         return [{columns[0]: result}]
     raise PredictError(
         "predict() must return a dict of column -> value, or a list of them"
