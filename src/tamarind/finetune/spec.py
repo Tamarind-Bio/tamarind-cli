@@ -219,13 +219,23 @@ def predictor_block(
     memory: str | None = None,
     inputs: Mapping[str, str] | Sequence[Mapping[str, Any]] | None = None,
     outputs: Mapping[str, str] | None = None,
+    serves_models_from: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """The `finetune.predictor` keys a @predictor contributes, minus the class the caller adds.
 
     `inputs={"sequence": "sequence"}` is shorthand for one input per entry; a list of full input
     dicts is passed through. `outputs={"affinity": "number"}` becomes the primary predictions CSV.
+    `serves_models_from` names the training tools whose models this class may serve when the
+    predictor is deployed as its own tool (a different image); by default it serves the models of
+    the tool it is deployed in.
     """
     block: dict[str, Any] = {}
+    if serves_models_from is not None:
+        if isinstance(serves_models_from, str) or not all(
+            isinstance(name, str) and name.strip() for name in serves_models_from
+        ):
+            raise FinetuneSpecError("serves_models_from must be a list of tool names")
+        block["servesModelsFrom"] = [name.strip() for name in serves_models_from]
     if gpu is not None:
         block["gpuType"] = gpu
     if memory is not None:

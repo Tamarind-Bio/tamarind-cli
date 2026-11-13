@@ -40,6 +40,7 @@ _FINETUNE_EXPORTS = frozenset(
         "artifact_dir",
         "run_dir",
         "is_platform",
+        "is_predicting",
         "Float",
         "Int",
         "Str",

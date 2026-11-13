@@ -24,6 +24,7 @@ like, and deploy the folder as a custom tool. See ``docs/finetune.md``.
 """
 
 from tamarind.finetune.decorators import evaluator, predictor, splitter, training_run
+from tamarind.finetune.predict import is_predicting
 from tamarind.finetune.runtime import (
     artifact_dir,
     checkpoint,
@@ -48,6 +49,7 @@ __all__ = [
     "evaluator",
     "hyperparameters",
     "is_platform",
+    "is_predicting",
     "log",
     "predictor",
     "run_dir",

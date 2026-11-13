@@ -44,7 +44,7 @@ def _declare():
     return main
 
 
-def test_decorators_return_the_object_unchanged_and_record_metadata() -> None:
+def test_decorators_return_a_callable_that_runs_the_body_and_record_metadata() -> None:
     main = _declare()
     assert main() == "ran"
     record = getattr(main, decorators.METADATA_ATTR)
