@@ -183,10 +183,30 @@ def training_run_block(
     if normalized_objective is not None:
         block["objective"] = normalized_objective
     if artifact is not None:
-        if not isinstance(artifact, str) or not artifact.strip():
-            raise FinetuneSpecError("artifact must be a relative directory under the run's output")
-        block["artifact"] = artifact.strip().strip("/")
+        block["artifact"] = normalize_artifact(artifact)
     return block
+
+
+def normalize_artifact(artifact: Any) -> str:
+    """`artifact` in canonical form, refused if it could leave the run's output directory.
+
+    Mirrors the platform's parser: empty and "." segments are dropped, so "checkpoints/./best"
+    is "checkpoints/best"; absolute paths, ".." and hidden directories are refused.
+    """
+    if not isinstance(artifact, str) or not artifact.strip():
+        raise FinetuneSpecError("artifact must be a relative directory under the run's output")
+    text = artifact.strip()
+    parts = [part for part in text.split("/") if part and part != "."]
+    if (
+        text.startswith("/")
+        or not parts
+        or any(part == ".." or part.startswith(".") for part in parts)
+    ):
+        raise FinetuneSpecError(
+            f"artifact {artifact!r} must be a relative directory under the run's output, "
+            "with no '..' or hidden directories"
+        )
+    return "/".join(parts)
 
 
 def predictor_block(

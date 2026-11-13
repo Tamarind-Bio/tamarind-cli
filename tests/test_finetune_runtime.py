@@ -182,3 +182,46 @@ def test_top_level_exports_resolve_lazily() -> None:
     assert "training_run" in dir(tm)
     with pytest.raises(AttributeError):
         tm.not_a_thing  # noqa: B018
+
+
+def test_log_never_raises_when_the_run_dir_cannot_be_created(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    monkeypatch.setenv(runtime.ENV_RUN_DIR, str(blocker / "run"))  # a dir under a regular file
+    tm.log({"a": 1}, step=1)
+    assert "could not" in capsys.readouterr().err
+
+
+def test_log_keeps_huge_integers_exact(tmp_path: Path) -> None:
+    tm.log({"count": 10**1000, "bad": float("inf")}, step=1)
+    line = json.loads((tmp_path / "tamarind_run" / "metrics.jsonl").read_text().splitlines()[0])
+    assert line["count"] == 10**1000
+    assert line["bad"] is None
+
+
+def test_checkpoint_never_raises_when_its_directory_cannot_be_created(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    blocker = tmp_path / "tamarind_run" / "file"
+    blocker.parent.mkdir(parents=True)
+    blocker.write_text("x")
+    target = tm.checkpoint("file/sub", step=2)
+    assert target == blocker / "sub"
+    assert "could not create checkpoint directory" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("bad", ["../model", "/abs", "ckpt/.cache", "./", "a/../b"])
+def test_artifact_paths_outside_the_run_are_refused(bad: str) -> None:
+    from tamarind.finetune.spec import FinetuneSpecError, normalize_artifact
+
+    with pytest.raises(FinetuneSpecError):
+        normalize_artifact(bad)
+
+
+def test_artifact_paths_are_canonical() -> None:
+    from tamarind.finetune.spec import normalize_artifact
+
+    assert normalize_artifact("checkpoints/./best/") == "checkpoints/best"
+    assert normalize_artifact("checkpoints//best") == "checkpoints/best"

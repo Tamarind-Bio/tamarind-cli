@@ -106,7 +106,9 @@ def hyperparameters() -> dict[str, Any]:
 def _json_safe(value: Any) -> Any:
     if isinstance(value, bool) or value is None or isinstance(value, str):
         return value
-    if isinstance(value, (int, float)):
+    if isinstance(value, int):
+        return value  # exact at any size; math.isfinite would overflow converting 10**1000
+    if isinstance(value, float):
         return value if math.isfinite(value) else None
     if isinstance(value, Mapping):
         return {str(k): _json_safe(v) for k, v in value.items()}
@@ -139,12 +141,17 @@ def log(metrics: Mapping[str, Any], step: int | None = None, **more: Any) -> Non
 
     Appends one JSON line per call. Non-finite numbers become null. Never raises.
     """
-    record: dict[str, Any] = {"time": time.time()}
-    if step is not None:
-        record["step"] = step
-    record.update(metrics)
-    record.update(more)
-    _append_line(metrics_file(), record)
+    try:
+        record: dict[str, Any] = {"time": time.time()}
+        if step is not None:
+            record["step"] = step
+        record.update(metrics)
+        record.update(more)
+        path = metrics_file()  # may create the local run dir, which can fail
+    except Exception as exc:  # noqa: BLE001 - logging must never end a training run
+        print(f"[tamarind] could not log metrics: {exc}", file=sys.stderr)
+        return
+    _append_line(path, record)
 
 
 def artifact_dir() -> Path:
@@ -178,17 +185,34 @@ def checkpoint(
     Returns the directory to save into (``path``, or the artifact dir). The platform uses the
     records to pick the best checkpoint by the declared objective.
     """
-    target = Path(path) if path is not None else artifact_dir()
-    if path is not None and not target.is_absolute():
-        target = run_dir() / target
-    target = target.resolve()
-    target.mkdir(parents=True, exist_ok=True)
-    record: dict[str, Any] = {"time": time.time(), "path": str(target)}
-    if step is not None:
-        record["step"] = step
-    if metrics:
-        record["metrics"] = dict(metrics)
-    _append_line(run_dir() / CHECKPOINTS_FILENAME, record)
+    # Never raises: a directory that cannot be created is reported, and the path is still
+    # returned so the script's own save shows the real error where it happens.
+    try:
+        target = Path(path) if path is not None else artifact_dir()
+        if path is not None and not target.is_absolute():
+            target = run_dir() / target
+        target = target.resolve()
+    except Exception as exc:  # noqa: BLE001 - checkpoint recording must never end a training run
+        print(f"[tamarind] could not resolve the checkpoint directory: {exc}", file=sys.stderr)
+        target = (
+            Path(path) if path is not None else Path(os.environ.get(ENV_ARTIFACT_DIR) or "model")
+        )
+        return target
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        print(f"[tamarind] could not create checkpoint directory {target}: {exc}", file=sys.stderr)
+    try:
+        record: dict[str, Any] = {"time": time.time(), "path": str(target)}
+        if step is not None:
+            record["step"] = step
+        if metrics:
+            record["metrics"] = dict(metrics)
+        records = run_dir() / CHECKPOINTS_FILENAME
+    except Exception as exc:  # noqa: BLE001
+        print(f"[tamarind] could not record the checkpoint: {exc}", file=sys.stderr)
+        return target
+    _append_line(records, record)
     return target
 
 
