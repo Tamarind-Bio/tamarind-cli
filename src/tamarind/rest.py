@@ -222,23 +222,18 @@ def get_files(
     client: HTTPClient,
     *,
     limit: int | None = None,
-    offset: int | None = None,
+    cursor: str | None = None,
     types: str | None = None,
     search: str | None = None,
     folder: str | None = None,
     include_folders: bool = False,
-    include_all: bool = False,
     include_metadata: bool = False,
 ) -> Any:
-    """GET /files — list files in the workspace, with filtering/pagination."""
+    """GET /files — one directory page; follow nextCursor until null."""
     params = {
-        "limit": limit,
-        "offset": offset,
-        "types": types,
-        "search": search,
+        "limit": limit, "cursor": cursor, "types": types, "search": search,
         "folder": folder,
         "includeFolders": _TRUE if include_folders else None,
-        "includeAll": _TRUE if include_all else None,
         "includeMetadata": _TRUE if include_metadata else None,
     }
     return client.get_json("files", params=params)

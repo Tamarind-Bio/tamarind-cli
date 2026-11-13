@@ -79,11 +79,11 @@ def test_folders_survives_non_list_response():
 
 
 @respx.mock
-def test_files_list_survives_non_list_response():
+def test_files_list_rejects_non_list_response():
     respx.get(f"{API}files").mock(return_value=httpx.Response(200, text="Redirecting..."))
     res = runner.invoke(app, ["files", "list"], env=ENV)
-    assert res.exit_code == 0
-    assert res.exception is None
+    assert res.exit_code != 0
+    assert isinstance(res.exception, TamarindError)
 
 
 @respx.mock
@@ -340,7 +340,7 @@ _WORKSPACE_FILES = ["a.pdb", "b.PDB", "c.cif", "notes.txt", "run.log", "seqs.fas
 def test_files_list_filters_by_type_client_side():
     # The endpoint returns the FULL list regardless of ?types=; the CLI must still
     # narrow it (this is the bug: the filter used to be silently ignored).
-    respx.get(f"{API}files").mock(return_value=httpx.Response(200, json=_WORKSPACE_FILES))
+    respx.get(f"{API}files").mock(return_value=httpx.Response(200, json={"files": _WORKSPACE_FILES, "hasMore": False, "nextCursor": None}))
     res = runner.invoke(app, ["--json", "files", "list", "--types", "pdb"], env=ENV)
     assert res.exit_code == 0, res.stdout
     out = json.loads(res.stdout)
@@ -352,7 +352,7 @@ def test_files_list_filters_by_type_client_side():
 
 @respx.mock
 def test_files_list_filters_by_multiple_types():
-    respx.get(f"{API}files").mock(return_value=httpx.Response(200, json=_WORKSPACE_FILES))
+    respx.get(f"{API}files").mock(return_value=httpx.Response(200, json={"files": _WORKSPACE_FILES, "hasMore": False, "nextCursor": None}))
     res = runner.invoke(app, ["--json", "files", "list", "--types", "pdb,cif"], env=ENV)
     out = json.loads(res.stdout)
     assert set(out["files"]) == {"a.pdb", "b.PDB", "c.cif"}
@@ -360,7 +360,7 @@ def test_files_list_filters_by_multiple_types():
 
 @respx.mock
 def test_files_list_filters_by_search():
-    respx.get(f"{API}files").mock(return_value=httpx.Response(200, json=_WORKSPACE_FILES))
+    respx.get(f"{API}files").mock(return_value=httpx.Response(200, json={"files": _WORKSPACE_FILES, "hasMore": False, "nextCursor": None}))
     res = runner.invoke(app, ["--json", "files", "list", "--search", "SEQ"], env=ENV)
     out = json.loads(res.stdout)
     assert out["files"] == ["seqs.fasta"]  # substring, case-insensitive
@@ -369,7 +369,7 @@ def test_files_list_filters_by_search():
 
 @respx.mock
 def test_files_list_paginates_client_side():
-    respx.get(f"{API}files").mock(return_value=httpx.Response(200, json=_WORKSPACE_FILES))
+    respx.get(f"{API}files").mock(return_value=httpx.Response(200, json={"files": _WORKSPACE_FILES, "hasMore": False, "nextCursor": None}))
     page1 = json.loads(
         runner.invoke(app, ["--json", "files", "list", "--limit", "2", "--offset", "0"], env=ENV).stdout
     )
@@ -447,7 +447,7 @@ def test_jobs_all_respects_page_cap(monkeypatch):
 @respx.mock
 def test_files_stats_counts_by_type():
     files = ["a.pdb", "b.pdb", "c.cif", "readme", "notes.txt"]
-    respx.get(f"{API}files").mock(return_value=httpx.Response(200, json=files))
+    respx.get(f"{API}files").mock(return_value=httpx.Response(200, json={"files": files, "hasMore": False, "nextCursor": None}))
     out = json.loads(runner.invoke(app, ["--json", "files", "stats"], env=ENV).stdout)
     assert out["totalFiles"] == 5
     assert out["fileTypes"] == {"pdb": 2, "cif": 1, "no_extension": 1, "txt": 1}
