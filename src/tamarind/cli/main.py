@@ -127,34 +127,19 @@ def _version_callback(value: bool) -> None:
 def main(
     ctx: typer.Context,
     api_key: Optional[str] = typer.Option(
-        None,
-        "--api-key",
-        envvar="TAMARIND_API_KEY",
-        help="API key (overrides env/profile).",
-        show_default=False,
+        None, "--api-key", envvar="TAMARIND_API_KEY", help="API key (overrides env/profile).", show_default=False
     ),
     api_base: Optional[str] = typer.Option(
         None, "--api-base", envvar="TAMARIND_API_BASE", help="Job API base URL.", show_default=False
     ),
     catalog_base: Optional[str] = typer.Option(
-        None,
-        "--catalog-base",
-        envvar="TAMARIND_CATALOG_BASE",
-        help="Catalog (discovery) base URL.",
-        show_default=False,
+        None, "--catalog-base", envvar="TAMARIND_CATALOG_BASE", help="Catalog (discovery) base URL.", show_default=False
     ),
     profile: Optional[str] = typer.Option(
-        None,
-        "--profile",
-        envvar="TAMARIND_PROFILE",
-        help="Named profile in ~/.tamarind/config.json.",
-        show_default=False,
+        None, "--profile", envvar="TAMARIND_PROFILE", help="Named profile in ~/.tamarind/config.json.", show_default=False
     ),
     json_output: Optional[bool] = typer.Option(
-        None,
-        "--json/--no-json",
-        help="Machine JSON output. Defaults on when stdout isn't a TTY.",
-        show_default=False,
+        None, "--json/--no-json", help="Machine JSON output. Defaults on when stdout isn't a TTY.", show_default=False
     ),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress status lines."),
     _version: Optional[bool] = typer.Option(

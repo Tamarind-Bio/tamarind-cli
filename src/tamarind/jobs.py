@@ -126,12 +126,12 @@ def fetch_job(
 def _matching_owners(resp: Any, name: str) -> list[str]:
     if not isinstance(resp, dict):
         return []
-    rows = (
-        resp.get("jobs")
-        if "jobs" in resp
-        else [v for k, v in resp.items() if k.isdigit() and isinstance(v, dict)]
-    )
-    return sorted({str(r["User"]) for r in rows or [] if job_name(r) == name and r.get("User")})
+    rows = resp.get("jobs") if "jobs" in resp else [
+        v for k, v in resp.items() if k.isdigit() and isinstance(v, dict)
+    ]
+    return sorted({
+        str(r["User"]) for r in rows or [] if job_name(r) == name and r.get("User")
+    })
 
 
 def resolve_owner(
@@ -219,7 +219,9 @@ def wait_for_job(
         remaining = None if deadline is None else deadline - time.monotonic()
         if remaining is not None and remaining <= 0:
             status_text = f" still {last_status!r}" if last_status is not None else ""
-            raise JobTimeoutError(f"Job '{name}'{status_text} after {timeout:.0f}s")
+            raise JobTimeoutError(
+                f"Job '{name}'{status_text} after {timeout:.0f}s"
+            )
         try:
             job = fetch_job(
                 client,
@@ -233,7 +235,11 @@ def wait_for_job(
             # translation. Preserve typed API failures (auth, budget, rate
             # limit, not-found, validation) even if the clock crossed while
             # the request was in flight.
-            if type(exc) is TamarindError and deadline is not None and time.monotonic() >= deadline:
+            if (
+                type(exc) is TamarindError
+                and deadline is not None
+                and time.monotonic() >= deadline
+            ):
                 raise JobTimeoutError(
                     f"Job '{name}' did not return status before the {timeout:.0f}s deadline"
                 ) from exc
@@ -248,14 +254,20 @@ def wait_for_job(
             return job
         remaining = None if deadline is None else deadline - time.monotonic()
         if remaining is not None and remaining <= 0:
-            raise JobTimeoutError(f"Job '{name}' still {last_status!r} after {timeout:.0f}s")
+            raise JobTimeoutError(
+                f"Job '{name}' still {last_status!r} after {timeout:.0f}s"
+            )
         sleep_for = poll_interval if remaining is None else min(poll_interval, remaining)
         time.sleep(max(0.0, sleep_for))
 
 
-def validate_wait_options(*, poll_interval: float = 10.0, timeout: float | None = None) -> None:
+def validate_wait_options(
+    *, poll_interval: float = 10.0, timeout: float | None = None
+) -> None:
     """Reject invalid local wait timing without making a remote request."""
     if not math.isfinite(poll_interval) or math.copysign(1.0, poll_interval) < 0:
         raise ValidationError("Poll interval must be a finite, non-negative number.")
-    if timeout is not None and (not math.isfinite(timeout) or math.copysign(1.0, timeout) < 0):
+    if timeout is not None and (
+        not math.isfinite(timeout) or math.copysign(1.0, timeout) < 0
+    ):
         raise ValidationError("Wait timeout must be a finite, non-negative number.")

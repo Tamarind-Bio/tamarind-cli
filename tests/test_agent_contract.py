@@ -39,7 +39,9 @@ def test_auth_status_preserves_non_auth_403_type(
 ):
     for key, value in ENV.items():
         monkeypatch.setenv(key, value)
-    respx.get(f"{API}jobs").mock(return_value=httpx.Response(403, json={"error": message}))
+    respx.get(f"{API}jobs").mock(
+        return_value=httpx.Response(403, json={"error": message})
+    )
     monkeypatch.setattr(sys, "argv", ["tamarind", "--json", "auth", "status"])
 
     with pytest.raises(SystemExit) as raised:
@@ -66,7 +68,9 @@ def test_auth_login_never_saves_when_verification_fails(
     config_dir = tmp_path / "config"
     monkeypatch.setenv("TAMARIND_CONFIG_DIR", str(config_dir))
     monkeypatch.setenv("TAMARIND_API_BASE", API)
-    respx.get(f"{API}jobs").mock(return_value=httpx.Response(403, json={"error": message}))
+    respx.get(f"{API}jobs").mock(
+        return_value=httpx.Response(403, json={"error": message})
+    )
     monkeypatch.setattr(
         sys,
         "argv",
@@ -224,7 +228,9 @@ def test_entrypoint_preserves_human_abort_behavior(monkeypatch, capsys):
 def test_ambiguous_auto_named_submit_surfaces_recovery_name(monkeypatch, capsys):
     for key, value in ENV.items():
         monkeypatch.setenv(key, value)
-    respx.post(f"{API}validate-job").mock(return_value=httpx.Response(200, json={"valid": True}))
+    respx.post(f"{API}validate-job").mock(
+        return_value=httpx.Response(200, json={"valid": True})
+    )
     request = httpx.Request("POST", f"{API}submit-job")
     respx.post(f"{API}submit-job").mock(
         side_effect=httpx.ReadTimeout("response lost", request=request)
@@ -281,9 +287,7 @@ def test_wait_failed_batch_parent_exits_nonzero(monkeypatch):
 @respx.mock
 def test_submit_wait_forwards_timeout_and_failed_job_exits_nonzero(monkeypatch):
     respx.post(f"{API}validate-job").mock(return_value=httpx.Response(200, json={"valid": True}))
-    respx.post(f"{API}submit-job").mock(
-        return_value=httpx.Response(200, json={"message": "queued"})
-    )
+    respx.post(f"{API}submit-job").mock(return_value=httpx.Response(200, json={"message": "queued"}))
     observed = {}
 
     def fake_wait(*args, **kwargs):
@@ -359,7 +363,9 @@ def test_submit_wait_rejects_invalid_timing_before_any_remote_request(timing_arg
 @respx.mock
 def test_submit_wait_redacts_result_url_from_final_job(monkeypatch):
     secret = "https://storage.test/result.zip?signature=do-not-leak"
-    respx.post(f"{API}validate-job").mock(return_value=httpx.Response(200, json={"valid": True}))
+    respx.post(f"{API}validate-job").mock(
+        return_value=httpx.Response(200, json={"valid": True})
+    )
     respx.post(f"{API}submit-job").mock(
         return_value=httpx.Response(200, json={"message": "queued"})
     )
@@ -394,8 +400,12 @@ def test_submit_wait_redacts_result_url_from_final_job(monkeypatch):
 
 
 @respx.mock
-def test_submit_wait_download_accepts_wrapped_url_and_sanitizes_job_name(tmp_path, monkeypatch):
-    respx.post(f"{API}validate-job").mock(return_value=httpx.Response(200, json={"valid": True}))
+def test_submit_wait_download_accepts_wrapped_url_and_sanitizes_job_name(
+    tmp_path, monkeypatch
+):
+    respx.post(f"{API}validate-job").mock(
+        return_value=httpx.Response(200, json={"valid": True})
+    )
     respx.post(f"{API}submit-job").mock(
         return_value=httpx.Response(200, json={"message": "queued"})
     )
@@ -503,7 +513,9 @@ def test_results_requires_explicit_download_or_show_url():
 @respx.mock
 def test_results_show_url_is_an_explicit_escape_hatch():
     presigned = "https://storage.test/result.zip?signature=explicit"
-    respx.post(f"{API}result").mock(return_value=httpx.Response(200, json=presigned))
+    respx.post(f"{API}result").mock(
+        return_value=httpx.Response(200, json=presigned)
+    )
 
     result = runner.invoke(
         app,
@@ -599,18 +611,8 @@ def test_validation_error_preserves_echoed_user_tokens(token):
 @respx.mock
 def test_status_and_job_lists_show_low_priority_state_on_low_priority_jobs_only():
     reason = "Stopped: no low-priority capacity was available within 7 days. You were not charged."
-    stopped = {
-        "JobName": "low",
-        "JobStatus": "Stopped",
-        "LowPriority": True,
-        "StoppedReasonUserFacing": reason,
-    }
-    queued = {
-        "JobName": "waiting",
-        "JobStatus": "In Queue",
-        "LowPriority": True,
-        "LowPriorityDeadline": "2026-11-10T00:00:00Z",
-    }
+    stopped = {"JobName": "low", "JobStatus": "Stopped", "LowPriority": True, "StoppedReasonUserFacing": reason}
+    queued = {"JobName": "waiting", "JobStatus": "In Queue", "LowPriority": True, "LowPriorityDeadline": "2026-11-10T00:00:00Z"}
     normal = {"JobName": "normal", "JobStatus": "Stopped"}
     respx.get(f"{API}jobs").mock(
         side_effect=[
@@ -623,28 +625,11 @@ def test_status_and_job_lists_show_low_priority_state_on_low_priority_jobs_only(
         ]
     )
 
-    assert (
-        json.loads(runner.invoke(app, ["--json", "status", "low"], env=ENV).output)[
-            "StoppedReasonUserFacing"
-        ]
-        == reason
-    )
-    assert (
-        runner.invoke(app, ["--no-json", "status", "low"], env=ENV).output.strip()
-        == f"low: Stopped (low priority) {reason}"
-    )
-    assert (
-        "2026-11-10T00:00:00Z"
-        in runner.invoke(app, ["--no-json", "status", "waiting"], env=ENV).output
-    )
-    assert (
-        runner.invoke(app, ["--no-json", "status", "normal"], env=ENV).output.strip()
-        == "normal: Stopped"
-    )
-    assert (
-        json.loads(runner.invoke(app, ["--json", "jobs"], env=ENV).output)["jobs"][0]["LowPriority"]
-        is True
-    )
+    assert json.loads(runner.invoke(app, ["--json", "status", "low"], env=ENV).output)["StoppedReasonUserFacing"] == reason
+    assert runner.invoke(app, ["--no-json", "status", "low"], env=ENV).output.strip() == f"low: Stopped (low priority) {reason}"
+    assert "2026-11-10T00:00:00Z" in runner.invoke(app, ["--no-json", "status", "waiting"], env=ENV).output
+    assert runner.invoke(app, ["--no-json", "status", "normal"], env=ENV).output.strip() == "normal: Stopped"
+    assert json.loads(runner.invoke(app, ["--json", "jobs"], env=ENV).output)["jobs"][0]["LowPriority"] is True
     table = runner.invoke(app, ["--no-json", "jobs"], env=ENV).output
     assert "Stopped (low priority)" in table
     assert sum("low priority" in line for line in table.splitlines()) == 1
@@ -652,16 +637,9 @@ def test_status_and_job_lists_show_low_priority_state_on_low_priority_jobs_only(
 
 @respx.mock
 def test_wait_shows_the_low_priority_deadline_while_it_polls():
-    queued = {
-        "JobName": "low",
-        "JobStatus": "In Queue",
-        "LowPriority": True,
-        "LowPriorityDeadline": "2026-11-10T00:00:00Z",
-    }
+    queued = {"JobName": "low", "JobStatus": "In Queue", "LowPriority": True, "LowPriorityDeadline": "2026-11-10T00:00:00Z"}
     done = {"JobName": "low", "JobStatus": "Complete", "LowPriority": True}
-    respx.get(f"{API}jobs").mock(
-        side_effect=[httpx.Response(200, json=queued), httpx.Response(200, json=done)]
-    )
+    respx.get(f"{API}jobs").mock(side_effect=[httpx.Response(200, json=queued), httpx.Response(200, json=done)])
     out = runner.invoke(app, ["--no-json", "wait", "low", "--poll-interval", "0"], env=ENV).output
     assert "2026-11-10T00:00:00Z" in out
 
@@ -675,10 +653,7 @@ def test_every_polling_status_line_carries_the_low_priority_note():
 
     source = Path(commands.__file__).read_text()
     assert len(re.findall(r"status: \{jobs_helpers\.job_status\(j\)\}", source)) == 3
-    assert not re.findall(
-        r"status: \{jobs_helpers\.job_status\(j\)\}(?!\{jobs_helpers\.low_priority_note\(j\)\})",
-        source,
-    )
+    assert not re.findall(r"status: \{jobs_helpers\.job_status\(j\)\}(?!\{jobs_helpers\.low_priority_note\(j\)\})", source)
 
 
 @respx.mock
@@ -780,7 +755,9 @@ def test_results_accepts_wrapped_download_url(tmp_path):
 
 @respx.mock
 def test_results_rejects_missing_download_url_cleanly(tmp_path):
-    respx.post(f"{API}result").mock(return_value=httpx.Response(200, json={"message": "not ready"}))
+    respx.post(f"{API}result").mock(
+        return_value=httpx.Response(200, json={"message": "not ready"})
+    )
 
     result = runner.invoke(
         app,
@@ -820,7 +797,9 @@ class _FailingStream(httpx.SyncByteStream):
         yield b"partial-download"
         raise httpx.ReadError(
             "stream interrupted",
-            request=httpx.Request("GET", "https://storage.test/result.zip?signature=do-not-leak"),
+            request=httpx.Request(
+                "GET", "https://storage.test/result.zip?signature=do-not-leak"
+            ),
         )
 
 
@@ -862,7 +841,9 @@ def test_midstream_download_failure_removes_partial_and_preserves_destination(tm
 def test_stream_protocol_failure_is_typed_and_removes_partial(tmp_path):
     presigned = "https://storage.test/result.zip?signature=do-not-leak"
     destination = tmp_path / "job-1.zip"
-    respx.get(presigned).mock(return_value=httpx.Response(200, stream=_BrokenProtocolStream()))
+    respx.get(presigned).mock(
+        return_value=httpx.Response(200, stream=_BrokenProtocolStream())
+    )
 
     with pytest.raises(TamarindError) as raised:
         jobs_commands._download(presigned, destination)
@@ -877,7 +858,9 @@ def test_stream_protocol_failure_is_typed_and_removes_partial(tmp_path):
 def test_interrupted_download_removes_partial_file(tmp_path):
     presigned = "https://storage.test/result.zip?signature=do-not-leak"
     destination = tmp_path / "job-1.zip"
-    respx.get(presigned).mock(return_value=httpx.Response(200, stream=_InterruptedStream()))
+    respx.get(presigned).mock(
+        return_value=httpx.Response(200, stream=_InterruptedStream())
+    )
 
     with pytest.raises(KeyboardInterrupt):
         jobs_commands._download(presigned, destination)

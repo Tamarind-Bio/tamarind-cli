@@ -105,11 +105,7 @@ def test_explicit_name_precedence_and_absence():
 
 def test_low_priority_in_an_envelope_is_a_request_field(tmp_path):
     path = tmp_path / "job.json"
-    path.write_text(
-        json.dumps(
-            {"jobName": "j", "type": "boltz", "lowPriority": True, "settings": {"sequence": "A"}}
-        )
-    )
+    path.write_text(json.dumps({"jobName": "j", "type": "boltz", "lowPriority": True, "settings": {"sequence": "A"}}))
     job = resolve_job_input(str(path), None)
     assert job.low_priority is True
     assert job.settings == {"sequence": "A"}
@@ -139,9 +135,7 @@ def test_low_priority_defaults_off():
 
 def test_low_priority_that_is_not_a_boolean_is_refused(tmp_path):
     path = tmp_path / "job.json"
-    path.write_text(
-        json.dumps({"jobName": "j", "lowPriority": "yes", "settings": {"sequence": "A"}})
-    )
+    path.write_text(json.dumps({"jobName": "j", "lowPriority": "yes", "settings": {"sequence": "A"}}))
     with pytest.raises(ValidationError):
         resolve_job_input(str(path), None)
 
@@ -149,9 +143,7 @@ def test_low_priority_that_is_not_a_boolean_is_refused(tmp_path):
 def test_low_priority_that_is_null_is_refused(tmp_path):
     # An unfilled template must not quietly become a full-price job.
     path = tmp_path / "job.json"
-    path.write_text(
-        json.dumps({"jobName": "j", "lowPriority": None, "settings": {"sequence": "A"}})
-    )
+    path.write_text(json.dumps({"jobName": "j", "lowPriority": None, "settings": {"sequence": "A"}}))
     with pytest.raises(ValidationError):
         resolve_job_input(str(path), None)
 

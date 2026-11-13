@@ -38,32 +38,21 @@ def put_presigned_upload(url: str, path: Path, *, content_type: str, remote: str
             "Content-Length": str(size),
         }
         with path.open("rb") as fh:
-            put = httpx.put(
-                url, content=_iter_file_chunks(fh), headers=headers, timeout=_UPLOAD_TIMEOUT
-            )
+            put = httpx.put(url, content=_iter_file_chunks(fh), headers=headers, timeout=_UPLOAD_TIMEOUT)
         put.raise_for_status()
     except httpx.TimeoutException as exc:
-        raise TamarindError(
-            f"Upload of '{remote}' timed out after {_UPLOAD_TIMEOUT:g} seconds."
-        ) from exc
+        raise TamarindError(f"Upload of '{remote}' timed out after {_UPLOAD_TIMEOUT:g} seconds.") from exc
     except httpx.HTTPStatusError as exc:
-        raise TamarindError(
-            f"Upload of '{remote}' failed with HTTP {exc.response.status_code}."
-        ) from exc
+        raise TamarindError(f"Upload of '{remote}' failed with HTTP {exc.response.status_code}.") from exc
     except (httpx.RequestError, httpx.InvalidURL, httpx.StreamError) as exc:
-        raise TamarindError(
-            f"Upload transfer failed for '{remote}' ({type(exc).__name__})."
-        ) from exc
+        raise TamarindError(f"Upload transfer failed for '{remote}' ({type(exc).__name__}).") from exc
     except OSError as exc:
         raise TamarindError(f"Could not read '{path}' during upload: {exc}.") from exc
     return size
 
 
 def upload_file(
-    client: HTTPClient,
-    path: str | Path,
-    *,
-    remote: str | None = None,
+    client: HTTPClient, path: str | Path, *, remote: str | None = None,
     content_type: str = "application/octet-stream",
 ) -> dict[str, Any]:
     """End-to-end upload: presign (POST /getPresignedUploadUrl) then PUT the bytes.

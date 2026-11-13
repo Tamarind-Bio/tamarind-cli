@@ -276,7 +276,9 @@ def test_tool_rejects_malformed_validator_before_mutation(etag: object) -> None:
     respx.get(f"{BASE}custom-tools/example", params__eq={}).mock(
         return_value=httpx.Response(200, json=malformed)
     )
-    delete = respx.delete(f"{BASE}custom-tools/example").mock(return_value=httpx.Response(204))
+    delete = respx.delete(f"{BASE}custom-tools/example").mock(
+        return_value=httpx.Response(204)
+    )
 
     with Tamarind(api_key="key", api_base=BASE) as client:
         with pytest.raises(TamarindError, match="generated contract"):

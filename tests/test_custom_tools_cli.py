@@ -381,16 +381,7 @@ def test_test_command_keeps_a_setting_named_low_priority(monkeypatch, tmp_path):
     source.write_text("sequence: AAA\nlowPriority: true\n")
     result = runner.invoke(
         app,
-        [
-            "--json",
-            "custom-tools",
-            "test",
-            "fold-local",
-            "--version",
-            VERSION,
-            "--input",
-            str(source),
-        ],
+        ["--json", "custom-tools", "test", "fold-local", "--version", VERSION, "--input", str(source)],
         env=ENV,
     )
     assert result.exit_code == 0, result.output
@@ -398,16 +389,7 @@ def test_test_command_keeps_a_setting_named_low_priority(monkeypatch, tmp_path):
 
     result = runner.invoke(
         app,
-        [
-            "--json",
-            "custom-tools",
-            "test",
-            "fold-local",
-            "--version",
-            VERSION,
-            "--set",
-            "lowPriority=true",
-        ],
+        ["--json", "custom-tools", "test", "fold-local", "--version", VERSION, "--set", "lowPriority=true"],
         env=ENV,
     )
     assert result.exit_code == 0, result.output
@@ -422,16 +404,7 @@ def test_test_command_refuses_a_low_priority_request(monkeypatch, tmp_path):
     source.write_text("jobName: smoke\nlowPriority: true\nsettings:\n  sequence: AAA\n")
     result = runner.invoke(
         app,
-        [
-            "--json",
-            "custom-tools",
-            "test",
-            "fold-local",
-            "--version",
-            VERSION,
-            "--input",
-            str(source),
-        ],
+        ["--json", "custom-tools", "test", "fold-local", "--version", VERSION, "--input", str(source)],
         env=ENV,
     )
     assert result.exit_code != 0

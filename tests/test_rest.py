@@ -349,9 +349,7 @@ def test_catalog_tools_filters():
 
 @respx.mock
 def test_submit_job_sends_low_priority_only_when_asked():
-    route = respx.post(f"{BASE}submit-job").mock(
-        return_value=httpx.Response(200, json={"ok": True})
-    )
+    route = respx.post(f"{BASE}submit-job").mock(return_value=httpx.Response(200, json={"ok": True}))
     rest.submit_job(client(), job_name="r", job_type="boltz", settings={}, low_priority=True)
     assert json.loads(route.calls.last.request.content)["lowPriority"] is True
     rest.submit_job(client(), job_name="r", job_type="boltz", settings={})
@@ -360,9 +358,7 @@ def test_submit_job_sends_low_priority_only_when_asked():
 
 @respx.mock
 def test_submit_batch_sends_low_priority_only_when_asked():
-    route = respx.post(f"{BASE}submit-batch").mock(
-        return_value=httpx.Response(200, json={"ok": True})
-    )
+    route = respx.post(f"{BASE}submit-batch").mock(return_value=httpx.Response(200, json={"ok": True}))
     rest.submit_batch(client(), batch_name="b", job_type="boltz", settings=[{}], low_priority=True)
     assert json.loads(route.calls.last.request.content)["lowPriority"] is True
     rest.submit_batch(client(), batch_name="b", job_type="boltz", settings=[{}])

@@ -27,22 +27,16 @@ def test_status_normalization():
     assert jh.job_status({"status": "completed"}) == "completed"
     assert jh.job_status({"batchStatus": "AggregationFailed"}) == "AggregationFailed"
     # Batch lifecycle is authoritative if a parent also carries JobStatus.
-    assert (
-        jh.job_status({"Type": "batch", "batchStatus": "Complete", "JobStatus": "Running"})
-        == "Complete"
-    )
-    assert (
-        jh.job_status(
-            {
-                "Type": "boltz",
-                "JobName": "batch-1-subjob-1",
-                "batchName": "batch-1",
-                "batchStatus": "Complete",
-                "JobStatus": "Running",
-            }
-        )
-        == "Running"
-    )
+    assert jh.job_status({
+        "Type": "batch", "batchStatus": "Complete", "JobStatus": "Running"
+    }) == "Complete"
+    assert jh.job_status({
+        "Type": "boltz",
+        "JobName": "batch-1-subjob-1",
+        "batchName": "batch-1",
+        "batchStatus": "Complete",
+        "JobStatus": "Running",
+    }) == "Running"
     assert jh.job_status({}) is None
 
 

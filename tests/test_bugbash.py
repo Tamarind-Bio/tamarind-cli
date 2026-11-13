@@ -34,7 +34,6 @@ ENV = {"TAMARIND_API_KEY": "k", "TAMARIND_API_BASE": API, "TAMARIND_CATALOG_BASE
 
 # --- #3: file `type:` must not silently override the `<tool>` arg -------------
 
-
 def test_effective_job_type_agrees_or_defaults():
     assert effective_job_type("boltz", None) == "boltz"
     assert effective_job_type("boltz", "boltz") == "boltz"
@@ -58,9 +57,7 @@ def test_effective_job_type_rejects_all_malformed_types(tool, bad):
 
 @respx.mock
 def test_validate_non_string_file_type_no_traceback(tmp_path):
-    route = respx.post(f"{API}validate-job").mock(
-        return_value=httpx.Response(200, json={"valid": True})
-    )
+    route = respx.post(f"{API}validate-job").mock(return_value=httpx.Response(200, json={"valid": True}))
     f = tmp_path / "job.yaml"
     f.write_text("type: 1\nsettings:\n  sequence: MKT\n")
     res = runner.invoke(app, ["validate", "boltz", "-i", str(f)], env=ENV)
@@ -73,9 +70,7 @@ def test_validate_non_string_file_type_no_traceback(tmp_path):
 def test_validate_rejects_mismatched_file_type(tmp_path):
     # The bug: `validate boltz -i esmfold.yaml` validated as esmfold and returned
     # valid:true. Now it must error out *before* any HTTP call.
-    route = respx.post(f"{API}validate-job").mock(
-        return_value=httpx.Response(200, json={"valid": True})
-    )
+    route = respx.post(f"{API}validate-job").mock(return_value=httpx.Response(200, json={"valid": True}))
     f = tmp_path / "job.yaml"
     f.write_text("type: esmfold\nsettings:\n  sequence: MKT\n")
     res = runner.invoke(app, ["validate", "boltz", "-i", str(f)], env=ENV)
@@ -96,12 +91,8 @@ def test_validate_allows_matching_file_type(tmp_path):
 
 @respx.mock
 def test_submit_rejects_mismatched_file_type(tmp_path):
-    v = respx.post(f"{API}validate-job").mock(
-        return_value=httpx.Response(200, json={"valid": True})
-    )
-    s = respx.post(f"{API}submit-job").mock(
-        return_value=httpx.Response(200, json={"message": "ok"})
-    )
+    v = respx.post(f"{API}validate-job").mock(return_value=httpx.Response(200, json={"valid": True}))
+    s = respx.post(f"{API}submit-job").mock(return_value=httpx.Response(200, json={"message": "ok"}))
     f = tmp_path / "job.yaml"
     f.write_text("type: esmfold\nsettings:\n  sequence: MKT\n")
     res = runner.invoke(app, ["submit", "boltz", "-i", str(f)], env=ENV)
@@ -111,7 +102,6 @@ def test_submit_rejects_mismatched_file_type(tmp_path):
 
 
 # --- #2: wait timeout -> typed JobTimeoutError (exit 7) ----------------------
-
 
 @respx.mock
 def test_wait_for_job_raises_typed_timeout():
@@ -138,7 +128,6 @@ def test_wait_command_surfaces_timeout_not_traceback():
 
 
 # --- #1: schema --example fails loudly with no example -----------------------
-
 
 def _schema_route(tool, exampleJob):
     payload = {"displayName": tool, "parameters": [{"name": "sequence", "type": "string"}]}
@@ -177,7 +166,6 @@ def test_schema_example_present_prints_settings():
 
 # --- #4: destructive commands refuse non-interactive without --yes -----------
 
-
 def test_confirm_destructive_yes_bypasses():
     # Explicit --yes: no prompt, no raise, in any mode.
     output.confirm_destructive("delete job 'x'", yes=True, mode=OutputMode(json=True, quiet=False))
@@ -185,9 +173,7 @@ def test_confirm_destructive_yes_bypasses():
 
 def test_confirm_destructive_refuses_in_json_mode():
     with pytest.raises(typer.Exit) as exc:
-        output.confirm_destructive(
-            "delete job 'x'", yes=False, mode=OutputMode(json=True, quiet=False)
-        )
+        output.confirm_destructive("delete job 'x'", yes=False, mode=OutputMode(json=True, quiet=False))
     assert exc.value.exit_code == ExitCode.USAGE
 
 
@@ -277,12 +263,9 @@ def test_confirm_destructive_refuses_non_tty_human_mode(monkeypatch):
 
 # --- #3: the batch command shares the type-conflict guard --------------------
 
-
 @respx.mock
 def test_batch_rejects_mismatched_file_type(tmp_path):
-    route = respx.post(f"{API}submit-batch").mock(
-        return_value=httpx.Response(200, json={"message": "ok"})
-    )
+    route = respx.post(f"{API}submit-batch").mock(return_value=httpx.Response(200, json={"message": "ok"}))
     f = tmp_path / "batch.yaml"
     f.write_text("type: esmfold\nsettings:\n  - sequence: MKT\n  - sequence: MKV\n")
     res = runner.invoke(app, ["batch", "boltz", "-i", str(f)], env=ENV)
@@ -293,13 +276,9 @@ def test_batch_rejects_mismatched_file_type(tmp_path):
 
 @respx.mock
 def test_batch_bare_list_uses_tool_arg(tmp_path):
-    route = respx.post(f"{API}submit-batch").mock(
-        return_value=httpx.Response(200, json={"message": "ok"})
-    )
+    route = respx.post(f"{API}submit-batch").mock(return_value=httpx.Response(200, json={"message": "ok"}))
     f = tmp_path / "batch.yaml"
-    f.write_text(
-        "- {inputFormat: sequence, sequence: MKT}\n- {inputFormat: sequence, sequence: MKV}\n"
-    )
+    f.write_text("- {inputFormat: sequence, sequence: MKT}\n- {inputFormat: sequence, sequence: MKV}\n")
     res = runner.invoke(app, ["--json", "batch", "boltz", "-i", str(f)], env=ENV)
     assert res.exit_code == 0, res.stdout
     out = json.loads(res.stdout)
@@ -309,13 +288,9 @@ def test_batch_bare_list_uses_tool_arg(tmp_path):
 
 @respx.mock
 def test_batch_matching_envelope_type(tmp_path):
-    route = respx.post(f"{API}submit-batch").mock(
-        return_value=httpx.Response(200, json={"message": "ok"})
-    )
+    route = respx.post(f"{API}submit-batch").mock(return_value=httpx.Response(200, json={"message": "ok"}))
     f = tmp_path / "batch.yaml"
-    f.write_text(
-        "type: boltz\nbatchName: b1\nsettings:\n  - {inputFormat: sequence, sequence: MKT}\n"
-    )
+    f.write_text("type: boltz\nbatchName: b1\nsettings:\n  - {inputFormat: sequence, sequence: MKT}\n")
     res = runner.invoke(app, ["--json", "batch", "boltz", "-i", str(f)], env=ENV)
     assert res.exit_code == 0, res.stdout
     body = json.loads(route.calls.last.request.content)
@@ -323,7 +298,6 @@ def test_batch_matching_envelope_type(tmp_path):
 
 
 # --- #4: files delete --folder and the empty-args guard ----------------------
-
 
 @respx.mock
 def test_files_delete_folder_refuses_without_yes_non_interactive():
