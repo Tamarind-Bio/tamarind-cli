@@ -80,22 +80,30 @@ def hyperparameters() -> dict[str, Any]:
         name: spec["default"] for name, spec in declared.items() if "default" in spec
     }
     file_path = os.environ.get(ENV_HYPERPARAMETERS)
+    # The environment is the fallback whenever the file did not answer — not only when the variable
+    # is unset. The platform also exports each submitted setting as an environment variable, so a
+    # file that was exported but never delivered (a runtime that did not carry it into the
+    # container) still trains with the submitted values instead of silently with the defaults.
+    file_read = False
     if file_path:
         try:
             loaded = json.loads(Path(file_path).read_text())
         except (OSError, ValueError) as exc:  # a platform bug, not the user's: say so once
             print(
-                f"[tamarind] could not read {ENV_HYPERPARAMETERS}={file_path}: {exc}",
+                f"[tamarind] could not read {ENV_HYPERPARAMETERS}={file_path}: {exc}; "
+                "falling back to the environment",
                 file=sys.stderr,
             )
-            loaded = {}
+            loaded = None
         if isinstance(loaded, dict):
+            file_read = True
             for name, value in loaded.items():
                 if not declared or name in declared:
                     values[name] = value
+    recovered = []
     for name, spec in declared.items():
         raw = os.environ.get(name)
-        if raw is not None and not file_path:
+        if raw is not None and not file_read:
             try:
                 value = _coerce(spec["type"], raw)
             except ValueError:
@@ -106,6 +114,14 @@ def hyperparameters() -> dict[str, Any]:
                 print(f"[tamarind] ignoring ${name}={raw!r}: {problem}", file=sys.stderr)
                 continue
             values[name] = value
+            recovered.append(name)
+    if file_path and not file_read and recovered:
+        # Names only: a `tm.Str` setting can carry a credential or a signed dataset URL, and this line
+        # lands in the job's persisted log.
+        print(
+            "[tamarind] hyperparameters read from the environment: " + ", ".join(recovered),
+            file=sys.stderr,
+        )
     return values
 
 

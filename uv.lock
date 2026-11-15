@@ -890,7 +890,7 @@ wheels = [
 
 [[package]]
 name = "tamarind-cli"
-version = "0.4.3"
+version = "0.6.1"
 source = { editable = "." }
 dependencies = [
     { name = "attrs" },
