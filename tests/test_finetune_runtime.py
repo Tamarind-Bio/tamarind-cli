@@ -275,3 +275,35 @@ def test_local_overrides_respect_declared_options_and_bounds(
     monkeypatch.setenv("rank", "16")
     monkeypatch.setenv("lr", "0.005")
     assert tm.hyperparameters() == {"rank": 16, "lr": 0.005}
+
+
+def test_an_exported_but_undelivered_file_falls_back_to_the_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The platform exports TAMARIND_HYPERPARAMETERS and every submitted setting as an env var. When the
+    file never reaches the container (a runtime that did not carry it), the submitted values must still
+    win over the decorator defaults — the run must not silently train with the defaults."""
+    _declare()
+    monkeypatch.setenv(runtime.ENV_HYPERPARAMETERS, str(tmp_path / "never-written.json"))
+    monkeypatch.setenv("epochs", "7")
+    monkeypatch.setenv("lr", "0.5")
+    values = runtime.hyperparameters()
+    assert values["epochs"] == 7 and values["lr"] == 0.5
+    err = capsys.readouterr().err
+    assert "falling back to the environment" in err
+    assert "hyperparameters read from the environment: " in err and "epochs=7" in err
+
+
+def test_an_unreadable_file_also_falls_back_and_a_good_file_still_wins(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _declare()
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json")
+    monkeypatch.setenv(runtime.ENV_HYPERPARAMETERS, str(bad))
+    monkeypatch.setenv("epochs", "7")
+    assert runtime.hyperparameters()["epochs"] == 7
+    good = tmp_path / "good.json"
+    good.write_text(json.dumps({"epochs": 3}))
+    monkeypatch.setenv(runtime.ENV_HYPERPARAMETERS, str(good))
+    assert runtime.hyperparameters()["epochs"] == 3  # a delivered file still wins over the env var
