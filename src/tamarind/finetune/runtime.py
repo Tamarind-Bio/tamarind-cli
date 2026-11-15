@@ -116,9 +116,10 @@ def hyperparameters() -> dict[str, Any]:
             values[name] = value
             recovered.append(name)
     if file_path and not file_read and recovered:
+        # Names only: a `tm.Str` setting can carry a credential or a signed dataset URL, and this line
+        # lands in the job's persisted log.
         print(
-            "[tamarind] hyperparameters read from the environment: "
-            + ", ".join(f"{n}={values[n]!r}" for n in recovered),
+            "[tamarind] hyperparameters read from the environment: " + ", ".join(recovered),
             file=sys.stderr,
         )
     return values

@@ -291,7 +291,8 @@ def test_an_exported_but_undelivered_file_falls_back_to_the_environment(
     assert values["epochs"] == 7 and values["lr"] == 0.5
     err = capsys.readouterr().err
     assert "falling back to the environment" in err
-    assert "hyperparameters read from the environment: " in err and "epochs=7" in err
+    assert "hyperparameters read from the environment: " in err and "epochs" in err
+    assert "0.5" not in err and "=7" not in err  # names only: a string setting may hold a secret
 
 
 def test_an_unreadable_file_also_falls_back_and_a_good_file_still_wins(
