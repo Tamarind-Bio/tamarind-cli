@@ -10,7 +10,7 @@ import pytest
 import respx
 from typer.testing import CliRunner
 
-from agent_fakes import approval, frame, reply, sse
+from agent_fakes import UPLOAD_FIELDS, UPLOAD_URL, approval, form_parts, frame, reply, sse, upload_slot
 from tamarind.cli import main as main_module
 from tamarind.cli.main import app
 from tamarind.errors import ExitCode, TamarindError
@@ -143,25 +143,26 @@ def test_send_refuses_before_sending_what_the_api_would_reject(argv, code):
 
 
 @respx.mock
-def test_files_upload_creates_a_slot_then_puts_the_bytes_without_the_api_key(tmp_path):
+def test_files_upload_creates_a_slot_then_posts_the_form_without_the_api_key(tmp_path):
     target = tmp_path / "target.pdb"
     target.write_bytes(b"ATOM  1\n")
-    create = respx.post(f"{API}chat-files").mock(return_value=httpx.Response(201, json={
-        "fileId": "file_9f2", "uploadUrl": "https://s3.test/u/file_9f2?X-Amz-Signature=s",
-        "expiresAt": "2026-10-27T17:17:11Z"}))
-    put = respx.put("https://s3.test/u/file_9f2").mock(return_value=httpx.Response(200))
+    create = respx.post(f"{API}chat-files").mock(return_value=httpx.Response(201, json=upload_slot()))
+    post = respx.post(UPLOAD_URL).mock(return_value=httpx.Response(204))
+    put = respx.put(url__regex=r"^https://s3\.test/").mock(return_value=httpx.Response(200))
 
     res = runner.invoke(app, ["--json", "chat", "files", "upload", str(target)], env=ENV)
 
     assert res.exit_code == 0, res.output
-    assert json.loads(res.stdout)["fileId"] == "file_9f2"
-    assert "uploadUrl" not in res.stdout  # a presigned URL is a credential
-    assert json.loads(create.calls.last.request.content) == {
-        "filename": "target.pdb", "size": 8, "contentType": "chemical/x-pdb"}
-    upload = put.calls.last.request
-    assert upload.content == b"ATOM  1\n"
-    assert upload.headers["Content-Type"] == "chemical/x-pdb"
-    assert "x-api-key" not in upload.headers
+    assert json.loads(res.stdout) == {"fileId": "file_9f2", "expiresAt": "2026-10-27T17:17:11Z"}
+    for credential in ("uploadUrl", "uploadFields", UPLOAD_URL, "topsecretsig", "POLICYB64"):
+        assert credential not in res.stdout  # the form is a credential
+    assert json.loads(create.calls.last.request.content) == {"filename": "target.pdb"}
+    upload = post.calls.last.request
+    # The fields as given and in order, then the file as the last field, named `file`.
+    assert form_parts(upload) == [(name, None, value.encode()) for name, value in UPLOAD_FIELDS.items()] + [
+        ("file", "target.pdb", b"ATOM  1\n")]
+    assert "x-api-key" not in upload.headers and "Tamarind-Version" not in upload.headers
+    assert not put.called  # a form POST, not a PUT
 
 
 @respx.mock
@@ -205,6 +206,21 @@ def test_approvals_lists_and_approve_resolves():
 
 
 @respx.mock
+def test_approve_sends_a_decision_and_a_scope_and_nothing_else():
+    resolve = respx.post(f"{API}chats/chat_7Q/approvals/apr_x").mock(
+        return_value=httpx.Response(200, json=approval(status="approved")))
+    res = runner.invoke(app, ["--json", "chat", "approve", "chat_7Q", "apr_x", "--scope", "chat"], env=ENV)
+    assert res.exit_code == 0, res.output
+    assert json.loads(resolve.calls.last.request.content) == {"decision": "approve", "scope": "chat"}
+
+
+@pytest.mark.parametrize("option", ["--budget-hours", "--workflow"])
+def test_approve_no_longer_takes_the_options_a_decision_dropped(option):
+    res = runner.invoke(app, ["--json", "chat", "approve", "chat_7Q", "apr_x", option, "5"], env=ENV)
+    assert res.exit_code == ExitCode.USAGE
+
+
+@respx.mock
 def test_answer_sends_answers_keyed_by_question_text():
     route = respx.post(f"{API}chats/chat_7Q/questions/q_8c").mock(return_value=httpx.Response(200, json={
         "id": "q_8c", "status": "answered", "questions": [], "createdAt": "x"}))
@@ -215,7 +231,7 @@ def test_answer_sends_answers_keyed_by_question_text():
     # Either side may hold an '='.
     assert json.loads(route.calls.last.request.content) == {
         "answers": {"Which chain is the target?": "Chain A", "Buffer pH?": "pH=7.4"}}
-    assert route.calls.last.request.headers["Idempotency-Key"]
+    assert "Idempotency-Key" not in route.calls.last.request.headers  # a repeat is safe: no key
 
 
 @respx.mock
@@ -230,23 +246,148 @@ def test_events_follow_prints_one_json_object_per_event():
 
 
 @respx.mock
-def test_archive_refuses_without_yes_in_json_mode():
-    route = respx.delete(f"{API}chats/chat_7Q").mock(return_value=httpx.Response(200, json={"id": "chat_7Q", "status": "archived"}))
-    refused = runner.invoke(app, ["--json", "chat", "archive", "chat_7Q"], env=ENV)
-    allowed = runner.invoke(app, ["--json", "chat", "archive", "chat_7Q", "--yes"], env=ENV)
+def test_delete_refuses_without_yes_in_json_mode_and_says_it_is_deleted():
+    route = respx.delete(f"{API}chats/chat_7Q").mock(
+        return_value=httpx.Response(200, json={"id": "chat_7Q", "object": "chat", "deleted": True}))
+    refused = runner.invoke(app, ["--json", "chat", "delete", "chat_7Q"], env=ENV)
+    allowed = runner.invoke(app, ["--json", "chat", "delete", "chat_7Q", "--yes"], env=ENV)
+    human = runner.invoke(app, ["--no-json", "chat", "delete", "chat_7Q", "--yes"], env=ENV)
     assert refused.exit_code == ExitCode.USAGE
     assert allowed.exit_code == 0
-    assert len(route.calls) == 1
+    assert json.loads(allowed.stdout) == {"id": "chat_7Q", "object": "chat", "deleted": True}
+    assert human.stdout.strip() == "chat_7Q deleted"
+    assert len(route.calls) == 2
+
+
+def test_there_is_no_archive_command_for_a_chat_that_the_api_now_deletes():
+    assert runner.invoke(app, ["--json", "chat", "archive", "chat_7Q", "--yes"], env=ENV).exit_code == ExitCode.USAGE
+
+
+SHARED = {"id": "chat_9Z", "object": "chat", "readOnly": True, "title": "Antibody notes",
+          "ownerEmail": "ana@lab.test", "source": "ui", "mode": "chat",
+          "webUrl": "https://app.tamarind.bio/agent/chat_9Z", "createdAt": "2026-10-25T09:12:00Z",
+          "updatedAt": "2026-10-26T16:30:41Z"}
 
 
 @respx.mock
-def test_usage_without_a_chat_reads_the_month():
+def test_list_scope_org_reads_teammates_chats_as_read_only_items_with_an_owner():
+    route = respx.get(f"{API}chats").mock(return_value=httpx.Response(200, json={
+        "data": [SHARED], "nextCursor": None}))
+    res = runner.invoke(app, ["--no-json", "chat", "list", "--scope", "org"], env=ENV)
+    assert res.exit_code == 0, res.output
+    assert route.calls.last.request.url.params["scope"] == "org"
+    assert "ana@lab.test" in res.stdout and "Antibody notes" in res.stdout
+
+
+@respx.mock
+def test_showing_a_teammates_chat_says_it_is_read_only_and_whose():
+    respx.get(f"{API}chats/chat_9Z").mock(return_value=httpx.Response(200, json=SHARED))
+    res = runner.invoke(app, ["--no-json", "chat", "show", "chat_9Z"], env=ENV)
+    assert res.exit_code == 0, res.output
+    assert "read-only, ana@lab.test's" in res.stdout
+
+
+@respx.mock
+def test_list_never_offers_the_removed_campaign_status_filter():
+    route = respx.get(f"{API}chats")
+    res = runner.invoke(app, ["--json", "chat", "list", "--campaign-status", "running"], env=ENV)
+    assert res.exit_code == ExitCode.USAGE
+    assert not route.called
+
+
+@respx.mock
+def test_jobs_never_offers_the_removed_campaign_filter():
+    route = respx.get(f"{API}chats/chat_7Q/jobs")
+    res = runner.invoke(app, ["--json", "chat", "jobs", "chat_7Q", "--campaign", "cmp_7Q"], env=ENV)
+    assert res.exit_code == ExitCode.USAGE
+    assert not route.called
+
+
+@respx.mock
+def test_files_list_says_when_the_listing_is_truncated():
+    respx.get(f"{API}chats/chat_7Q/files").mock(return_value=httpx.Response(200, json={
+        "data": [], "nextCursor": None, "truncated": True}))
+    res = runner.invoke(app, ["--no-json", "chat", "files", "list", "chat_7Q"], env=ENV)
+    assert res.exit_code == 0, res.output
+    assert "only the first 20,000 by path are listed" in res.stdout
+
+
+@respx.mock
+def test_workflows_lists_what_each_supports():
+    respx.get(f"{API}agent-workflows").mock(return_value=httpx.Response(200, json={"data": [
+        {"id": "binder-design", "label": "Binder design", "supports": ["plan", "pause", "budget"]}]}))
+    res = runner.invoke(app, ["--no-json", "chat", "workflows"], env=ENV)
+    assert res.exit_code == 0, res.output
+    assert "binder-design" in res.stdout and "plan, pause, budget" in res.stdout
+
+
+@respx.mock
+def test_new_with_approve_all_names_it_whole_and_needs_a_yes():
+    route = respx.post(f"{API}chats").mock(return_value=httpx.Response(201, json={
+        **CHAT, "autoApprove": True, "dangerouslyApproveAll": True}))
+    argv = ["--json", "chat", "new", "--auto-approve", "--dangerously-approve-all"]
+
+    refused = runner.invoke(app, argv, env=ENV)
+    allowed = runner.invoke(app, [*argv, "--yes"], env=ENV)
+
+    assert refused.exit_code == ExitCode.USAGE
+    assert len(route.calls) == 1  # only the confirmed one was sent
+    assert json.loads(route.calls.last.request.content) == {"autoApprove": True, "dangerouslyApproveAll": True}
+    assert allowed.exit_code == 0
+
+
+@respx.mock
+@pytest.mark.parametrize(("flag", "yes", "sent"), [
+    (["--auto-approve", "--dangerously-approve-all"], [], None),  # refused: nothing to confirm with
+    (["--auto-approve", "--dangerously-approve-all"], ["--yes"], {"autoApprove": True, "dangerouslyApproveAll": True}),
+    # Turning it OFF is the safe direction: no confirmation.
+    (["--no-dangerously-approve-all"], [], {"dangerouslyApproveAll": False}),
+])
+def test_update_asks_for_a_yes_only_to_turn_approve_all_on(flag, yes, sent):
+    route = respx.patch(f"{API}chats/chat_7Q").mock(return_value=httpx.Response(200, json=CHAT))
+    res = runner.invoke(app, ["--json", "chat", "update", "chat_7Q", *flag, *yes], env=ENV)
+    if sent is None:
+        assert res.exit_code == ExitCode.USAGE and not route.called
+    else:
+        assert res.exit_code == 0, res.output
+        assert json.loads(route.calls.last.request.content) == sent
+
+
+@pytest.mark.parametrize("command", ["new", "update"])
+def test_the_approve_all_flag_says_in_help_that_it_is_dangerous_and_what_it_does(command):
+    argv = ["chat", command, *(["chat_7Q"] if command == "update" else []), "--help"]
+    res = runner.invoke(app, argv, env={**ENV, "COLUMNS": "200"})
+    assert res.exit_code == 0, res.output
+    text = " ".join(res.stdout.split())
+    assert "--dangerously-approve-all" in text and "DANGEROUS" in text
+    assert "deletes and cancels" in text and "Needs --yes" in text
+
+
+@respx.mock
+def test_showing_a_chat_says_when_approve_all_is_on():
+    respx.get(f"{API}chats/chat_7Q").mock(return_value=httpx.Response(200, json={
+        **CHAT, "autoApprove": True, "dangerouslyApproveAll": True}))
+    res = runner.invoke(app, ["--no-json", "chat", "show", "chat_7Q"], env=ENV)
+    assert "approve-all is ON" in res.stdout
+
+
+@respx.mock
+def test_usage_without_a_chat_reads_the_month_without_jobs():
     route = respx.get(f"{API}agent-usage").mock(return_value=httpx.Response(200, json={
-        "month": "2026-10", "agentHours": 1, "jobsHours": 2, "totalHours": 3}))
+        "month": "2026-10", "agentHours": 1.5, "remainingHours": 925.7}))
     res = runner.invoke(app, ["--no-json", "chat", "usage", "--month", "2026-10"], env=ENV)
     assert res.exit_code == 0, res.output
     assert route.calls.last.request.url.params["month"] == "2026-10"
-    assert "2026-10: 3 h total" in res.stdout
+    assert res.stdout.strip() == "2026-10: 1.5 h agent (jobs are not counted here), 925.7 h left of your tightest budget"
+
+
+@respx.mock
+def test_usage_of_a_chat_reads_its_jobs_too():
+    respx.get(f"{API}chats/chat_7Q/usage").mock(return_value=httpx.Response(200, json={
+        "agentHours": 0.42, "jobsHours": 1.1, "totalHours": 1.52, "capHours": 40}))
+    res = runner.invoke(app, ["--no-json", "chat", "usage", "chat_7Q"], env=ENV)
+    assert res.exit_code == 0, res.output
+    assert res.stdout.strip() == "1.52 h total (0.42 h agent, 1.1 h jobs)"
 
 
 @respx.mock
@@ -271,14 +412,21 @@ def test_send_wait_keeps_a_continuing_replys_parts_apart():
 
 
 @respx.mock
-def test_structure_into_a_directory_takes_the_urls_file_name(tmp_path):
-    respx.get(f"{API}chats/chat_7Q/candidates/cand_07/structure").mock(return_value=httpx.Response(
-        302, headers={"Location": "https://s3.test/u/candidates/pdl1-b07.cif?X-Amz-Signature=s"}))
-    s3 = respx.get("https://s3.test/u/candidates/pdl1-b07.cif").mock(return_value=httpx.Response(200, content=b"data_\n"))
+@pytest.mark.parametrize(("headers", "saved_as"), [
+    ({"Content-Disposition": 'attachment; filename="pdl1-b07.pdb"'}, "pdl1-b07.pdb"),
+    # A name that tries to leave the directory stays in it.
+    ({"Content-Disposition": 'attachment; filename="../../evil.pdb"'}, "evil.pdb"),
+    # No name: the candidate's id, and an extension for the type.
+    ({"Content-Type": "chemical/x-mmcif"}, "cand_07.cif"),
+])
+def test_structure_into_a_directory_takes_the_name_the_file_carries(headers, saved_as, tmp_path):
+    served = respx.get(f"{API}chats/chat_7Q/candidates/cand_07/structure").mock(
+        return_value=httpx.Response(200, content=b"data_\n", headers=headers))
     res = runner.invoke(app, ["--json", "chat", "structure", "chat_7Q", "cand_07", "--out", str(tmp_path)], env=ENV)
     assert res.exit_code == 0, res.output
-    assert (tmp_path / "pdl1-b07.cif").read_bytes() == b"data_\n"
-    assert "x-api-key" not in s3.calls.last.request.headers
+    assert (tmp_path / saved_as).read_bytes() == b"data_\n"
+    assert served.calls.last.request.headers["x-api-key"] == "k"  # served by the API itself, not a redirect
+    assert [p.name for p in tmp_path.iterdir()] == [saved_as]  # no partial file left behind
 
 
 @respx.mock
@@ -361,13 +509,16 @@ def test_a_failed_presigned_transfer_never_carries_the_signed_url(direction, tmp
             target = tmp_path / "target.pdb"
             target.write_bytes(b"ATOM\n")
             respx.post(f"{API}chat-files").mock(return_value=httpx.Response(201, json={
-                "fileId": "file_u0", "uploadUrl": signed, "expiresAt": "x"}))
-            respx.put(url__regex=r"^https://s3\.test/").mock(return_value=httpx.Response(403))
+                "fileId": "file_u0", "uploadUrl": signed, "uploadFields": {**UPLOAD_FIELDS, "policy": "secretpolicy"},
+                "expiresAt": "x"}))
+            respx.post(url__regex=r"^https://s3\.test/").mock(return_value=httpx.Response(
+                403, text="<Error><Code>AccessDenied</Code><Message>Policy expired: secretpolicy</Message></Error>"))
             action = lambda: client.agent.files.upload(target)  # noqa: E731
         with pytest.raises(TamarindError) as raised:
             action()
     rendered = "".join(traceback.format_exception(raised.value))
     assert "X-Amz-Signature" not in rendered and "secret" not in rendered
+    assert "topsecretsig" not in rendered and "POLICYB64" not in rendered
 
 
 @pytest.mark.parametrize("extra", [["--text", "A", "--question", "Which?", "--choice", "A"], []])
@@ -429,8 +580,6 @@ def test_a_send_whose_answer_is_lost_names_its_idempotency_key(monkeypatch, caps
 @pytest.mark.parametrize(("argv", "method", "path", "ok"), [
     (["chat", "new", "--title", "t"], "POST", "chats", (201, CHAT)),
     (["chat", "send", "chat_7Q", "hi"], "POST", "chats/chat_7Q/messages", (202, reply("queued"))),
-    (["chat", "answer", "chat_7Q", "q_8c", "--text", "A"], "POST", "chats/chat_7Q/questions/q_8c",
-     (200, {"id": "q_8c", "status": "answered", "questions": [], "createdAt": "x"})),
     (["chat", "export", "chat_7Q"], "POST", "chats/chat_7Q/exports", (202, {"id": "exp_5d", "status": "pending"})),
 ])
 def test_the_printed_idempotency_key_advice_is_runnable(argv, method, path, ok, monkeypatch, capsys):
@@ -496,9 +645,8 @@ def test_a_send_with_an_uploaded_file_can_be_retried_with_the_same_key_and_body(
     target = tmp_path / "target.pdb"
     target.write_bytes(b"ATOM\n")
     file_id = "file_u0123456789abcdef0123456789abcdef"
-    create = respx.post(f"{API}chat-files").mock(return_value=httpx.Response(201, json={
-        "fileId": file_id, "uploadUrl": "https://s3.test/u/x?X-Amz-Signature=s", "expiresAt": "x"}))
-    respx.put("https://s3.test/u/x").mock(return_value=httpx.Response(200))
+    create = respx.post(f"{API}chat-files").mock(return_value=httpx.Response(201, json=upload_slot(file_id)))
+    respx.post(UPLOAD_URL).mock(return_value=httpx.Response(204))
     send = respx.post(f"{API}chats/chat_7Q/messages").mock(
         side_effect=[httpx.ReadTimeout("lost")] * 4 + [httpx.Response(202, json=reply("queued"))])
 

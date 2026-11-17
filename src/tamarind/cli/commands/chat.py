@@ -15,7 +15,7 @@ from typing import Any, Iterable, Optional
 
 import typer
 
-from ...agent import Approval, Chat, Event, EventStream, Message
+from ...agent import Approval, Chat, Event, EventStream, Message, SharedChat
 from ...agent._contract import FINAL_MESSAGE_EVENTS
 from ...errors import AgentActionRequiredError, AgentReplyFailedError, JobTimeoutError, TamarindError
 from .. import output
@@ -44,6 +44,23 @@ def _chat_line(chat: Chat) -> dict[str, Any]:
             "title": chat.title, "updated": chat.updated_at}
 
 
+def _shared_chat_line(chat: SharedChat) -> dict[str, Any]:
+    """A teammate's chat has no status: its owner and mode say what it is."""
+    return {"id": chat.id, "owner": chat.owner_email, "mode": chat.mode or "", "title": chat.title,
+            "updated": chat.updated_at}
+
+
+# What `--dangerously-approve-all` does, said where it is asked for: it is the one flag here
+# that lets the agent act with nobody to say no, so it is named whole and needs a yes.
+_APPROVE_ALL_HELP = (
+    "DANGEROUS. Approve EVERY action the agent asks about, with no one watching: deletes and "
+    "cancels, running code, installing packages, web and site access, changes to its own "
+    "settings, publishing a pipeline to your organization, deploying custom tool code, paid "
+    "wet-lab orders and starting a campaign. Needs --auto-approve. Needs --yes when not run "
+    "at a terminal."
+)
+
+
 def _approval_line(approval: Approval) -> dict[str, Any]:
     return {"id": approval.id, "status": approval.status, "kind": approval.kind,
             "summary": approval.summary, "message": approval.message_id or ""}
@@ -61,16 +78,23 @@ def new(
     budget_hours: Optional[float] = typer.Option(None, "--budget-hours", help="Spend cap for the chat."),
     per_job_hours: Optional[float] = typer.Option(None, "--per-job-hours", help="Largest job auto-approve may submit."),
     auto_approve: Optional[bool] = typer.Option(None, "--auto-approve/--no-auto-approve", help="Submit jobs within budget without asking."),
+    dangerously_approve_all: bool = typer.Option(False, "--dangerously-approve-all", help=_APPROVE_ALL_HELP),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Confirm --dangerously-approve-all without prompting."),
     agent_id: Optional[str] = typer.Option(None, "--agent-id", help="A saved agent from the agent builder."),
     idempotency_key: Optional[str] = typer.Option(
         None, "--idempotency-key", help="Reuse the key from a failed attempt to make the retry safe."),
 ) -> None:
     """Create a chat."""
     state = ctx.obj
+    if dangerously_approve_all:
+        output.confirm_destructive(
+            "create a chat that approves EVERY action the agent asks about, deletes included, "
+            "with no one to say no", yes=yes, mode=state.output)
     with state.sdk_client() as client:
         chat = client.agent.chats.create(
             title=title, effort=effort, mode=mode, workflow=workflow, budget_hours=budget_hours,
             per_job_hours=per_job_hours, auto_approve=auto_approve, agent_id=agent_id,
+            dangerously_approve_all=True if dangerously_approve_all else None,
             idempotency_key=idempotency_key,
         )
     output.emit(_raw(chat), state.output, human=f"{chat.id}  {chat.web_url or ''}".rstrip())
@@ -84,15 +108,18 @@ def list_chats(
     source: Optional[str] = typer.Option(None, "--source", help="api, ui or all."),
     status: Optional[str] = typer.Option(None, "--status", help="e.g. requires_action."),
     mode: Optional[str] = typer.Option(None, "--mode", help="chat, campaign or all."),
-    campaign_status: Optional[str] = typer.Option(None, "--campaign-status", help="e.g. running."),
+    scope: Optional[str] = typer.Option(
+        None, "--scope", help="own (default), or org: your teammates' chats you may read (read-only)."),
 ) -> None:
     """List chats, most recently updated first."""
     state = ctx.obj
     with state.sdk_client() as client:
-        page = client.agent.chats.list(limit=limit, cursor=cursor, source=source, status=status,
-                                       mode=mode, campaign_status=campaign_status)
-    human = output.render_table([_chat_line(c) for c in page.items],
-                                ["id", "status", "mode", "campaign", "title", "updated"])
+        page = client.agent.chats.list(limit=limit, cursor=cursor, scope=scope, source=source,
+                                       status=status, mode=mode)
+    rows = [_shared_chat_line(c) if isinstance(c, SharedChat) else _chat_line(c) for c in page.items]
+    columns = (["id", "owner", "mode", "title", "updated"] if scope == "org"
+               else ["id", "status", "mode", "campaign", "title", "updated"])
+    human = output.render_table(rows, columns)
     output.emit(_page(page.items, page.next_cursor), state.output, human=human + _more(page.next_cursor))
 
 
@@ -102,9 +129,14 @@ def show(ctx: typer.Context, chat_id: str = typer.Argument(..., help="The chat i
     state = ctx.obj
     with state.sdk_client() as client:
         chat = client.agent.chats.get(chat_id)
-    lines = [f"{chat.id}  {chat.status}  {chat.title}"]
-    if chat.active_message_ids:
+    if isinstance(chat, SharedChat):  # a teammate's: no state of its own
+        lines = [f"{chat.id}  read-only, {chat.owner_email}'s  {chat.title}"]
+    else:
+        lines = [f"{chat.id}  {chat.status}  {chat.title}"]
+    if isinstance(chat, Chat) and chat.active_message_ids:
         lines.append("active replies: " + ", ".join(chat.active_message_ids))
+    if isinstance(chat, Chat) and chat.dangerously_approve_all:
+        lines.append("approve-all is ON: every action the agent asks about is approved without asking")
     if chat.campaign:
         lines.append(f"campaign {chat.campaign.id}: {chat.campaign.status} ({chat.campaign.workflow})")
     if chat.web_url:
@@ -118,36 +150,48 @@ def update(
     chat_id: str = typer.Argument(..., help="The chat id."),
     title: Optional[str] = typer.Option(None, "--title"),
     effort: Optional[str] = typer.Option(None, "--effort"),
-    mode: Optional[str] = typer.Option(None, "--mode", help="campaign hands the task to a campaign; chat pauses it."),
+    mode: Optional[str] = typer.Option(
+        None, "--mode", help="campaign hands the task to a campaign; chat is only for a chat that has not run one."),
     workflow: Optional[str] = typer.Option(None, "--workflow"),
     budget_hours: Optional[float] = typer.Option(None, "--budget-hours"),
     per_job_hours: Optional[float] = typer.Option(None, "--per-job-hours"),
     auto_approve: Optional[bool] = typer.Option(None, "--auto-approve/--no-auto-approve"),
-    campaign_status: Optional[str] = typer.Option(None, "--campaign-status", help="paused, running or cancelled."),
+    dangerously_approve_all: Optional[bool] = typer.Option(
+        None, "--dangerously-approve-all/--no-dangerously-approve-all",
+        help=_APPROVE_ALL_HELP + " Turning it ON also approves, now, what the agent is waiting on. "
+        "It turns off with --no-auto-approve or a pause."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Confirm --dangerously-approve-all without prompting."),
+    campaign_status: Optional[str] = typer.Option(
+        None, "--campaign-status", help="paused (auto-approve off) or running (auto-approve on)."),
 ) -> None:
-    """Change a chat's settings, mode or campaign (pause, resume, stop)."""
+    """Change a chat's settings, mode or campaign (pause, resume)."""
     state = ctx.obj
+    if dangerously_approve_all:
+        output.confirm_destructive(
+            f"turn on approve-all for chat '{chat_id}': every action the agent asks about, deletes "
+            "included, runs with no one to say no, and what it is waiting on is approved now",
+            yes=yes, mode=state.output)
     with state.sdk_client() as client:
         chat = client.agent.chats.update(
             chat_id, title=title, effort=effort, mode=mode, workflow=workflow,
             budget_hours=budget_hours, per_job_hours=per_job_hours, auto_approve=auto_approve,
-            campaign_status=campaign_status,
+            dangerously_approve_all=dangerously_approve_all, campaign_status=campaign_status,
         )
     output.emit(_raw(chat), state.output, human=f"{chat.id}  {chat.status}  {chat.title}")
 
 
-@app.command("archive")
-def archive(
+@app.command("delete")
+def delete(
     ctx: typer.Context,
     chat_id: str = typer.Argument(..., help="The chat id."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Confirm without prompting."),
 ) -> None:
-    """Stop everything running in a chat (campaigns included) and archive it."""
+    """Stop any reply in progress, then delete the chat. It cannot be restored through the API."""
     state = ctx.obj
-    output.confirm_destructive(f"archive chat '{chat_id}' and stop what it is running", yes=yes, mode=state.output)
+    output.confirm_destructive(f"delete chat '{chat_id}' (it cannot be restored)", yes=yes, mode=state.output)
     with state.sdk_client() as client:
-        done = client.agent.chats.archive(chat_id)
-    output.emit(_raw(done), state.output, human=f"{done.id} archived")
+        done = client.agent.chats.delete(chat_id)
+    output.emit(_raw(done), state.output, human=f"{done.id} deleted")
 
 
 @app.command("rewind")
@@ -487,10 +531,10 @@ def approvals(
 
 
 def _resolve(ctx: typer.Context, chat_id: str, approval_id: str, decision: str, *,
-             scope: Optional[str], wait: bool, **options: Any) -> None:
+             scope: Optional[str], wait: bool) -> None:
     state = ctx.obj
     with state.sdk_client() as client:
-        approval = client.agent.approvals.resolve(chat_id, approval_id, decision, scope=scope, **options)
+        approval = client.agent.approvals.resolve(chat_id, approval_id, decision, scope=scope)
         if not wait:
             output.emit(_raw(approval), state.output, human=f"{approval.id}  {approval.status}")
             return
@@ -506,14 +550,12 @@ def approve(
     ctx: typer.Context,
     chat_id: str = typer.Argument(..., help="The chat id."),
     approval_id: str = typer.Argument(..., help="The approval id (see `chat approvals`)."),
-    scope: Optional[str] = typer.Option(None, "--scope", help="once (default), chat, site, all, connector or package."),
-    budget_hours: Optional[float] = typer.Option(None, "--budget-hours", help="campaign_start only: the budget to accept with."),
-    workflow: Optional[str] = typer.Option(None, "--workflow", help="campaign_start only: run this workflow instead."),
+    scope: Optional[str] = typer.Option(
+        None, "--scope", help="once (default), chat, site, all, connector or package; which ones an approval takes depends on its kind."),
     wait: bool = typer.Option(False, "--wait", help="Then follow the agent's answer."),
 ) -> None:
-    """Approve a pending action."""
-    _resolve(ctx, chat_id, approval_id, "approve", scope=scope, wait=wait,
-             budget_hours=budget_hours, workflow=workflow)
+    """Approve a pending action. A campaign_start takes no budget or workflow here: set them with `chat update` first."""
+    _resolve(ctx, chat_id, approval_id, "approve", scope=scope, wait=wait)
 
 
 @app.command("deny")
@@ -535,8 +577,6 @@ def answer(
     text: Optional[str] = typer.Option(None, "--text", help="One answer for every question on the card."),
     questions: list[str] = typer.Option([], "--question", help="A question's text. Repeatable; pairs with --choice."),
     choices: list[str] = typer.Option([], "--choice", help="Your answer to the --question in the same position."),
-    idempotency_key: Optional[str] = typer.Option(
-        None, "--idempotency-key", help="Reuse the key from a failed attempt to make the retry safe."),
 ) -> None:
     """Answer a question the agent is waiting on (--text, or --question/--choice pairs)."""
     state = ctx.obj
@@ -545,8 +585,7 @@ def answer(
         raise typer.BadParameter("give one --choice for each --question", param_hint="--choice")
     answers: dict[str, str] = dict(zip(questions, choices))
     with state.sdk_client() as client:
-        result = client.agent.questions.answer(chat_id, question_id, answers=answers or None, text=text,
-                                               idempotency_key=idempotency_key)
+        result = client.agent.questions.answer(chat_id, question_id, answers=answers or None, text=text)
     output.emit(_raw(result), state.output, human=f"{result.id}  {result.status}")
 
 
@@ -555,14 +594,15 @@ def answer(
 @files_app.command("upload")
 def files_upload(
     ctx: typer.Context,
-    path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True, help="Local file (up to 200 MB)."),
-    filename: Optional[str] = typer.Option(None, "--name", help="The name the agent sees."),
-    content_type: Optional[str] = typer.Option(None, "--content-type", help="Default: from the extension."),
+    path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True, help="Local file (1 byte to 200 MB)."),
+    filename: Optional[str] = typer.Option(
+        None, "--name",
+        help="The name the agent sees: letters, digits, '.', '_', '-' and '/' for a folder. Its extension sets the file's type. Default: the file's own name."),
 ) -> None:
     """Upload a file; pass its id to `chat send --file`."""
     state = ctx.obj
     with state.sdk_client() as client:
-        slot = client.agent.files.upload(path, filename=filename, content_type=content_type)
+        slot = client.agent.files.upload(path, filename=filename)
     output.emit({"fileId": slot.file_id, "expiresAt": slot.expires_at}, state.output, human=slot.file_id)
 
 
@@ -588,6 +628,8 @@ def files_list(
         page = client.agent.files.list(chat_id, limit=limit, cursor=cursor)
     rows = [{"id": f.id, "path": f.path or f.filename, "size": f.size, "origin": f.origin or ""} for f in page.items]
     human = output.render_table(rows, ["id", "path", "size", "origin"])
+    if page.truncated:
+        human += "\n\n(truncated: the chat has more than 20,000 files; only the first 20,000 by path are listed)"
     output.emit(_page(page.items, page.next_cursor), state.output, human=human + _more(page.next_cursor))
 
 
@@ -664,9 +706,9 @@ def workflows(ctx: typer.Context) -> None:
     state = ctx.obj
     with state.sdk_client() as client:
         items = client.agent.workflows.list()
-    rows = [{"id": w.id, "engine": w.engine, "label": w.label} for w in items]
+    rows = [{"id": w.id, "label": w.label, "supports": ", ".join(w.supports)} for w in items]
     output.emit({"data": [_raw(w) for w in items]}, state.output,
-                human=output.render_table(rows, ["id", "engine", "label"]))
+                human=output.render_table(rows, ["id", "label", "supports"]))
 
 
 @app.command("candidates")
@@ -694,7 +736,7 @@ def structure(
     candidate_id: str = typer.Argument(..., help="The candidate id."),
     out: Path = typer.Option(Path("."), "--out", "-o", help="A directory, or the file path to write."),
 ) -> None:
-    """Download a candidate's predicted structure."""
+    """Download a candidate's structure file (PDB, mmCIF or SDF, up to 10 MiB)."""
     state = ctx.obj
     with state.sdk_client() as client:
         saved = client.agent.campaigns.download_structure(chat_id, candidate_id, out)
@@ -705,14 +747,13 @@ def structure(
 def jobs(
     ctx: typer.Context,
     chat_id: str = typer.Argument(..., help="The chat id."),
-    campaign_id: Optional[str] = typer.Option(None, "--campaign", help="Only one campaign's jobs."),
     limit: Optional[int] = typer.Option(None, "--limit"),
     cursor: Optional[str] = typer.Option(None, "--cursor"),
 ) -> None:
     """List the platform jobs the agent submitted in this chat."""
     state = ctx.obj
     with state.sdk_client() as client:
-        page = client.agent.campaigns.jobs(chat_id, campaign_id=campaign_id, limit=limit, cursor=cursor)
+        page = client.agent.campaigns.jobs(chat_id, limit=limit, cursor=cursor)
     rows = [{"jobName": j.job_name, "tool": j.tool, "status": j.status, "hours": j.compute_hours} for j in page.items]
     human = output.render_table(rows, ["jobName", "tool", "status", "hours"])
     output.emit(_page(page.items, page.next_cursor), state.output, human=human + _more(page.next_cursor))
@@ -758,13 +799,19 @@ def usage(
     chat_id: Optional[str] = typer.Argument(None, help="A chat id. Omit for your monthly totals."),
     month: Optional[str] = typer.Option(None, "--month", help="YYYY-MM, for monthly totals."),
 ) -> None:
-    """What the agent cost: one chat, or your month."""
+    """What the agent used, in hours: one chat (with its jobs), or your month (without jobs)."""
     state = ctx.obj
     if chat_id and month:
         raise TamarindError("Pass a chat id or --month, not both.")
     with state.sdk_client() as client:
-        result = client.agent.usage.chat(chat_id) if chat_id else client.agent.usage.month(month)
-    head = f"{result.month}: " if result.month else ""
-    human = (f"{head}{result.total_hours:g} h total ({result.agent_hours:g} h agent, "
-             f"{result.jobs_hours:g} h jobs)")
-    output.emit(_raw(result), state.output, human=human)
+        if chat_id:
+            chat_usage = client.agent.usage.chat(chat_id)
+            human = (f"{chat_usage.total_hours:g} h total ({chat_usage.agent_hours:g} h agent, "
+                     f"{chat_usage.jobs_hours:g} h jobs)")
+            output.emit(_raw(chat_usage), state.output, human=human)
+            return
+        monthly = client.agent.usage.month(month)
+    human = f"{monthly.month}: {monthly.agent_hours:g} h agent (jobs are not counted here)"
+    if monthly.remaining_hours is not None:
+        human += f", {monthly.remaining_hours:g} h left of your tightest budget"
+    output.emit(_raw(monthly), state.output, human=human)
