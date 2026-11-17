@@ -94,15 +94,36 @@ tamarind chat new --title "PD-L1 binders"                  # prints the chat id
 tamarind chat send chat_7Q "Fold this and summarize pLDDT" --file target.pdb --wait
 tamarind chat approvals chat_7Q --status pending
 tamarind chat approve chat_7Q apr_x --wait                 # or: tamarind chat deny chat_7Q apr_x
+tamarind chat files upload target.pdb                      # prints the file id; up to 200 MB
 tamarind chat files list chat_7Q
 tamarind chat files download chat_7Q file_k2 --out ./out
 tamarind chat events chat_7Q --follow                      # every event, one JSON line each
+tamarind chat list --scope org                             # teammates' chats you may read (read-only)
+tamarind chat delete chat_7Q --yes                         # stops any reply, then deletes; no restore
 ```
 
 `send --wait` streams the reply's text to stdout (in `--json` mode it prints the finished
 reply). A reply that stops on an approval or a question exits `10` with the ids to answer in
 the error; approve or answer it, then `tamarind chat wait <chat> <reply>`. A reply that
 ends `failed`, `cancelled` or `incomplete` exits `9`.
+
+A file goes to storage by the presigned form the API returns for its name (a `POST`, with
+no API key), and the name is letters, digits, `.`, `_`, `-` and `/` for a folder. A chat is
+deleted, not archived: `chat delete` stops any reply in progress and the chat cannot be
+restored through the API. `chat list --scope org` shows teammates' chats as read-only items
+(owner, mode, title: no status, budget or usage, which are their owner's).
+
+For a run nobody watches, `--auto-approve` lets the agent submit jobs within
+`--budget-hours` (and `--per-job-hours`) without asking; deletes and cancels still ask.
+`--dangerously-approve-all` goes further and approves **every** action the agent asks about:
+deleting and cancelling, running code, installing packages, web and site access, changes to
+its own settings and skills, publishing a pipeline to your whole organization, deploying
+custom tool code, ordering a paid wet-lab assay and starting a campaign. It needs
+`--auto-approve`, turns off with it (and with a spent budget or a paused campaign), and jobs
+still run only within the budget. Turning it on for a chat that exists
+(`chat update --dangerously-approve-all`) also approves, at once, what the agent is waiting
+on, a delete included. Use it only for runs nobody is watching; it asks for `--yes` when not
+run at a terminal, like the other destructive commands.
 
 From Python:
 
@@ -111,7 +132,8 @@ from tamarind import Tamarind
 
 with Tamarind() as client:
     chat = client.agent.chats.create(title="PD-L1 binders")
-    reply = client.agent.messages.send(chat.id, "Fold this and summarize pLDDT")
+    file = client.agent.files.upload("target.pdb")        # create the slot, then POST the form
+    reply = client.agent.messages.send(chat.id, "Fold this and summarize pLDDT", file_ids=[file.file_id])
     stream = client.agent.messages.follow(chat.id, reply.id, follow_continuations=True)
     for event in stream:                     # resumes by itself after a dropped connection
         if event.type == "output_text.delta":
@@ -120,6 +142,13 @@ with Tamarind() as client:
         for approval in client.agent.approvals.list(chat.id, status="pending"):
             client.agent.approvals.approve(chat.id, approval.id)
 ```
+
+`chats.create(auto_approve=True, dangerously_approve_all=True)` and
+`chats.update(chat.id, dangerously_approve_all=True)` are the unattended-run flags described
+above, and carry the same warning. `chats.delete(chat.id)` returns a `DeletedChat`;
+`chats.get` of a teammate's chat returns a read-only `SharedChat`; `usage.month()` returns an
+`AgentUsage` (your agent hours for the month, without jobs); and
+`campaigns.download_structure(chat.id, candidate.id, dest)` saves a candidate's structure file.
 
 ## Python SDK
 
