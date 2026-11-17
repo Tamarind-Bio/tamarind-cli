@@ -1,0 +1,2897 @@
+openapi: 3.1.0
+info:
+  title: Tamarind Agent API
+  version: 1.0.0
+  summary: "Drive Tamarind's AI agent from your own code: chats (including campaign mode), streamed replies, approvals and files."
+  description: |
+    Start chats with Tamarind's AI agent, send it messages, stream its replies, approve or deny the
+    actions it asks about, and download the files it produces.
+
+    **Base URL.** `https://app.tamarind.bio/api`, the same host and prefix as the jobs API
+    (`/api/jobs`, `/api/molecules`, `/api/pipelines`).
+
+    **Auth.** Send your Tamarind API key as `x-api-key: <your key>`, the same key as the jobs API.
+    `Authorization: Bearer <key>` is also accepted. Keys from an agent trial are not accepted, and
+    your organization must have AI enabled.
+
+    **Conventions.**
+    - JSON is camelCase.
+    - Lists take `limit` and an opaque `cursor`, and return `nextCursor` (null on the last page). A
+      page can hold fewer items than `limit`, even none, and still have a `nextCursor`: keep
+      reading until it is null.
+    - Errors are RFC 9457 `application/problem+json`. Branch on `code`, not on `detail`.
+    - Creating a chat, sending a message and starting an export accept an `Idempotency-Key`.
+      Retrying with the same key and body applies the request once. Keys are kept for at least 24 h.
+    - Ignore event types and fields you do not know: new ones are added without notice.
+
+    **Chats and campaigns are one resource.** A campaign is a mode of a chat: the same id,
+    history, event stream, approvals and files. Start one with `POST /chats {mode: "campaign"}`
+    or switch an existing chat with `PATCH /chats/{chatId} {mode: "campaign"}`. There are no
+    campaign paths: pause, resume and the budget are `PATCH /chats/{chatId}` too, a campaign's
+    state is the chat's `campaign` field, and its results are chat collections.
+
+    **Teammates' chats.** Members of your organization can read each other's chats, as in the web
+    app, unless the organization turns off sharing between members (its admins can still read).
+    Add `scope=org` to `GET /chats` to list them. Reading is all a teammate can do: every other
+    request on someone else's chat is `404 not_found`. A teammate can read the chat
+    (`GET /chats/{chatId}`), its messages and events, its tasks, its candidates with their
+    structures, and its jobs. They cannot list its approvals, files, subagents, usage or exports,
+    or change anything. Its messages and events show a teammate what the web app shows them, an
+    approval request or a subagent's steps included. Credentials in what they read are replaced
+    with `[redacted]`.
+
+    **Streaming.** Server-sent events.
+    - Each event's SSE `id` is a resume cursor (`<sequence>.<index>`).
+    - Reconnect with the `Last-Event-ID` header or `?after=`.
+    - `ping` events come every 15 s and carry no id.
+    - A reply keeps going when your connection drops.
+
+    **Limits.** Past a limit a request is `429 rate_limited`, with `Retry-After` in seconds.
+    - 200 new messages an hour per account, across all its keys. Answering a question and
+      deciding an approval count as messages, because each wakes the agent. A message send
+      returns `x-ratelimit-limit`, `x-ratelimit-remaining` and `x-ratelimit-reset`.
+    - 10 open event streams per account.
+    - Per key and hour: 500 file uploads started, 600 file listings, 1,200 reads of a chat's
+      results (candidates, tasks, jobs, structures), 300 listings of teammates' chats and 30
+      exports started.
+    - A message holds up to 100,000 characters and 64 files. A file is up to 200 MB.
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Tamarind-Proprietary
+  contact:
+    name: Tamarind Bio
+    url: https://app.tamarind.bio/api-docs
+servers:
+  - url: https://app.tamarind.bio/api
+    description: Production
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+tags:
+  - name: Chats
+    description: A chat is a conversation with the agent. It is the same object the Tamarind web app shows in its sidebar.
+  - name: Messages
+    description: |
+      A message is one entry in a chat: yours, or the agent's reply. Each reply has an id you can
+      follow: it has a status, streams as it is written, can be cancelled, and keeps going if you
+      disconnect. Replies the agent starts on its own (a job finishing, a campaign step) are
+      messages too.
+  - name: Subagents
+    description: |
+      A subagent is a helper the agent starts for a sub-task (a hotspot researcher, say). Each has
+      its own status, steps and result. A background one can be stopped on its own while the reply
+      goes on.
+  - name: Events
+    description: The ordered record of what happened in a chat, campaign progress included. Read it as history, or follow it live as a server-sent event stream.
+  - name: Approvals
+    description: Spending, deleting and other outward actions pause the reply in `requires_action` until you approve or deny them. Questions the agent asks wait for your answer here too.
+  - name: Files
+    description: Upload inputs and download what the agent produced.
+  - name: Campaign mode
+    description: |
+      A chat in campaign mode runs a long, autonomous design workflow with a budget, a plan and
+      candidates. It runs in the chat itself, so it has the chat's id, history and event stream.
+      Start and control it with `POST` and `PATCH` on `/chats`, and read its state from the chat's
+      `campaign` field. This tag lists only the available workflows.
+  - name: Usage
+    description: What the agent has used, per chat and per month, in weighted hours.
+
+paths:
+  # ───────────────────────────── Chats ─────────────────────────────
+  /chats:
+    post:
+      tags: [Chats]
+      operationId: createChat
+      summary: Create a chat
+      description: |
+        Creates a chat. Every field is optional: `POST /chats {}` gives a plain chat with the default
+        effort and budget. Retrying with the same `Idempotency-Key` returns the same chat, not a
+        second one. The key is tied to the whole body: a different body is refused.
+
+        To start a design campaign, set `mode: "campaign"` (and, if you want one, a `workflow` from
+        `GET /agent-workflows`), then send your objective as the first message. The agent answers a
+        design request with a `campaign_start` approval. Approving it starts the campaign, within the
+        chat's budget.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChatCreate' }
+      responses:
+        '501':
+          description: '`not_supported`: the Agent API is not available for new chats on this Tamarind deployment.'
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '201':
+          description: Chat created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Chat' }
+              example:
+                id: chat_7Q
+                object: chat
+                title: PD-L1 binders, hotspot 54-68
+                status: idle
+                source: api
+                activeMessageIds: []
+                effort: high
+                agentId:
+                budget:
+                  capHours: 40
+                  usedHours: 0
+                  perJobHours:
+                autoApprove: false
+                mode: chat
+                workflow:
+                campaign:
+                usage:
+                  agentHours: 0
+                  jobsHours: 0
+                  totalHours: 0
+                  capHours: 40
+                webUrl: https://app.tamarind.bio/agent/chat_7Q
+                createdAt: '2026-10-27T17:02:11Z'
+                updatedAt: '2026-10-27T17:02:11Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: |
+            - `idempotency_key_reused`: that `Idempotency-Key` was already used with a different body.
+            - `not_in_campaign_mode`: you sent `workflow` without `mode: "campaign"`.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: |
+            - `unknown_workflow`: `workflow` is not one `GET /agent-workflows` lists.
+            - `invalid_request`: `autoApprove` cannot turn on because no budget is left. Send `budgetHours`.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    get:
+      tags: [Chats]
+      operationId: listChats
+      summary: List chats
+      description: |
+        Your own chats, most recently updated first. With `scope=org`, the chats of your teammates that
+        you may read instead, grouped by owner in order of their email addresses, with each owner's
+        newest first. Those are `SharedChat` items. They carry no state, so `status` is 400 with
+        `scope=org`. The list is empty if you are in no organization, or your organization keeps its
+        members' chats apart and you are not an admin. Deleted chats are never listed.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: scope
+          in: query
+          description: '`org` lists the chats of the other members of your organization that you may read. Default `own`.'
+          schema: { type: string, enum: [own, org], default: own }
+        - name: source
+          in: query
+          description: '`api` lists only chats your scripts created; `ui` only ones people started in the web app. Default `all`.'
+          schema: { type: string, enum: [api, ui, all], default: all }
+        - name: status
+          in: query
+          schema: { type: string, enum: [idle, running, requires_action, waiting_on_jobs] }
+          description: Only chats in this state, e.g. `requires_action` to find chats waiting on an approval. A listed state can trail the chat by a few seconds; `GET /chats/{chatId}` has the current one.
+        - name: mode
+          in: query
+          description: '`campaign` lists only chats that are or were campaigns. Default `all`.'
+          schema: { type: string, enum: [chat, campaign, all], default: all }
+      responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+        '200':
+          description: A page of chats, most recently updated first.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          oneOf:
+                            - $ref: '#/components/schemas/Chat'
+                            - $ref: '#/components/schemas/SharedChat'
+              example:
+                data:
+                  - id: chat_7Q
+                    object: chat
+                    title: PD-L1 binders, hotspot 54-68
+                    status: waiting_on_jobs
+                    source: api
+                    effort: high
+                    agentId:
+                    mode: campaign
+                    campaign:
+                      id: cmp_7Q
+                      workflow: binder-design
+                      status: running
+                      plan:
+                        stage: design
+                        tasks:
+                          - id: task-1
+                            title: Pick hotspot residues
+                            status: done
+                          - id: task-2
+                            title: RFdiffusion backbones, 200 designs
+                            status: running
+                          - id: task-3
+                            title: Fold and filter with Boltz-2
+                            status: pending
+                      candidateCount: 18
+                      startedAt: '2026-10-27T17:20:04Z'
+                    webUrl: https://app.tamarind.bio/agent/chat_7Q
+                    createdAt: '2026-10-27T17:02:11Z'
+                    updatedAt: '2026-10-27T18:41:55Z'
+                  - id: chat_2M
+                    object: chat
+                    title: Antibody humanization notes
+                    status: idle
+                    source: ui
+                    effort: high
+                    agentId:
+                    mode: chat
+                    campaign:
+                    webUrl: https://app.tamarind.bio/agent/chat_2M
+                    createdAt: '2026-10-25T09:12:00Z'
+                    updatedAt: '2026-10-26T16:30:41Z'
+                nextCursor: eyJ1IjoiMjAyNi0xMC0yNSJ9
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /chats/{chatId}:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+    get:
+      tags: [Chats]
+      operationId: getChat
+      summary: Get a chat
+      description: |
+        A chat of a teammate is a `SharedChat`: its campaign and plan are included, its state, budget
+        and usage are not.
+      responses:
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+        '200':
+          description: The chat.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Chat'
+                  - $ref: '#/components/schemas/SharedChat'
+              example:
+                id: chat_7Q
+                object: chat
+                title: PD-L1 binders, hotspot 54-68
+                status: waiting_on_jobs
+                source: api
+                activeMessageIds: []
+                effort: high
+                agentId:
+                budget:
+                  capHours: 40
+                  usedHours: 1.52
+                  perJobHours: 4
+                autoApprove: true
+                mode: campaign
+                workflow: binder-design
+                campaign:
+                  id: cmp_7Q
+                  workflow: binder-design
+                  status: running
+                  plan:
+                    stage: design
+                    tasks:
+                      - id: task-1
+                        title: Pick hotspot residues
+                        status: done
+                      - id: task-2
+                        title: RFdiffusion backbones, 200 designs
+                        status: running
+                      - id: task-3
+                        title: Fold and filter with Boltz-2
+                        status: pending
+                  candidateCount: 18
+                  startedAt: '2026-10-27T17:20:04Z'
+                usage:
+                  agentHours: 0.42
+                  jobsHours: 1.1
+                  totalHours: 1.52
+                  capHours: 40
+                webUrl: https://app.tamarind.bio/agent/chat_7Q
+                createdAt: '2026-10-27T17:02:11Z'
+                updatedAt: '2026-10-27T18:41:55Z'
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Chats]
+      operationId: updateChat
+      summary: Update a chat
+      description: |
+        Changes a chat. Send only the fields you want to change.
+
+        When one request changes several fields, they apply in this order: `mode` and `workflow`;
+        pausing (`campaign.status: paused`), so nothing runs on a budget you raise in the same
+        request; `title`, `autoApprove`, `budgetHours` and `perJobHours`; `effort`; resuming
+        (`campaign.status: running`); and last `dangerouslyApproveAll`, which, when it turns the flag
+        on, also answers the approvals the agent is waiting on (see the field).
+
+        A request that cannot succeed is refused before anything changes: `workflow` or
+        `campaign.status` on a chat that is not in campaign mode and that the request does not put
+        there (409 `not_in_campaign_mode`), and turning on `autoApprove` or `dangerouslyApproveAll`,
+        or resuming, when your organization cannot start new work (403; pausing is always allowed).
+        If a field is refused after earlier ones were applied, such as a budget at or below what the
+        chat has already spent (422), the earlier changes stay applied. The error's `detail` starts
+        with the name of the field.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChatUpdate' }
+      responses:
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+        '200':
+          description: The updated chat.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Chat' }
+              example:
+                id: chat_7Q
+                object: chat
+                title: PD-L1 binders, hotspot 54-68
+                status: waiting_on_jobs
+                source: api
+                activeMessageIds: []
+                effort: high
+                agentId:
+                budget:
+                  capHours: 60
+                  usedHours: 1.52
+                  perJobHours: 4
+                autoApprove: true
+                mode: campaign
+                workflow: binder-design
+                campaign:
+                  id: cmp_7Q
+                  workflow: binder-design
+                  status: running
+                  plan:
+                    stage: design
+                    tasks:
+                      - id: task-1
+                        title: Pick hotspot residues
+                        status: done
+                      - id: task-2
+                        title: RFdiffusion backbones, 200 designs
+                        status: running
+                      - id: task-3
+                        title: Fold and filter with Boltz-2
+                        status: pending
+                  candidateCount: 18
+                  startedAt: '2026-10-27T17:20:04Z'
+                usage:
+                  agentHours: 0.42
+                  jobsHours: 1.1
+                  totalHours: 1.52
+                  capHours: 60
+                webUrl: https://app.tamarind.bio/agent/chat_7Q
+                createdAt: '2026-10-27T17:02:11Z'
+                updatedAt: '2026-10-27T18:41:55Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            - `not_in_campaign_mode`: `workflow` or `campaign.status` on a chat that is not in campaign mode.
+            - `no_campaign`: `campaign.status` before a campaign has started.
+            - `conflict`: a chat that has run a campaign cannot go back to `mode: "chat"` or change its `workflow`.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: |
+            - `unknown_workflow`: `workflow` is not one `GET /agent-workflows` lists.
+            - `invalid_request`: `budgetHours` is at or below what the chat has already used or reserved, or `autoApprove` cannot turn on because no budget is left. Send a higher `budgetHours`.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    delete:
+      tags: [Chats]
+      operationId: deleteChat
+      summary: Delete a chat
+      description: Stops any reply in progress, then deletes the chat. It is no longer listed, every other request for it is `404 not_found`, and it cannot be restored through the API.
+      responses:
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+        '200':
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, object, deleted]
+                properties:
+                  id: { type: string }
+                  object: { const: chat }
+                  deleted: { const: true }
+              example:
+                id: chat_7Q
+                object: chat
+                deleted: true
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ───────────────────────────── Messages ─────────────────────────────
+  /chats/{chatId}/messages:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+    post:
+      tags: [Messages]
+      operationId: sendMessage
+      summary: Send a message
+      description: |
+        Sends your message and starts the agent's reply. The reply is a Message with its own id, and
+        your message's id is its `inReplyTo`.
+
+        With `stream: true` the response is the reply's event stream. With `stream: false` it returns
+        `202` and the queued reply. Follow that reply with `GET .../messages/{messageId}`, or with the
+        chat's event stream and `messageId`. The reply keeps running if you disconnect, and it spends
+        from the chat's budget.
+
+        You can send while the agent is busy. The agent reads your message at its next step. The reply
+        in progress ends there as `completed`, with `continuedBy` set to the new reply, which carries
+        the work on. Nothing already running is stopped. Send `interrupt: true` to stop the reply in
+        progress first.
+
+        Retry with the same `Idempotency-Key` after a timeout and the message is sent once: a retry
+        never starts a second reply. The key is tied to the message's `input` and `interrupt`; a retry
+        may change `stream`, which only decides how the reply is returned. If a rewind has hidden the
+        message, send it again under a new key.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MessageCreate' }
+            examples:
+              streamed:
+                value:
+                  input:
+                    - { type: text, text: Fold this and summarize pLDDT }
+                    - { type: file, fileId: file_9f2 }
+                  stream: true
+      responses:
+        '501':
+          description: '`not_supported`: this chat cannot run replies on this Tamarind deployment.'
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '200':
+          description: The reply's event stream (`stream:true`).
+          headers:
+            x-ratelimit-limit: { $ref: '#/components/headers/RateLimitLimit' }
+            x-ratelimit-remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+            x-ratelimit-reset: { $ref: '#/components/headers/RateLimitReset' }
+          content:
+            text/event-stream:
+              schema: { $ref: '#/components/schemas/EventStream' }
+              example: |
+                id: 1040.0
+                event: message.created
+                data: {"id":"1040.0","type":"message.created","sequence":1040,"chatId":"chat_7Q","messageId":"msg_1","createdAt":"2026-10-27T17:02:11Z","data":{"id":"msg_1","object":"message","chatId":"chat_7Q","role":"assistant","createdAt":"2026-10-27T17:02:11Z","content":[],"status":"queued","startedBy":"user","inReplyTo":"msg_0","pendingApprovals":[],"pendingQuestions":[],"completedAt":null}}
+
+                id: 1041.0
+                event: message.in_progress
+                data: {"id":"1041.0","type":"message.in_progress","sequence":1041,"chatId":"chat_7Q","messageId":"msg_1","createdAt":"2026-10-27T17:02:11Z","data":{"id":"msg_1","object":"message","chatId":"chat_7Q","role":"assistant","createdAt":"2026-10-27T17:02:11Z","content":[],"status":"in_progress","startedBy":"user","inReplyTo":"msg_0","pendingApprovals":[],"pendingQuestions":[],"completedAt":null}}
+
+                id: 1042.0
+                event: output_text.delta
+                data: {"id":"1042.0","type":"output_text.delta","sequence":1042,"chatId":"chat_7Q","messageId":"msg_1","createdAt":"2026-10-27T17:02:11Z","data":{"partId":"p_0","delta":"I'll fold the target with Boltz-2, "}}
+
+                id: 1043.0
+                event: output_text.delta
+                data: {"id":"1043.0","type":"output_text.delta","sequence":1043,"chatId":"chat_7Q","messageId":"msg_1","createdAt":"2026-10-27T17:02:11Z","data":{"partId":"p_0","delta":"5 samples."}}
+
+                event: ping
+                data: {}
+
+                id: 1044.0
+                event: step.started
+                data: {"id":"1044.0","type":"step.started","sequence":1044,"chatId":"chat_7Q","messageId":"msg_1","createdAt":"2026-10-27T17:02:11Z","data":{"id":"stp_1","kind":"platform","title":"Submitting 5 Boltz-2 samples of the target","status":"running"}}
+
+                id: 1050.0
+                event: subagent.started
+                data: {"id":"1050.0","type":"subagent.started","sequence":1050,"chatId":"chat_7Q","messageId":"msg_1","createdAt":"2026-10-27T17:02:11Z","data":{"id":"sub_3h","object":"subagent","chatId":"chat_7Q","messageId":"msg_1","name":"hotspot-researcher","title":"Find the PD-L1 hotspot residues","instructions":"Read the PD-L1/PD-1 complex (3BIK) and name the PD-L1 residues that carry the PD-1 contact.","background":false,"status":"running","result":null,"createdAt":"2026-10-27T17:03:40Z","completedAt":null}}
+
+                id: 1061.0
+                event: subagent.completed
+                data: {"id":"1061.0","type":"subagent.completed","sequence":1061,"chatId":"chat_7Q","messageId":"msg_1","createdAt":"2026-10-27T17:02:11Z","data":{"id":"sub_3h","object":"subagent","chatId":"chat_7Q","messageId":"msg_1","name":"hotspot-researcher","title":"Find the PD-L1 hotspot residues","instructions":"Read the PD-L1/PD-1 complex (3BIK) and name the PD-L1 residues that carry the PD-1 contact.","background":false,"status":"completed","result":"Residues 54-68 (loop C'C'') form the PD-1 contact patch; 56, 63 and 66 are the anchors.","createdAt":"2026-10-27T17:03:40Z","completedAt":"2026-10-27T17:05:12Z"}}
+
+                id: 1071.0
+                event: job.completed
+                data: {"id":"1071.0","type":"job.completed","sequence":1071,"chatId":"chat_7Q","messageId":"msg_1","createdAt":"2026-10-27T17:02:11Z","data":{"jobName":"boltz-target-1","tool":"boltz","status":"Complete"}}
+
+                id: 1072.0
+                event: step.completed
+                data: {"id":"1072.0","type":"step.completed","sequence":1072,"chatId":"chat_7Q","messageId":"msg_1","createdAt":"2026-10-27T17:02:11Z","data":{"id":"stp_1","kind":"platform","title":"Submitting 5 Boltz-2 samples of the target","status":"completed"}}
+
+                id: 1079.0
+                event: output_text.done
+                data: {"id":"1079.0","type":"output_text.done","sequence":1079,"chatId":"chat_7Q","messageId":"msg_1","createdAt":"2026-10-27T17:02:11Z","data":{"partId":"p_2","text":"Mean pLDDT 87.3 across 5 samples; the interface loop (residues 54-68) is the least confident at 71."}}
+
+                id: 1080.0
+                event: message.completed
+                data: {"id":"1080.0","type":"message.completed","sequence":1080,"chatId":"chat_7Q","messageId":"msg_1","createdAt":"2026-10-27T17:02:11Z","data":{"id":"msg_1","object":"message","chatId":"chat_7Q","role":"assistant","createdAt":"2026-10-27T17:02:11Z","content":[{"type":"text","id":"p_0","text":"I'll fold the target with Boltz-2, 5 samples."},{"type":"step","step":{"id":"stp_1","kind":"platform","title":"Submitting 5 Boltz-2 samples of the target","status":"completed"}},{"type":"text","id":"p_2","text":"Mean pLDDT 87.3 across 5 samples; the interface loop (residues 54-68) is the least confident at 71."},{"type":"file","fileId":"file_k2","path":"boltz/model_0.cif"}],"status":"completed","startedBy":"user","inReplyTo":"msg_0","pendingApprovals":[],"pendingQuestions":[],"completedAt":"2026-10-27T17:14:02Z","incompleteReason":null,"error":null,"usage":{"agentHours":0.08,"jobsHours":0.4,"totalHours":0.48,"capHours":40}}}
+        '202':
+          description: The reply, accepted and queued (`stream:false`).
+          headers:
+            Location:
+              description: 'The reply, as a reference relative to this request: `messages/{messageId}`, which resolves to `.../chats/{chatId}/messages/{messageId}`.'
+              schema: { type: string }
+            x-ratelimit-limit: { $ref: '#/components/headers/RateLimitLimit' }
+            x-ratelimit-remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+            x-ratelimit-reset: { $ref: '#/components/headers/RateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+              example:
+                id: msg_1
+                object: message
+                chatId: chat_7Q
+                role: assistant
+                createdAt: '2026-10-27T17:02:11Z'
+                content: []
+                status: queued
+                startedBy: user
+                inReplyTo: msg_0
+                pendingApprovals: []
+                pendingQuestions: []
+                completedAt:
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/BudgetExhausted' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            - `idempotency_key_reused`: that `Idempotency-Key` was used with a different message, or its message was hidden by a rewind.
+            - `conflict`: a file in `input` has not finished uploading, or changed while it was being attached.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+    get:
+      tags: [Messages]
+      operationId: listMessages
+      summary: List the chat transcript
+      description: |
+        Your messages and the agent's replies, oldest first. A reply holds the agent's text, steps and
+        files as `content` parts, and a `status`. Replies the agent started on its own carry
+        `startedBy` (`job`, `timer`, `continuation`, `campaign`) and no `inReplyTo`.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+        '200':
+          description: A page of messages.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/Message' } }
+              example:
+                data:
+                  - id: msg_0
+                    object: message
+                    chatId: chat_7Q
+                    role: user
+                    createdAt: '2026-10-27T17:02:11Z'
+                    content:
+                      - type: text
+                        text: Fold this target and summarize pLDDT.
+                      - type: file
+                        fileId: file_9f2
+                        path: uploads/target.pdb
+                  - id: msg_1
+                    object: message
+                    chatId: chat_7Q
+                    role: assistant
+                    createdAt: '2026-10-27T17:02:11Z'
+                    content:
+                      - type: text
+                        id: p_0
+                        text: I'll fold the target with Boltz-2, 5 samples.
+                      - type: step
+                        step:
+                          id: stp_1
+                          kind: platform
+                          title: Submitting 5 Boltz-2 samples of the target
+                          status: completed
+                      - type: text
+                        id: p_2
+                        text: Mean pLDDT 87.3 across 5 samples; the interface loop (residues 54-68) is the least confident at 71.
+                      - type: file
+                        fileId: file_k2
+                        path: boltz/model_0.cif
+                    status: completed
+                    startedBy: user
+                    inReplyTo: msg_0
+                    pendingApprovals: []
+                    pendingQuestions: []
+                    completedAt: '2026-10-27T17:14:02Z'
+                    incompleteReason:
+                    error:
+                    usage:
+                      agentHours: 0.08
+                      jobsHours: 0.4
+                      totalHours: 0.48
+                      capHours: 40
+                  - id: msg_2
+                    object: message
+                    chatId: chat_7Q
+                    role: assistant
+                    createdAt: '2026-10-27T18:40:20Z'
+                    status: completed
+                    startedBy: job
+                    inReplyTo:
+                    content:
+                      - type: text
+                        id: p_0
+                        text: 'Batch 3 finished: 18 candidates so far, best ipTM 0.86.'
+                    pendingApprovals: []
+                    pendingQuestions: []
+                    completedAt: '2026-10-27T18:40:31Z'
+                nextCursor:
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /chats/{chatId}/messages/{messageId}:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+      - $ref: '#/components/parameters/MessageId'
+    get:
+      tags: [Messages]
+      operationId: getMessage
+      summary: Get a message
+      description: |
+        Poll a reply until its `status` is final (`completed`, `failed`, `cancelled`, `incomplete`).
+        The id stays the same for the whole reply, even when the agent has to restart its work
+        partway through.
+      responses:
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+        '200':
+          description: The message.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+              example:
+                id: msg_1
+                object: message
+                chatId: chat_7Q
+                role: assistant
+                createdAt: '2026-10-27T17:02:11Z'
+                content:
+                  - type: text
+                    id: p_0
+                    text: I'll fold the target with Boltz-2, 5 samples.
+                  - type: step
+                    step:
+                      id: stp_1
+                      kind: platform
+                      title: Submitting 5 Boltz-2 samples of the target
+                      status: completed
+                  - type: text
+                    id: p_2
+                    text: Mean pLDDT 87.3 across 5 samples; the interface loop (residues 54-68) is the least confident at 71.
+                  - type: file
+                    fileId: file_k2
+                    path: boltz/model_0.cif
+                status: completed
+                startedBy: user
+                inReplyTo: msg_0
+                pendingApprovals: []
+                pendingQuestions: []
+                completedAt: '2026-10-27T17:14:02Z'
+                incompleteReason:
+                error:
+                usage:
+                  agentHours: 0.08
+                  jobsHours: 0.4
+                  totalHours: 0.48
+                  capHours: 40
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /chats/{chatId}/messages/{messageId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+      - $ref: '#/components/parameters/MessageId'
+    post:
+      tags: [Messages]
+      operationId: cancelMessage
+      summary: Cancel a reply
+      description: |
+        Stops this reply only. A newer reply that has already started is not affected. Pass the
+        reply's id; your own message's id also works. A queued reply is dropped before it starts. Jobs
+        the reply already submitted keep running: cancel those with the jobs API. In campaign mode
+        this stops the campaign's current step and leaves `campaign.status` as it was. To pause, `PATCH`
+        the chat.
+
+        If the reply stopped at an approval (`requires_action`), nothing is running, so its pending
+        approvals are denied. The reply ends `completed` and the agent answers in a new reply
+        (`continuedBy`), as after a `deny`. If the reply is still running, only the reply stops, and
+        an approval it raised stays pending until you resolve it. A reply waiting on a question has
+        nothing to stop: that is 409 `conflict`. Answer the question or send a message instead.
+      responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: |
+            - `conflict`: the reply is waiting on a question, so nothing is running to stop.
+            - `approval_not_pending`: the approval the reply stopped at is already being applied, or another answer decided it first.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+        '202':
+          description: |
+            Cancellation recorded. The reply is returned as it is now; it ends `cancelled`
+            within seconds (follow it on the stream, or poll). For a reply stopped at an
+            approval, the approvals are denied and it ends `completed`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+        '200':
+          description: The reply had already finished; returned unchanged.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+              example:
+                id: msg_1
+                object: message
+                chatId: chat_7Q
+                role: assistant
+                createdAt: '2026-10-27T17:02:11Z'
+                content:
+                  - type: text
+                    id: p_0
+                    text: I'll fold the target with Boltz-2, 5 samples.
+                status: cancelled
+                startedBy: user
+                inReplyTo: msg_0
+                pendingApprovals: []
+                pendingQuestions: []
+                completedAt: '2026-10-27T17:06:30Z'
+                incompleteReason:
+                error:
+                usage:
+                  agentHours: 0.08
+                  jobsHours: 0.4
+                  totalHours: 0.48
+                  capHours: 40
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /chats/{chatId}/rewind:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+    post:
+      tags: [Chats]
+      operationId: rewindChat
+      summary: Rewind a chat
+      description: |
+        Hides the given message and everything after it, so you can fix a prompt and resend instead of
+        starting a new chat. A reply's id rewinds to the message it answered, and that message is
+        hidden too. A rewind is refused (409) while a reply is in progress or an approval is waiting.
+        The chat's event stream says `chat.rewound`.
+
+        A background subagent that the rewind hides and that is still running is stopped, as
+        `POST /chats/{chatId}/subagents/{subagentId}/cancel` would stop it. This is best effort: if
+        the subagent cannot be found in time, the rewind still succeeds and the subagent runs on.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [beforeMessageId]
+              properties:
+                beforeMessageId: { type: string, description: 'The message to rewind to: it and everything after it are hidden. Ids come from `GET /chats/{chatId}/messages`.' }
+      responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+        '200':
+          description: The chat after rewinding.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Chat' }
+              example:
+                id: chat_7Q
+                object: chat
+                title: PD-L1 binders, hotspot 54-68
+                status: idle
+                source: api
+                activeMessageIds: []
+                effort: high
+                agentId:
+                budget:
+                  capHours: 40
+                  usedHours: 0
+                  perJobHours:
+                autoApprove: false
+                mode: chat
+                workflow:
+                campaign:
+                usage:
+                  agentHours: 0
+                  jobsHours: 0
+                  totalHours: 0
+                  capHours: 40
+                webUrl: https://app.tamarind.bio/agent/chat_7Q
+                createdAt: '2026-10-27T17:02:11Z'
+                updatedAt: '2026-10-27T17:30:00Z'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: '`invalid_request`: the message is neither one you sent nor a reply to one.'
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: |
+            - `reply_in_progress`: a reply is running or queued, or an approval is waiting. Cancel the reply or resolve the approval first.
+            - `conflict`: the chat changed while the rewind ran. Retry.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+  # ───────────────────────────── Events ─────────────────────────────
+  /chats/{chatId}/events:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+    get:
+      tags: [Events]
+      operationId: listChatEvents
+      summary: List chat events
+      description: |
+        The chat's events across all its replies, oldest first. With `stream=true` the connection stays
+        open after a reply ends, so you also receive events between replies, such as jobs finishing and
+        waking the agent. This is the stream to follow a campaign. Streams close about every 60
+        minutes: reconnect with your last cursor. An account can have at most 10 streams open at once
+        (429 beyond that).
+
+        With `messageId`, you get only that reply's events (and `chat.rewound`), and a stream closes
+        after the reply's final event. A stream that is cut short ends with a retryable
+        `stream_interrupted` error event: reconnect with your last cursor.
+      parameters:
+        - name: messageId
+          in: query
+          schema: { type: string, examples: [msg_1] }
+          description: 'Only this reply''s events (and `chat.rewound`, since a rewind can remove it), e.g. the id `POST /chats/{chatId}/messages` returned. A stream then closes when the reply ends. Default: every event in the chat.'
+        - $ref: '#/components/parameters/Stream'
+        - $ref: '#/components/parameters/After'
+        - $ref: '#/components/parameters/LastEventId'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+        '200':
+          description: Events.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EventPage' }
+              example:
+                data:
+                  - id: '2210.0'
+                    type: job.completed
+                    sequence: 2210
+                    chatId: chat_7Q
+                    messageId:
+                    createdAt: '2026-10-27T18:40:12Z'
+                    data:
+                      jobName: rfd-pdl1-batch-3
+                      tool: rfdiffusion
+                      status: Complete
+                  - id: '2211.0'
+                    type: job.completed
+                    sequence: 2211
+                    chatId: chat_7Q
+                    messageId:
+                    createdAt: '2026-10-27T18:40:15Z'
+                    data:
+                      jobName: rfd-pdl1-batch-4
+                      tool: rfdiffusion
+                      status: Complete
+                nextCursor: '2211.0'
+            text/event-stream:
+              schema: { $ref: '#/components/schemas/EventStream' }
+              example: |
+                id: 2210.0
+                event: job.completed
+                data: {"id":"2210.0","type":"job.completed","sequence":2210,"chatId":"chat_7Q","messageId":null,"createdAt":"2026-10-27T18:40:12Z","data":{"jobName":"rfd-pdl1-batch-3","tool":"rfdiffusion","status":"Complete"}}
+
+                id: 2211.0
+                event: job.completed
+                data: {"id":"2211.0","type":"job.completed","sequence":2211,"chatId":"chat_7Q","messageId":null,"createdAt":"2026-10-27T18:40:15Z","data":{"jobName":"rfd-pdl1-batch-4","tool":"rfdiffusion","status":"Complete"}}
+
+                event: ping
+                data: {}
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ───────────────────────────── Approvals ─────────────────────────────
+  /chats/{chatId}/approvals:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+    get:
+      tags: [Approvals]
+      operationId: listApprovals
+      summary: List approvals in a chat
+      description: The actions the agent asked you to approve in this chat, newest first. Use `status=pending` for what is waiting on you now.
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ApprovalStatus' }
+          description: '`pending` lists what is waiting on you right now. Default: all.'
+      responses:
+        '503': { $ref: '#/components/responses/Unavailable' }
+        '200':
+          description: Approvals, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Approval' } }
+              example:
+                data:
+                  - id: apr_x
+                    messageId: msg_1
+                    status: pending
+                    kind: platform
+                    summary: Submit 24 Boltz-2 jobs (~3.1 h)
+                    detail:
+                      operation: submit
+                      tool: boltz
+                      count: 24
+                    estimate:
+                      computeHours: 3.1
+                      jobs: 24
+                    createdAt: '2026-10-27T17:05:40Z'
+                    expiresAt:
+                    resolvedAt:
+                    resolvedBy:
+  /chats/{chatId}/questions/{questionId}:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+      - name: questionId
+        in: path
+        required: true
+        schema: { type: string, examples: [q_8c] }
+        description: The question, from a `question.asked` event or the reply's `pendingQuestions`.
+    post:
+      tags: [Approvals]
+      operationId: answerQuestion
+      summary: Answer a question
+      description: |
+        Answers a question the agent asked. The answer is sent as your next message, so the web app
+        shows the question as answered too. Any message you send after a question answers it the same
+        way.
+
+        `answers` must answer every question on the card, one line each. `text` answers them all at
+        once. If the reply that asked is still waiting, it ends `completed`, and its `continuedBy`
+        names the reply that reads your answer. Repeating the same answer after a lost response
+        returns the answered question and sends nothing twice. An answer counts against the hourly
+        message limit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuestionAnswer' }
+      responses:
+        '200':
+          description: The answered question.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Question' }
+              example:
+                id: q_8c
+                messageId: msg_1
+                status: answered
+                questions:
+                  - question: Which chain is the target?
+                    header: Target chain
+                    multiSelect: false
+                    options:
+                      - label: Chain A
+                        description: PD-L1 IgV domain
+                      - label: Chain B
+                        description: The second copy in the crystal
+                answers:
+                  Which chain is the target?: Chain A
+                answerMessageId: msg_u1052
+                createdAt: '2026-10-27T17:03:02Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`question_not_pending`: the question was already answered.'
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /chats/{chatId}/approvals/{approvalId}:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+      - $ref: '#/components/parameters/ApprovalId'
+    post:
+      tags: [Approvals]
+      operationId: resolveApproval
+      summary: Approve or deny a pending action
+      description: |
+        Approves or denies a pending action. Resolving the reply's last pending approval completes it.
+        The agent's answer to your decision is a new reply, named by the old one's `continuedBy` once
+        it starts: to see it, follow the chat's stream without `messageId`. Repeating the same
+        decision after a lost response returns the resolved approval and runs nothing twice. An
+        approval whose reply was rewound away is `superseded`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalDecision' }
+      responses:
+        '200':
+          description: The resolved approval.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Approval' }
+              example:
+                id: apr_x
+                messageId: msg_1
+                status: approved
+                kind: platform
+                summary: Submit 24 Boltz-2 jobs (~3.1 h)
+                detail:
+                  operation: submit
+                  tool: boltz
+                  count: 24
+                estimate:
+                  computeHours: 3.1
+                  jobs: 24
+                createdAt: '2026-10-27T17:05:40Z'
+                expiresAt:
+                resolvedAt: '2026-10-27T17:06:02Z'
+                resolvedBy: user
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            - `approval_not_pending`: the approval is no longer pending (decided, `superseded` or `expired`), is being applied, or another answer decided it first. Repeating the same decision with no options returns the approval instead of this error.
+            - `conflict`: approving a `campaign_start` could not turn Auto on under the chat's budget, so no campaign started.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: '`invalid_request`: approving a `campaign_start` while the chat''s budget is at or below what it has already used or reserved. Raise it with `PATCH /chats/{chatId}` first.'
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '501':
+          description: '`not_supported`: this approval is for an action the API cannot answer.'
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '503': { $ref: '#/components/responses/Unavailable' }
+
+  # ───────────────────────────── Files ─────────────────────────────
+  /chat-files:
+    post:
+      tags: [Files]
+      operationId: createChatFile
+      summary: Start a file upload
+      description: |
+        Starts a file upload and returns a form to send it with. Before `expiresAt`, `POST` a
+        `multipart/form-data` request to `uploadUrl` with every entry of `uploadFields` as a form
+        field, exactly as given and in that order, and then the file itself as the last field, named
+        `file`. With curl, that is one `-F name=value` per entry of `uploadFields`, then
+        `-F file=@target.pdb`. A successful upload answers `204` with no body.
+
+        A file can be up to 200 MB: storage rejects a larger one (and an empty one) with a `400`
+        whose body names the problem (`EntityTooLarge`), so you do not need to tell us the size. The
+        file's type comes from its name (`contentType` on the file, else `application/octet-stream`),
+        and the upload accepts only that type: it is one of the `uploadFields`, so send them as given.
+
+        Then reference `fileId` in a message's `input`, in any of your chats.
+        Attaching a file copies it into that chat's workspace as `uploads/<fileId>/<filename>`, where
+        the agent reads it. You can start up to 500 uploads an hour (429).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filename]
+              properties:
+                filename: { type: string, maxLength: 255, examples: [target.pdb], description: "The file's name, e.g. `target.pdb`: letters, digits, `.`, `_`, `-`, and `/` for a folder (no empty, `.` or `..` folder, and not starting with `/`). The agent sees this name, and its extension sets the file's `contentType`." }
+      responses:
+        '201':
+          description: Upload slot created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [fileId, uploadUrl, uploadFields, expiresAt]
+                properties:
+                  fileId: { type: string, examples: [file_9f2] }
+                  uploadUrl: { type: string, format: uri, description: 'Where to `POST` the upload form.' }
+                  uploadFields: { type: object, additionalProperties: { type: string }, description: 'The form fields to send with the file, exactly as given and in this order, before the file itself. Their names and values are opaque: do not build or change them.' }
+                  expiresAt: { type: string, format: date-time }
+              example:
+                fileId: file_9f2
+                uploadUrl: https://storage.example.com/
+                uploadFields:
+                  key: uploads/file_9f2/target.pdb
+                  Content-Type: chemical/x-pdb
+                  policy: EXAMPLE
+                  x-amz-algorithm: AWS4-HMAC-SHA256
+                  x-amz-credential: EXAMPLE
+                  x-amz-date: 20261027T170211Z
+                  x-amz-signature: EXAMPLE
+                expiresAt: '2026-10-27T17:17:11Z'
+          headers:
+            x-ratelimit-limit: { $ref: '#/components/headers/RateLimitLimit' }
+            x-ratelimit-remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+            x-ratelimit-reset: { $ref: '#/components/headers/RateLimitReset' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+
+  /chat-files/{fileId}:
+    parameters:
+      - $ref: '#/components/parameters/FileId'
+    get:
+      tags: [Files]
+      operationId: getChatFile
+      summary: Get an uploaded file's status
+      description: 'For a `fileId` from `POST /chat-files`. It is `pending` until its bytes are uploaded, then `ready`. An upload that was never completed becomes `expired` an hour after `expiresAt`, and stays expired: start a new upload.'
+      responses:
+        '200':
+          description: The file.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/File' }
+              example:
+                id: file_9f2
+                object: file
+                filename: target.pdb
+                path: uploads/file_9f2/target.pdb
+                contentType: chemical/x-pdb
+                size: 88140
+                status: ready
+                origin: upload
+                createdAt: '2026-10-27T17:13:50Z'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+
+  /chats/{chatId}/files:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+    get:
+      tags: [Files]
+      operationId: listChatFiles
+      summary: List files in the chat's workspace
+      description: |
+        Lists the files you attached and everything the agent produced (structures, CSVs, reports,
+        code), in `path` order, like the web app's files panel. A listed file's `id` belongs to this
+        chat: download it here, or attach it to a message in this chat. The exception is a file with
+        `origin: campaign`, the campaign's own, which the agent already reads (attaching it is `400`).
+
+        A file you attached is listed at `uploads/<fileId>/<filename>` with an id of its own, and the
+        id from `POST /chat-files` keeps working too. Only the first 20,000 files by path are listed:
+        when a chat has more, every page says `truncated: true`. You can run up to 600 listings an
+        hour (429).
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of files.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/File' } }
+                      truncated: { type: boolean, description: 'Present and true when the chat has more than 20,000 files: only the first 20,000 by path are listed, and `nextCursor: null` is the end of those.' }
+
+              example:
+                data:
+                  - id: file_3f1c0a9e
+                    object: file
+                    filename: target.pdb
+                    path: uploads/file_9f2/target.pdb
+                    contentType: chemical/x-pdb
+                    size: 88140
+                    status: ready
+                    origin: upload
+                    createdAt: '2026-10-27T17:02:11Z'
+                  - id: file_k2
+                    object: file
+                    filename: model_0.cif
+                    path: boltz/model_0.cif
+                    contentType: chemical/x-mmcif
+                    size: 412233
+                    status: ready
+                    origin: job
+                    createdAt: '2026-10-27T17:13:50Z'
+                nextCursor:
+          headers:
+            x-ratelimit-limit: { $ref: '#/components/headers/RateLimitLimit' }
+            x-ratelimit-remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+            x-ratelimit-reset: { $ref: '#/components/headers/RateLimitReset' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /chats/{chatId}/files/{fileId}/content:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+      - $ref: '#/components/parameters/FileId'
+    get:
+      tags: [Files]
+      operationId: downloadChatFile
+      summary: Download a file
+      description: A file from this chat's listing, or one of your uploads.
+      responses:
+        '302':
+          description: Redirect to a short-lived presigned download URL.
+          headers:
+            Location: { schema: { type: string, format: uri }, example: 'https://storage.example.com/files/boltz/model_0.cif?X-Amz-Expires=300&X-Amz-Signature=EXAMPLE' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+
+  # ─────────────────────── Campaign mode ───────────────────────
+  /agent-workflows:
+    get:
+      tags: [Campaign mode]
+      operationId: listAgentWorkflows
+      summary: List campaign workflows
+      description: The agent's built-in design workflows, the same ones its start card offers. They are listed for every caller.
+      responses:
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+        '200':
+          description: Available workflows.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Workflow' } }
+              example:
+                data:
+                  - id: binder-design
+                    label: Binder design
+                    supports:
+                      - plan
+                      - interrupt
+                      - pause
+                      - budget
+                  - id: miniprotein-design
+                    label: Miniprotein design
+                    supports:
+                      - plan
+                      - interrupt
+                      - pause
+                      - budget
+                  - id: chaperone
+                    label: Chaperone
+                    supports:
+                      - plan
+                      - interrupt
+                      - pause
+                      - budget
+  /chats/{chatId}/candidates:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+    get:
+      tags: [Chats]
+      operationId: listCandidates
+      summary: List design candidates
+      description: |
+        Lists the designs the agent published for this chat's campaign: one set per publish, newest
+        set first, each in its own order. `rank` is the position within its set and does not change
+        with `sort`. The list is empty if the chat never ran a campaign.
+
+        Candidate ids are stable between requests and never shared by two designs; do not parse them.
+        If the agent republished a set, only its latest version is listed.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: sort
+          in: query
+          description: "Rank by a metric, `-` for descending, e.g. `-iptm` for the best designs first. Default: the listed order (`rank`)."
+          schema: { type: string, examples: ['-iptm'] }
+      responses:
+        '200':
+          description: A page of candidates.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/Candidate' } }
+              example:
+                data:
+                  - id: cand_07
+                    name: pdl1-b07
+                    sequence: MSEEKLKELLKRAEELAKKGDLEGAIRVLEEAL
+                    rank: 1
+                    metrics:
+                      iptm: 0.86
+                      plddt: 89.2
+                      pae_interaction: 5.1
+                    hasStructure: true
+                    jobName: boltz-pdl1-b07
+                  - id: cand_12
+                    name: pdl1-b12
+                    sequence: MSPEELIKKAIELAKEGNLEEALKLLKEAA
+                    rank: 2
+                    metrics:
+                      iptm: 0.83
+                      plddt: 87.5
+                      pae_interaction: 6.0
+                    hasStructure: false
+                    jobName: boltz-pdl1-b12
+                nextCursor: Y2FuZF8xMg
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /chats/{chatId}/candidates/{candidateId}/structure:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+      - name: candidateId
+        in: path
+        required: true
+        schema: { type: string }
+        description: The candidate, from `GET /chats/{chatId}/candidates`.
+    get:
+      tags: [Chats]
+      operationId: getCandidateStructure
+      summary: Download a candidate's structure
+      description: |
+        Downloads the structure file of a candidate whose `hasStructure` is true, as stored: PDB
+        (`chemical/x-pdb`), mmCIF (`chemical/x-mmcif`) or SDF (`chemical/x-mdl-sdfile`), named for the
+        design in `Content-Disposition`. The file is read with your key, so a molecule you may not read
+        is a 404, whoever's chat it is. A design with several structure files gives you one, the same
+        one every time unless it changes: its primary structure file, else its newest, with a PDB or
+        mmCIF before any SDF.
+
+        - 404 `not_found` when there is no structure to serve. A `hasStructure: false` in the list can
+          also mean the check timed out, so this route may still serve the file.
+        - 413 `payload_too_large` for a file over 10 MiB.
+        - 503 `unavailable` (retryable) when the file cannot be fetched right now.
+        - 429 when you read too many at once. Wait for `Retry-After`.
+      responses:
+        '200':
+          description: The structure file.
+          headers:
+            Content-Disposition: { schema: { type: string }, description: 'An attachment named for the design, e.g. `attachment; filename="pdl1-b07.pdb"`.' }
+          content:
+            chemical/x-pdb:
+              schema: { type: string, format: binary }
+            chemical/x-mmcif:
+              schema: { type: string, format: binary }
+            chemical/x-mdl-sdfile:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413':
+          description: The structure file is over 10 MiB, more than this route serves (`payload_too_large`).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+
+  /chats/{chatId}/jobs:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+    get:
+      tags: [Chats]
+      operationId: listChatJobs
+      summary: List a chat's jobs
+      description: |
+        Lists every job the agent submitted in this chat, in either mode, newest first. A batch is listed
+        once, not with its members. Each `jobName` works directly with the jobs API (`/api/jobs`,
+        `/api/result`). A job can take a few seconds to appear after it is submitted. A page can hold
+        fewer than `limit`, even none, and still have a `nextCursor`: follow it to the end.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of jobs.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/JobRef' } }
+              example:
+                data:
+                  - jobName: boltz-target-1
+                    tool: boltz
+                    status: Complete
+                    submittedAt: '2026-10-27T17:06:05Z'
+                    computeHours: 0.4
+                  - jobName: rfd-pdl1-batch-3
+                    tool: rfdiffusion
+                    status: Complete
+                    submittedAt: '2026-10-27T18:02:40Z'
+                    computeHours: 0.7
+                nextCursor:
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+
+  /chats/{chatId}/tasks/{taskId}:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+      - name: taskId
+        in: path
+        required: true
+        schema: { type: string }
+        description: The task, from the campaign's `plan.tasks` on the chat.
+    get:
+      tags: [Chats]
+      operationId: getChatTask
+      summary: Get a task's report
+      description: |
+        Reads one task of the campaign's plan, by the `task-<n>` id the plan lists it under. An id the
+        chat's campaign never had is a 404, including on a chat that never ran a campaign. `report` is
+        the plan's note on the task, or null when there is none.
+      responses:
+        '200':
+          description: The task report.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, title, status]
+                properties:
+                  id: { type: string }
+                  title: { type: string }
+                  status: { type: string, enum: [pending, running, done, failed] }
+                  report: { type: [string, 'null'], description: "The plan's note on the task: what it is doing, what it waits on, who owns it. Null when there is none." }
+              example:
+                id: task-2
+                title: Pick hotspot residues
+                status: running
+                report: Picking hotspot residues
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+
+  /chats/{chatId}/subagents:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+    get:
+      tags: [Subagents]
+      operationId: listSubagents
+      summary: List a chat's subagents
+      description: Newest first, without their steps. Read one for its steps and result.
+      parameters:
+        - name: messageId
+          in: query
+          description: Only the subagents this reply started. Your own message's id names its reply.
+          schema: { type: string }
+        - name: status
+          in: query
+          description: Only subagents in this status, e.g. `running` for the ones still working.
+          schema: { $ref: '#/components/schemas/SubagentStatus' }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of subagents.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Subagent' } }
+                  nextCursor: { type: [string, 'null'] }
+              example:
+                data:
+                  - id: sub_5c
+                    object: subagent
+                    chatId: chat_7Q
+                    messageId: msg_1
+                    name: hotspot-researcher
+                    title: Check the hotspot is not glycosylated
+                    instructions: Check whether any of PD-L1 residues 54-68 carry a glycan.
+                    background: true
+                    status: running
+                    result:
+                    createdAt: '2026-10-27T17:05:30Z'
+                    completedAt:
+                  - id: sub_3h
+                    object: subagent
+                    chatId: chat_7Q
+                    messageId: msg_1
+                    name: hotspot-researcher
+                    title: Find the PD-L1 hotspot residues
+                    instructions: Read the PD-L1/PD-1 complex (3BIK) and name the PD-L1 residues that carry the PD-1 contact.
+                    background: false
+                    status: completed
+                    result: Residues 54-68 (loop C'C'') form the PD-1 contact patch; 56, 63 and 66 are the anchors.
+                    createdAt: '2026-10-27T17:03:40Z'
+                    completedAt: '2026-10-27T17:05:12Z'
+                nextCursor:
+        '404': { $ref: '#/components/responses/NotFound' }
+  /chats/{chatId}/subagents/{subagentId}:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+      - $ref: '#/components/parameters/SubagentId'
+    get:
+      tags: [Subagents]
+      operationId: getSubagent
+      summary: Get a subagent
+      description: Its brief, its steps so far and, once it has finished, what it found.
+      responses:
+        '200':
+          description: The subagent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subagent' }
+              example:
+                id: sub_3h
+                object: subagent
+                chatId: chat_7Q
+                messageId: msg_1
+                name: hotspot-researcher
+                title: Find the PD-L1 hotspot residues
+                instructions: Read the PD-L1/PD-1 complex (3BIK) and name the PD-L1 residues that carry the PD-1 contact.
+                background: false
+                status: completed
+                result: Residues 54-68 (loop C'C'') form the PD-1 contact patch; 56, 63 and 66 are the anchors.
+                createdAt: '2026-10-27T17:03:40Z'
+                completedAt: '2026-10-27T17:05:12Z'
+                steps:
+                  - id: stp_s1
+                    kind: site
+                    title: Reading 3BIK from the PDB
+                    status: completed
+                    subagentId: sub_3h
+                  - id: stp_s2
+                    kind: code
+                    title: Measuring buried surface per residue
+                    status: completed
+                    subagentId: sub_3h
+        '404': { $ref: '#/components/responses/NotFound' }
+  /chats/{chatId}/subagents/{subagentId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+      - $ref: '#/components/parameters/SubagentId'
+    post:
+      tags: [Subagents]
+      operationId: cancelSubagent
+      summary: Stop a subagent
+      description: |
+        Stops this subagent only. Its reply goes on and is told the subagent was stopped. Only a
+        `background` subagent can be stopped on its own. One that runs inside its reply (`background: false`)
+        is part of that reply's work, so cancelling it is 409 `subagent_not_cancellable`. Cancel the reply
+        (`cancelMessage`) to stop both.
+      responses:
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`subagent_not_cancellable`: the subagent runs inside its reply (`background: false`). Cancel the reply instead.'
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '202':
+          description: |
+            Cancellation recorded. The subagent is returned as it is now (`running`); it ends
+            `cancelled` within seconds (follow `subagent.completed` on the stream, or poll).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subagent' }
+        '200':
+          description: The subagent had already finished; returned unchanged.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subagent' }
+              example:
+                id: sub_5c
+                object: subagent
+                chatId: chat_7Q
+                messageId: msg_1
+                name: hotspot-researcher
+                title: Check the hotspot is not glycosylated
+                instructions: Check whether any of PD-L1 residues 54-68 carry a glycan.
+                background: true
+                status: cancelled
+                result: The helper was stopped before it finished.
+                createdAt: '2026-10-27T17:05:30Z'
+                completedAt: '2026-10-27T17:06:10Z'
+
+  /chats/{chatId}/exports:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+    post:
+      tags: [Chats]
+      operationId: createChatExport
+      summary: Export the chat's results
+      description: |
+        Exports the chat's campaign results. `candidates.csv` holds the candidates that
+        `GET /chats/{chatId}/candidates` lists, with their metrics. A `zip` also holds each candidate's
+        structure file (those with `hasStructure`) under `structures/`, at most 200 files and 256 MiB
+        in all, and a `metadata.json` with the chat, the export time, the number of candidates and
+        structures, and the candidates left out:
+
+        - `missingStructures`: could not be read in time.
+        - `structuresOverLimit`: past the file count or size limit, or a file over 10 MiB.
+        - `structuresUnchecked`: could not be checked.
+
+        A structure that is left out never fails the export. Text cells that start like a spreadsheet
+        formula are prefixed with `'`. You can start up to 30 exports an hour (429).
+
+        Retrying with the same `Idempotency-Key` returns the same export, not a second one. The key is tied to the `format`: a different one is refused.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                format: { type: string, enum: [csv, zip], default: zip, description: '`zip` bundles the metrics table (`candidates.csv`) and the candidates'' structure files with a `metadata.json`; `csv` is the metrics table only, for a spreadsheet or LIMS import. Default `zip`.' }
+      responses:
+        '202':
+          description: Export started.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Export' }
+              example:
+                id: exp_5d
+                status: pending
+                format: zip
+                downloadUrl:
+                expiresAt:
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            - `no_campaign`: the chat has not run a campaign, so it has no results to export.
+            - `idempotency_key_reused`: that `Idempotency-Key` was used with a different `format`.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /chats/{chatId}/exports/{exportId}:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+      - name: exportId
+        in: path
+        required: true
+        schema: { type: string }
+        description: The export, from `POST /chats/{chatId}/exports`.
+    get:
+      tags: [Chats]
+      operationId: getChatExport
+      summary: Get an export
+      responses:
+        '200':
+          description: The export; `downloadUrl` is set once `status` is `ready`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Export' }
+              example:
+                id: exp_5d
+                status: ready
+                format: zip
+                downloadUrl: https://storage.example.com/exports/exp_5d.zip?X-Amz-Signature=EXAMPLE
+                expiresAt: '2026-10-28T18:45:00Z'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+
+  # ───────────────────────────── Usage ─────────────────────────────
+  /chats/{chatId}/usage:
+    parameters:
+      - $ref: '#/components/parameters/ChatId'
+    get:
+      tags: [Usage]
+      operationId: getChatUsage
+      summary: Get a chat's usage
+      description: |
+        What the chat has used so far, in hours: the agent's own work (`agentHours`) and the jobs'
+        GPU-weighted hours (`jobsHours`), against the chat's budget (`capHours`). The agent's hours
+        are counted as it works; the amount billed can trail that by a few minutes, and the larger of
+        the two is what is shown.
+      responses:
+        '200':
+          description: Usage so far.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Usage' }
+              example:
+                agentHours: 0.42
+                jobsHours: 1.1
+                totalHours: 1.52
+                capHours: 40
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /agent-usage:
+    get:
+      tags: [Usage]
+      operationId: getAgentUsage
+      summary: Get your monthly agent usage
+      description: |
+        Your own agent usage for a month, in hours. It covers every chat of yours, including ones you
+        made in the web app, and is the usage of the key's user under the account they are in now:
+        their organization, or their personal account. Jobs are not in it: they are billed and
+        reported with the rest of your compute (the jobs API, the web app's usage page). A chat's own
+        jobs are in `GET /chats/{chatId}/usage`.
+      parameters:
+        - name: month
+          in: query
+          description: 'Which month, `YYYY-MM` in US Pacific time (when usage rolls over), e.g. for a monthly cost report. Default: the current month.'
+          schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }
+      responses:
+        '200':
+          description: Totals for the month.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentUsage' }
+              example:
+                month: 2026-10
+                agentHours: 12.4
+                remainingHours: 925.7
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: The same Tamarind API key, sent as a bearer token.
+
+  parameters:
+    SubagentId:
+      name: subagentId
+      in: path
+      required: true
+      schema: { type: string, examples: [sub_3h] }
+      description: The subagent, from a `subagent.started` event, a `helper` step, or the list.
+    ChatId:
+      name: chatId
+      in: path
+      required: true
+      schema: { type: string, examples: [chat_7Q] }
+      description: The chat, e.g. `chat_7Q`, from `POST /chats` or `GET /chats`.
+    MessageId:
+      name: messageId
+      in: path
+      required: true
+      schema: { type: string, examples: [msg_1] }
+      description: 'The message, e.g. `msg_1`: the reply `POST /chats/{chatId}/messages` returned, one listed by `GET /chats/{chatId}/messages` or the chat''s `activeMessageIds`, or a `message.created` event.'
+    ApprovalId:
+      name: approvalId
+      in: path
+      required: true
+      schema: { type: string, examples: [apr_x] }
+      description: The approval, e.g. `apr_x`, from a `message.requires_action` event, the reply's `pendingApprovals`, or `GET /chats/{chatId}/approvals`.
+    FileId:
+      name: fileId
+      in: path
+      required: true
+      schema: { type: string, examples: [file_9f2] }
+      description: The file, e.g. `file_9f2`, from `POST /chat-files` or a chat's file list.
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      description: Page size, 1-200. Raise it to page through a long history in fewer calls.
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor from the previous page's `nextCursor`. Omit for the first page; stop when `nextCursor` is null. A cursor that did not come from this list is 400 `invalid_cursor`.
+      schema: { type: string }
+    Stream:
+      name: stream
+      in: query
+      description: '`true` keeps the connection open and sends events as they happen (SSE). `false` returns one page of past events: use it to catch up after being offline, then stream from the last id.'
+      schema: { type: boolean, default: false }
+    After:
+      name: after
+      in: query
+      description: Only events after this cursor (an event `id`, e.g. `1042.0`). Use it to resume where you left off, from a stored cursor or the last event you processed. A cursor from beyond the end of the chat's events is 400 `invalid_cursor`.
+      schema: { type: string, pattern: '^\d+(\.\d+)?$', examples: ['1042.0'] }
+    LastEventId:
+      name: Last-Event-ID
+      in: header
+      description: The standard SSE resume header, same meaning as `after`. Browsers' EventSource sends it automatically on reconnect; set it yourself in other clients.
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: 'Any unique string (a UUID is typical), up to 255 characters. Send the same key when you retry after a timeout or network error and the request is applied once. Keys are kept for at least 24 h. A key used again for a different request is 409 `idempotency_key_reused`; the operation says what makes a request different. A blank key is 400.'
+      schema: { type: string, maxLength: 255 }
+
+  headers:
+    RateLimitLimit:
+      description: New messages your account may send in an hour, across all its keys. Returned on a message send and on its 429.
+      schema: { type: integer }
+    RateLimitRemaining:
+      description: New messages left this hour.
+      schema: { type: integer }
+    RateLimitReset:
+      description: Seconds until the hour's count starts again.
+      schema: { type: integer }
+  responses:
+    BadRequest:
+      description: The request is malformed or breaks a rule on one of its fields. `code` and `detail` say which.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    Unauthenticated:
+      description: Missing or invalid API key.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    Forbidden:
+      description: The key is valid but the request is not allowed. `code` says why, e.g. `ai_disabled_for_org` or `agent_api_not_available_for_trial_keys`.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    NotFound:
+      description: No such resource, or it is not visible to you. A deleted chat reads as not found.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    BudgetExhausted:
+      description: '`budget_exhausted`: the chat''s budget (`budgetHours`) is spent. Raise it with `PATCH /chats/{chatId}`. If your own account''s budget runs out instead, or the chat''s budget is used up by work the send cannot see yet (a batch still running), the message is accepted and the reply ends `incomplete` with `budget_exhausted`.'
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    PayloadTooLarge:
+      description: 'The message or answer is over 100,000 characters or about 295,000 bytes of UTF-8 (so CJK or emoji text fits fewer characters), or an attached file is over 200 MB.'
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    RateLimited:
+      description: You are past a limit (see Limits in the introduction), or are sending too many requests with keys that do not exist. Wait `Retry-After` seconds.
+      headers:
+        Retry-After: { schema: { type: integer }, description: Seconds to wait. }
+        x-ratelimit-limit: { $ref: '#/components/headers/RateLimitLimit' }
+        x-ratelimit-remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+        x-ratelimit-reset: { $ref: '#/components/headers/RateLimitReset' }
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    InternalError:
+      description: Something failed on our side (`internal_error`; `retryable` is true). Retry, with the same `Idempotency-Key` if the request takes one.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    Unavailable:
+      description: Temporarily unavailable (`unavailable`, among others), e.g. the rate limits could not be checked; `retryable` is true. Retry after `Retry-After` when it is set, with the same `Idempotency-Key` if the request takes one.
+      headers:
+        Retry-After: { schema: { type: integer }, description: Seconds to wait, when known. }
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+  schemas:
+    # ── shared ──
+    Problem:
+      type: object
+      description: RFC 9457 problem details, in the same shape as the Tamarind public jobs API.
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri, examples: ['https://app.tamarind.bio/api-docs/errors/reply_in_progress'] }
+        title: { type: string }
+        status: { type: integer }
+        code:
+          type: string
+          examples: [reply_in_progress]
+          description: |
+            Stable; branch on it, not on `detail`. New codes may be added, so handle one you do not know
+            by its status. Common codes, by status:
+            - 400 `invalid_request`, `invalid_cursor`
+            - 401 `unauthenticated` (no key), `invalid_api_key`
+            - 402 `budget_exhausted` (a send to a chat whose budget is spent)
+            - 403 `ai_disabled_for_org`, `agent_api_not_available_for_trial_keys`, `organization_read_disabled`, `organization_compute_disabled` (an organization that is not active may read but not send or approve work)
+            - 404 `not_found` (also another user's chat, a deleted one, and an `agentId` you cannot use)
+            - 405 `method_not_allowed`
+            - 409 `conflict` (retryable when the chat changed under the request), `reply_in_progress`, `idempotency_key_reused`, `question_not_pending`, `approval_not_pending`, `not_in_campaign_mode`, `no_campaign`, `subagent_not_cancellable`
+            - 413 `payload_too_large`
+            - 422 `invalid_request` (a rewind to a message that is not a prompt, or a budget the chat has already spent), `unknown_workflow`
+            - 429 `rate_limited`
+            - 500 `internal_error`
+            - 501 `not_supported` (an approval for an action this API cannot answer, or a Tamarind deployment that cannot serve the chat)
+            - 503 `unavailable`, `auth_unavailable`, `account_not_ready`, `organization_access_unavailable`
+            Stream `error` events: `key_revoked`, `not_found` (the chat was deleted), `stream_interrupted`. A failed reply's `error.code`: `agent_error`.
+        detail: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              message: { type: string }
+        retryable: { type: boolean }
+        requestId: { type: string }
+    Page:
+      type: object
+      required: [nextCursor]
+      properties:
+        nextCursor: { type: [string, 'null'] }
+    # ── chats ──
+    ChatStatus:
+      type: string
+      description: |
+        - `idle`: nothing running.
+        - `running`: a reply is in progress.
+        - `requires_action`: a reply is waiting on an approval or a question.
+        - `waiting_on_jobs`: the agent is waiting for submitted jobs and will wake when they finish.
+      enum: [idle, running, requires_action, waiting_on_jobs]
+    Chat:
+      type: object
+      required: [id, object, title, status, source, createdAt, updatedAt]
+      properties:
+        id: { type: string, examples: [chat_7Q] }
+        object: { const: chat }
+        title: { type: string }
+        status: { $ref: '#/components/schemas/ChatStatus' }
+        source: { type: string, enum: [api, ui], description: Where the chat was started. Both kinds appear in the web app sidebar. }
+        activeMessageIds:
+          type: array
+          items: { type: string }
+          description: 'Replies in progress, including ones the agent started on its own. Use them to cancel or follow a reply you did not start. Oldest first: the first is running, the rest are queued. Empty when idle. Not in `GET /chats` items, which say only whether the chat is working: read the chat for its replies.'
+        effort: { $ref: '#/components/schemas/Effort' }
+        agentId: { type: [string, 'null'], description: "The saved agent (from the web app's agent builder) this chat runs, fixed when it started. Null: the default agent." }
+        budget: { $ref: '#/components/schemas/Budget' }
+        autoApprove: { type: boolean, description: 'Whether Auto is on: job submissions within `budget.perJobHours` run without asking. Deletes and cancels still ask unless `dangerouslyApproveAll` is on.' }
+        dangerouslyApproveAll: { type: boolean, description: 'Every action the agent asks about is approved without asking (see the field on `POST /chats`). False whenever `autoApprove` is false. Not in `GET /chats` items.' }
+        mode: { $ref: '#/components/schemas/ChatMode' }
+        workflow: { type: [string, 'null'], description: 'The workflow the campaign runs, from `GET /agent-workflows`. Null in chat mode.' }
+        campaign:
+          description: 'The chat''s campaign. Null if it never started one. In `GET /chats` items, without `plan`.'
+          oneOf:
+            - $ref: '#/components/schemas/Campaign'
+            - type: 'null'
+        usage: { $ref: '#/components/schemas/Usage' }
+        webUrl: { type: string, format: uri, description: Open this chat in the web app. }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    SharedChat:
+      type: object
+      description: A chat of a teammate that you may read and not change. It has no status, budget or usage, which are its owner's.
+      required: [id, object, readOnly, title, ownerEmail, source, mode, webUrl, createdAt, updatedAt]
+      properties:
+        id: { type: string, examples: [chat_7Q] }
+        object: { const: chat }
+        readOnly: { const: true }
+        title: { type: string }
+        ownerEmail: { type: string, description: The teammate the chat belongs to. }
+        source: { type: string, enum: [api, ui], description: Where the chat was started. }
+        mode: { $ref: '#/components/schemas/ChatMode' }
+        campaign:
+          description: 'The chat''s campaign. Null if it never started one. Only in `GET /chats/{chatId}`.'
+          oneOf:
+            - $ref: '#/components/schemas/Campaign'
+            - type: 'null'
+        webUrl: { type: string, format: uri, description: Open this chat in the web app. }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ChatCreate:
+      type: object
+      description: Every field is optional.
+      properties:
+        title: { type: string, maxLength: 200, description: 'Shown in the web app sidebar. Set it to something your users will recognise, e.g. the ELN entry name. Default: generated from the first message.' }
+        effort: { $ref: '#/components/schemas/Effort', description: 'How hard the agent thinks before acting. `low` is fastest and cheapest, for lookups and simple edits; `high` suits most design work; `max` is for hard multi-step problems, and is the slowest and most expensive. Default `high`.' }
+        agentId: { type: string, pattern: '^agt_[0-9a-f]{20}$', description: "Run a saved agent from the web app's agent builder, with its instructions, tools and settings, for the whole chat: it cannot be changed later. A chat starts on your own agent's latest saved version, or on the version published to your organization for a colleague's. Later edits reach new chats only. 404 `not_found` for an agent that is archived, a colleague's unpublished draft, or not yours to use." }
+        mode: { $ref: '#/components/schemas/ChatMode', description: '`campaign` makes this a design campaign: the first message is the objective, and the campaign runs within the budget once its `campaign_start` approval is approved. Default `chat`.' }
+        workflow: { type: string, description: 'Which campaign workflow to run, from `GET /agent-workflows`. Campaign mode only. Default: the one the agent''s offer names.' }
+        budgetHours: { $ref: '#/components/schemas/BudgetHours', description: 'The chat''s budget, campaign included. Once it is spent the agent stops and Auto submits nothing more; jobs you approve yourself still run. Set it lower than the default when a script runs unattended.' }
+        perJobHours: { type: number, exclusiveMinimum: 0, description: 'Largest single job that `autoApprove` may submit without asking. Use it to let small jobs run hands-free while big ones still need a yes. Needs `autoApprove: true` (400 otherwise). Default: no ceiling.' }
+        autoApprove: { type: boolean, default: false, description: '`true` turns on Auto: the agent submits jobs within the budget without pausing for approval. Use it for unattended runs; deletes and cancels still ask unless `dangerouslyApproveAll` is on. Default off.' }
+        dangerouslyApproveAll:
+          type: boolean
+          default: false
+          description: |
+            Approves every action the agent asks about, with no one watching: deleting and cancelling,
+            running code, installing packages, web and site access, changes to the agent's own settings
+            and skills (it can widen its own allowed sites, packages and approvals), publishing a
+            pipeline to your whole organization, deploying custom tool code, ordering a paid wet-lab
+            assay and starting a campaign. Use it only for runs nobody is watching.
+
+            Needs `autoApprove: true` (400 otherwise) and turns off with it: turning Auto off, a spent
+            budget and pausing a campaign all turn it off. Jobs still run only within `budgetHours` and
+            `perJobHours`. Assay orders and custom tools are not bounded by those limits.
+
+            What stays held for you is a check or a limit, not a click: a batch that names files outside
+            your own, a pipeline that cannot be priced, a settings change too large to show, web access
+            the agent's settings turn off, and a custom tool's test run. A campaign it starts uses the
+            `workflow` you named, else the one the agent offers, within the chat's budget.
+
+            It applies to actions the agent asks about while it is on. An action already waiting when
+            you turn it on is handled by that `PATCH` (see `PATCH /chats/{chatId}`). Default off.
+    ChatUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        title: { type: string, maxLength: 200, description: Rename the chat. }
+        effort: { $ref: '#/components/schemas/Effort', description: 'Change the effort for future messages, e.g. `max` when a task turns out harder than expected, or `low` for quick follow-ups.' }
+        mode: { $ref: '#/components/schemas/ChatMode', description: 'Switch to `campaign` to hand the chat''s task to an autonomous campaign; the chat keeps its id, history and stream. `chat` returns a chat that has not started a campaign to plain chat (409 `conflict` once one has: pause it with `campaign.status`).' }
+        workflow: { type: string, description: 'The workflow the campaign will run; default: the one the agent''s offer names. It cannot be changed once the campaign has started (409 `conflict`).' }
+        budgetHours: { $ref: '#/components/schemas/BudgetHours', description: "Raise or lower the chat's spend cap, in either mode, e.g. to let a campaign that is going well continue. A campaign spends from the same budget." }
+        perJobHours: { type: number, exclusiveMinimum: 0, description: "Change the largest job `autoApprove` may submit without asking. Send it with `autoApprove: true`; a limit you leave out keeps the value the chat shows." }
+        autoApprove:
+          type: boolean
+          description: |
+            Turn hands-free job submission on or off, e.g. off before you review a campaign's next batch
+            yourself.
+            - `true` applies the `budgetHours` and `perJobHours` in this request. A limit you leave out
+              keeps the chat's current one, so `true` with no limits on a chat where Auto is already on
+              changes nothing.
+            - The budget belongs to the chat: it carries across Auto being turned off and on.
+            - `true` on a chat whose budget is already spent is 422. Send a higher `budgetHours` with it.
+            - `false` takes no `budgetHours` or `perJobHours` in the same request (400).
+        dangerouslyApproveAll:
+          type: boolean
+          description: |
+            Turn approve-all on or off (see `POST /chats` for what it approves). `true` needs `autoApprove`
+            on once the request is done: send `autoApprove: true` with it, or have it on already (400
+            otherwise).
+
+            Turning it off applies to every action the agent asks about after the change. An action that
+            is already being carried out at that moment is not recalled. It is also off after
+            `autoApprove: false` or `campaign.status: paused`, so send `true` again to resume it.
+
+            Turning it on, from off, also answers once the approvals the agent is waiting on right now:
+            those of a reply in progress (one of `activeMessageIds`) that it would approve if it asked
+            now. They are answered as `dangerouslyApproveAll`, so this can run an action that was
+            waiting, such as a delete. Only that change answers anything: sending `true` while it is
+            already on, or creating a chat with it on, answers nothing.
+
+            Approvals it does not answer stay waiting for you: ones left by a reply that was stopped,
+            failed or finished, ones the agent asked for between replies, and any it could not answer
+            (`GET /chats/{chatId}/approvals` lists what is left; to have it try again, send `false`
+            and then `true`). If an approval for the very action the agent asks for is already waiting,
+            the flag does not answer it for you: the agent is told so and waits for your answer.
+        campaign:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [running, paused]
+              description: '`paused` stops new work while running jobs finish (e.g. to review results): it is `autoApprove` off. `running` resumes: it is `autoApprove` on. Naming `autoApprove` with a status that disagrees is 400. Idempotent; 409 `no_campaign` before a campaign has started.'
+          description: Campaign controls. Campaign mode only.
+    BudgetHours:
+      type: number
+      exclusiveMinimum: 0
+      description: |
+        The chat's budget in weighted hours: $1 of model spend is 1 h at the standard rate, and GPU
+        jobs are weighted by hardware. Everything the chat spends counts toward it: the agent's model
+        use, and the jobs submitted in the chat, including ones you approved yourself.
+
+        When the budget is spent:
+        - The agent makes no more model calls. A reply that reaches the limit ends `incomplete` with
+          `budget_exhausted`, and a new message is refused with 402 `budget_exhausted` until you raise
+          the budget. The refusal is checked when you send, so spend it cannot see yet (a batch still
+          running) ends that reply `incomplete` instead.
+        - Auto submits no more jobs, and turns off.
+
+        A job you approve yourself still runs on a spent budget, and its hours count. The budget caps
+        what the agent does unasked, not everything the chat can spend.
+
+        This holds for every chat created through the API. A chat started in the web app is held to its
+        budget only while Auto is on, or after Auto stopped because the budget ran out.
+
+        A budget must be between one second (1/3600 h) and 100,000 h (400 otherwise), and above what the
+        chat has already used or reserved (422 otherwise). Default: your remaining balance, capped at
+        20,000 h. Approvals still pause unless `autoApprove` is on, so the default never lets jobs run
+        unasked.
+    Budget:
+      type: object
+      required: [capHours, usedHours]
+      properties:
+        capHours: { type: [number, 'null'], description: 'The cap; null when the chat has none.' }
+        usedHours: { type: [number, 'null'], description: 'Spent so far. Null when it cannot be read right now.' }
+        perJobHours: { type: [number, 'null'] }
+    Effort:
+      type: string
+      enum: [low, medium, high, max]
+    ChatMode:
+      type: string
+      description: |
+        - `chat`: a plain conversation.
+        - `campaign`: the chat runs a design workflow autonomously within a budget.
+
+        A chat reads `campaign` once it is in campaign mode and stays `campaign` after a pause;
+        whether it has run a campaign is `campaign != null`. In a request it is the mode you want.
+      enum: [chat, campaign]
+      default: chat
+
+    # ── messages & content ──
+    InputPart:
+      oneOf:
+        - type: object
+          title: TextPart
+          required: [type, text]
+          properties:
+            type: { const: text }
+            text: { type: string, minLength: 1, maxLength: 100000 }
+        - type: object
+          title: FilePart
+          required: [type, fileId]
+          properties:
+            type: { const: file }
+            fileId: { type: string, maxLength: 2048, description: 'From `POST /chat-files` (once its bytes are uploaded, else `409`), or from this chat''s file listing (not one with `origin: campaign`: `400`). Anything else is `404`.' }
+      discriminator: { propertyName: type }
+    OutputPart:
+      oneOf:
+        - type: object
+          title: OutputText
+          required: [type, text]
+          properties:
+            type: { const: text }
+            id: { type: string, description: 'Matches `partId` on `output_text.*` events.' }
+            text: { type: string }
+        - type: object
+          title: OutputFile
+          required: [type, fileId]
+          properties:
+            type: { const: file }
+            fileId: { type: string, description: "The file's id. For a file attached in the web app this is its path in the chat's workspace; its id is in the chat's file listing." }
+            path: { type: string }
+        - type: object
+          title: OutputStep
+          description: A step of the reply's own. The steps a subagent took are on the subagent (`getSubagent`); the reply has the `helper` step that started it.
+          required: [type, step]
+          properties:
+            type: { const: step }
+            step: { $ref: '#/components/schemas/Step' }
+    Message:
+      type: object
+      description: |
+        Yours (`role: user`) or the agent's reply (`role: assistant`). The fields from `status` down
+        are set on replies only.
+      required: [id, object, chatId, role, content, createdAt]
+      properties:
+        id: { type: string, examples: [msg_1] }
+        object: { const: message }
+        chatId: { type: string }
+        role: { type: string, enum: [user, assistant] }
+        content: { type: array, items: { $ref: '#/components/schemas/OutputPart' } }
+        createdAt: { type: string, format: date-time }
+        status: { $ref: '#/components/schemas/MessageStatus' }
+        startedBy:
+          type: string
+          enum: [user, job, timer, continuation, campaign]
+          description: |
+            What started this reply.
+            - `user`: your message (`inReplyTo`).
+            - `job`: jobs finishing woke the agent.
+            - `timer`: Tamarind woke the agent, on a schedule while Auto runs your jobs (to check on them
+              or give a status update), or to tell it Auto was paused, stopped or resumed.
+            - `continuation`: the agent carrying on from a reply that ended `incomplete`, because it hit
+              a limit or was interrupted.
+            - `campaign`: a campaign step.
+        inReplyTo: { type: [string, 'null'], description: 'Your message this replies to. Null when the agent started the reply.' }
+        continuedBy: { type: [string, 'null'], description: 'Set when a message you sent while this reply ran was read into it: the reply that carried the work on from there. This reply then ends `completed`.' }
+        incompleteReason:
+          type: [string, 'null']
+          enum: [budget_exhausted, turn_time_limit, step_limit, context_limit, interrupted, max_output, rewound, null]
+          description: |
+            Why the reply ended early.
+            - `budget_exhausted`: the chat's budget ran out, or your Tamarind budget (personal, team or
+              organization, or a free plan's monthly assistant allowance). Raise it, then send again.
+            - `turn_time_limit`: the reply took longer than a single reply is allowed to.
+            - `step_limit`: the reply used up the number of steps (tool calls) a single reply is allowed.
+            - `context_limit`: the conversation grew too long for the agent to keep reading in full.
+            - `interrupted`: the reply was cut off by a restart on our side. The agent usually carries on by
+              itself in a new reply (`startedBy: continuation`); if none follows, send your message again.
+            - `max_output`: the reply reached the most text a single reply is allowed to write.
+            - `rewound`: a rewind hid how the reply ended. It never carries on.
+
+            After `turn_time_limit`, `step_limit`, `context_limit` or `interrupted` the agent may carry on
+            in a new reply of its own (`startedBy: continuation`).
+        error:
+          type: [object, 'null']
+          properties:
+            code: { type: string }
+            message: { type: string }
+        pendingApprovals: { type: array, items: { $ref: '#/components/schemas/Approval' } }
+        pendingQuestions: { type: array, items: { $ref: '#/components/schemas/Question' } }
+        usage: { $ref: '#/components/schemas/Usage' }
+        completedAt: { type: [string, 'null'], format: date-time }
+    Step:
+      type: object
+      description: |
+        Something the agent did, in words. A step never carries the tool's arguments or output. What
+        a step produced reaches you as its own events and collections: `job.*` events, files,
+        candidates. An action the web app hides (a silent web call, a question put to you) is not a
+        step.
+      required: [id, kind, title, status]
+      properties:
+        id: { type: string, examples: [stp_1] }
+        kind:
+          type: string
+          enum: [platform, code, web, site, helper, other]
+          description: |
+            - `platform`: a Tamarind action, e.g. submitting or reading jobs, files or molecules.
+            - `code`: running code in the chat's workspace.
+            - `web`: a web search.
+            - `site`: reading a web page or connecting to a host.
+            - `helper`: a subagent working on a sub-task.
+        title: { type: string, examples: ['Submitting 5 Boltz-2 samples'], description: 'The agent''s own one-line status for the step.' }
+        status: { type: string, enum: [running, waiting, completed, failed], description: '`waiting`: stopped at an approval, so nothing has run yet.' }
+        subagentId:
+          type: [string, 'null']
+          description: On a `helper` step, the subagent it started. On a step a subagent took, that subagent. Null otherwise.
+
+    SubagentStatus:
+      type: string
+      enum: [running, completed, failed, cancelled]
+    Subagent:
+      type: object
+      description: |
+        A subagent working on a sub-task for a reply. Like the reply's, its steps never carry its
+        arguments or output.
+      required: [id, object, chatId, messageId, name, title, status, createdAt]
+      properties:
+        id: { type: string, examples: [sub_3h] }
+        object: { const: subagent }
+        chatId: { type: string }
+        messageId: { type: string, description: The reply that started it. }
+        name: { type: string, examples: [hotspot-researcher], description: 'Which kind of subagent it is.' }
+        title: { type: string, examples: ['Find the PD-L1 hotspot residues'], description: 'The sub-task in one line, as the agent put it.' }
+        instructions: { type: [string, 'null'], description: 'The brief the agent gave it, cut at 4,000 characters.' }
+        background: { type: boolean, description: 'True when it runs on after its reply ends; its result then arrives in a later reply.' }
+        status: { $ref: '#/components/schemas/SubagentStatus' }
+        steps:
+          type: array
+          description: |
+            Only when you get one subagent, not in the list. A very long run does not show every step:
+            you get its early steps and its latest ones.
+          items: { $ref: '#/components/schemas/Step' }
+        result: { type: [string, 'null'], description: 'What it found, in its own words (Markdown, up to 8,000 characters); for a failed or stopped one, what happened. Null while it runs.' }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+
+    MessageStatus:
+      type: string
+      description: |
+        A reply's lifecycle: `queued` (briefly, before the agent picks it up) → `in_progress` ⇄
+        `requires_action`, then one of the final states `completed`, `failed`, `cancelled` or
+        `incomplete`.
+      enum: [queued, in_progress, requires_action, completed, failed, cancelled, incomplete]
+    MessageCreate:
+      type: object
+      required: [input]
+      properties:
+        input:
+          type: array
+          minItems: 1
+          maxItems: 65
+          description: 'Your message: one text part plus up to 64 file parts (400 beyond that; `fileId` from `POST /chat-files`, or from this chat''s file listing). The only required field.'
+          items: { $ref: '#/components/schemas/InputPart' }
+        stream: { type: boolean, default: false, description: "`true` returns the reply's live event stream in the response, for showing the answer as it is written. `false` returns at once (202) with the reply; follow it by polling or the event stream. Default false." }
+        interrupt: { type: boolean, default: false, description: "`true` stops the reply in progress now (cancelled, as with `cancel`) and runs this message next. Use it for a correction that must not wait for the agent's current step. Default false: the agent reads your message at its next step." }
+
+    # ── approvals ──
+    ApprovalStatus:
+      type: string
+      enum: [pending, approved, denied, expired, superseded]
+    Approval:
+      type: object
+      required: [id, status, kind, summary, createdAt]
+      properties:
+        id: { type: string, examples: [apr_x] }
+        messageId: { type: [string, 'null'], description: The reply waiting on this approval. Null for campaign approvals raised between replies. }
+        status: { $ref: '#/components/schemas/ApprovalStatus' }
+        kind:
+          type: string
+          enum: [platform, code, web, site, helper, connector, package, batch, plan, campaign_start]
+          description: |
+            - `platform`: a Tamarind action that spends or deletes, e.g. submitting or deleting jobs.
+            - `code`: run a command in the chat's workspace.
+            - `web`: run a web search.
+            - `site`: let the chat read a web page or connect to a host.
+            - `helper`: start a subagent on a sub-task.
+            - `connector`: call a tool of a connector the user added (a third-party service).
+            - `package`: install a Python package in the chat's workspace.
+            - `campaign_start`: the agent offers to switch this chat into campaign mode. Approving
+              it is the same as `PATCH /chats/{chatId} {mode: "campaign"}`, and it takes no `workflow`
+              or `budgetHours` of its own: set them with that `PATCH` before you approve. The
+              campaign runs the chat's `workflow` (default: the one the agent proposed; the approval's
+              `detail.workflow` says which) within the chat's budget.
+            - `batch`: submitting a batch of jobs (`detail.count` and `estimate.jobs` say how many).
+            - `plan`: a campaign plan, an amendment to it, a stage, a decision or a deviation.
+        summary: { type: string, examples: ['Submit 24 Boltz-2 jobs (~3.1 h)'] }
+        detail: { $ref: '#/components/schemas/ApprovalDetail' }
+        estimate:
+          type: object
+          properties:
+            computeHours: { type: number }
+            jobs: { type: integer }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: [string, 'null'], format: date-time }
+        resolvedAt: { type: [string, 'null'], format: date-time }
+        resolvedBy:
+          type: [string, 'null']
+          enum: [user, dangerouslyApproveAll, null]
+          description: 'Who decided it: `user` for your approve or deny, `dangerouslyApproveAll` for an action the chat approved by itself, either as the agent asked (the approval was never `pending`: `approval.resolved` arrives with no `approval.requested` before it) or because it was waiting when the flag was turned on and `PATCH /chats/{chatId}` answered it (it was `pending` first). The approvals list is the record: in rare failures the event for an automatic approval can be missing. Null while pending, expired or superseded.'
+    ApprovalDetail:
+      type: object
+      description: |
+        What the action would do, so a script can decide whether to approve it. Which fields are set
+        depends on `kind`:
+        - `platform`: `operation`, `tool`, `count`, `target`, `settings`, `affects` and `call`; for a
+          change to your agent or a skill (the agent builder), also `settingChanges` and `scopes`.
+        - `code`: `command`.
+        - `web`: `query`.
+        - `site`: `host`, and `connect` when a command would open a connection to it.
+        - `helper`: `helper`, `task`.
+        - `package`: `package`.
+        - `connector`: `connector`, `tool`, `arguments`.
+        - `campaign_start`: `workflow`, and `plan` when the campaign starts from a plan.
+        - `plan`: a proposed plan's `plan`; an amendment's `changes`, `reason` and the `plan` it
+          makes; a stage, decision or deviation's `record`.
+
+        Fields show what the agent wrote, so a command can include a credential the agent put in it. A
+        custom tool's `envVars` are never shown. When a long value (`arguments`, `settings` or part of
+        `call`) is cut short, `complete` is false; the action itself runs with the whole value.
+      properties:
+        operation: { type: string, enum: [submit, delete, cancel, other] }
+        tool: { type: string, examples: [boltz], description: 'The Tamarind tool, as named in the jobs API (the type of job a call submits); for a `connector` approval, the connector''s tool.' }
+        connector: { type: string, examples: [Benchling], description: The connector (third-party service) a `connector` approval would call. }
+        arguments: { type: string, description: 'The arguments a `connector` approval would send, as JSON text. Long arguments are cut short, and `complete` is then false.' }
+        count: { type: integer, description: Jobs affected. }
+        command: { type: string }
+        query: { type: string }
+        host: { type: string, examples: [rest.uniprot.org] }
+        connect: { type: boolean, default: false, description: 'On a `site` approval: a command in the workspace would open a connection to `host`, which can send its files as well as read. Approving it `once` keeps the host open to the workspace until it restarts. For a page read, `once` covers that page alone.' }
+        helper: { type: string, examples: [hotspot-researcher] }
+        task: { type: string }
+        package: { type: string, examples: [numpy], description: The Python package to install. }
+        workflow: { type: string, examples: [binder-design], description: 'The workflow a `campaign_start` runs: the one offered and, once approved, the one the campaign took. A workflow the chat cannot run is replaced by the one offered.' }
+        plan:
+          type: object
+          description: The proposed plan. Fields the plan leaves unset are absent.
+          properties:
+            title: { type: string }
+            objective: { type: string }
+            target: { type: string }
+            modality: { type: string }
+            workflow: { type: string }
+            rationale: { type: string }
+            stages:
+              type: array
+              items:
+                type: object
+                properties:
+                  name: { type: string }
+                  goal: { type: string }
+                  designs: { type: integer }
+                  tools: { type: array, items: { type: string } }
+            tools: { type: array, items: { type: string } }
+            validation:
+              type: array
+              items:
+                type: object
+                properties:
+                  method: { type: string }
+                  threshold: { type: string }
+            deliverables: { type: array, items: { type: string } }
+            designCount: { type: integer }
+            estimatedHours: { type: number }
+            budgetHours: { type: number }
+        changes:
+          type: array
+          description: What an amendment changes against the plan in force, field by field (a stage added or removed has one side empty).
+          items:
+            type: object
+            required: [field, before, after]
+            properties:
+              field: { type: string, examples: ['Stage: Screen'] }
+              before: { type: string }
+              after: { type: string }
+        reason: { type: string, description: Why the agent asks to amend the plan. }
+        settingChanges:
+          type: array
+          description: 'What an agent builder change changes, a row per setting (`key`): `before` and `after` for a value; `added`, `removed` and their counts for a list (`every` is `before` or `after` when that side is every one); `changed` and `changedCount` for switches. A list may show only some of its names; the counts are complete.'
+          items:
+            type: object
+            required: [key]
+            additionalProperties: true
+            properties:
+              key: { type: string, examples: [allowed_sites] }
+              added: { type: array }
+              removed: { type: array }
+              addedCount: { type: integer }
+              removedCount: { type: integer }
+              changed: { type: array }
+              changedCount: { type: integer }
+              every: { type: string, enum: [before, after] }
+        target: { type: string, description: 'What the call names: the job, batch or run it starts, or the job, file or run it deletes, cancels or stops.' }
+        settings: { type: string, description: 'What a platform call runs with, as JSON text: a job''s settings, a batch''s first job or what its jobs share, or what an agent builder change saves (the agent''s definition, or a skill''s instructions and files). Cut short when long, and `complete` is then false.' }
+        affects: { type: object, additionalProperties: true, description: 'For a delete, cancel or stop: what the platform reports it reaches (a job''s type, status and children, a run''s steps, a file''s size).' }
+        call:
+          type: object
+          additionalProperties: true
+          description: 'The rest of the call, by tool: a custom tool''s mode, Dockerfile, scripts and resources (`customTool`), a pipeline''s graph and bindings, a fine-tuning run''s base model and files (`finetune`), a benchmark''s predictors (`benchmark`), a batch''s source (`fromJob`, `fromFile`, `batchFile`). Parts are cut short when long, and `complete` is then false. Fields may be added.'
+        scopes: { type: array, items: { type: string }, description: 'The scopes an agent builder change may be saved for (`once`, `chat`, `all`), any of which `scope` may name.' }
+        record:
+          type: object
+          additionalProperties: true
+          description: 'What a stage, decision or deviation would record: `stage`, `status`, `note` and `plan_stage`; `decision`, `reason`, `direction`; or `deviation`, `reason`, `cost`.'
+        complete: { type: boolean, default: true }
+    ApprovalDecision:
+      type: object
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [approve, deny], description: '`approve` lets the paused action run; `deny` tells the agent not to, and it continues without it.' }
+        scope:
+          type: string
+          enum: [once, chat, site, all, connector, package]
+          default: once
+          description: |
+            How far an approval reaches. Default `once`: this action only. The scopes an approval takes
+            depend on its `kind`, and any other scope is 400.
+            - `code`, `web`, `helper`: `once`, or `chat` to also allow later actions of the same kind in
+              this chat.
+            - `site`: `once`; `site` to allow that host for the rest of the chat; `all` to allow every
+              host. With `detail.connect`, `once` keeps the host open to the workspace until it restarts.
+              A `site` approval left over from an older version of the agent takes only `once`.
+            - `connector`: `once` for this call alone; `chat` for this tool for the chat; `connector` for
+              every tool of that connector for the chat; `all` for every tool of it in all your chats.
+            - `package`: `package` to install that package for the chat, or `chat` for every package.
+              `once` is not accepted: name one of the two.
+            - `platform`, `batch`, `plan`, `campaign_start`: only `once`. For jobs to run without asking,
+              set `autoApprove` on the chat. A change to your agent or a skill takes the scopes in
+              `detail.scopes`.
+
+            A denial takes no scope.
+
+    # ── questions ──
+    Question:
+      type: object
+      description: The agent asking you to choose before it goes on. One card can hold several questions.
+      required: [id, status, questions, createdAt]
+      properties:
+        id: { type: string, examples: [q_8c] }
+        messageId: { type: string, description: The reply waiting on the answer. }
+        status:
+          type: string
+          enum: [pending, answered]
+          description: '`answered` once a message of yours follows it (sent here or not); a rewind that cuts that message makes it `pending` again. A rewind that cuts the question itself removes it (404; `chat.rewound` says to read again).'
+        questions:
+          type: array
+          items:
+            type: object
+            required: [question, options]
+            properties:
+              question: { type: string }
+              header: { type: string }
+              multiSelect: { type: boolean }
+              options:
+                type: array
+                items:
+                  type: object
+                  required: [label]
+                  properties:
+                    label: { type: string }
+                    description: { type: string }
+        answers: { type: [object, 'null'], additionalProperties: { type: string }, description: 'What was answered, by question text. A message not in the card''s form answers every question with its whole text.' }
+        answerMessageId: { type: [string, 'null'], description: 'The message that answered it.' }
+        createdAt: { type: string, format: date-time }
+    QuestionAnswer:
+      type: object
+      description: Exactly one of `answers` and `text`.
+      minProperties: 1
+      maxProperties: 1
+      additionalProperties: false
+      properties:
+        answers:
+          type: object
+          additionalProperties: { type: string }
+          description: 'Your choice for each question on the card, keyed by the question''s text: an option''s `label`, or your own words, on one line. For a `multiSelect` question, join labels with ", "; they are sent in the options'' order, then any other text, unless reordering could change what they say (a label containing ", ", repeated labels, or repeated or empty items).'
+        text: { type: string, description: 'One plain answer given to every question on the card. Use it when the questions have no options or one sentence answers them all.' }
+
+    # ── files ──
+    File:
+      type: object
+      required: [id, object, filename, status]
+      properties:
+        id: { type: string, examples: [file_k2] }
+        object: { const: file }
+        filename: { type: string }
+        path: { type: string, description: 'Path inside the workspace, e.g. boltz/model_0.cif.' }
+        contentType: { type: string }
+        size: { type: integer }
+        status: { type: string, enum: [pending, ready, expired] }
+        origin: { type: string, enum: [upload, agent, job, campaign], description: '`upload`: you attached it. `agent`: the agent wrote it. `job`: a job''s output. `campaign`: the chat''s campaign produced it; it can be downloaded but not attached.' }
+        createdAt: { type: string, format: date-time }
+
+    # ── campaign mode ──
+    CampaignStatus:
+      type: string
+      description: '`running` while the chat''s `autoApprove` is on, `paused` once it is off. It is not progress: a campaign neither finishes nor stops for good. Read `plan.stages` for how far it is.'
+      enum: [running, paused]
+    Workflow:
+      type: object
+      required: [id, label]
+      properties:
+        id: { type: string, examples: [binder-design] }
+        label: { type: string }
+        description: { type: string }
+        supports:
+          type: array
+          description: |
+            Optional behaviour this workflow supports.
+            - `plan`: the Chat's `campaign.plan` is filled.
+            - `interrupt`: cancelling the reply in progress stops the campaign's current step.
+            - `pause`: `campaign.status` `paused` and `running`.
+            - `budget`: `budgetHours` and `autoApprove` apply to the campaign.
+          items: { type: string, enum: [interrupt, plan, pause, budget] }
+    Campaign:
+      type: object
+      description: The campaign part of a chat in campaign mode. Read it on the Chat; change it with `PATCH /chats/{chatId}`.
+      required: [id, workflow, status]
+      properties:
+        id: { type: string, examples: [cmp_7Q], description: 'The campaign''s id: `cmp_` plus the chat''s id. Every operation addresses a campaign through its chat.' }
+        workflow: { type: string }
+        status: { $ref: '#/components/schemas/CampaignStatus' }
+        plan:
+          type: [object, 'null']
+          description: |
+            The current plan with stages and tasks; tasks are readable at `/chats/{chatId}/tasks/{taskId}`.
+            Null before the agent has written a plan, a task, an epitope or a deviation, and while the plan
+            cannot be read (`finalDesigns` is then null too: read again). Only on `GET /chats/{chatId}`, not
+            on a list item.
+          properties:
+            stage: { type: string, description: 'The stage in progress: the first stage that is `running`, else the first not yet closed, else the last. Once the plan''s own last stage is `done` the plan is over, and this is a stage the agent added after it that is `running`, else that last stage.' }
+            stages:
+              type: array
+              maxItems: 100
+              description: |
+                The plan's own stages, in the plan's order, then any stage the agent reported that the plan
+                does not name: at most 100. What the web app's plan view draws. A stage that was skipped
+                carries the reason in its `summary`.
+              items:
+                type: object
+                required: [id, title, status]
+                properties:
+                  id: { type: string }
+                  title: { type: string }
+                  status:
+                    type: string
+                    enum: [pending, running, done, skipped, blocked, failed]
+                    description: 'The agent''s own report of the stage; `pending` until it reports one (or reports one this API does not list).'
+                  summary: { type: [string, 'null'], description: 'The note the agent gave when it reported the stage, e.g. why it was skipped.' }
+                  startedAt: { type: [string, 'null'], format: date-time, description: 'When the agent reported it running or done.' }
+                  completedAt: { type: [string, 'null'], format: date-time, description: When the agent reported it done. }
+            deviations:
+              type: array
+              maxItems: 50
+              description: The deviations from the plan the agent recorded, oldest first, the latest 50 as the web app's plan view keeps them.
+              items:
+                type: object
+                required: [text, reason]
+                properties:
+                  text: { type: string, description: What it did differently. }
+                  reason: { type: string }
+                  cost: { type: [string, 'null'], description: 'What the deviation costs, as the agent put it.' }
+                  recordedAt: { type: [string, 'null'], format: date-time }
+            epitope:
+              type: [object, 'null']
+              description: |
+                The newest epitope the agent recorded: the site its designs are aimed at, as the chat's
+                epitope card shows it. Null before one is recorded. Only on `GET /chats/{chatId}`, not
+                on a list item. It carries the science only: no structure file is referenced.
+              properties:
+                target: { type: string, examples: [PD-L1], description: The protein. }
+                verdict: { type: string, enum: [settled, borderline, unsettled, abstain] }
+                reason: { type: string }
+                bindingSite: { type: object, additionalProperties: { type: string }, examples: [{ A: '54,56,113' }], description: 'The recommended site: chain id to its residues, as PDB author numbers in a comma list (empty on an `abstain`).' }
+                sites:
+                  type: array
+                  description: The ranked sites (at most 3), best first; `bindingSite` is one of them.
+                  items:
+                    type: object
+                    properties:
+                      rank: { type: integer }
+                      bindingSite: { type: object, additionalProperties: { type: string } }
+                      chain: { type: [string, 'null'] }
+                      structuralConfidence: { type: [string, 'null'], enum: [direct-complex, partial-contacts, predicted, inferred, apo, literature-only, null] }
+                      designability: { type: [string, 'null'], enum: [good, borderline, poor, unknown, null] }
+                      reachable: { type: [boolean, 'null'] }
+                      chainIdentity: { type: [string, 'null'], enum: [match, mismatch, unverifiable, null] }
+                sourceStructure: { type: [string, 'null'], description: 'The PDB id or file the residues are numbered on.' }
+                notBindingSite: { type: object, additionalProperties: { type: string }, description: 'Residues to keep designs off, in the form of `bindingSite`.' }
+            tasks:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: string }
+                  title: { type: string }
+                  status: { type: string, enum: [pending, running, done, failed] }
+        finalDesigns:
+          type: [object, 'null']
+          description: |
+            The designs the agent marked final (the latest it marked): the same designs `Candidate.final`
+            reports. Null before it marks any, and while the plan cannot be read (`plan` is then null
+            too: read again). Only on `GET /chats/{chatId}`, not on a list item.
+          required: [ids, note, moleculeGroupId, moleculeGroupName, markedAt]
+          properties:
+            ids:
+              type: array
+              maxItems: 500
+              items: { type: string }
+              description: 'The design ids exactly as the agent marked them, whether or not a published set holds them; at most 500 (`truncated`).'
+            note: { type: string }
+            moleculeGroupId: { type: [string, 'null'], description: The molecule database group that holds exactly these designs, when the agent named one. }
+            moleculeGroupName: { type: [string, 'null'] }
+            markedAt: { type: [string, 'null'], format: date-time }
+            truncated: { const: true, description: 'Only when the mark held more than 500 ids: `ids` is its first 500.' }
+        candidateCount: { type: integer }
+        startedAt: { type: string, format: date-time }
+    Candidate:
+      type: object
+      required: [id, sequence]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        sequence: { type: string }
+        rank: { type: integer }
+        final:
+          type: boolean
+          description: |
+            Whether the agent marked this design as final: it is one of the designs the web app lists as
+            Final Passing Designs (the same ones as `Campaign.finalDesigns`). False for every design until
+            the agent marks any. If the agent's marks cannot be read, the list is refused with 503
+            `unavailable` (retryable) instead of answering false.
+        metrics:
+          type: object
+          description: The numbers published with the design, by name, e.g. iptm, plddt, pae_interaction, ipsae. The agent chooses the names, so they can differ between sets (`ipTM` in one, `iptm` in another). Text such as `PASS` is not here.
+          additionalProperties: { type: number }
+        hasStructure: { type: boolean, description: 'Whether `/candidates/{candidateId}/structure` has a file for this design. False means there is none, or that this could not be checked right now: request the structure anyway if you need it. The route serves PDB, mmCIF and SDF files.' }
+        jobName: { type: [string, 'null'], description: 'The job the agent named as the design''s source. Null when it named none.' }
+    JobRef:
+      type: object
+      required: [jobName, tool, status]
+      properties:
+        jobName: { type: string }
+        tool: { type: string, examples: [boltz] }
+        status: { type: string, examples: [Complete] }
+        submittedAt: { type: [string, 'null'], format: date-time, description: Null when the job's record carries no time. }
+        computeHours: { type: [number, 'null'], description: 'The weighted hours the platform has billed the job, as the usage page counts them. Null until it has billed any. A batch reports its hours once the platform has closed it, and is null before that.' }
+    Export:
+      type: object
+      required: [id, status]
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [pending, ready, failed], description: 'A `pending` export still building 5 minutes after it began reads `failed`. Retry a `failed` export with the same `Idempotency-Key` and it is built again.' }
+        format: { type: string }
+        downloadUrl: { type: [string, 'null'], format: uri, description: 'Set once `ready`. Each `GET` of a ready export returns a fresh one.' }
+        expiresAt: { type: [string, 'null'], format: date-time, description: 'When `downloadUrl` stops working, 15 minutes after it was made.' }
+
+    # ── usage ──
+    Usage:
+      type: object
+      description: |
+        What a chat has used, in hours: the agent's own work and the GPU-weighted hours of its jobs.
+        Budgets are in hours, so `totalHours` is what counts against `capHours`.
+      required: [agentHours, jobsHours, totalHours]
+      properties:
+        agentHours: { type: number, description: 'Hours the agent''s own work has used, at your organization''s rate.' }
+        jobsHours: { type: number, description: 'GPU-weighted hours of the jobs the chat submitted that have finished or reported their time so far; a job still starting counts 0.' }
+        totalHours: { type: number, description: '`agentHours` + `jobsHours`.' }
+        capHours: { type: [number, 'null'], description: 'The chat''s budget (`budgetHours`); null when it has none.' }
+    AgentUsage:
+      type: object
+      description: |
+        Your agent usage for one month (`GET /agent-usage`), in hours. The same figure as a chat's
+        `agentHours`, without jobs: jobs are reported with the rest of your compute.
+      required: [month, agentHours, remainingHours]
+      properties:
+        month: { type: string, description: '`YYYY-MM`, US Pacific time.' }
+        agentHours: { type: number, description: 'Hours the agent''s own work has used across all your chats that month, counted as `agentHours` is in a chat''s usage (`GET /chats/{chatId}/usage`), at your organization''s current rate.' }
+        remainingHours:
+          type: [number, 'null']
+          description: 'What is left now of the tightest Tamarind budget that caps you and that you can see, in hours: your personal budget, and your organization''s and teams'' only if you may see them in the web app. Null when nothing caps you, when it cannot be read right now, and for any month but the current one.' 
+
+    # ── events ──
+    EventStream:
+      type: string
+      description: |
+        `text/event-stream`. Each event is sent as:
+
+            id: <sequence>.<index>
+            event: <type>
+            data: <Event JSON>
+
+        `ping` events are sent every 15 s and have no `id`, so they never move your cursor.
+        Reconnect with `Last-Event-ID: <last id>` (or `?after=`) and you get exactly the events
+        you missed. The server may also send `retry: 2000`.
+    EventPage:
+      type: object
+      required: [data, nextCursor]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Event' } }
+        nextCursor: { type: [string, 'null'], description: Pass as `after` to continue. }
+    Event:
+      type: object
+      description: Envelope for every event, streamed or listed.
+      required: [id, type, sequence, chatId, createdAt, data]
+      properties:
+        id: { type: string, description: 'Resume cursor `<sequence>.<index>`.', examples: ['1042.0'] }
+        type: { $ref: '#/components/schemas/EventType' }
+        sequence: { type: integer, description: 'Where the event sits in the chat: it increases as the chat goes on. Several events can share one `sequence`; the number after the dot in `id` puts them in order.' }
+        chatId: { type: string }
+        messageId: { type: [string, 'null'], description: 'The reply this event belongs to. Null for events between replies, e.g. campaign progress.' }
+        createdAt: { type: string, format: date-time }
+        data:
+          description: The event's content. Its shape depends on `type`, which `EventType` lists for each type.
+          anyOf:
+            - $ref: '#/components/schemas/MessageEventData'
+            - $ref: '#/components/schemas/TextDeltaData'
+            - $ref: '#/components/schemas/TextDoneData'
+            - $ref: '#/components/schemas/Step'
+            - $ref: '#/components/schemas/Subagent'
+            - $ref: '#/components/schemas/Question'
+            - $ref: '#/components/schemas/Approval'
+            - $ref: '#/components/schemas/JobEventData'
+            - $ref: '#/components/schemas/Usage'
+            - $ref: '#/components/schemas/ErrorData'
+            - type: object
+    EventType:
+      type: string
+      description: |
+        Clients MUST ignore types they don't know.
+
+        **Messages**
+        - `message.created`: a message was added, yours or a reply starting (status `queued`).
+        - `message.in_progress`, `message.requires_action`, `message.completed`, `message.failed`,
+          `message.cancelled`, `message.incomplete`: a reply's status changed.
+          Data is the Message (`requires_action` adds `approvals[]`; a question waiting is in `pendingQuestions`).
+        - `message.continued` `{id, continuedBy}`: a message you sent while this reply ran was
+          read into it (steering); the reply `continuedBy` names carries the work on.
+
+        **Reply text**
+        - `output_text.delta` `{partId, delta}`
+        - `output_text.done` `{partId, text}`. Authoritative: replace the accumulated deltas with it.
+        - `output_text.discarded` `{partId}`: the agent threw that draft away; remove it.
+
+        **Steps and subagents**
+        - `step.started`, `step.waiting` (stopped at an approval, nothing has run) and `step.completed` (Step). A step a subagent took has its `subagentId`.
+        - `subagent.started`, `subagent.updated` and `subagent.completed` (Subagent, without
+          steps). `updated`: it now runs on past its reply (`background: true`), so it can be
+          cancelled alone. `completed` covers every end; read its `status`.
+
+        **Human in the loop**
+        - `approval.requested` and `approval.resolved` (Approval)
+        - `question.asked` and `question.resolved` (Question): answer it with
+          `POST /chats/{chatId}/questions/{questionId}`. `question.asked` is sent again, with
+          `status: pending`, when a rewind or an edit in the web app cuts the message that answered it.
+
+        **Platform**
+        - `job.completed`, `job.failed` `{jobName, tool, status}`
+
+        **Chat**
+        - `chat.rewound` `{fromSequence, toSequence}`: a rewind (yours, or an edit in the web
+          app) hid the events in that range and the messages they made. Re-read
+          `GET /chats/{chatId}/messages` and `GET /chats/{chatId}/subagents`: a reply the cut
+          ended now reads `incomplete` (`rewound`), a subagent or one of its steps can read
+          `running` again, and text or steps you built up from the hidden events should be
+          rebuilt from those reads. Sent to a read following one message (`messageId`) too.
+
+        **Misc**
+        - `usage.updated` (Usage): the chat's usage, read right after a
+          reply ends, for replies that end while your stream is open. Stream only. Like `ping` it has no
+          `id`: it is not part of the log, so it is not in `GET /chats/{chatId}/events` pages, a
+          reconnect does not replay it, and it never moves your cursor. The reply's last model call can
+          be counted a moment after the reply ends, so these figures can read slightly low: read
+          `GET /chats/{chatId}/usage` after `message.completed` for the final ones.
+        - `error` `{code, message, retryable}`
+        - `ping` (stream only, no id)
+      enum:
+        - message.created
+        - message.in_progress
+        - message.requires_action
+        - message.completed
+        - message.failed
+        - message.cancelled
+        - message.incomplete
+        - message.continued
+        - output_text.delta
+        - output_text.done
+        - output_text.discarded
+        - step.started
+        - step.waiting
+        - step.completed
+        - subagent.started
+        - subagent.updated
+        - subagent.completed
+        - approval.requested
+        - approval.resolved
+        - question.asked
+        - question.resolved
+        - job.completed
+        - job.failed
+        - chat.rewound
+        - usage.updated
+        - error
+        - ping
+    MessageEventData:
+      allOf:
+        - $ref: '#/components/schemas/Message'
+        - type: object
+          properties:
+            approvals: { type: array, items: { $ref: '#/components/schemas/Approval' } }
+    TextDeltaData:
+      type: object
+      required: [partId, delta]
+      properties:
+        partId: { type: string }
+        delta: { type: string }
+    TextDoneData:
+      type: object
+      required: [partId, text]
+      properties:
+        partId: { type: string }
+        text: { type: string }
+    JobEventData:
+      type: object
+      required: [jobName, status]
+      properties:
+        jobName: { type: string }
+        tool: { type: string }
+        status: { type: string }
+    ErrorData:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, examples: [key_revoked] }
+        message: { type: string }
+        retryable: { type: boolean }

@@ -7,6 +7,8 @@ callers (and the CLI's exit codes) get consistent behaviour.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 import re
 from typing import Any
 
@@ -149,6 +151,65 @@ class HTTPClient:
             return resp
         raise _map_error(resp, request_path=path)
 
+    def send(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str | None] | None = None,
+        json: Any | None = None,
+        timeout: float | None = None,
+    ) -> httpx.Response:
+        """One request, returned whatever its status, for a caller with its own retry policy.
+
+        Unlike :meth:`request`, a non-2xx response is returned (map it with
+        :func:`map_error`) and a transport failure raises ``httpx.HTTPError`` unchanged, so
+        the caller can tell a lost response from a refusal. Redirects are never followed: a
+        presigned ``Location`` must not receive the API key.
+        """
+        self._require_key()
+        return self._client.request(
+            method,
+            path.lstrip("/"),
+            params=_without_none_values(params),
+            headers=_without_none_values(headers),
+            json=json,
+            timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
+            follow_redirects=False,
+        )
+
+    @contextmanager
+    def stream(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str | None] | None = None,
+        json: Any | None = None,
+        timeout: httpx.Timeout | float | None = None,
+    ) -> Iterator[httpx.Response]:
+        """A streamed response (SSE), with the same raw contract as :meth:`send`."""
+        self._require_key()
+        with self._client.stream(
+            method,
+            path.lstrip("/"),
+            params=_without_none_values(params),
+            headers=_without_none_values(headers),
+            json=json,
+            timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
+            follow_redirects=False,
+        ) as resp:
+            yield resp
+
+    def _require_key(self) -> None:
+        if not self.api_key:
+            raise AuthError(
+                "No API key configured. Set TAMARIND_API_KEY, pass --api-key, "
+                "or run `tamarind auth login`."
+            )
+
     def get_json(
         self,
         path: str,
@@ -280,6 +341,11 @@ def _map_error(resp: httpx.Response, *, request_path: str) -> TamarindError:
     if code == 422:
         return ValidationError(msg, detail=detail)
     return APIError(msg, status_code=code, detail=detail)
+
+
+def map_error(resp: httpx.Response, *, request_path: str) -> TamarindError:
+    """The typed error for a non-2xx response, as :meth:`HTTPClient.request` raises it."""
+    return _map_error(resp, request_path=request_path)
 
 
 def _problem_code(body: object | None) -> str | None:

@@ -1,0 +1,2 @@
+# Vendored contracts are pinned by SHA-256: never convert their line endings on checkout.
+openapi/agent-v1.yaml -text

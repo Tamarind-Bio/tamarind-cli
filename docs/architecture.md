@@ -5,7 +5,7 @@ The CLI, the [MCP server](https://mcp.tamarind.bio), and the web app are all
 logic; it only knows how to call four well-defined surfaces. This is what keeps
 the CLI and the MCP from drifting as the platform evolves.
 
-## Four surfaces, four single sources of truth
+## Five surfaces, five single sources of truth
 
 ### 1. Job/file REST surface — source of truth: the OpenAPI spec
 
@@ -103,6 +103,67 @@ Custom Tools contract.
 Generated endpoint code owns URL encoding and wire-model parsing. A small resource
 adapter adds strict runtime checks and composes `PipelineRun` → `NodeRun` → molecule
 pages without introducing another public vocabulary.
+
+### 5. Agent API surface — source of truth: the agent's published OpenAPI spec
+
+`Tamarind().agent` and `tamarind chat` drive the AI agent: chats (campaign mode
+included), replies and their event stream, approvals, questions, files, subagents,
+workflows, campaign collections and usage. The contract is tamarind-agent's
+`docs/public-api/openapi.yaml`, vendored byte-for-byte as `openapi/agent-v1.yaml` with
+its producer commit and SHA-256 in `openapi/agent-v1.lock.json`. **The vendored spec is at
+tamarind-agent `7972531f1`** (spec version 1.0.0). Requests go to the same host and
+`x-api-key` as the jobs API.
+That spec no longer documents a `Tamarind-Version` header; the SDK still sends the date it
+was written against (`2026-11-01`) on every request, as a pin the contract does not
+describe (`tamarind.agent._contract`), until the agent team says to drop it.
+
+The client is hand-written, not generated: run on this spec, the pinned generator
+(openapi-python-client 0.28.4) drops `ApprovalDetail`, `Approval`, `Message` and
+`MessageEventData` over an array with no `items` (`settingChanges.added`), so it would type
+neither a reply nor an approval. Drift is caught instead by
+`tests/test_agent_api_contract.py`, which reads the vendored spec and fails when:
+
+- an `operationId` is added, removed, or changes method, path or `Idempotency-Key`
+  (each maps to one row of `src/tamarind/agent/_contract.py` and one SDK method);
+- the `EventType` enum changes;
+- a model schema names a property the matching dataclass does not read;
+- a request the SDK builds, with every option set, carries a body field or query parameter
+  the operation does not list, or lacks one it requires (the server answers 400 to a field
+  it does not know, so a field the spec dropped must stop being SENT, not only read);
+- an SDK call does not hit its operation's path, or cannot parse the spec's own example.
+
+Re-sync: `git -C <tamarind-agent> show <sha>:docs/public-api/openapi.yaml >
+openapi/agent-v1.yaml`, set `sourceCommit`/`artifactSha256` in the lock, and run the
+contract test (with `TAMARIND_AGENT_CHECKOUT=<path>` it also checks the bytes are that
+commit's).
+
+The handwritten layer owns only what a client must: the retry policy (a 429 waits
+`Retry-After`/`x-ratelimit-reset`; a lost response or 5xx is retried only where the
+operation cannot apply twice), one `Idempotency-Key` per logical POST that takes one
+(create a chat, send a message, start an export) reused across its retries, and the event
+stream, which resumes with `Last-Event-ID` after a cut or a retryable `stream_interrupted`
+event, drops frames replayed at or before its cursor, and skips unknown event types as the
+contract requires (a type the contract dropped, such as `campaign.status`, is skipped the
+same way). Replies are always sent with `stream: false` and followed on the events stream,
+because that one can be resumed and the POST's own body cannot.
+
+Two transfers leave the API host, and never carry the API key (or any API header):
+
+- **Upload.** `POST /chat-files {filename}` returns `uploadUrl` and `uploadFields`; the file
+  goes to storage as a multipart form `POST` with every `uploadFields` entry as a form field,
+  exactly as given and in the given order, then the file as the last field, named `file`
+  (`tamarind.uploads.post_presigned_form`). Storage, not the API, enforces the 200 MB limit
+  (400 `EntityTooLarge`, empty files too), so no size is sent; the SDK still refuses a local
+  file outside 1 byte to 200 MB before asking for a slot. This is not the jobs API's upload
+  (`rest.upload_file_url`), which stays a presigned `PUT`.
+- **Download.** A chat file's `GET .../content` answers a 302 to a presigned URL, which is
+  fetched without the key. A candidate's structure is different: `.../structure` serves the
+  file itself (PDB, mmCIF or SDF, up to 10 MiB), so that request is the one with the key and
+  its answer is written to disk atomically.
+
+Presigned URLs and the upload form's values are credentials: the redacting log filter
+covers URLs, errors never quote either, and a refused upload quotes only the storage error
+code (`EntityTooLarge`).
 
 ## Why not a single binary that re-encodes the API?
 
