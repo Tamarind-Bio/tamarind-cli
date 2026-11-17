@@ -6,7 +6,9 @@ import httpx
 import pytest
 
 from agent_fakes import PING, FakeAgentServer, approval, frame, reply, sse
+from tamarind.agent._contract import EVENT_TYPES
 from tamarind.agent.events import SSEFrame, parse_cursor, parse_sse
+from tamarind.agent.models import Subagent
 from tamarind.agent.transport import DeadlineExceeded
 from tamarind.errors import AgentStreamError, APIError, AuthError, JobTimeoutError, NotFoundError, RateLimitError, TamarindError
 
@@ -19,6 +21,12 @@ def _delta(event_id: str, text: str) -> str:
 
 def _status(event_id: str, status: str, **kw) -> str:
     return frame(event_id, f"message.{status}", reply(status, **kw))
+
+
+def _subagent(status: str = "running", background: bool = True) -> dict:
+    return {"id": "sub_5c", "object": "subagent", "chatId": "chat_7Q", "messageId": "msg_1",
+            "name": "hotspot-researcher", "title": "Check the hotspot", "background": background,
+            "status": status, "createdAt": "2026-10-27T17:05:30Z"}
 
 
 def _types_and_ids(events) -> list[tuple[str, str]]:
@@ -125,6 +133,38 @@ def test_unknown_event_types_are_skipped_but_still_move_the_cursor():
     assert server.requests_to("GET", EVENTS)[1].headers["Last-Event-ID"] == "2.0"
 
 
+# The types the contract dropped (the campaign had its own events before it became a mode of
+# the chat) read, if a server still sent one, as any type the client does not know.
+_REMOVED_TYPES = ["campaign.status", "candidates.updated", "file.created", "job.submitted", "plan.updated"]
+
+
+@pytest.mark.parametrize("removed", _REMOVED_TYPES)
+def test_a_type_the_contract_dropped_is_skipped_like_any_unknown_type(removed):
+    server = FakeAgentServer()
+    server.on("GET", EVENTS,
+              sse(_delta("1.0", "a") + frame("2.0", removed, {"x": 1}) + _status("3.0", "completed"), cut=True),
+              sse(_status("4.0", "completed")))
+
+    stream = server.agent().messages.follow("chat_7Q", "msg_1")
+    assert [e.type for e in stream] == ["output_text.delta", "message.completed"]
+    assert removed not in EVENT_TYPES
+
+
+def test_a_background_subagent_that_runs_on_past_its_reply_is_a_known_event():
+    """`subagent.updated`: it now runs past its reply (`background: true`), so it can be cancelled alone."""
+    server = FakeAgentServer()
+    server.on("GET", EVENTS, sse(frame("2.0", "subagent.started", _subagent(background=False))
+                                 + frame("3.0", "subagent.updated", _subagent())
+                                 + frame("4.0", "subagent.completed", _subagent("completed"))
+                                 + _status("5.0", "completed")))
+
+    events = list(server.agent().messages.follow("chat_7Q", "msg_1"))
+
+    assert [e.type for e in events] == ["subagent.started", "subagent.updated", "subagent.completed", "message.completed"]
+    updated = events[1]
+    assert (Subagent.from_wire(dict(updated.data)).background, updated.message_id) == (True, "msg_1")
+
+
 def test_include_unknown_yields_unknown_types():
     server = FakeAgentServer()
     server.on("GET", EVENTS, sse(frame("2.0", "brand.new_thing", {}) + _status("3.0", "completed")))
@@ -136,11 +176,11 @@ def test_include_unknown_yields_unknown_types():
 
 def test_until_stops_after_the_matching_event_and_leaves_a_resumable_cursor():
     server = FakeAgentServer()
-    server.on("GET", EVENTS, sse(frame("1.0", "job.submitted", {"jobName": "j", "status": "In Queue"}, message=None)
-                                 + frame("2.0", "candidates.updated", {"count": 3}, message=None)
-                                 + frame("3.0", "plan.updated", {"plan": {}}, message=None)))
+    server.on("GET", EVENTS, sse(frame("1.0", "job.completed", {"jobName": "j", "status": "Complete"}, message=None)
+                                 + frame("2.0", "subagent.updated", _subagent(), message=None)
+                                 + frame("3.0", "job.failed", {"jobName": "k", "status": "Failed"}, message=None)))
 
-    stream = server.agent().events.stream("chat_7Q", until="candidates.updated")
+    stream = server.agent().events.stream("chat_7Q", until="subagent.updated")
     events = list(stream)
 
     assert [e.id for e in events] == ["1.0", "2.0"]
@@ -152,9 +192,9 @@ def test_a_chat_stream_closed_while_idle_reconnects_from_its_cursor():
     server = FakeAgentServer()
     server.on("GET", EVENTS,
               sse(frame("10.0", "job.completed", {"jobName": "j", "status": "Complete"}, message=None)),
-              sse(frame("11.0", "campaign.status", {"campaignId": "c", "status": "paused"}, message=None)))
+              sse(frame("11.0", "subagent.completed", _subagent("completed"), message=None)))
 
-    stream = server.agent().events.stream("chat_7Q", after="9.0", until="campaign.status")
+    stream = server.agent().events.stream("chat_7Q", after="9.0", until="subagent.completed")
     assert [e.id for e in stream] == ["10.0", "11.0"]
     connects = server.requests_to("GET", EVENTS)
     assert [c.headers["Last-Event-ID"] for c in connects] == ["9.0", "10.0"]
@@ -303,10 +343,30 @@ def test_a_reply_ended_by_a_decided_card_is_followed_into_the_answer_once_it_sta
     assert len(server.requests_to("GET", "/chats/chat_7Q/messages/msg_1")) == 2
 
 
+def test_a_card_the_flag_answered_after_it_was_pending_still_ends_its_reply():
+    """`PATCH dangerouslyApproveAll` answers what was waiting: that card WAS pending (an
+    `approval.requested` came first), so, like a decision of yours, it ends the reply."""
+    server = FakeAgentServer()
+    server.on("GET", EVENTS,
+              sse(_status("3.0", "requires_action") + frame("4.0", "approval.requested", approval())
+                  + frame("5.0", "approval.resolved", approval(status="approved", resolved_by="dangerouslyApproveAll"))
+                  + _status("6.0", "completed")),
+              sse(frame("8.0", "message.completed", reply("completed", message_id="msg_2"), message="msg_2")))
+    server.on("GET", "/chats/chat_7Q/messages/msg_1",
+              httpx.Response(200, json=reply("completed", continued_by="msg_2")))
+
+    stream = server.agent().messages.follow("chat_7Q", "msg_1", follow_continuations=True)
+    assert [e.id for e in stream][-1] == "8.0"
+    assert len(server.requests_to("GET", "/chats/chat_7Q/messages/msg_1")) == 1
+
+
 @pytest.mark.parametrize("before", [
     "",  # nothing was decided
     # Decided while the turn still ran: it went on in place, no new reply answers it.
     frame("4.0", "approval.resolved", approval(status="approved")) + _status("5.0", "in_progress"),
+    # Approved by the chat as the agent asked (`dangerouslyApproveAll`): never pending, so an
+    # `approval.resolved` with no `approval.requested` before it, and the reply simply goes on.
+    frame("4.0", "approval.resolved", approval(status="approved", resolved_by="dangerouslyApproveAll")),
 ])
 def test_a_reply_that_just_completes_is_not_polled_for_a_continuation(before):
     server = FakeAgentServer()

@@ -188,6 +188,7 @@ class EventStream(Iterator[Event]):
         self._status: str | None = None
         self._continued_by: str | None = None
         self._card_decided = False
+        self._requested: set[str] = set()  # approvals this stream saw raised
         self._iterator = self._run()
 
     def __iter__(self) -> "EventStream":
@@ -343,14 +344,23 @@ class EventStream(Iterator[Event]):
             if isinstance(continued, str) and continued:
                 self._continued_by = continued
         elif event.type in ("approval.resolved", "approval.requested"):
-            if self._decided_approval is not None and event.data.get("id") == self._decided_approval:
+            approval_id = event.data.get("id")
+            if self._decided_approval is not None and approval_id == self._decided_approval:
                 if event.type == "approval.requested":
                     self._decided_spent = False  # raised here: anything before is not its end
                 self._decided_raised = True
                 self._decided_resolved = self._decided_resolved or event.type == "approval.resolved"
+            if event.type == "approval.requested" and isinstance(approval_id, str):
+                self._requested.add(approval_id)
+            # An action the chat approved by itself (`resolvedBy: dangerouslyApproveAll`) as
+            # the agent asked was never pending: its `approval.resolved` has no
+            # `approval.requested` before it, and the reply simply goes on.
+            auto_approved = (event.data.get("resolvedBy") == "dangerouslyApproveAll"
+                             and approval_id not in self._requested)
             # A decided card ends this reply, and the answer comes as a NEW reply named by
             # this one's continuedBy once it starts (after this stream has closed).
-            self._card_decided = event.type == "approval.resolved" or self._card_decided
+            self._card_decided = (
+                (event.type == "approval.resolved" and not auto_approved) or self._card_decided)
 
     def _ends_followed_reply(self, event: Event) -> bool:
         return (

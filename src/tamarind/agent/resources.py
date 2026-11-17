@@ -2,33 +2,35 @@
 
 One method per operation in the pinned spec (the table in ``_contract.OPERATIONS`` names
 each), grouped as the spec's tags group them, plus two compositions: ``files.upload``
-(create the slot, then PUT the bytes) and ``messages.wait`` (send, then follow the reply's
-events to its end). Every call carries ``Tamarind-Version``; retries, rate limits and
-idempotency keys are :class:`~tamarind.agent.transport.AgentTransport`'s.
+(create the slot, then send the file to it by the form it names) and ``messages.wait``
+(send, then follow the reply's events to its end). Retries, rate limits and idempotency
+keys are :class:`~tamarind.agent.transport.AgentTransport`'s.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping, Sequence
+import email.message
 import os
 from pathlib import Path
 import tempfile
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, Literal, TypeVar, overload
 from urllib.parse import unquote, urlsplit
 
 import httpx
 
 from tamarind._logging import redact_signed_urls
 from tamarind.errors import ArgumentError, JobTimeoutError, NotFoundError, TamarindError
-from tamarind.uploads import put_presigned_upload
+from tamarind.uploads import post_presigned_form
 
 from .events import EventStream, Until
 from .models import (
+    AgentUsage,
     Approval,
-    ArchivedChat,
     Candidate,
     Chat,
     ContractError,
+    DeletedChat,
     Event,
     Export,
     File,
@@ -37,35 +39,25 @@ from .models import (
     Message,
     Page,
     Question,
+    SharedChat,
     Subagent,
     TaskReport,
     Usage,
     Workflow,
+    chat_from_wire,
     page_of,
 )
 from .transport import AgentTransport
 
 T = TypeVar("T")
+# A chat file is up to 200 MB, and not empty: storage refuses anything else (400).
 MAX_UPLOAD_BYTES = 209_715_200
 _DOWNLOAD_TIMEOUT = 300.0
 _DOWNLOAD_CHUNK = 1024 * 1024
-# The Content-Type an upload declares (the PUT must repeat it exactly). A fixed table, not
-# `mimetypes`: that reads the OS's own database, which differs by platform (`.pdb` is a
-# Palm database on macOS), so the same file would upload differently from each machine.
-CONTENT_TYPES = {
-    "pdb": "chemical/x-pdb", "ent": "chemical/x-pdb", "cif": "chemical/x-mmcif",
-    "mmcif": "chemical/x-mmcif", "sdf": "chemical/x-mdl-sdfile", "mol": "chemical/x-mdl-molfile",
-    "mol2": "chemical/x-mol2", "fasta": "text/x-fasta", "fa": "text/x-fasta", "faa": "text/x-fasta",
-    "csv": "text/csv", "tsv": "text/tab-separated-values", "txt": "text/plain", "md": "text/markdown",
-    "json": "application/json", "yaml": "application/yaml", "yml": "application/yaml",
-    "pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
-    "zip": "application/zip", "gz": "application/gzip",
+# The extension for a structure download that names no file, by its media type.
+_STRUCTURE_SUFFIX = {
+    "chemical/x-pdb": ".pdb", "chemical/x-mmcif": ".cif", "chemical/x-mdl-sdfile": ".sdf",
 }
-
-
-def content_type_for(filename: str) -> str:
-    ext = filename.rsplit(".", 1)[1].lower() if "." in filename else ""
-    return CONTENT_TYPES.get(ext, "application/octet-stream")
 
 
 def _json(resp: httpx.Response) -> Any:
@@ -134,38 +126,77 @@ class Chats(_Resource):
         self, *, title: str | None = None, effort: str | None = None, agent_id: str | None = None,
         mode: str | None = None, workflow: str | None = None, budget_hours: float | None = None,
         per_job_hours: float | None = None, auto_approve: bool | None = None,
-        idempotency_key: str | None = None,
+        dangerously_approve_all: bool | None = None, idempotency_key: str | None = None,
     ) -> Chat:
-        """``POST /chats``. Every field is optional; ``mode="campaign"`` starts a campaign."""
+        """``POST /chats``. Every field is optional; ``mode="campaign"`` starts a campaign.
+
+        ``dangerously_approve_all=True`` approves EVERY action the agent asks about, with no
+        one watching: deleting and cancelling, running code, installing packages, web and site
+        access, changes to the agent's own settings and skills (it can widen its own allowed
+        sites, packages and approvals), publishing a pipeline to your whole organization,
+        deploying custom tool code, ordering a paid wet-lab assay and starting a campaign. Use
+        it only for runs nobody is watching. It needs ``auto_approve=True`` (400 otherwise) and
+        turns off with it; jobs still run only within ``budget_hours`` and ``per_job_hours``,
+        but assay orders and custom tools are not bounded by those limits.
+        """
         body = _compact({
             "title": title, "effort": effort, "agentId": agent_id, "mode": mode,
             "workflow": workflow, "budgetHours": budget_hours, "perJobHours": per_job_hours,
-            "autoApprove": auto_approve,
+            "autoApprove": auto_approve, "dangerouslyApproveAll": dangerously_approve_all,
         })
         resp = self._t.call("createChat", json=body, idempotency_key=idempotency_key)
         return _one(resp, Chat.from_wire)
 
+    @overload
     def list(
-        self, *, limit: int | None = None, cursor: str | None = None, source: str | None = None,
-        status: str | None = None, mode: str | None = None, campaign_status: str | None = None,
-    ) -> Page[Chat]:
-        params = _page_params(limit, cursor, source=source, status=status, mode=mode,
-                              campaignStatus=campaign_status)
-        return page_of(_json(self._t.call("listChats", params=params)), Chat.from_wire)
+        self, *, scope: Literal["org"], limit: int | None = None, cursor: str | None = None,
+        source: str | None = None, status: str | None = None, mode: str | None = None,
+    ) -> Page[SharedChat]: ...
 
-    def get(self, chat_id: str) -> Chat:
-        return _one(self._t.call("getChat", {"chatId": chat_id}), Chat.from_wire)
+    @overload
+    def list(
+        self, *, scope: Literal["own"] | None = None, limit: int | None = None,
+        cursor: str | None = None, source: str | None = None, status: str | None = None,
+        mode: str | None = None,
+    ) -> Page[Chat]: ...
+
+    def list(
+        self, *, scope: str | None = None, limit: int | None = None, cursor: str | None = None,
+        source: str | None = None, status: str | None = None, mode: str | None = None,
+    ) -> Page[Any]:
+        """``GET /chats``: your own chats, most recently updated first.
+
+        ``scope="org"`` lists the chats of the other members of your organization that you may
+        read instead, as read-only :class:`SharedChat` items (grouped by owner's email). They
+        carry no state, so ``status`` is refused (400) with it. The list is empty if you are in
+        no organization, or yours keeps its members' chats apart and you are not an admin.
+        """
+        params = _page_params(limit, cursor, scope=scope, source=source, status=status, mode=mode)
+        return page_of(_json(self._t.call("listChats", params=params)), chat_from_wire)
+
+    def get(self, chat_id: str) -> Chat | SharedChat:
+        """``GET /chats/{chatId}``. A teammate's chat comes back as a read-only
+        :class:`SharedChat`: its campaign and plan, not its state, budget or usage."""
+        return _one(self._t.call("getChat", {"chatId": chat_id}), chat_from_wire)
 
     def update(
         self, chat_id: str, *, title: str | None = None, effort: str | None = None,
         mode: str | None = None, workflow: str | None = None, budget_hours: float | None = None,
         per_job_hours: float | None = None, auto_approve: bool | None = None,
-        campaign_status: str | None = None,
+        dangerously_approve_all: bool | None = None, campaign_status: str | None = None,
     ) -> Chat:
-        """``PATCH /chats/{chatId}``: settings, mode, and campaign pause/resume/stop."""
+        """``PATCH /chats/{chatId}``: settings, mode, and campaign pause/resume.
+
+        ``campaign_status="paused"`` is ``auto_approve=False`` and ``"running"`` is
+        ``auto_approve=True``. ``dangerously_approve_all`` is the flag described on
+        :meth:`create`: it needs ``auto_approve`` on once the request is done, and TURNING IT ON
+        ALSO ANSWERS the approvals the agent is waiting on right now (a delete, say), as
+        approved. It is off again after ``auto_approve=False`` or a pause.
+        """
         body = _compact({
             "title": title, "effort": effort, "mode": mode, "workflow": workflow,
             "budgetHours": budget_hours, "perJobHours": per_job_hours, "autoApprove": auto_approve,
+            "dangerouslyApproveAll": dangerously_approve_all,
         })
         if campaign_status is not None:
             body["campaign"] = {"status": campaign_status}
@@ -174,9 +205,13 @@ class Chats(_Resource):
         resp = self._t.call("updateChat", {"chatId": chat_id}, json=body)
         return _one(resp, Chat.from_wire)
 
-    def archive(self, chat_id: str) -> ArchivedChat:
-        """``DELETE /chats/{chatId}``: stops what is running and archives (not a hard delete)."""
-        return _one(self._t.call("archiveChat", {"chatId": chat_id}), ArchivedChat.from_wire)
+    def delete(self, chat_id: str) -> DeletedChat:
+        """``DELETE /chats/{chatId}``: stops any reply in progress, then deletes the chat.
+
+        It is no longer listed, every other request for it is 404, and it cannot be restored
+        through the API.
+        """
+        return _one(self._t.call("deleteChat", {"chatId": chat_id}), DeletedChat.from_wire)
 
     def rewind(self, chat_id: str, before_message_id: str) -> Chat:
         """Hide ``before_message_id`` and everything after it, to edit and resend."""
@@ -298,20 +333,21 @@ class Approvals(_Resource):
 
     def resolve(
         self, chat_id: str, approval_id: str, decision: str, *, scope: str | None = None,
-        budget_hours: float | None = None, workflow: str | None = None,
     ) -> Approval:
+        """Approve or deny. ``scope`` (default ``once``) says how far an approval reaches; a
+        denial takes none. Approving a ``campaign_start`` takes no workflow or budget: set
+        them with ``chats.update`` before you approve."""
         if decision not in ("approve", "deny"):
             raise ArgumentError("decision must be 'approve' or 'deny'")
-        body = _compact({"decision": decision, "scope": scope, "budgetHours": budget_hours,
-                         "workflow": workflow})
+        body = _compact({"decision": decision, "scope": scope})
         # Only the same BARE decision is safe to repeat (it returns the resolved approval);
         # with options, a repeat whose first answer was lost is 409 approval_not_pending.
         resp = self._t.call("resolveApproval", {"chatId": chat_id, "approvalId": approval_id},
                             json=body, retry_safe=False if len(body) > 1 else None)
         return _one(resp, Approval.from_wire)
 
-    def approve(self, chat_id: str, approval_id: str, **options: Any) -> Approval:
-        return self.resolve(chat_id, approval_id, "approve", **options)
+    def approve(self, chat_id: str, approval_id: str, *, scope: str | None = None) -> Approval:
+        return self.resolve(chat_id, approval_id, "approve", scope=scope)
 
     def deny(self, chat_id: str, approval_id: str) -> Approval:
         return self.resolve(chat_id, approval_id, "deny")
@@ -320,27 +356,39 @@ class Approvals(_Resource):
 class Questions(_Resource):
     def answer(
         self, chat_id: str, question_id: str, *, answers: Mapping[str, str] | None = None,
-        text: str | None = None, idempotency_key: str | None = None,
+        text: str | None = None,
     ) -> Question:
-        """Answer by question text (``answers``) or one ``text`` for every question."""
+        """Answer by question text (``answers``) or one ``text`` for every question.
+
+        The answer is sent as your next message. Repeating the same answer after a lost
+        response returns the answered question and sends nothing twice, so no key is needed.
+        """
         body = _compact({"answers": dict(answers) if answers is not None else None, "text": text})
         if len(body) != 1:
             # The server refuses both together (400): one or the other.
             raise ArgumentError("answer needs answers or text, not both")
         resp = self._t.call("answerQuestion", {"chatId": chat_id, "questionId": question_id},
-                            json=body, idempotency_key=idempotency_key)
+                            json=body)
         return _one(resp, Question.from_wire)
 
 
 class Files(_Resource):
-    def create_upload(self, filename: str, size: int, *, content_type: str | None = None) -> FileUpload:
-        """``POST /chat-files``: an upload slot. PUT the bytes to ``upload_url`` next."""
-        body = _compact({"filename": filename, "size": size, "contentType": content_type})
-        return _one(self._t.call("createChatFile", json=body), FileUpload.from_wire)
+    def create_upload(self, filename: str) -> FileUpload:
+        """``POST /chat-files``: an upload slot, which is a form to send the file with.
 
-    def upload(self, path: str | Path, *, filename: str | None = None,
-               content_type: str | None = None) -> FileUpload:
-        """Create a slot and PUT ``path`` to it; reference the ``file_id`` in a message."""
+        ``filename`` is letters, digits, ``.``, ``_``, ``-`` and ``/`` for a folder (400
+        otherwise); the agent sees this name and its extension sets the file's type. Send the
+        file before ``expires_at`` (:meth:`upload` does both steps).
+        """
+        return _one(self._t.call("createChatFile", json={"filename": filename}),
+                    FileUpload.from_wire)
+
+    def upload(self, path: str | Path, *, filename: str | None = None) -> FileUpload:
+        """Create a slot and send ``path`` to it; reference the ``file_id`` in a message.
+
+        The file goes by the presigned form the slot names (a ``POST``), not a ``PUT``, and
+        that request carries no API key. A file is 1 byte to 200 MB.
+        """
         path = Path(path)
         name = filename or path.name
         try:
@@ -349,10 +397,8 @@ class Files(_Resource):
             raise TamarindError(f"Could not read '{path}': {exc}.") from exc
         if size < 1 or size > MAX_UPLOAD_BYTES:
             raise ArgumentError("a chat file must be 1 byte to 200 MB")
-        kind = content_type or content_type_for(name)
-        slot = self.create_upload(name, size, content_type=kind)
-        # The same Content-Type the slot was created with, as the presigned PUT requires.
-        put_presigned_upload(slot.upload_url, path, content_type=kind, remote=name)
+        slot = self.create_upload(name)
+        post_presigned_form(slot.upload_url, slot.upload_fields, path, remote=name)
         return slot
 
     def get(self, file_id: str) -> File:
@@ -413,23 +459,28 @@ class Campaigns(_Resource):
         return page_of(_json(self._t.call("listCandidates", {"chatId": chat_id}, params=params)),
                        Candidate.from_wire)
 
-    def candidate_structure_url(self, chat_id: str, candidate_id: str) -> str:
-        resp = self._t.call("getCandidateStructure", {"chatId": chat_id, "candidateId": candidate_id})
-        return _location(resp)
-
     def download_structure(self, chat_id: str, candidate_id: str, dest: str | Path) -> Path:
-        """Save the structure to ``dest`` (a directory gets the URL's file name)."""
-        url = self.candidate_structure_url(chat_id, candidate_id)
+        """Save the candidate's structure file to ``dest`` (a directory gets the file's name).
+
+        The route serves the file itself (PDB, mmCIF or SDF, up to 10 MiB), so this request is
+        the one that carries the API key and no other host is involved. A candidate with no
+        structure is 404, whatever its ``has_structure`` said: that can read false when the
+        check timed out.
+        """
+        resp = self._t.call("getCandidateStructure", {"chatId": chat_id, "candidateId": candidate_id})
         target = Path(dest)
         if target.is_dir():
-            target = target / _url_name(url, fallback=f"{candidate_id}.cif")
-        return save_url(url, target)
+            target = target / _structure_name(resp, fallback=candidate_id)
+        try:
+            _write_atomic(target, [resp.content])
+        except OSError as exc:
+            raise TamarindError(f"Could not write '{target}': {exc}.") from exc
+        return target
 
     def jobs(
         self, chat_id: str, *, limit: int | None = None, cursor: str | None = None,
-        campaign_id: str | None = None,
     ) -> Page[JobRef]:
-        params = _page_params(limit, cursor, campaignId=campaign_id)
+        params = _page_params(limit, cursor)
         return page_of(_json(self._t.call("listChatJobs", {"chatId": chat_id}, params=params)),
                        JobRef.from_wire)
 
@@ -452,9 +503,12 @@ class UsageResource(_Resource):
     def chat(self, chat_id: str) -> Usage:
         return _one(self._t.call("getChatUsage", {"chatId": chat_id}), Usage.from_wire)
 
-    def month(self, month: str | None = None) -> Usage:
-        """The month's totals (``YYYY-MM``; default the current month)."""
-        return _one(self._t.call("getAgentUsage", params={"month": month}), Usage.from_wire)
+    def month(self, month: str | None = None) -> AgentUsage:
+        """Your agent usage for a month (``YYYY-MM``, US Pacific; default the current month).
+
+        It covers every chat of yours, jobs excluded: a chat's own jobs are in :meth:`chat`.
+        """
+        return _one(self._t.call("getAgentUsage", params={"month": month}), AgentUsage.from_wire)
 
 
 class Agent:
@@ -485,32 +539,49 @@ def safe_name(name: str, *, fallback: str) -> str:
     return leaf if leaf not in ("", ".", "..") else fallback.replace("/", "_")
 
 
+def _structure_name(resp: httpx.Response, *, fallback: str) -> str:
+    """The file name a structure download carries (``Content-Disposition``), made safe to join
+    to a directory; else the candidate's id and an extension for the file's type."""
+    header = email.message.Message()
+    header["content-disposition"] = resp.headers.get("content-disposition", "")
+    name = header.get_filename()
+    if name:
+        return safe_name(name, fallback=fallback)
+    kind = resp.headers.get("content-type", "").split(";")[0].strip().lower()
+    return safe_name(fallback, fallback="structure") + _STRUCTURE_SUFFIX.get(kind, "")
+
+
+def _write_atomic(target: Path, chunks: Iterable[bytes]) -> None:
+    """Write ``chunks`` to a fresh, exclusively created temp file beside ``target`` and rename it
+    into place, so two writers cannot share a partial file and a planted symlink is never
+    opened."""
+    fd, name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".part", dir=target.parent)
+    partial: Path | None = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            for chunk in chunks:
+                fh.write(chunk)
+        os.replace(name, target)
+        partial = None
+    finally:
+        if partial is not None:
+            partial.unlink(missing_ok=True)
+
+
 def save_url(url: str, target: Path) -> Path:
     """Stream a presigned URL to ``target``, without the API key and without echoing the URL.
 
-    Written to a fresh, exclusively created temp file beside ``target`` and renamed into
-    place, so two downloads cannot share a partial file and a planted symlink is never
-    opened.
+    Written through :func:`_write_atomic`, so a partial download never replaces ``target``.
     """
     redact_signed_urls()  # httpx logs the URL at INFO, and the URL is the credential
-    partial: Path | None = None
     try:
         with httpx.stream("GET", url, timeout=_DOWNLOAD_TIMEOUT, follow_redirects=True) as resp:
             resp.raise_for_status()
-            fd, name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".part", dir=target.parent)
-            partial = Path(name)
-            with os.fdopen(fd, "wb") as fh:
-                for chunk in resp.iter_bytes(_DOWNLOAD_CHUNK):
-                    fh.write(chunk)
-        os.replace(partial, target)
-        partial = None
+            _write_atomic(target, resp.iter_bytes(_DOWNLOAD_CHUNK))
     except httpx.HTTPStatusError as exc:
         raise TamarindError(f"Download of '{target.name}' failed with HTTP {exc.response.status_code}.") from None  # the cause names the signed URL
     except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:  # ValueError: a bad host (idna)
         raise TamarindError(f"Download of '{target.name}' failed ({type(exc).__name__}).") from None  # the cause names the signed URL
     except OSError as exc:
         raise TamarindError(f"Could not write '{target}': {exc}.") from exc
-    finally:
-        if partial is not None:
-            partial.unlink(missing_ok=True)
     return target

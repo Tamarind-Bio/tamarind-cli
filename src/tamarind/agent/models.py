@@ -95,76 +95,57 @@ class Page(Generic[T]):
 
     items: tuple[T, ...]
     next_cursor: str | None = None
+    # ``files.list`` only: the chat holds more than 20,000 files and only the first 20,000 by
+    # path are listed, so ``next_cursor is None`` ends that part of the list, not the chat's files.
+    truncated: bool = False
 
 
 def page_of(wire: Any, parse: Callable[[dict[str, Any]], T], *, cursor: bool = True) -> Page[T]:
     body = _as_object(wire)
     items = _objects(body, "data", parse, required=True)
-    return Page(items=items, next_cursor=_str(body, "nextCursor") if cursor else None)
+    return Page(items=items, next_cursor=_str(body, "nextCursor") if cursor else None,
+                truncated=_bool(body, "truncated") is True)
 
 
 # ── usage ──
 
 @dataclass(frozen=True)
-class TokenCounts:
-    input: int
-    output: int
-    cache_read: int
-    cache_write: int
-
-    @classmethod
-    def from_wire(cls, wire: dict[str, Any]) -> "TokenCounts":
-        def need(key: str) -> int:
-            value = _get(wire, key, (int,), required=True, nullable=False)
-            return int(value)
-        return cls(need("input"), need("output"), need("cacheRead"), need("cacheWrite"))
-
-
-@dataclass(frozen=True)
-class ModelUsage:
-    model: str
-    usd: float
-    hours: float | None
-    tokens: TokenCounts
-
-    @classmethod
-    def from_wire(cls, wire: dict[str, Any]) -> "ModelUsage":
-        tokens = _get(wire, "tokens", (dict,), required=True, nullable=False)
-        return cls(
-            model=_str(wire, "model", required=True),
-            usd=_num(wire, "usd", required=True),
-            hours=_num(wire, "hours"),
-            tokens=TokenCounts.from_wire(tokens),
-        )
-
-
-@dataclass(frozen=True)
 class Usage:
-    """What the agent cost. ``month``/``remaining_hours`` are set by ``usage.month`` only."""
+    """What a chat has used, in hours (``usage.chat``, and the ``usage`` of a chat or reply)."""
 
     agent_hours: float
     jobs_hours: float
     total_hours: float
-    agent_usd: float | None = None
     cap_hours: float | None = None
-    tokens: TokenCounts | None = None
-    by_model: tuple[ModelUsage, ...] = ()
-    month: str | None = None
-    remaining_hours: float | None = None
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     @classmethod
     def from_wire(cls, wire: dict[str, Any]) -> "Usage":
-        tokens = _obj(wire, "tokens")
         return cls(
             agent_hours=_num(wire, "agentHours", required=True),
             jobs_hours=_num(wire, "jobsHours", required=True),
             total_hours=_num(wire, "totalHours", required=True),
-            agent_usd=_num(wire, "agentUsd"),
             cap_hours=_num(wire, "capHours"),
-            tokens=TokenCounts.from_wire(tokens) if tokens is not None else None,
-            by_model=_objects(wire, "byModel", ModelUsage.from_wire),
-            month=_str(wire, "month"),
+            raw=wire,
+        )
+
+
+@dataclass(frozen=True)
+class AgentUsage:
+    """Your own agent usage for one month (``usage.month``), in hours, without jobs."""
+
+    month: str
+    agent_hours: float
+    # What is left of the tightest Tamarind budget that caps you; None when nothing does,
+    # when it cannot be read, and for any month but the current one.
+    remaining_hours: float | None = None
+    raw: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
+
+    @classmethod
+    def from_wire(cls, wire: dict[str, Any]) -> "AgentUsage":
+        return cls(
+            month=_str(wire, "month", required=True),
+            agent_hours=_num(wire, "agentHours", required=True),
             remaining_hours=_num(wire, "remainingHours"),
             raw=wire,
         )
@@ -188,12 +169,12 @@ class Campaign:
     """A chat's campaign, read on :attr:`Chat.campaign`; change it with ``chats.update``."""
 
     id: str
-    engine: str
     workflow: str
     status: str
     plan: Mapping[str, Any] | None
+    # The designs the agent marked final (``ids``, ``note``, ...); only on ``chats.get``.
+    final_designs: Mapping[str, Any] | None
     candidate_count: int | None
-    paused_workflows: tuple[Mapping[str, Any], ...]
     started_at: str | None
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
@@ -201,12 +182,11 @@ class Campaign:
     def from_wire(cls, wire: dict[str, Any]) -> "Campaign":
         return cls(
             id=_str(wire, "id", required=True),
-            engine=_str(wire, "engine", required=True),
             workflow=_str(wire, "workflow", required=True),
             status=_str(wire, "status", required=True),
             plan=_obj(wire, "plan"),
+            final_designs=_obj(wire, "finalDesigns"),
             candidate_count=_int(wire, "candidateCount"),
-            paused_workflows=_objects(wire, "pausedWorkflows", lambda item: item),
             started_at=_str(wire, "startedAt"),
             raw=wire,
         )
@@ -226,6 +206,9 @@ class Chat:
     agent_id: str | None = None
     budget: Budget | None = None
     auto_approve: bool | None = None
+    # Every action the agent asks about is approved without asking; off whenever
+    # ``auto_approve`` is. Not in ``chats.list`` items.
+    dangerously_approve_all: bool | None = None
     mode: str | None = None
     workflow: str | None = None
     campaign: Campaign | None = None
@@ -250,6 +233,7 @@ class Chat:
             agent_id=_str(wire, "agentId"),
             budget=Budget.from_wire(budget) if budget is not None else None,
             auto_approve=_bool(wire, "autoApprove"),
+            dangerously_approve_all=_bool(wire, "dangerouslyApproveAll"),
             mode=_str(wire, "mode"),
             workflow=_str(wire, "workflow"),
             campaign=Campaign.from_wire(campaign) if campaign is not None else None,
@@ -260,19 +244,61 @@ class Chat:
 
 
 @dataclass(frozen=True)
-class ArchivedChat:
+class SharedChat:
+    """A teammate's chat that you may read and not change (``chats.list(scope="org")``, or
+    ``chats.get`` of a chat that is not yours). It has no status, budget or usage: those
+    are its owner's."""
+
     id: str
-    status: str
-    campaigns_stopping: tuple[str, ...]
+    title: str
+    owner_email: str
+    source: str
+    created_at: str
+    updated_at: str
+    read_only: bool = True
+    mode: str | None = None
+    # Only on ``chats.get``.
+    campaign: Campaign | None = None
+    web_url: str | None = None
+    raw: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
+
+    @classmethod
+    def from_wire(cls, wire: dict[str, Any]) -> "SharedChat":
+        campaign = _obj(wire, "campaign")
+        return cls(
+            id=_str(wire, "id", required=True),
+            title=_str(wire, "title", required=True),
+            owner_email=_str(wire, "ownerEmail", required=True),
+            source=_str(wire, "source", required=True),
+            created_at=_str(wire, "createdAt", required=True),
+            updated_at=_str(wire, "updatedAt", required=True),
+            read_only=_bool(wire, "readOnly") is not False,
+            mode=_str(wire, "mode"),
+            campaign=Campaign.from_wire(campaign) if campaign is not None else None,
+            web_url=_str(wire, "webUrl"),
+            raw=wire,
+        )
+
+
+def chat_from_wire(wire: dict[str, Any]) -> Chat | SharedChat:
+    """A chat of yours, or a teammate's (``readOnly: true``, no status): the spec's ``oneOf``."""
+    return SharedChat.from_wire(wire) if wire.get("readOnly") is True else Chat.from_wire(wire)
+
+
+@dataclass(frozen=True)
+class DeletedChat:
+    """What ``chats.delete`` answers: the chat is gone and cannot be restored."""
+
+    id: str
+    deleted: bool
 
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     @classmethod
-    def from_wire(cls, wire: dict[str, Any]) -> "ArchivedChat":
+    def from_wire(cls, wire: dict[str, Any]) -> "DeletedChat":
         return cls(
             id=_str(wire, "id", required=True),
-            status=_str(wire, "status", required=True),
-            campaigns_stopping=_strings(wire, "campaignsStopping"),
+            deleted=_get(wire, "deleted", (bool,), required=True, nullable=False),
             raw=wire,
         )
 
@@ -315,6 +341,9 @@ class Approval:
     estimate: Mapping[str, Any] | None = None
     expires_at: str | None = None
     resolved_at: str | None = None
+    # ``user`` (your approve or deny) or ``dangerouslyApproveAll`` (the chat approved it by
+    # itself); None while pending, expired or superseded.
+    resolved_by: str | None = None
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     @classmethod
@@ -330,6 +359,7 @@ class Approval:
             estimate=_obj(wire, "estimate"),
             expires_at=_str(wire, "expiresAt"),
             resolved_at=_str(wire, "resolvedAt"),
+            resolved_by=_str(wire, "resolvedBy"),
             raw=wire,
         )
 
@@ -344,7 +374,8 @@ class Question:
     created_at: str
     message_id: str | None = None
     answers: Mapping[str, str] | None = None
-    expires_at: str | None = None
+    # The message that answered it (yours, sent here or not).
+    answer_message_id: str | None = None
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     @classmethod
@@ -356,7 +387,7 @@ class Question:
             created_at=_str(wire, "createdAt", required=True),
             message_id=_str(wire, "messageId"),
             answers=_obj(wire, "answers"),
-            expires_at=_str(wire, "expiresAt"),
+            answer_message_id=_str(wire, "answerMessageId"),
             raw=wire,
         )
 
@@ -380,7 +411,6 @@ class Message:
     continued_by: str | None = None
     incomplete_reason: str | None = None
     error: Mapping[str, Any] | None = None
-    model: str | None = None
     pending_approvals: tuple[Approval, ...] = ()
     pending_questions: tuple[Question, ...] = ()
     usage: Usage | None = None
@@ -402,7 +432,6 @@ class Message:
             continued_by=_str(wire, "continuedBy"),
             incomplete_reason=_str(wire, "incompleteReason"),
             error=_obj(wire, "error"),
-            model=_str(wire, "model"),
             # A `message.requires_action` event carries the cards as `approvals` too; take
             # them when `pendingApprovals` is empty, so the reply names its own cards.
             pending_approvals=(_objects(wire, "pendingApprovals", Approval.from_wire)
@@ -457,19 +486,29 @@ class File:
 
 @dataclass(frozen=True)
 class FileUpload:
-    """An upload slot. ``upload_url`` is presigned: it is a credential, so do not log it."""
+    """An upload slot: a presigned form to ``POST`` the file to before ``expires_at``.
+
+    ``upload_url`` and ``upload_fields`` are a credential (the fields carry the signed
+    policy), so neither is shown in ``repr`` nor to be logged. ``upload_fields`` is in the
+    order the server gave, and is to be sent exactly so, then the file as the last field.
+    """
 
     file_id: str
     upload_url: str = field(repr=False)
+    upload_fields: Mapping[str, str] = field(repr=False)
     expires_at: str
 
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     @classmethod
     def from_wire(cls, wire: dict[str, Any]) -> "FileUpload":
+        form = _get(wire, "uploadFields", (dict,), required=True, nullable=False)
+        if not all(isinstance(name, str) and isinstance(value, str) for name, value in form.items()):
+            raise ContractError("Agent API response field 'uploadFields' is not a map of strings.")
         return cls(
             file_id=_str(wire, "fileId", required=True),
             upload_url=_str(wire, "uploadUrl", required=True),
+            upload_fields=dict(form),
             expires_at=_str(wire, "expiresAt", required=True),
             raw=wire,
         )
@@ -519,7 +558,6 @@ class Subagent:
 @dataclass(frozen=True)
 class Workflow:
     id: str
-    engine: str
     label: str
     description: str | None = None
     supports: tuple[str, ...] = ()
@@ -530,7 +568,6 @@ class Workflow:
     def from_wire(cls, wire: dict[str, Any]) -> "Workflow":
         return cls(
             id=_str(wire, "id", required=True),
-            engine=_str(wire, "engine", required=True),
             label=_str(wire, "label", required=True),
             description=_str(wire, "description"),
             supports=_strings(wire, "supports"),
@@ -544,8 +581,12 @@ class Candidate:
     sequence: str
     name: str | None = None
     rank: int | None = None
+    # The agent marked it as one of the final designs (``Campaign.final_designs``).
+    final: bool | None = None
     metrics: Mapping[str, float] = field(default_factory=dict)
-    structure_file_id: str | None = None
+    # Whether ``campaigns.download_structure`` has a file for it. False can also mean it
+    # could not be checked just now: ask for the structure anyway if you need it.
+    has_structure: bool | None = None
     job_name: str | None = None
 
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
@@ -557,8 +598,9 @@ class Candidate:
             sequence=_str(wire, "sequence", required=True),
             name=_str(wire, "name"),
             rank=_int(wire, "rank"),
+            final=_bool(wire, "final"),
             metrics=_obj(wire, "metrics") or {},
-            structure_file_id=_str(wire, "structureFileId"),
+            has_structure=_bool(wire, "hasStructure"),
             job_name=_str(wire, "jobName"),
             raw=wire,
         )
@@ -573,7 +615,6 @@ class JobRef:
     status: str
     submitted_at: str | None = None
     compute_hours: float | None = None
-    campaign_id: str | None = None
 
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
@@ -585,7 +626,6 @@ class JobRef:
             status=_str(wire, "status", required=True),
             submitted_at=_str(wire, "submittedAt"),
             compute_hours=_num(wire, "computeHours"),
-            campaign_id=_str(wire, "campaignId"),
             raw=wire,
         )
 
@@ -596,7 +636,6 @@ class TaskReport:
     title: str
     status: str
     report: str | None = None
-    trace: tuple[Step, ...] = ()
 
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
@@ -607,7 +646,6 @@ class TaskReport:
             title=_str(wire, "title", required=True),
             status=_str(wire, "status", required=True),
             report=_str(wire, "report"),
-            trace=_objects(wire, "trace", Step.from_wire),
             raw=wire,
         )
 
@@ -647,7 +685,6 @@ class Event:
     created_at: str
     data: Mapping[str, Any]
     message_id: str | None = None
-    campaign_id: str | None = None
 
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
@@ -663,7 +700,6 @@ class Event:
             created_at=_str(wire, "createdAt", required=True),
             data=data,
             message_id=_str(wire, "messageId"),
-            campaign_id=_str(wire, "campaignId"),
             raw=wire,
         )
 

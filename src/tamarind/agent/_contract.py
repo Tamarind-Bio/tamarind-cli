@@ -6,10 +6,15 @@ Pinned to ``openapi/agent-v1.yaml`` (vendored from tamarind-agent
 re-synced spec that adds, moves or renames an operation fails CI until this table, and
 the resource method it names, follow.
 
-The client is hand-written rather than generated: the pinned generator
-(openapi-python-client 0.28.4) emits no endpoint for this spec, because every path takes
-the ``Tamarind-Version`` header as a ``date`` and it refuses a date-typed header, and it
-drops ``Message``/``Approval`` over an untyped array in ``ApprovalDetail``.
+The client is hand-written rather than generated: run on this spec, the pinned generator
+(openapi-python-client 0.28.4) drops ``ApprovalDetail``, ``Approval``, ``Message`` and
+``MessageEventData`` over an array with no ``items`` (``settingChanges.added``), so it types
+neither a reply nor an approval.
+
+The vendored spec (7972531f1) no longer documents a ``Tamarind-Version`` header; the copy
+this SDK was first written against took it on every path. The SDK still sends the date it
+was written against, unchanged: nothing in the current spec says whether the server reads it,
+so it is a pin the contract does not describe, kept until the agent team says to drop it.
 """
 
 from __future__ import annotations
@@ -38,9 +43,10 @@ OPERATIONS: dict[str, Operation] = {
     "listChats": Operation("GET", "/chats", False, True, "chats.list"),
     "getChat": Operation("GET", "/chats/{chatId}", False, True, "chats.get"),
     "updateChat": Operation("PATCH", "/chats/{chatId}", False, True, "chats.update"),
-    # Retried: the server takes a second DELETE of an archived chat as the retry it is (it
-    # re-stops a turn whose stop failed) and answers it 200, not the archived chat's 404.
-    "archiveChat": Operation("DELETE", "/chats/{chatId}", False, True, "chats.archive"),
+    # Not retried after a lost response: the chat is gone once the first DELETE lands, and
+    # the spec answers every later request for it 404, so a retry would report a delete that
+    # happened as "not found".
+    "deleteChat": Operation("DELETE", "/chats/{chatId}", False, False, "chats.delete"),
     "sendMessage": Operation("POST", "/chats/{chatId}/messages", True, True, "messages.send"),
     "listMessages": Operation("GET", "/chats/{chatId}/messages", False, True, "messages.list"),
     "getMessage": Operation("GET", "/chats/{chatId}/messages/{messageId}", False, True, "messages.get"),
@@ -53,8 +59,10 @@ OPERATIONS: dict[str, Operation] = {
     "rewindChat": Operation("POST", "/chats/{chatId}/rewind", False, False, "chats.rewind"),
     "listChatEvents": Operation("GET", "/chats/{chatId}/events", False, True, "events.list"),
     "listApprovals": Operation("GET", "/chats/{chatId}/approvals", False, True, "approvals.list"),
+    # Not keyed, and safe to repeat: "Repeating the same answer after a lost response returns
+    # the answered question and sends nothing twice."
     "answerQuestion": Operation(
-        "POST", "/chats/{chatId}/questions/{questionId}", True, True, "questions.answer"
+        "POST", "/chats/{chatId}/questions/{questionId}", False, True, "questions.answer"
     ),
     # "Retrying needs no Idempotency-Key, since the approval is the key": the same bare
     # decision again returns the resolved approval and runs nothing twice.
@@ -62,7 +70,7 @@ OPERATIONS: dict[str, Operation] = {
         "POST", "/chats/{chatId}/approvals/{approvalId}", False, True, "approvals.resolve"
     ),
     # Not keyed: a retry would mint a second (harmless, never-filled) upload slot, so a lost
-    # response is reported instead.
+    # response is reported instead. The bytes then go to the slot by a presigned form POST.
     "createChatFile": Operation("POST", "/chat-files", False, False, "files.create_upload"),
     "getChatFile": Operation("GET", "/chat-files/{fileId}", False, True, "files.get"),
     "listChatFiles": Operation("GET", "/chats/{chatId}/files", False, True, "files.list"),
@@ -71,9 +79,10 @@ OPERATIONS: dict[str, Operation] = {
     ),
     "listAgentWorkflows": Operation("GET", "/agent-workflows", False, True, "workflows.list"),
     "listCandidates": Operation("GET", "/chats/{chatId}/candidates", False, True, "campaigns.candidates"),
+    # The structure file itself (up to 10 MiB), not a redirect to one.
     "getCandidateStructure": Operation(
         "GET", "/chats/{chatId}/candidates/{candidateId}/structure", False, True,
-        "campaigns.candidate_structure_url",
+        "campaigns.download_structure",
     ),
     "listChatJobs": Operation("GET", "/chats/{chatId}/jobs", False, True, "campaigns.jobs"),
     "getChatTask": Operation("GET", "/chats/{chatId}/tasks/{taskId}", False, True, "campaigns.task"),
@@ -115,18 +124,14 @@ EVENT_TYPES: frozenset[str] = frozenset(
         "step.waiting",
         "step.completed",
         "subagent.started",
+        "subagent.updated",
         "subagent.completed",
         "approval.requested",
         "approval.resolved",
         "question.asked",
         "question.resolved",
-        "job.submitted",
         "job.completed",
         "job.failed",
-        "file.created",
-        "plan.updated",
-        "candidates.updated",
-        "campaign.status",
         "chat.rewound",
         "usage.updated",
         "error",

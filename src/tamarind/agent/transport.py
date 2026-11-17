@@ -46,9 +46,9 @@ DEFAULT_MAX_RETRIES = 3
 DEFAULT_MAX_RATE_LIMIT_WAIT = 60.0
 _RETRYABLE_STATUS = frozenset({500, 502, 503, 504})
 # The operations whose answer is a 302 to a presigned URL. Any other redirect (a 307 to a
-# proxy's login page, say) is an error:
-# it is not followed (it would carry the API key) and not returned as a success.
-REDIRECTING = frozenset({"downloadChatFile", "getCandidateStructure"})
+# proxy's login page, say, or a 302 from an operation that serves its file itself) is an
+# error: it is not followed (it would carry the API key) and not returned as a success.
+REDIRECTING = frozenset({"downloadChatFile"})
 
 
 def build_path(template: str, path_params: Mapping[str, str]) -> str:

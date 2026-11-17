@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from collections.abc import Callable, Iterator
 import json
+import re
 from typing import Any
 
 import httpx
@@ -26,8 +27,7 @@ def frame(event_id: str | None, event_type: str, data: dict[str, Any], *, chat: 
     """One SSE frame carrying a public Event envelope."""
     seq = sequence if sequence is not None else int((event_id or "0").split(".")[0])
     envelope = {"id": event_id or "0.0", "type": event_type, "sequence": seq, "chatId": chat,
-                "messageId": message, "campaignId": None, "createdAt": "2026-10-27T17:02:11Z",
-                "data": data}
+                "messageId": message, "createdAt": "2026-10-27T17:02:11Z", "data": data}
     head = f"id: {event_id}\n" if event_id is not None else ""
     return f"{head}event: {event_type}\ndata: {json.dumps(envelope)}\n\n"
 
@@ -48,10 +48,42 @@ def reply(status: str, *, message_id: str = "msg_1", continued_by: str | None = 
     return body
 
 
-def approval(approval_id: str = "apr_x", status: str = "pending") -> dict[str, Any]:
+def approval(approval_id: str = "apr_x", status: str = "pending",
+             resolved_by: str | None = None) -> dict[str, Any]:
     return {"id": approval_id, "messageId": "msg_1", "status": status, "kind": "platform",
             "summary": "Submit 24 Boltz-2 jobs (~3.1 h)", "detail": {"operation": "submit"},
-            "createdAt": "2026-10-27T17:05:40Z", "expiresAt": None, "resolvedAt": None}
+            "createdAt": "2026-10-27T17:05:40Z", "expiresAt": None, "resolvedAt": None,
+            "resolvedBy": resolved_by}
+
+
+# The form a `POST /chat-files` answers with: the spec's example, in the order it gives.
+UPLOAD_URL = "https://s3.test/chat-uploads/"
+UPLOAD_FIELDS = {
+    "key": "uploads/file_9f2/target.pdb", "Content-Type": "chemical/x-pdb", "policy": "POLICYB64",
+    "x-amz-algorithm": "AWS4-HMAC-SHA256", "x-amz-credential": "AKIAEXAMPLE/20261027/us-west-2/s3",
+    "x-amz-date": "20261027T170211Z", "x-amz-signature": "topsecretsig",
+}
+
+
+def upload_slot(file_id: str = "file_9f2") -> dict[str, Any]:
+    return {"fileId": file_id, "uploadUrl": UPLOAD_URL, "uploadFields": dict(UPLOAD_FIELDS),
+            "expiresAt": "2026-10-27T17:17:11Z"}
+
+
+def form_parts(request: httpx.Request) -> list[tuple[str, str | None, bytes]]:
+    """A multipart request's parts in the order sent: (field name, file name or None, body)."""
+    kind = request.headers["Content-Type"]
+    assert kind.startswith("multipart/form-data; boundary="), kind
+    delimiter = b"--" + kind.split("boundary=", 1)[1].encode()
+    parts = []
+    for chunk in request.content.split(delimiter)[1:-1]:
+        head, _, body = chunk.removeprefix(b"\r\n").partition(b"\r\n\r\n")
+        text = head.decode()
+        name = re.search(r'name="([^"]*)"', text)
+        filename = re.search(r'filename="([^"]*)"', text)
+        assert name is not None, text
+        parts.append((name.group(1), filename.group(1) if filename else None, body.removesuffix(b"\r\n")))
+    return parts
 
 
 class CutStream(httpx.SyncByteStream):
