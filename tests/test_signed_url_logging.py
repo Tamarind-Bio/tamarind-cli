@@ -10,7 +10,7 @@ import respx
 
 from tamarind._logging import SignedUrlRedactor, redact_signed_urls
 from tamarind.agent.resources import save_url
-from tamarind.uploads import put_presigned_upload
+from tamarind.uploads import post_presigned_form, put_presigned_upload
 
 SIGNED = "https://s3.test/u/file_9f2?X-Amz-Credential=AKIAEXAMPLE&X-Amz-Signature=topsecretsig&X-Amz-Expires=900"
 
@@ -36,6 +36,23 @@ def test_an_upload_never_logs_the_signature(httpx_logger, caplog, tmp_path):
 
     assert "HTTP Request: PUT https://s3.test/u/file_9f2" in caplog.text  # still logged
     assert "topsecretsig" not in caplog.text and "AKIAEXAMPLE" not in caplog.text
+
+
+@respx.mock
+def test_a_form_upload_never_logs_the_signature_or_the_fields(httpx_logger, caplog, tmp_path):
+    caplog.set_level(logging.DEBUG)  # httpx logs at INFO; httpcore, below it, at DEBUG
+    target = tmp_path / "a.pdb"
+    target.write_bytes(b"ATOM\n")
+    respx.post("https://s3.test/u/file_9f2").mock(return_value=httpx.Response(204))
+    fields = {"key": "uploads/file_9f2/a.pdb", "policy": "topsecretpolicy", "x-amz-signature": "topsecretsig"}
+
+    # A URL that carries a signature as well: the URL is a credential too.
+    sent = post_presigned_form(SIGNED, fields, target, remote="a.pdb")
+
+    assert sent == 5
+    assert "HTTP Request: POST https://s3.test/u/file_9f2" in caplog.text  # still logged
+    for secret in ("topsecretsig", "AKIAEXAMPLE", "topsecretpolicy"):
+        assert secret not in caplog.text
 
 
 @respx.mock
