@@ -71,7 +71,13 @@ class Transport:
         self._storage.close()
 
     # -- API calls --------------------------------------------------------
-    def call(self, endpoint: types.ModuleType, body: Any = UNSET, **arguments: Any) -> Any:
+    def call(
+        self,
+        endpoint: types.ModuleType,
+        body: Any = UNSET,
+        extra_headers: Mapping[str, str] | None = None,
+        **arguments: Any,
+    ) -> httpx.Response:
         """Build one request with ``endpoint._get_kwargs`` and send it."""
         build = endpoint._get_kwargs
         hints = _hints(build)
@@ -99,14 +105,13 @@ class Transport:
         for name in COMMA_JOINED_QUERY.get(endpoint.__name__.rsplit(".", 1)[-1], ()):
             if params and isinstance(params.get(name), list):
                 params[name] = ",".join(str(item) for item in params[name])
-        response = self.send(
+        return self.send(
             request["method"].upper(),
             self.base_url + request["url"],
             params=request.get("params"),
-            headers=request.get("headers"),
+            headers={**(request.get("headers") or {}), **(extra_headers or {})},
             json=request.get("json"),
         )
-        return decode(response)
 
     def send(
         self,
@@ -117,7 +122,8 @@ class Transport:
         headers: Mapping[str, str] | None = None,
         json: Any = None,
     ) -> httpx.Response:
-        merged = {**self._headers, **(headers or {})}
+        merged = httpx.Headers(self._headers)
+        merged.update(headers or {})
         repeat_safe = method in _SAFE_METHODS or "Idempotency-Key" in merged
         return self._with_retries(
             lambda: self._client.request(method, url, params=params, headers=merged, json=json),

@@ -26,10 +26,11 @@ import io
 import os
 import time
 import types
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import IO, Any
 
+import attrs
 import httpx
 
 from tamarind.errors import JobTimeoutError, TamarindError
@@ -180,6 +181,8 @@ from tamarind.v1._transport import (
     DEFAULT_TIMEOUT,
     Transport,
     _hints,
+    _members,
+    decode,
 )
 
 TERMINAL_STATUSES = frozenset({"Complete", "Stopped", "Failed"})
@@ -190,9 +193,15 @@ SIGNED_UPLOAD_LIMIT = 5_000_000_000
 class Operation:
     """Binds one generated endpoint module to a resource as a method."""
 
-    def __init__(self, endpoint: types.ModuleType, *path: str):
+    def __init__(
+        self,
+        endpoint: types.ModuleType,
+        *path: str,
+        check: Callable[[httpx.Response, Any], None] | None = None,
+    ):
         self.endpoint = endpoint
         self.path = path
+        self.check = check
         self.__doc__ = _doc(endpoint)
 
     def __set_name__(self, owner: type, name: str) -> None:
@@ -213,6 +222,8 @@ def _doc(endpoint: types.ModuleType) -> str:
             break
         kept.append(line)
     return "\n".join(kept).rstrip() + (
+        "\n\nextra_headers (dict): headers to add to this one request, such as"
+        " ``{'Accept': 'text/csv'}``."
         "\n\nReturns the decoded JSON answer (bytes for file content, None when empty)."
         "\nRaises tamarind.v1.ProblemError for an error answer."
     )
@@ -231,9 +242,26 @@ class BoundOperation:
 
     @property
     def pageable(self) -> bool:
+        """``cursor`` is a query parameter of this operation."""
         return "cursor" in _hints(self.operation.endpoint._get_kwargs)
 
-    def __call__(self, *args: Any, body: Any = UNSET, **params: Any) -> Any:
+    @property
+    def body_pageable(self) -> bool:
+        """``cursor`` is a field of this operation's request body."""
+        hint = _hints(self.operation.endpoint._get_kwargs).get("body")
+        return any(
+            attrs.has(member) and "cursor" in attrs.fields_dict(member)
+            for member in _members(hint)
+            if isinstance(member, type)
+        )
+
+    def __call__(
+        self,
+        *args: Any,
+        body: Any = UNSET,
+        extra_headers: Mapping[str, str] | None = None,
+        **params: Any,
+    ) -> Any:
         path = self.operation.path
         positional_body = self.takes_body and body is UNSET
         if len(args) > len(path) + (1 if positional_body else 0):
@@ -247,8 +275,29 @@ class BoundOperation:
         overlap = set(path) & set(params)
         if overlap:
             raise TypeError(f"{self.__name__}() got {', '.join(sorted(overlap))} twice")
-        return self._transport.call(
-            self.operation.endpoint, body=body, **dict(zip(path, args)), **params
+        response = self._transport.call(
+            self.operation.endpoint,
+            body=body,
+            extra_headers=extra_headers,
+            **dict(zip(path, args)),
+            **params,
+        )
+        answer = decode(response)
+        if self.operation.check is not None:
+            self.operation.check(response, answer)
+        return answer
+
+
+def _secret_shown(response: httpx.Response, answer: Any) -> None:
+    """A replayed ``createApiKey`` has no secret: the key exists but can't be used."""
+    if response.headers.get("idempotent-replayed") == "true" and not (
+        isinstance(answer, dict) and answer.get("secret")
+    ):
+        key_id = answer.get("id") if isinstance(answer, dict) else None
+        raise TamarindError(
+            f"Key {key_id} was made by an earlier attempt with this Idempotency-Key, and its "
+            "secret can't be shown again. Revoke it (api_keys.revoke) and create another.",
+            detail=answer,
         )
 
 
@@ -263,7 +312,7 @@ class Me(_Resource):
 
 class ApiKeys(_Resource):
     list = Operation(list_api_keys)
-    create = Operation(create_api_key)
+    create = Operation(create_api_key, check=_secret_shown)
     get = Operation(get_api_key, "key_id")
     update = Operation(update_api_key, "key_id")
     revoke = Operation(revoke_api_key, "key_id")
@@ -339,17 +388,26 @@ class Jobs(_Resource):
                 return item
             delay = float(poll_interval or item.get("pollAfterSeconds") or 15)
             if deadline is not None:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise JobTimeoutError(
-                        f"{job_id} is still {item.get('status')} after {timeout:g}s",
-                        detail=item,
-                    )
-                delay = min(delay, remaining)
+                delay = min(delay, max(0.0, deadline - time.monotonic()))
             self._transport._sleep(delay)
+            # Checked before the next read, so no request starts after the deadline.
+            if deadline is not None and time.monotonic() >= deadline:
+                raise JobTimeoutError(
+                    f"{job_id} was still {item.get('status')} when {timeout:g}s passed",
+                    detail=item,
+                )
 
 
 class Files(_Resource):
+    """Your workspace files.
+
+    ``get``/``jobs.get_file`` answer ``delivery="url"`` (the default) with a short-lived
+    link to fetch without your key, and ``delivery="inline"`` with the bytes (up to
+    4 MiB). ``delivery="redirect"`` is for clients that follow redirects and needs
+    ``Authorization: Bearer``; with this client's ``x-api-key`` it is 422
+    ``redirect_needs_bearer``, and the link it would redirect to is the one ``url`` gives.
+    """
+
     list = Operation(list_files)
     delete = Operation(delete_file)
     get = Operation(get_file)
@@ -386,11 +444,11 @@ class Files(_Resource):
             )
             if not use_multipart and content.size <= INLINE_UPLOAD_LIMIT:
                 request["contentBase64"] = base64.b64encode(content.read(0, content.size)).decode()
-                return dict(self._transport.call(upload_file, body=request)["file"])
+                return dict(decode(self._transport.call(upload_file, body=request))["file"])
             request["sizeBytes"] = content.size
             if use_multipart:
                 request["multipart"] = True
-            answer = self._transport.call(upload_file, body=request)
+            answer = decode(self._transport.call(upload_file, body=request))
             upload = answer["upload"]
             if not use_multipart:
                 self._transport.put_signed(
@@ -407,7 +465,7 @@ class Files(_Resource):
                 length = max(0, min(part_size, content.size - start))
                 response = self._transport.put_signed(
                     part["url"],
-                    lambda start=start, length=length: content.read(start, length),
+                    lambda start=start, length=length: content.stream(start, length),
                     {"Content-Length": str(length)},
                 )
                 etag = response.headers.get("etag")
@@ -417,7 +475,7 @@ class Files(_Resource):
             completed = self._transport.call(
                 complete_file_upload, body={"uploadId": upload["id"], "parts": parts}
             )
-            return dict(completed)
+            return dict(decode(completed))
         finally:
             content.close()
 
@@ -572,15 +630,29 @@ class Tamarind:
         ``client.paginate(client.jobs.list, status="Running", limit=200)``. Takes the
         same arguments as ``method``; ``limit`` sets the page size.
         """
-        if not isinstance(method, BoundOperation) or not method.pageable:
+        if not isinstance(method, BoundOperation) or not (
+            method.pageable or method.body_pageable
+        ):
             raise TypeError("paginate() takes a list operation such as client.jobs.list")
-        cursor = params.pop("cursor", None)
+        if method.pageable:
+            cursor = params.pop("cursor", None)
+            while True:
+                page = method(*args, cursor=cursor, **params)
+                yield from page.get("items") or []
+                cursor = page.get("nextCursor")
+                if not cursor:
+                    return
+        # The cursor is a body field (molecules.search, molecules.list_score_observations).
+        path = len(method.operation.path)
+        body = args[path] if len(args) > path else params.pop("body", None)
+        request = dict(getattr(body, "to_dict", lambda: body)() or {})
         while True:
-            page = method(*args, cursor=cursor, **params)
+            page = method(*args[:path], body=request, **params)
             yield from page.get("items") or []
             cursor = page.get("nextCursor")
             if not cursor:
                 return
+            request = {**request, "cursor": cursor}
 
     def close(self) -> None:
         self._transport.close()

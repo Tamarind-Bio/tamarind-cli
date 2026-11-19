@@ -9,7 +9,7 @@ import httpx
 import pytest
 import respx
 
-from tamarind.errors import ExitCode, JobTimeoutError
+from tamarind.errors import ExitCode, JobTimeoutError, TamarindError
 from tamarind.v1 import ProblemError, Tamarind, paginate
 
 BASE = "https://api.test.tamarind.bio"
@@ -283,10 +283,12 @@ def test_wait_polls_until_a_terminal_status(client: Tamarind) -> None:
 
 
 @respx.mock
-def test_wait_times_out(client: Tamarind, monkeypatch: pytest.MonkeyPatch) -> None:
-    clock = iter([0.0, 0.0, 5.0, 11.0])
+def test_wait_times_out_without_reading_after_the_deadline(
+    client: Tamarind, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = iter([0.0, 0.0, 5.0, 5.0, 11.0])
     monkeypatch.setattr("tamarind.v1.client.time.monotonic", lambda: next(clock))
-    respx.get(f"{BASE}/jobs/batch_1").mock(
+    route = respx.get(f"{BASE}/jobs/batch_1").mock(
         return_value=httpx.Response(
             200, json={"id": "batch_1", "status": "Running", "pollAfterSeconds": 15}
         )
@@ -294,6 +296,46 @@ def test_wait_times_out(client: Tamarind, monkeypatch: pytest.MonkeyPatch) -> No
     with pytest.raises(JobTimeoutError):
         client.jobs.wait("batch_1", timeout=10)
     assert client.sleeps == [10.0, 5.0]  # type: ignore[attr-defined]
+    assert route.call_count == 2
+
+
+@respx.mock
+def test_extra_headers_reach_the_request(client: Tamarind) -> None:
+    route = respx.get(f"{BASE}/usage").mock(
+        return_value=httpx.Response(200, text="month,value\n", headers={"content-type": "text/csv"})
+    )
+    assert client.usage.get(extra_headers={"accept": "text/csv"}) == b"month,value\n"
+    assert route.calls.last.request.headers.get_list("accept") == ["text/csv"]
+
+
+@respx.mock
+def test_paginate_a_cursor_in_the_request_body(client: Tamarind) -> None:
+    def answer(request: httpx.Request) -> httpx.Response:
+        sent = json.loads(request.content)
+        assert sent["query"] == "x"
+        if sent.get("cursor") is None:
+            return httpx.Response(200, json={"items": [1], "nextCursor": "c2"})
+        return httpx.Response(200, json={"items": [2], "nextCursor": None})
+
+    respx.post(f"{BASE}/molecules/search").mock(side_effect=answer)
+    assert list(client.paginate(client.molecules.search, {"query": "x"})) == [1, 2]
+    respx.post(f"{BASE}/molecules/groups/grp_1/score-observations").mock(
+        return_value=httpx.Response(200, json={"items": ["o"], "nextCursor": None})
+    )
+    assert list(client.paginate(client.molecules.list_score_observations, "grp_1", {})) == ["o"]
+
+
+@respx.mock
+def test_a_replayed_key_creation_without_its_secret_raises(client: Tamarind) -> None:
+    respx.post(f"{BASE}/api-keys").mock(
+        side_effect=[
+            httpx.Response(201, json={"id": "key_1", "secret": "s"}),
+            httpx.Response(200, json={"id": "key_1"}, headers={"Idempotent-Replayed": "true"}),
+        ]
+    )
+    assert client.api_keys.create({"serviceAccountId": "u_1"})["secret"] == "s"
+    with pytest.raises(TamarindError, match="key_1.*Revoke it"):
+        client.api_keys.create({"serviceAccountId": "u_1"}, idempotency_key="again")
 
 
 @respx.mock
