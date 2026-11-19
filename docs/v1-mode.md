@@ -14,7 +14,10 @@ for `--help`, `--version` or other offline commands) and keeps the answer for 5 
 per key and environment. The CLI keeps it in `~/.tamarind/v1-flag.json` (or under
 `TAMARIND_CONFIG_DIR`), mode 0600, which holds a hash of the key, never the key itself.
 Anything but an explicit `true` means classic: no answer, a 401, a 404 (a caller outside
-v1), the field false or missing.
+v1), the field false or missing. Once a client (or a CLI command) has its answer it keeps
+it, so a long `wait` never changes API halfway; a flag change reaches the next command
+within 5 minutes. `--help` lists the v1-only commands from the last answer kept, so a
+flagged user's very first `--help`, before any command has asked, doesn't list them yet.
 
 The v1 API is the one in the classic base's environment: `app.tamarind.bio` →
 `api.tamarind.bio`, `staging.tamarind.bio` → `api-staging.tamarind.bio`. Any other

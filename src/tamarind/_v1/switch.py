@@ -172,14 +172,17 @@ def probe(v1_base: str, api_key: str, *, timeout: float = PROBE_TIMEOUT) -> bool
 
 
 class Switch:
-    """One client's answer to "does this key use v1?", asked when first needed."""
+    """One client's answer to "does this key use v1?", asked when first needed and then
+    kept for the client's life, so a long wait never changes API halfway through. A new
+    client reads the shared cache, so a changed flag reaches the next command (or client)
+    within :data:`CACHE_SECONDS`."""
 
     def __init__(self, api_key: str | None, v1_base: str | None, cache: FlagCache | None = None):
         self.api_key = api_key
         self.v1_base = v1_base.rstrip("/") if v1_base else None
         self._cache = cache if cache is not None else _PROCESS_CACHE
         self._lock = threading.Lock()
-        self._known: tuple[bool, float] | None = None
+        self._known: bool | None = None
 
     def _key(self) -> str | None:
         if not self.api_key or not self.v1_base or disabled():
@@ -187,12 +190,13 @@ class Switch:
         return cache_key(self.v1_base, self.api_key)
 
     def cached(self, *, max_age: float = CACHE_SECONDS) -> bool | None:
-        """The answer if one no older than ``max_age`` is known; never the network."""
+        """This client's answer, or else one no older than ``max_age`` in the shared
+        cache; never the network."""
         key = self._key()
         if key is None:
             return False
-        if self._known is not None and time.monotonic() - self._known[1] <= max_age:
-            return self._known[0]
+        if self._known is not None:
+            return self._known
         return self._cache.get(key, max_age=max_age)
 
     def last_known(self) -> bool | None:
@@ -204,12 +208,14 @@ class Switch:
         if key is None:
             return False
         with self._lock:
-            known = self.cached()
+            if self._known is not None:
+                return self._known
+            known = self._cache.get(key)
             if known is None:
                 assert self.v1_base is not None and self.api_key is not None
                 known = probe(self.v1_base, self.api_key)
-                # Remembered here too, so an unwritable cache doesn't mean asking per request;
-                # timed from the answer, so no answer outlives CACHE_SECONDS.
-                self._known = (known, time.monotonic())
                 self._cache.set(key, known)
+            # Kept for this client's life (and so an unwritable cache never means asking
+            # again on every request).
+            self._known = known
             return known

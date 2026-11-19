@@ -97,17 +97,29 @@ def test_no_key_no_base_or_the_escape_hatch_never_ask(monkeypatch):
     assert not switch.Switch("k", V1).on()
 
 
-def test_the_cache_expires(monkeypatch):
+def test_a_client_keeps_its_answer_and_new_clients_see_a_change_after_the_cache(monkeypatch):
     clock = [1000.0]
     monkeypatch.setattr(switch.time, "monotonic", lambda: clock[0])
+    answers = iter([True, False])
     asked: list[str] = []
-    monkeypatch.setattr(switch, "probe", lambda base, key, **k: (asked.append(key), True)[1])
+    monkeypatch.setattr(switch, "probe", lambda base, key, **k: (asked.append(key), next(answers))[1])
     one = switch.Switch("k", V1)
     assert one.on()
     clock[0] += switch.CACHE_SECONDS - 1
-    assert one.on() and switch.Switch("k", V1).on() and asked == ["k"]
+    assert switch.Switch("k", V1).on() and asked == ["k"]  # a new client: the cache
     clock[0] += 2
-    assert one.on() and asked == ["k", "k"]
+    assert one.on() and asked == ["k"]  # a long wait keeps its API
+    assert not switch.Switch("k", V1).on() and asked == ["k", "k"]  # a new client asks again
+
+
+def test_an_unusable_cache_still_asks_once_per_client(tmp_path, monkeypatch):
+    blocker = tmp_path / "file"
+    blocker.write_text("")
+    asked: list[str] = []
+    monkeypatch.setattr(switch, "probe", lambda base, key, **k: (asked.append(key), True)[1])
+    one = switch.Switch("k", V1, switch.FileFlagCache(blocker))
+    assert one.on() and one.on() and one.on()
+    assert asked == ["k"]
 
 
 def test_the_file_cache_is_private_and_never_holds_the_key(tmp_path):
