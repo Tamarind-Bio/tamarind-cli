@@ -65,7 +65,8 @@ class Transport:
         self._owns_client = http_client is None
         self._headers = headers
         # Signed storage URLs must never see the API key.
-        self._storage = httpx.Client(timeout=timeout)
+        self._storage_transport = httpx.HTTPTransport()
+        self._storage = httpx.Client(transport=self._storage_transport, timeout=timeout)
 
     def close(self) -> None:
         if self._owns_client:
@@ -167,10 +168,22 @@ class Transport:
         """PUT bytes to a signed storage URL, without the API key."""
         self.require_secure(url)
         return self._with_retries(
-            lambda: self._storage.put(url, content=content(), headers=dict(headers)),
+            lambda: self._put_unlogged(url, content(), headers),
             repeat_safe=True,
             api=False,
         )
+
+    def _put_unlogged(self, url: str, content: Any, headers: Mapping[str, str]) -> httpx.Response:
+        """Send a PUT below ``httpx.Client``, whose INFO log line would carry the signed URL
+        (a credential) into the application's logs."""
+        request = self._storage.build_request("PUT", url, content=content, headers=dict(headers))
+        response = self._storage_transport.handle_request(request)
+        try:
+            response.read()
+        finally:
+            response.close()
+        response.request = request
+        return response
 
     # -- retries ----------------------------------------------------------
     def _with_retries(

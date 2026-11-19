@@ -645,3 +645,25 @@ def test_idempotent_writes_the_contract_names_are_retried(client: Tamarind) -> N
     )
     assert client.api_keys.revoke("key_1") is None
     assert revoke.call_count == 2
+
+
+@respx.mock
+def test_signed_urls_stay_out_of_httpx_logs(
+    client: Tamarind, caplog: pytest.LogCaptureFixture
+) -> None:
+    signed = "https://storage.test/put?X-Amz-Signature=sekrit"
+    respx.post(f"{BASE}/files").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "file": {"path": "big.bin"},
+                "upload": {"method": "PUT", "url": signed, "headers": {}, "expiresAt": "x"},
+            },
+        )
+    )
+    put = respx.put(signed).mock(return_value=httpx.Response(200))
+    with caplog.at_level("INFO", logger="httpx"):
+        client.files.upload(b"z" * (3 * 1024 * 1024 + 1), "big.bin")
+    assert put.call_count == 1
+    assert "HTTP Request: POST" in caplog.text  # the API call still logs
+    assert "sekrit" not in caplog.text
