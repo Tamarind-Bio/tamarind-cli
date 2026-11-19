@@ -762,3 +762,28 @@ def test_max_lines_applies_to_json_logs_too(v1):
     v1.answers["jobs.logs"] = {"content": "a\nb\nc\n", "nextCursor": "older", "complete": False}
     out = _json(runner.invoke(app, ["--json", "logs", "job_0f8fad5b-d9cb-469f-a165-70867728950e", "--max-lines", "2"]))
     assert out == {"content": "b\nc\n", "nextCursor": "older", "complete": False, "omittedLines": 1}
+
+
+def test_generated_writes_with_an_idempotency_key_say_how_to_retry(v1):
+    from tamarind.errors import APIError
+
+    v1.answers["pipelines.submit"] = APIError("503 service_unavailable", status_code=503)
+    res = runner.invoke(app, ["--json", "pipelines", "submit", "--set", "name=p"])
+    key = v1.calls[-1][2]["idempotency_key"]
+    assert res.exception.detail["idempotencyKey"] == key
+    assert f"--idempotency-key {key}" in str(res.exception)
+
+
+def test_idempotency_in_progress_is_an_unclear_outcome(v1):
+    from tamarind.errors import APIError
+
+    err = APIError("409 idempotency_in_progress", status_code=409)
+    err.status, err.code = 409, "idempotency_in_progress"
+    v1.answers["jobs.submit"] = err
+    res = runner.invoke(app, ["--json", "submit", "esmfold", "--set", "sequence=M"])
+    assert res.exception.detail["outcomeMayBeAmbiguous"] is True
+
+
+def test_max_lines_must_be_positive(v1):
+    res = runner.invoke(app, ["--json", "logs", "job_0f8fad5b-d9cb-469f-a165-70867728950e", "--max-lines", "0"])
+    assert isinstance(res.exception, UsageError) and v1.calls == []

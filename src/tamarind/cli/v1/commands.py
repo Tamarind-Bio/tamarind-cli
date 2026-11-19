@@ -325,29 +325,9 @@ def _archive(
 
 
 def _submit(client: Any, body: dict[str, Any], idempotency_key: str | None) -> dict[str, Any]:
-    """``submitJob`` with an Idempotency-Key the CLI knows, so an unclear outcome can be
-    retried without a second job: the key goes into the error with the command to rerun."""
-    import uuid
-
-    key = idempotency_key or str(uuid.uuid4())
-    try:
-        return call(client, "submitJob", body=body, idempotency_key=key)
-    except TamarindError as exc:
-        status = getattr(exc, "status", None)
-        if isinstance(status, int) and status < 500:
-            raise  # refused: nothing was created
-        problem = getattr(exc, "problem", None) or None
-        err = TamarindError(
-            f"{exc.message} The submit may or may not have been accepted; run the same "
-            f"command again with --idempotency-key {key} to get the same job, not a second one.",
-            detail={
-                "idempotencyKey": key,
-                "outcomeMayBeAmbiguous": True,
-                "problem": problem,
-            },
-        )
-        err.exit_code = exc.exit_code
-        raise err from exc
+    """``submitJob``; an unclear outcome comes back with the key to retry it safely
+    (see :func:`.sdk.invoke`)."""
+    return call(client, "submitJob", body=body, idempotency_key=idempotency_key)
 
 
 def submit(
@@ -534,11 +514,13 @@ def results(
 def logs(
     state: Any, ref: str, *, max_lines: int, max_bytes: int | None = None, cursor: str | None = None
 ) -> None:
+    if max_lines < 1:
+        raise UsageError("--max-lines must be at least 1.")
     with sdk.make_client(state) as client:
         chunk = call(client, "getJobLogs", resolve_id(client, ref), maxBytes=max_bytes, cursor=cursor)
     content = chunk.get("content") or ""
     lines = content.splitlines(keepends=True)
-    if max_lines and len(lines) > max_lines:
+    if len(lines) > max_lines:
         # --max-lines keeps the newest lines in both output modes; `omittedLines` says
         # how many of this window's older lines were left out (read them without it).
         chunk = {**chunk, "content": "".join(lines[-max_lines:]), "omittedLines": len(lines) - max_lines}

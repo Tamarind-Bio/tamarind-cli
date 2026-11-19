@@ -11,9 +11,10 @@ from __future__ import annotations
 import builtins
 import keyword
 import re
+import uuid
 from typing import Any, Callable
 
-from ...errors import UsageError
+from ...errors import TamarindError, UsageError
 
 # openapi-python-client (pinned) renames a parameter that would shadow a builtin
 # or a keyword by adding "_": `from` → `from_`, `filter` → `filter_`.
@@ -129,16 +130,52 @@ def invoke(
     if_match: str | None = None,
     **query: Any,
 ) -> Any:
-    """Call one operation through its SDK method; returns the plain answer (None for 204)."""
+    """Call one operation through its SDK method; returns the plain answer (None for 204).
+
+    An operation that takes an ``Idempotency-Key`` always gets one the CLI knows (the
+    caller's, or a new one), so when its outcome is unclear the error can say how to
+    retry it without doing the work twice.
+    """
     check_values(op, query)
     kwargs: dict[str, Any] = {argument(k): v for k, v in query.items() if v is not None}
     if body is not None:
         kwargs["body"] = body
+    retry_safe = "Idempotency-Key" in op["headers"]
+    if retry_safe:
+        idempotency_key = idempotency_key or str(uuid.uuid4())
     if idempotency_key:
         kwargs["idempotency_key"] = idempotency_key
     if if_match:
         kwargs["if_match"] = if_match
-    return plain(method(client, op["sdk"])(*path_args, **kwargs))
+    try:
+        return plain(method(client, op["sdk"])(*path_args, **kwargs))
+    except TamarindError as exc:
+        if retry_safe and idempotency_key and outcome_unclear(exc):
+            raise retry_hint(exc, op, idempotency_key) from exc
+        raise
+
+
+def outcome_unclear(exc: TamarindError) -> bool:
+    """No answer, a 5xx, or 409 `idempotency_in_progress` (the first attempt may be
+    running): the work may have been done. A 4xx refusal means nothing was."""
+    if getattr(exc, "code", None) == "idempotency_in_progress":
+        return True
+    status = getattr(exc, "status", None) or getattr(exc, "status_code", None)
+    return not isinstance(status, int) or status >= 500
+
+
+def retry_hint(exc: TamarindError, op: dict[str, Any], key: str) -> TamarindError:
+    err = TamarindError(
+        f"{exc.message} `tamarind {op['cli']}` may or may not have gone through; run the "
+        f"same command again with --idempotency-key {key} to get the same result, not a second one.",
+        detail={
+            "idempotencyKey": key,
+            "outcomeMayBeAmbiguous": True,
+            "problem": getattr(exc, "problem", None) or None,
+        },
+    )
+    err.exit_code = exc.exit_code
+    return err
 
 
 def collect(client: Any, op: dict[str, Any], *path_args: str, **query: Any) -> dict[str, Any]:
