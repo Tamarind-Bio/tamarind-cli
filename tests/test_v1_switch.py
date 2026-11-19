@@ -202,3 +202,35 @@ def test_a_flag_cache_is_shared_through_its_file(tmp_path, monkeypatch):
     assert asked == ["k"]
     fresh = HTTPClient("https://app.tamarind.bio/api", "k", flag_cache=switch.FileFlagCache(tmp_path))
     assert fresh.cached_uses_v1() is True
+
+
+@pytest.mark.skipif(os.name != "posix", reason="symlinks")
+def test_a_cache_write_never_follows_a_planted_link(tmp_path, monkeypatch):
+    class Fixed:
+        hex = "planted"
+
+    monkeypatch.setattr(switch.uuid, "uuid4", lambda: Fixed())
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep me")
+    (tmp_path / f".{switch.CACHE_FILE}.planted").symlink_to(victim)
+    cache = switch.FileFlagCache(tmp_path)
+    cache.set("k", True)  # the planted name is refused: nothing written, nothing raised
+    assert victim.read_text() == "keep me"
+    assert cache.get("k") is None
+    assert (tmp_path / f".{switch.CACHE_FILE}.planted").is_symlink()  # not ours to remove
+
+
+def test_each_cache_write_uses_a_new_temporary_name(tmp_path, monkeypatch):
+    names: list[str] = []
+    real_open = os.open
+
+    def recording_open(path, *args, **kwargs):  # type: ignore[no-untyped-def]
+        names.append(os.path.basename(path))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(switch.os, "open", recording_open)
+    cache = switch.FileFlagCache(tmp_path)
+    cache.set("a", True)
+    cache.set("b", False)
+    assert len(names) == 2 and names[0] != names[1]
+    assert cache.get("a") is True and cache.get("b") is False

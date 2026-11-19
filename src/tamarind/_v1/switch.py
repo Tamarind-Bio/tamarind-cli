@@ -19,6 +19,7 @@ import json
 import os
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Protocol
 
@@ -132,18 +133,25 @@ class FileFlagCache:
         now = time.time()
         data = {k: v for k, v in self._read().items() if self._fresh(v, now, KEEP_SECONDS)}
         data[key] = {"useV1": value, "at": now}
-        temporary = self.path.with_name(f".{CACHE_FILE}.{os.getpid()}.{threading.get_ident()}")
+        # A fresh, unguessable name, opened only if nothing is there yet and never through
+        # a link: in a shared config directory nobody can plant a file or symlink for the
+        # write to land on.
+        temporary = self.path.with_name(f".{CACHE_FILE}.{uuid.uuid4().hex}")
+        made = False
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            handle = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+            handle = os.open(temporary, flags, 0o600)
+            made = True
             with os.fdopen(handle, "w") as out:
                 json.dump(data, out)
             os.replace(temporary, self.path)
         except OSError:
-            try:
-                temporary.unlink()
-            except OSError:
-                pass
+            if made:  # only ever remove the file this write made
+                try:
+                    temporary.unlink()
+                except OSError:
+                    pass
 
 
 _PROCESS_CACHE = MemoryFlagCache()
