@@ -1,9 +1,9 @@
 """The CLI through the real v1 SDK, down to the HTTP requests it sends.
 
-``tests/test_v1_cli.py`` checks what each command asks the SDK for; these run a
-few commands through ``tamarind.v1.Tamarind`` over a mock transport, so the
-requests on the wire (path, query, body, headers) and the error mapping are
-checked too.
+``tests/test_v1_cli.py`` and ``tests/test_v1_classic_routes.py`` check what each
+command asks the SDK for; these run a few commands through ``tamarind.v1.Tamarind``
+over a mock transport, so the requests on the wire (path, query, body, headers) and
+the error mapping are checked too.
 """
 
 from __future__ import annotations
@@ -56,19 +56,21 @@ def wire(monkeypatch, tmp_path):
 def test_submit_sends_the_v1_body_key_and_an_idempotency_key(wire):
     seen, routes = wire
     routes[("POST", "/jobs")] = (201, {"kind": "job", "id": "job_00000000-0000-0000-0000-000000000001", "name": "n", "status": "In Queue"})
-    res = runner.invoke(app, ["--json", "submit", "esmfold", "--set", "sequence=MKT"])
+    res = runner.invoke(app, ["--json", "submit", "esmfold", "--skip-validate", "--name", "n", "--set", "sequence=MKT"])
     assert res.exit_code == 0, res.output
     request = seen[-1]
     assert str(request.url) == f"{BASE}/jobs"
-    assert json.loads(request.content) == {"kind": "job", "tool": "esmfold", "settings": {"sequence": "MKT"}}
+    assert json.loads(request.content) == {"kind": "job", "tool": "esmfold", "name": "n", "settings": {"sequence": "MKT"}}
     assert request.headers["x-api-key"] == "test-key" or request.headers.get("authorization") == "Bearer test-key"
     assert request.headers.get("idempotency-key")
+    # today's output: classic's answer to /submit-job
+    assert json.loads(res.stdout) == {"jobName": "n", "type": "esmfold", "submit": "n submitted to queue."}
 
 
 def test_list_filters_go_comma_joined(wire):
     seen, routes = wire
     routes[("GET", "/jobs")] = (200, {"items": [], "nextCursor": None})
-    res = runner.invoke(app, ["--json", "jobs", "--status", "Running,In Queue", "--limit", "7"])
+    res = runner.invoke(app, ["--json", "jobs", "list", "--status", "Running,In Queue", "--limit", "7"])
     assert res.exit_code == 0, res.output
     params = seen[-1].url.params
     assert params["status"] == "Running,In Queue"
@@ -100,7 +102,8 @@ def test_small_upload_goes_inline(wire, tmp_path):
     assert res.exit_code == 0, res.output
     body = json.loads(seen[-1].content)
     assert body["path"] == "x/t.pdb" and body["contentBase64"]
-    assert json.loads(res.stdout)["path"] == "x/t.pdb"
+    # today's output: what classic's upload answers
+    assert json.loads(res.stdout) == {"ok": True, "filename": "x/t.pdb", "bytes": 4}
 
 
 def test_auth_status_with_a_rejected_key_says_not_verified(wire):
@@ -108,8 +111,7 @@ def test_auth_status_with_a_rejected_key_says_not_verified(wire):
     routes[("GET", "/me")] = (401, {"type": "about:blank", "title": "Unauthorized", "status": 401, "code": "invalid_api_key", "detail": "bad key"})
     res = runner.invoke(app, ["--json", "auth", "status"])
     assert res.exit_code == 0, res.output
-    out = json.loads(res.stdout)
-    assert out["verified"] is False and out["me"] is None
+    assert json.loads(res.stdout) == {"profile": "default", "hasKey": True, "verified": False}
 
 
 def test_auth_login_refuses_a_rejected_key(wire):

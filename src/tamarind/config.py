@@ -11,9 +11,10 @@ Settings are resolved in this order (first wins):
 
 Which API the client talks to is one setting, ``api``: ``classic`` (the default,
 ``https://app.tamarind.bio/api``) or ``v1`` (``https://api.tamarind.bio``). The v1
-base has its own setting, so a classic ``api_base`` in an existing profile or
-environment is never sent v1 requests. (The CLI's ``--api-base`` flag sets the base
-of whichever API is selected for that one invocation.)
+base has its own setting, ``v1_api_base``, so a classic ``api_base`` in an existing
+profile or environment is never sent v1 requests. With v1 selected the classic base
+still matters: the CLI's existing commands keep calling classic for every request v1
+can't answer exactly as classic does, so both bases must name the same environment.
 
 This mirrors how the AWS CLI and similar tools layer flags > env > file, so it
 is predictable for both humans and agents (an agent typically just exports

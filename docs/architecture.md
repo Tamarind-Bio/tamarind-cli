@@ -107,18 +107,46 @@ pages without introducing another public vocabulary.
 ### 5. The v1 API — source of truth: the v1 contract
 
 `openapi/api-v1.yaml` (vendored from tamarind-website) is the v1 contract. The SDK
-(`tamarind.v1`) is generated from it, one method per operation. The CLI's v1 commands
-call only that SDK (`tamarind/cli/v1/sdk.py` is the one place they do), and the commands
-themselves come from the contract too: each operation's `x-clients.cli` names its command,
-and `scripts/gen_v1_cli_manifest.py` writes the manifest the CLI builds them from (path
-parameters → arguments, query parameters → options, a body → `--input`/`--set`). Today's
-commands are written by hand and keep their names and flags; with v1 selected they call
-the v1 operations instead. `tests/test_v1_cli_parity.py` fails when the manifest is stale,
-when an operation has no command, or when an argument name doesn't match the SDK's.
+(`tamarind.v1`) is generated from it, one method per operation. The CLI calls v1 only
+through that SDK.
 
-v1 is opt-in (`TAMARIND_API=v1`, `--api v1`, or `"api": "v1"` in a profile) until it
-launches; classic stays the default, and its base (`TAMARIND_API_BASE`) is never used for
-v1 calls (`TAMARIND_V1_API_BASE` is).
+v1 is opt-in (`TAMARIND_API=v1`, or `"api": "v1"` in a profile) until it launches, and
+classic stays the default. v1's base is its own setting (`TAMARIND_V1_API_BASE`, profile
+`"v1_api_base"`); classic's (`TAMARIND_API_BASE`, `--api-base`) is never sent a v1 call.
+
+**Today's commands keep their output.** With v1 selected, every command the CLI already
+had keeps its names, flags, human and `--json` output and exit codes: it runs its classic
+code, and only where some of its requests go changes. `tamarind/cli/v1/classic_routes.py`
+stands in for the classic HTTP client. The requests v1 can answer exactly as classic does
+go to v1, and v1's answer is rebuilt into classic's:
+
+| Command | Request | v1 operation |
+|---|---|---|
+| `submit` | `/submit-job` | submitJob (classic validates first, as today) |
+| `results` (own job, not `--pdbs-only`) | `/result` | archiveJob, or getJobFile for `--file` (the same stored archive) |
+| `delete` | `/delete-job` | deleteJob |
+| `files delete` | `/delete-file` | deleteFile |
+| `files upload` | presign + PUT | uploadFile (+ completeFileUpload) |
+| `auth status`, `auth login` | key check | getMe |
+| `custom-tools *` | `/custom-tools…` | the same operations at the v1 base |
+
+Every other request stays on classic, because v1 can't give classic's answer to it: job
+rows (`jobs`, `status`, `wait`; v1 has no `TamarindSchemaVersion`/`StorageFolder`, and
+rounds differently), validation (`validate`, `batch --prevalidate`; v1 has no
+`missing_fields`/`unrecognized_settings`), `batch`, `cancel` (the cancelled counts), logs
+(byte offsets), files listings (classic's order), and the catalog (`tools`, `schema`,
+`modalities`, `functions`). A request v1 refuses (a 4xx: nothing was done) is sent to
+classic too, so a refusal reads exactly as classic words it. With v1 selected both bases
+must therefore name the same environment.
+
+**New commands come from the contract.** Each operation's `x-clients.cli` names its
+command, and `scripts/gen_v1_cli_manifest.py` writes the manifest the CLI builds them from
+(path parameters → arguments, query parameters → options, a body → `--input`/`--set`).
+They print v1's fields. Where a contract name is also a flat command today (`jobs`,
+`tools`), `tamarind jobs list` and the other contract commands run with v1 selected, and
+`tamarind jobs …` with anything else is today's command. `tests/test_v1_cli_parity.py`
+fails when the manifest is stale, when an operation has no command, or when an argument
+name doesn't match the SDK's.
 
 ## Why not a single binary that re-encodes the API?
 

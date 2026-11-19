@@ -55,13 +55,22 @@ def test_every_contract_operation_names_a_cli_command_and_sdk_method():
     assert missing == []
 
 
+@pytest.fixture(autouse=True)
+def _v1_selected(monkeypatch, tmp_path):
+    """The contract's commands are the CLI's with v1 selected."""
+    monkeypatch.setenv("TAMARIND_API", "v1")
+    monkeypatch.setenv("TAMARIND_CONFIG_DIR", str(tmp_path))
+
+
 def _resolve(path: tuple[str, ...]) -> tuple[click.Command, click.Context]:
+    """The command ``tamarind <path>`` runs, found the way click dispatches it."""
     root = typer.main.get_command(app)
     ctx = click.Context(root, info_name="tamarind")
     command: click.Command = root
-    for name in path:
+    args = list(path)
+    while args:
         assert isinstance(command, click.Group), f"{' '.join(path)}: {command.name} is not a group"
-        found = command.get_command(ctx, name)
+        name, found, args = command.resolve_command(ctx, args)
         assert found is not None, f"no command `tamarind {' '.join(path)}` (stops at {name!r})"
         ctx = click.Context(found, info_name=name, parent=ctx)
         command = found

@@ -1,8 +1,9 @@
 """Commands built from the v1 contract.
 
-Every v1 operation names its CLI command in ``x-clients.cli``. Commands written
-by hand (today's ``submit``, ``jobs``, ``files upload`` and the rest) take
-precedence; every other operation gets a command built here from the manifest:
+Every v1 operation names its CLI command in ``x-clients.cli``. Today's commands
+(``submit``, ``jobs``, ``files upload`` and the rest) keep their names, flags and
+output, and take precedence; every other operation gets a command built here from
+the manifest:
 
 - path parameters are positional arguments, in path order;
 - query parameters are options (``batchId`` → ``--batch-id``; a list takes
@@ -32,7 +33,11 @@ from . import manifest, render, sdk
 DEFAULT_COMMAND = "_default"
 # Hand-written commands that exist only for v1 (no classic counterpart); they stay
 # out of --help in classic mode, like the generated ones.
-V1_ONLY_COMMANDS = {("files", "download"), ("jobs", "download")}
+V1_ONLY_COMMANDS = {("files", "download")}
+# Today's flat commands whose name the contract also uses as a group (`jobs list`,
+# `tools schema`). With v1 selected, `tamarind jobs <contract command>` runs that
+# command; anything else is today's flat command, exactly as in classic mode.
+LISTING_GROUPS = ("jobs", "tools")
 
 
 def option_name(param: dict[str, Any]) -> str:
@@ -247,16 +252,17 @@ def v1_selected(ctx: click.Context) -> bool:
         return is_v1
     import sys
 
+    # Before the root callback has run (resolving a command): the profile can come
+    # from the command line; TAMARIND_API and the profile's "api" do the rest.
     argv = sys.argv[1:]
-    given: dict[str, str] = {}
+    profile: str | None = None
     for index, arg in enumerate(argv):
-        for option in ("--api", "--profile"):
-            if arg == option and index + 1 < len(argv):
-                given[option] = argv[index + 1]
-            elif arg.startswith(option + "="):
-                given[option] = arg.split("=", 1)[1]
+        if arg == "--profile" and index + 1 < len(argv):
+            profile = argv[index + 1]
+        elif arg.startswith("--profile="):
+            profile = arg.split("=", 1)[1]
     try:
-        return resolve_api(given.get("--api"), profile=given.get("--profile")) == API_V1
+        return resolve_api(profile=profile) == API_V1
     except UsageError:
         return False
 
@@ -271,6 +277,8 @@ class ContractGroup(TyperGroup):
 
     contract_path: tuple[str, ...] | None = None
     default_operation: str | None = None
+    # Hand-written v1 commands under this path, beside the generated ones.
+    extra_commands: dict[str, click.Command] = {}
     # Names listed first, in this order (keeps today's --help order where Typer
     # would put groups after commands).
     command_order: tuple[str, ...] = ()
@@ -289,7 +297,7 @@ class ContractGroup(TyperGroup):
         names = [n for n in super().list_commands(ctx) if n != DEFAULT_COMMAND]
         path = self.path(ctx)
         if v1_selected(ctx):
-            for name in manifest.children(path):
+            for name in [*self.extra_commands, *manifest.children(path)]:
                 if name not in names:
                     names.append(name)
         else:
@@ -303,6 +311,8 @@ class ContractGroup(TyperGroup):
         command = super().get_command(ctx, cmd_name)
         if command is not None:
             return command
+        if cmd_name in self.extra_commands:
+            return self.extra_commands[cmd_name]
         path = self.path(ctx)
         if cmd_name == DEFAULT_COMMAND and self.default_operation:
             return operation_command(manifest.operation(self.default_operation), DEFAULT_COMMAND, hidden=True)
@@ -353,8 +363,38 @@ def build(path: tuple[str, ...]) -> click.Command | None:
     return operation_command(op, path[-1])
 
 
+def listing_group(name: str) -> ContractGroup:
+    """``tamarind jobs <contract command>`` with v1 selected: the contract's commands
+    under ``name``, plus the hand-written v1 ones (``jobs download``)."""
+    group = ContractGroup(name=name, help=manifest.group_help((name,)))
+    group.contract_path = (name,)
+    group.extra_commands = _extra_commands(name)
+    return group
+
+
+def _extra_commands(name: str) -> dict[str, click.Command]:
+    if name != "jobs":
+        return {}
+    import typer
+
+    from ..commands.jobs import v1_jobs_app  # the commands import this module
+
+    command = typer.main.get_command(v1_jobs_app)
+    return {"download": command}
+
+
 class RootGroup(ContractGroup):
     """The ``tamarind`` group: today's command order, then the v1 groups."""
+
+    def resolve_command(
+        self, ctx: click.Context, args: list[str]
+    ) -> tuple[str | None, click.Command | None, list[str]]:
+        cmd_name, command, rest = super().resolve_command(ctx, args)
+        if cmd_name in LISTING_GROUPS and rest and v1_selected(ctx):
+            group = listing_group(cmd_name)
+            if rest[0] in group.extra_commands or rest[0] in manifest.children((cmd_name,)):
+                return cmd_name, group, rest
+        return cmd_name, command, rest
 
     command_order = (
         "tools",

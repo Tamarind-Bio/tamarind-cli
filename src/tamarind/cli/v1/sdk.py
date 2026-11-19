@@ -71,7 +71,7 @@ def require_v1(state: Any, command: str) -> None:
     if not state.is_v1:
         raise UsageError(
             f"`tamarind {command}` uses the v1 API (https://api.tamarind.bio). "
-            "Select it with TAMARIND_API=v1, `--api v1`, or \"api\": \"v1\" in your profile."
+            "Select it with TAMARIND_API=v1, or \"api\": \"v1\" in your profile."
         )
 
 

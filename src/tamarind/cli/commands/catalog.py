@@ -9,8 +9,6 @@ import typer
 from ... import catalog
 from .. import output
 from ..guidance import rewrite_legacy_guidance
-from ..v1 import commands as v1
-from ..v1.generic import ContractGroup
 
 
 def _with_cli_tools_hint(response: object) -> object:
@@ -47,50 +45,16 @@ def _with_cli_schema_hints(response: object, tool: str) -> object:
 
 
 def register(app: typer.Typer) -> None:
-    # `tools` is a group so the contract's `tools <verb>` names sit beside it; with
-    # no subcommand it lists, exactly as the flat `tools` did.
-    tools_app = typer.Typer(cls=ContractGroup, no_args_is_help=False)
-
+    @app.command()
     def tools(
         ctx: typer.Context,
         modality: Optional[str] = typer.Option(None, "--modality", "-m", help="Filter by molecule type (see `tamarind modalities`)."),
         function: Optional[str] = typer.Option(None, "--function", "-f", help="Filter by function/tag (see `tamarind functions`)."),
         search: Optional[str] = typer.Option(None, "--search", "-s", help="Free-text search in name/description."),
         custom: bool = typer.Option(False, "--custom", help="Show only your org's custom tools."),
-        finetune: Optional[bool] = typer.Option(
-            None, "--finetune/--no-finetune", help="v1 only: only tools that train a model (or only those that don't)."
-        ),
-        pipeline_tools: bool = typer.Option(
-            False, "--pipeline-tools", help="v1 only: only tools that run as a pipeline behind the scenes."
-        ),
-        limit: Optional[int] = typer.Option(
-            None, "--limit", help="v1 only: one page of this size instead of the whole catalog."
-        ),
-        cursor: Optional[str] = typer.Option(
-            None, "--cursor", help="v1 only: the nextCursor from a previous page."
-        ),
     ) -> None:
         """List available tools. Filter to narrow the (large) catalog."""
-        if ctx.invoked_subcommand is not None:
-            return
         state = ctx.obj
-        if state.is_v1:
-            v1.tools_list(
-                state,
-                modality=modality,
-                function=function,
-                search=search,
-                custom=custom or None,
-                finetune=finetune,
-                pipeline_tools=pipeline_tools or None,
-                limit=limit,
-                cursor=cursor,
-            )
-            return
-        if finetune is not None or pipeline_tools or limit is not None or cursor is not None:
-            raise typer.BadParameter(
-                "--finetune, --pipeline-tools, --limit and --cursor need the v1 API (--api v1)."
-            )
         with state.catalog_client() as client:
             resp = catalog.list_tools(
                 client, modality=modality, function=function, search=search, custom=custom or None
@@ -115,9 +79,6 @@ def register(app: typer.Typer) -> None:
     def modalities(ctx: typer.Context) -> None:
         """List molecule types (modalities) you can filter tools by."""
         state = ctx.obj
-        if state.is_v1:
-            v1.facets(state, "modalities")
-            return
         with state.catalog_client() as client:
             resp = catalog.list_modalities(client)
         rows = [
@@ -130,9 +91,6 @@ def register(app: typer.Typer) -> None:
     def functions(ctx: typer.Context) -> None:
         """List functions (tags) you can filter tools by."""
         state = ctx.obj
-        if state.is_v1:
-            v1.facets(state, "functions")
-            return
         with state.catalog_client() as client:
             resp = catalog.list_functions(client)
         rows = [
@@ -149,9 +107,6 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Show a tool's parameters and a runnable example job."""
         state = ctx.obj
-        if state.is_v1:
-            v1.schema(state, tool, example=example)
-            return
         with state.catalog_client() as client:
             resp = catalog.get_schema(client, tool)
         resp = _with_cli_schema_hints(resp, tool)
@@ -205,12 +160,3 @@ def register(app: typer.Typer) -> None:
             + " --example` for runnable example settings."
         )
         output.emit(resp, state.output, human=human)
-
-    tools_app.callback(invoke_without_command=True)(tools)
-    tools_app.command("list")(tools)
-    tools_app.command("schema")(schema)  # the contract's name; `tamarind schema` stays
-    app.add_typer(
-        tools_app,
-        name="tools",
-        help="List available tools. Filter to narrow the (large) catalog.",
-    )

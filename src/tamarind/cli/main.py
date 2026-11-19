@@ -20,7 +20,7 @@ except ImportError:  # pragma: no cover - older Typer uses the external Click pa
     from click import ClickException
 
 from .. import __version__, attribution
-from ..config import API_V1, Config, load_config, resolve_api
+from ..config import Config, load_config
 from ..errors import ExitCode, TamarindError
 from ..http import HTTPClient
 from ..custom_tools.client import Tamarind
@@ -46,7 +46,7 @@ Abort = typer.Abort
 # unwound its context. A process executes one CLI invocation, so this is scoped
 # to exactly the lifecycle it represents.
 _active_output_mode = OutputMode(json=not output.is_tty(), quiet=False)
-_GLOBAL_VALUE_OPTIONS = {"--api-key", "--api-base", "--catalog-base", "--profile", "--api"}
+_GLOBAL_VALUE_OPTIONS = {"--api-key", "--api-base", "--catalog-base", "--profile"}
 _GLOBAL_FLAG_OPTIONS = {"--json", "--no-json", "--quiet", "-q"}
 # Groups that need a subcommand (`jobs`, `tools` and `usage` run on their own).
 _COMMAND_GROUPS = {
@@ -102,11 +102,7 @@ class State:
     _kwargs: dict
 
     def config(self) -> Config:
-        kwargs = dict(self._kwargs)
-        # `--api-base` names the base of the API this invocation selected.
-        if kwargs.get("api_base") and resolve_api(kwargs.get("api"), profile=kwargs.get("profile")) == API_V1:
-            kwargs["v1_api_base"] = kwargs.pop("api_base")
-        return load_config(**kwargs)
+        return load_config(**self._kwargs)
 
     @property
     def is_v1(self) -> bool:
@@ -114,7 +110,14 @@ class State:
         return self.config().is_v1
 
     def rest_client(self) -> HTTPClient:
+        """Today's job API. With v1 selected, the requests v1 can answer exactly as
+        classic does go to v1 instead (see :mod:`.v1.classic_routes`); the commands
+        and their output are the same either way."""
         cfg = self.config()
+        if cfg.is_v1:
+            from .v1.classic_routes import ClassicOverV1
+
+            return ClassicOverV1(self)  # type: ignore[return-value]
         return HTTPClient(cfg.api_base, cfg.api_key)
 
     def catalog_client(self) -> HTTPClient:
@@ -159,28 +162,13 @@ def main(
         None, "--api-key", envvar="TAMARIND_API_KEY", help="API key (overrides env/profile).", show_default=False
     ),
     api_base: Optional[str] = typer.Option(
-        None,
-        "--api-base",
-        help=(
-            "Base URL of the selected API (env: TAMARIND_API_BASE for classic, "
-            "TAMARIND_V1_API_BASE for v1)."
-        ),
-        show_default=False,
+        None, "--api-base", envvar="TAMARIND_API_BASE", help="Job API base URL.", show_default=False
     ),
     catalog_base: Optional[str] = typer.Option(
         None, "--catalog-base", envvar="TAMARIND_CATALOG_BASE", help="Catalog (discovery) base URL.", show_default=False
     ),
     profile: Optional[str] = typer.Option(
         None, "--profile", envvar="TAMARIND_PROFILE", help="Named profile in ~/.tamarind/config.json.", show_default=False
-    ),
-    api: Optional[str] = typer.Option(
-        None,
-        "--api",
-        help=(
-            "Which API to use: 'classic' (default, app.tamarind.bio) or 'v1' (api.tamarind.bio). "
-            "Env: TAMARIND_API; profile key: \"api\"."
-        ),
-        show_default=False,
     ),
     json_output: Optional[bool] = typer.Option(
         None, "--json/--no-json", help="Machine JSON output. Defaults on when stdout isn't a TTY.", show_default=False
@@ -200,7 +188,6 @@ def main(
             "api_base": api_base,
             "catalog_base": catalog_base,
             "profile": profile,
-            "api": api,
         },
     )
 
