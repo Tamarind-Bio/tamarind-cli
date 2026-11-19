@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 
 import httpx
@@ -177,13 +178,15 @@ def test_pipeline_run_reads_go_to_the_v1_base(on):
 @respx.mock
 def test_uploads_go_to_v1(on, tmp_path):
     local = tmp_path / "a.fasta"
-    local.write_text(">a\nMK\n")
+    local.write_bytes(b">a\r\nMK\n")  # bytes as written, on every platform
     route = respx.post(f"{V1}/files").mock(
         return_value=httpx.Response(201, json={"file": {"path": "a.fasta"}, "upload": None})
     )
     with Tamarind(api_key="k", api_base=CLASSIC) as client:
-        assert client.files.upload(local) == {"ok": True, "filename": "a.fasta", "bytes": 6}
-    assert json.loads(route.calls[0].request.content)["path"] == "a.fasta"
+        assert client.files.upload(local) == {"ok": True, "filename": "a.fasta", "bytes": 7}
+    sent = json.loads(route.calls[0].request.content)
+    assert sent["path"] == "a.fasta"
+    assert base64.b64decode(sent["contentBase64"]) == b">a\r\nMK\n"  # unchanged, CR and all
 
 
 def test_paginate_takes_only_v1_operations():
@@ -222,7 +225,7 @@ def test_node_run_molecules_from_v1_are_read_in_classics_shape(on):
 @respx.mock
 def test_uploads_send_the_callers_content_type_to_v1(on, tmp_path):
     local = tmp_path / "a.pdb"
-    local.write_text("ATOM\n")
+    local.write_bytes(b"ATOM\n")
     route = respx.post(f"{V1}/files").mock(
         return_value=httpx.Response(201, json={"file": {"path": "a.pdb"}, "upload": None})
     )

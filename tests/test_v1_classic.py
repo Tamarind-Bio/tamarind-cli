@@ -358,7 +358,7 @@ def test_v1_refusals_are_raised_never_sent_to_classic(env, tmp_path, monkeypatch
     args, answers, method = WRITES[command]
     if args is None:
         local = tmp_path / "in.fasta"
-        local.write_text(">a\nMK\n")
+        local.write_bytes(b">a\nMK\n")
         args = ["files", "upload", str(local)]
     env.v1.answers.update(answers)
     env.v1.answers[method] = problem(status, code)
@@ -745,7 +745,7 @@ def test_files_delete_of_a_file_and_a_folder_is_classics_to_decide(env):
 
 def test_files_upload_goes_to_v1(env, tmp_path, monkeypatch):
     local = tmp_path / "in.fasta"
-    local.write_text(">a\nMK\n")
+    local.write_bytes(b">a\nMK\n")
     FakeClassic.answers["getPresignedUploadUrl"] = {"uploadUrl": "https://bucket.s3.amazonaws.com/in.fasta?sig=1"}
     monkeypatch.setattr("tamarind.uploads.put_presigned_upload", lambda url, path, **k: Path(path).stat().st_size)
     env.v1.answers["files.upload"] = {"path": "in.fasta", "type": "file", "sizeBytes": 6}
