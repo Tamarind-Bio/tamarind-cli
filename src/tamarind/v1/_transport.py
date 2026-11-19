@@ -33,7 +33,9 @@ DEFAULT_TIMEOUT = 60.0
 DEFAULT_MAX_RETRIES = 3
 # Waits longer than this are not slept through; the error is raised instead.
 MAX_RETRY_AFTER = 120.0
-_SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "PUT", "DELETE"}
+# Repeating these can't change anything. A DELETE is not here: after a lost answer a
+# repeat could delete a file or tool someone just made at the freed path or name.
+_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
 class Transport:
@@ -76,9 +78,15 @@ class Transport:
         endpoint: types.ModuleType,
         body: Any = UNSET,
         extra_headers: Mapping[str, str] | None = None,
+        repeat_safe: bool = False,
         **arguments: Any,
     ) -> httpx.Response:
-        """Build one request with ``endpoint._get_kwargs`` and send it."""
+        """Build one request with ``endpoint._get_kwargs`` and send it.
+
+        ``repeat_safe`` marks a request the contract says can be repeated (it is also
+        implied by GET and by an ``Idempotency-Key``). A failure raised after retries
+        carries ``idempotency_key``, so a caller can repeat the same intent safely.
+        """
         build = endpoint._get_kwargs
         hints = _hints(build)
         values = {
@@ -105,13 +113,19 @@ class Transport:
         for name in COMMA_JOINED_QUERY.get(endpoint.__name__.rsplit(".", 1)[-1], ()):
             if params and isinstance(params.get(name), list):
                 params[name] = ",".join(str(item) for item in params[name])
-        return self.send(
-            request["method"].upper(),
-            self.base_url + request["url"],
-            params=request.get("params"),
-            headers={**(request.get("headers") or {}), **(extra_headers or {})},
-            json=request.get("json"),
-        )
+        try:
+            return self.send(
+                request["method"].upper(),
+                self.base_url + request["url"],
+                params=request.get("params"),
+                headers={**(request.get("headers") or {}), **(extra_headers or {})},
+                json=request.get("json"),
+                repeat_safe=repeat_safe,
+            )
+        except TamarindError as error:
+            # An inconclusive submit can be retried with the same key, without duplicating it.
+            error.idempotency_key = values.get("idempotency_key")  # type: ignore[attr-defined]
+            raise
 
     def send(
         self,
@@ -121,10 +135,11 @@ class Transport:
         params: Mapping[str, Any] | None = None,
         headers: Mapping[str, str] | None = None,
         json: Any = None,
+        repeat_safe: bool = False,
     ) -> httpx.Response:
         merged = httpx.Headers(self._headers)
         merged.update(headers or {})
-        repeat_safe = method in _SAFE_METHODS or "Idempotency-Key" in merged
+        repeat_safe = repeat_safe or method in _SAFE_METHODS or "Idempotency-Key" in merged
         return self._with_retries(
             lambda: self._client.request(method, url, params=params, headers=merged, json=json),
             repeat_safe=repeat_safe,
@@ -154,7 +169,9 @@ class Transport:
                 response = send()
             except httpx.TransportError as exc:
                 # A connection that never opened sent nothing, so any request may retry it.
-                never_sent = isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout))
+                never_sent = isinstance(
+                    exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+                )
                 if attempt < self.max_retries and (repeat_safe or never_sent):
                     self._sleep(_backoff(attempt))
                     attempt += 1

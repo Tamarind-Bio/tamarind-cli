@@ -242,14 +242,23 @@ class BoundOperation:
 
     @property
     def pageable(self) -> bool:
-        """``cursor`` is a query parameter of this operation."""
-        return "cursor" in _hints(self.operation.endpoint._get_kwargs)
+        """``cursor`` is a query parameter and the answer is a page of ``items``."""
+        return "cursor" in _hints(self.operation.endpoint._get_kwargs) and self._pages_items
+
+    @property
+    def _pages_items(self) -> bool:
+        answer = _hints(self.operation.endpoint._parse_response).get("return")
+        return any(
+            attrs.has(member) and "items" in attrs.fields_dict(member)
+            for member in _members(answer)
+            if isinstance(member, type)
+        )
 
     @property
     def body_pageable(self) -> bool:
         """``cursor`` is a field of this operation's request body."""
         hint = _hints(self.operation.endpoint._get_kwargs).get("body")
-        return any(
+        return self._pages_items and any(
             attrs.has(member) and "cursor" in attrs.fields_dict(member)
             for member in _members(hint)
             if isinstance(member, type)
@@ -376,8 +385,10 @@ class Jobs(_Resource):
         Returns the final item; check its ``status`` (and ``stopReason``). Between
         polls it waits ``poll_interval`` seconds, or else the item's own
         ``pollAfterSeconds``. ``on_update`` sees every item read. Raises
-        :class:`~tamarind.errors.JobTimeoutError` when ``timeout`` seconds pass first;
-        the job itself keeps running.
+        :class:`~tamarind.errors.JobTimeoutError` once ``timeout`` seconds have passed
+        without a finished item; the job itself keeps running. ``timeout`` bounds the
+        waiting between polls: no poll starts after it, and a poll already sent is an
+        ordinary request, bounded by the client's own ``timeout``.
         """
         deadline = None if timeout is None else time.monotonic() + timeout
         while True:
@@ -479,8 +490,12 @@ class Files(_Resource):
                 if not etag:
                     raise TamarindError(f"storage returned no ETag for part {number}")
                 parts.append({"partNumber": number, "etag": etag})
+            # The contract makes completion repeatable: a repeat after a lost answer
+            # returns the stored file.
             completed = self._transport.call(
-                complete_file_upload, body={"uploadId": upload["id"], "parts": parts}
+                complete_file_upload,
+                body={"uploadId": upload["id"], "parts": parts},
+                repeat_safe=True,
             )
             return dict(decode(completed))
         finally:

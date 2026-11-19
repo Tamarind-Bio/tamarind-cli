@@ -467,3 +467,64 @@ def test_a_malformed_upload_session_sends_nothing(client: Tamarind) -> None:
         with pytest.raises(TamarindError, match=message):
             client.files.upload(stream, "m.bin", multipart=True)
     assert puts.call_count == 0 and plain.call_count == 0
+
+
+@respx.mock
+def test_deletes_are_not_repeated_after_an_ambiguous_failure(client: Tamarind) -> None:
+    gone = respx.delete(f"{BASE}/files").mock(return_value=httpx.Response(502, text="bad gateway"))
+    with pytest.raises(ProblemError):
+        client.files.delete(path="a.pdb")
+    assert gone.call_count == 1
+    busy = respx.delete(f"{BASE}/custom-tools/t").mock(
+        side_effect=[
+            httpx.Response(503, json=problem(503, "service_unavailable")),
+            httpx.Response(204),
+        ]
+    )
+    assert client.custom_tools.delete("t") is None
+    assert busy.call_count == 2
+
+
+@respx.mock
+def test_requests_that_never_left_are_retried(client: Tamarind) -> None:
+    route = respx.post(f"{BASE}/projects").mock(
+        side_effect=[httpx.PoolTimeout("pool"), httpx.Response(201, json={"id": "proj_1"})]
+    )
+    assert client.projects.create({"name": "p"}) == {"id": "proj_1"}
+    assert route.call_count == 2
+    lost = respx.post(f"{BASE}/projects/proj_1/notes/entries").mock(
+        side_effect=httpx.ReadTimeout("lost")
+    )
+    with pytest.raises(TamarindError):
+        client.projects.notes.create_entry("proj_1", {"title": "t"})
+    assert lost.call_count == 1
+
+
+@respx.mock
+def test_an_inconclusive_submit_names_its_idempotency_key(client: Tamarind) -> None:
+    route = respx.post(f"{BASE}/jobs").mock(side_effect=httpx.ReadTimeout("lost"))
+    with pytest.raises(TamarindError) as raised:
+        client.jobs.submit({"tool": "t", "settings": {}})
+    key = raised.value.idempotency_key  # type: ignore[attr-defined]
+    assert route.call_count == client._transport.max_retries + 1
+    assert {call.request.headers["Idempotency-Key"] for call in route.calls} == {key}
+
+
+@respx.mock
+def test_multipart_completion_is_repeated_after_a_lost_answer(client: Tamarind) -> None:
+    respx.post(f"{BASE}/files").mock(
+        return_value=httpx.Response(201, json=_multipart_session([1], 8))
+    )
+    respx.put("https://storage.test/p1").mock(
+        return_value=httpx.Response(200, headers={"ETag": '"e1"'})
+    )
+    complete = respx.post(f"{BASE}/files/complete").mock(
+        side_effect=[httpx.ReadTimeout("lost"), httpx.Response(200, json={"path": "m.bin"})]
+    )
+    assert client.files.upload(b"abc", "m.bin", multipart=True) == {"path": "m.bin"}
+    assert complete.call_count == 2
+
+
+def test_logs_are_not_an_item_page(client: Tamarind) -> None:
+    with pytest.raises(TypeError):
+        list(client.paginate(client.jobs.logs, "job_1"))
