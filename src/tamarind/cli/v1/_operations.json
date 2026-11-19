@@ -463,7 +463,7 @@
     },
     {
      "commaJoined": true,
-     "description": "Dimensions to break down by, comma-separated or repeated.",
+     "description": "Dimensions to break down by, comma-separated (`groupBy=tool,month`) or repeated (`groupBy=tool&groupBy=month`): both forms are read, and every value counts.",
      "enum": [
       "tool",
       "user",
@@ -906,7 +906,7 @@
      "type": "string"
     },
     {
-     "description": "Another member's email.",
+     "description": "Another member's email, with `scope=org`.",
      "format": "email",
      "name": "createdBy",
      "option": "created-by",
@@ -1327,7 +1327,7 @@
    "body": null,
    "cli": "jobs download",
    "confirmFirst": false,
-   "description": "Takes a `job_` or `batch_` id and a `path` from `listJobFiles`; a `run_` id is 404, and so is a path with no file. A `path` that could leave the job's folder (a leading `/`, a backslash, a control character or an empty, `.` or `..` segment) is 422. `inline` content is gzip-encoded when the client accepts gzip, as every response is.",
+   "description": "Takes a `job_` or `batch_` id and a `path` from `listJobFiles`; a `run_` id is 404, and so is a path with no file. A `path` that could leave the job's folder (a leading `/`, a backslash, a control character or an empty, `.` or `..` segment) is 422. `inline` content is gzip-encoded when the client accepts gzip, as every response is. Another member's job or batch is 404 for now; once website#7795 merges, it follows today's `/result` rule for a key (decision 74), and one that rule refuses is the same 404.",
    "headers": [],
    "links": true,
    "method": "GET",
