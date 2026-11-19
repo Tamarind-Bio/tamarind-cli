@@ -45,6 +45,7 @@ SPEC = Path("openapi/api-v1.yaml")
 LOCK = Path("openapi/api-v1.lock.json")
 CONFIG = Path("openapi/api-v1-openapi-python-client.json")
 TARGET = Path("src/tamarind/v1/_generated")
+METADATA = Path("src/tamarind/v1/_contract.py")
 LOCK_KEYS = {
     "artifactSha256",
     "generator",
@@ -107,6 +108,7 @@ def sync(
         if target.exists():
             shutil.rmtree(target)
         shutil.copytree(generated, target)
+        (root / METADATA).write_text(contract_metadata(projected))
 
 
 def check(root: Path) -> None:
@@ -120,9 +122,13 @@ def check(root: Path) -> None:
         raise SystemExit("unsupported API v1 producer")
     if sha256(raw).hexdigest() != lock["artifactSha256"]:
         raise SystemExit(f"{SPEC} does not match its provenance lock")
+    projected = project_contract(load_contract(raw))
     with TemporaryDirectory(dir=root) as directory:
-        generated = generate(root, project_contract(load_contract(raw)), Path(directory))
+        generated = generate(root, projected, Path(directory))
         differences = _differences(generated, root / TARGET)
+    metadata = root / METADATA
+    if not metadata.is_file() or metadata.read_text() != contract_metadata(projected):
+        differences.append(f"changed {METADATA}")
     if differences:
         listed = "\n  ".join(differences[:20])
         raise SystemExit(f"{TARGET} is stale; rerun scripts/sync_api_v1_contract.py:\n  {listed}")
@@ -172,6 +178,43 @@ def project_contract(document: dict[str, Any]) -> dict[str, Any]:
         if "BatchSource" in schemas:
             batch_source["title"] = "Channel"
     return projected
+
+
+def contract_metadata(document: dict[str, Any]) -> str:
+    """What the generated request builders can't express, for the SDK to apply."""
+    parameters = document.get("components", {}).get("parameters", {})
+    comma_joined: dict[str, list[str]] = {}
+    for _method, _path, operation in operations(document):
+        for parameter in operation.get("parameters", []):
+            if "$ref" in parameter:
+                parameter = parameters[parameter["$ref"].rsplit("/", 1)[-1]]
+            schema = parameter.get("schema", {})
+            if (
+                parameter.get("in") == "query"
+                and parameter.get("explode") is False
+                and parameter.get("style", "form") == "form"
+                and schema.get("type") == "array"
+            ):
+                module = _snake(operation["operationId"])
+                comma_joined.setdefault(module, []).append(parameter["name"])
+    lines = [
+        '"""Generated from openapi/api-v1.yaml by scripts/sync_api_v1_contract.py. Do not edit."""',
+        "",
+        "# Query parameters the contract declares `style: form, explode: false`, by generated",
+        "# module: a list goes on the wire as one comma-joined value (`status=Running,Complete`).",
+        "# The generated request builders send repeated keys instead, which the API reads as",
+        "# only the last value.",
+        "COMMA_JOINED_QUERY: dict[str, frozenset[str]] = {",
+    ]
+    for module in sorted(comma_joined):
+        names = ", ".join(json.dumps(name) for name in sorted(comma_joined[module]))
+        lines.append(f"    {json.dumps(module)}: frozenset({{{names}}}),")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def _snake(name: str) -> str:
+    return "".join(f"_{c.lower()}" if c.isupper() else c for c in name).lstrip("_")
 
 
 def generate(root: Path, projected: dict[str, Any], staging: Path) -> Path:

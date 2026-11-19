@@ -115,3 +115,12 @@ def test_generated_client_parses_pages_and_problems() -> None:
     assert isinstance(parsed, Problem)
     assert parsed.code == "validation_failed" and parsed.status == 422
     assert len(parsed.errors) == 2
+
+
+def test_comma_joined_query_parameters_match_the_contract() -> None:
+    from tamarind.v1._contract import COMMA_JOINED_QUERY
+
+    assert COMMA_JOINED_QUERY["list_jobs"] == {"status"}
+    assert COMMA_JOINED_QUERY["list_files"] == {"extension"}
+    # Default form-style arrays repeat the key, so they are not listed.
+    assert "list_molecules" not in COMMA_JOINED_QUERY
