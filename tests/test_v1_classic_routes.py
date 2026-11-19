@@ -19,7 +19,7 @@ from typer.testing import CliRunner
 from tamarind.cli import main as cli_main
 from tamarind.cli.main import app
 from tamarind.cli.v1 import classic_routes, sdk
-from tamarind.errors import APIError, AuthError, NotFoundError, TamarindError, ValidationError
+from tamarind.errors import APIError, AuthError, JobTimeoutError, NotFoundError, TamarindError, ValidationError
 from tamarind.v1.errors import ProblemError
 
 from test_v1_cli import Recorder
@@ -288,20 +288,68 @@ def test_batch_submits_on_v1_with_classics_answer(env, tmp_path):
     }
 
 
-def test_prevalidate_reads_v1s_row_verdicts(env, tmp_path):
-    rows = tmp_path / "rows.json"
-    rows.write_text(json.dumps([{"sequence": "MK"}, {"nonsense": 1}]))
-    env.v1.answers["jobs.validate"] = {
-        "valid": False,
-        "results": [
-            {"index": 0, "valid": True, "errors": []},
-            {"index": 1, "valid": False, "errors": [{"code": "unknown_field", "pointer": "/settings/nonsense", "detail": "Unrecognized nonsense."}]},
-        ],
+def _rows(tmp_path, rows):
+    path = tmp_path / "rows.json"
+    path.write_text(json.dumps(rows))
+    return str(path)
+
+
+def _report(count, results=(), *, errors=(), truncated=False):
+    """validateJob's BatchValidationReport: `results` lists only the rows with an error
+    or a warning, their pointers into the row (`/settings/1/x`)."""
+    results = list(results)
+    return {
+        "valid": not errors and all(r["valid"] for r in results),
+        "count": count,
+        "validCount": 0 if errors else count - sum(1 for r in results if not r["valid"]),
+        "errors": list(errors),
+        "results": results,
+        "resultsTruncated": truncated,
     }
-    res = env.run("v1", "--json", "batch", "esmfold", "--input", str(rows), "--name", "b1", "--prevalidate")
+
+
+BAD_ROW = {
+    "index": 1, "valid": False, "warnings": [],
+    "errors": [{"code": "unknown_field", "pointer": "/settings/1/nonsense", "detail": "Unrecognized nonsense."}],
+}
+
+
+def test_prevalidate_passes_a_batch_v1_lists_no_rows_of(env, tmp_path):
+    rows = _rows(tmp_path, [{"sequence": "MK"}, {"sequence": "MKT"}])
+    env.v1.answers["jobs.validate"] = _report(2)
+    env.v1.answers["jobs.submit"] = {"id": BATCH}
+    res = env.run("v1", "--json", "batch", "esmfold", "--input", rows, "--name", "b1", "--prevalidate")
+    assert res.exit_code == 0, res.output
+    assert [c[0] for c in env.v1.calls] == ["jobs.validate", "jobs.submit"]
+
+
+def test_prevalidate_reads_v1s_row_verdicts(env, tmp_path):
+    rows = _rows(tmp_path, [{"sequence": "MK"}, {"nonsense": 1}])
+    env.v1.answers["jobs.validate"] = _report(2, [BAD_ROW])
+    res = env.run("v1", "--json", "batch", "esmfold", "--input", rows, "--name", "b1", "--prevalidate")
     assert isinstance(res.exception, ValidationError)
     assert str(res.exception) == "Batch item 2 settings invalid: Unrecognized nonsense."
+    verdict = res.exception.detail["validation"]
+    assert verdict["unrecognized_settings"] == ["nonsense"] and verdict["errors"][0]["field"] == "nonsense"
     assert env.v1.calls[0][2]["body"]["kind"] == "batch" and [c[0] for c in env.v1.calls] == ["jobs.validate"]
+
+
+def test_prevalidate_refuses_rows_a_truncated_report_left_out(env, tmp_path):
+    rows = _rows(tmp_path, [{"sequence": "MK"}, {"nonsense": 1}, {"sequence": "MKT"}])
+    env.v1.answers["jobs.validate"] = _report(3, [BAD_ROW], truncated=True)
+    res = env.run("v1", "--json", "batch", "esmfold", "--input", rows, "--name", "b1", "--prevalidate")
+    assert isinstance(res.exception, ValidationError)
+    assert str(res.exception).startswith("Batch validation answered for 1 of 3 rows")
+    assert [c[0] for c in env.v1.calls] == ["jobs.validate"]
+
+
+def test_prevalidate_refuses_a_batch_v1_refuses_as_a_whole(env, tmp_path):
+    rows = _rows(tmp_path, [{"sequence": "MK"}])
+    env.v1.answers["jobs.validate"] = _report(1, errors=[{"code": "quota_exceeded", "detail": "Over your monthly limit."}])
+    res = env.run("v1", "--json", "batch", "esmfold", "--input", rows, "--name", "b1", "--prevalidate")
+    assert isinstance(res.exception, ValidationError)
+    assert str(res.exception) == "Batch validation was refused: Over your monthly limit."
+    assert [c[0] for c in env.v1.calls] == ["jobs.validate"]
 
 
 # -- v1's refusals are v1's -------------------------------------------------------------
@@ -426,6 +474,58 @@ def test_results_of_an_unfinished_job_read_as_classic_words_them(env, archive, s
     env.v1.answers["jobs.get"] = {**V1_JOB, "status": status}
     res = env.run("v1", "--json", "results", "n1", "--show-url")
     assert isinstance(res.exception, ValidationError) and str(res.exception) == message and classic_calls() == []
+
+
+RUN = "run_0f8fad5b-d9cb-469f-a165-70867728950e"
+READY = {"status": "ready", "downloadUrl": SIGNED}
+
+
+def test_results_of_a_pipeline_run_come_from_archive_pipeline_run(env):
+    env.v1.answers["jobs.list"] = _found("pipeline", RUN, status="Complete")
+    env.v1.answers["pipelines.archive_run"] = READY
+    res = env.run("v1", "--json", "results", "n1", "--show-url")
+    assert res.exit_code == 0, res.output
+    assert json.loads(res.stdout)["url"] == SIGNED
+    assert ("pipelines.archive_run", (RUN,), {"body": {}}) in env.v1.calls
+    assert "jobs.archive" not in [c[0] for c in env.v1.calls]
+
+
+def _preparing_then_ready(times: int):
+    answers = [{"status": "preparing", "retryAfterSeconds": 10}] * times + [READY]
+    return lambda *a, **k: answers.pop(0)
+
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    slept: list[float] = []
+    monkeypatch.setattr(classic_routes.time, "sleep", slept.append)
+    return slept
+
+
+def test_results_wait_asks_again_while_a_complete_batchs_archive_is_preparing(env, sleeps):
+    env.v1.answers["jobs.list"] = _found("batch", BATCH, status="Complete")
+    env.v1.answers["jobs.get"] = {"kind": "batch", "id": BATCH, "name": "n1", "status": "Complete"}
+    env.v1.answers["jobs.archive"] = _preparing_then_ready(2)
+    res = env.run("v1", "--json", "results", "n1", "--wait", "--poll-interval", "1", "--show-url")
+    assert res.exit_code == 0, res.output
+    assert json.loads(res.stdout)["url"] == SIGNED and sleeps == [10.0, 10.0]
+
+
+def test_results_without_wait_says_the_archive_is_preparing(env, sleeps):
+    env.v1.answers["jobs.list"] = _found("batch", BATCH, status="Complete")
+    env.v1.answers["jobs.get"] = {"kind": "batch", "id": BATCH, "name": "n1", "status": "Complete"}
+    env.v1.answers["jobs.archive"] = _preparing_then_ready(1)
+    res = env.run("v1", "--json", "results", "n1", "--show-url")
+    assert type(res.exception) is TamarindError and "still being prepared" in str(res.exception)
+    assert sleeps == []
+
+
+def test_results_wait_stops_at_its_timeout(env, sleeps):
+    env.v1.answers["jobs.list"] = _found("batch", BATCH, status="Complete")
+    env.v1.answers["jobs.get"] = {"kind": "batch", "id": BATCH, "name": "n1", "status": "Complete"}
+    env.v1.answers["jobs.archive"] = _preparing_then_ready(5)
+    res = env.run("v1", "--json", "results", "n1", "--wait", "--poll-interval", "1", "--timeout", "5", "--show-url")
+    assert isinstance(res.exception, JobTimeoutError) and sleeps == []
 
 
 def test_delete_job_goes_to_v1(env):

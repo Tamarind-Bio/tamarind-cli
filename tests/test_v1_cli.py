@@ -405,6 +405,20 @@ def test_an_error_on_an_answer_is_not_called_unclear(v1):
     assert str(res.exception).startswith("Key key_1 was made by an earlier attempt")
 
 
+def test_an_assay_order_its_key_cant_read_back_is_an_unclear_outcome(v1):
+    """409 idempotency_order_unavailable: the key's order was placed, so the key is shown
+    for the retry rather than read as a refusal (a new key would order again)."""
+    from tamarind.v1.errors import ProblemError
+
+    v1.answers["assays.submit"] = ProblemError(
+        status=409, code="idempotency_order_unavailable", title="Conflict",
+        detail="This key's order can't be read back.",
+    )
+    res = runner.invoke(app, ["--json", "assays", "submit", "--set", "x=1", "--yes"])
+    assert res.exception.detail["outcomeMayBeAmbiguous"] is True
+    assert "--idempotency-key" in str(res.exception)
+
+
 def test_no_answer_is_an_unclear_outcome(v1):
     import httpx
 

@@ -30,13 +30,13 @@ export TAMARIND_API_BASE=https://staging.tamarind.bio/api/
 | `validate`, the check `submit` makes first, `batch --prevalidate` | validateJob |
 | `submit`, `batch` | submitJob |
 | `cancel`, `cancel --batch` | cancelJob |
-| `results` (download, `--show-url`, `--file`) | archiveJob, getJobFile |
+| `results` (download, `--show-url`, `--file`) | archiveJob (archivePipelineRun for a run), getJobFile |
 | `delete` | deleteJob |
 | `logs` | getJobLogs |
 | `files list`, `files stats`, `files folders` | listFiles |
 | `files upload` | uploadFile |
 | `files delete` | deleteFile |
-| `custom-tools …` | the same operations at the v1 base |
+| `custom-tools …` | the same operations at the v1 base; `custom-tools test` is submitJob pinned to the version |
 
 There is no fallback to classic. When v1 refuses a request, the CLI shows v1's error with
 today's exit codes (401 → 3, 404 → 4, 400/422 → 5, 429 → 6, budget or quota → 8, anything
@@ -89,6 +89,14 @@ case, by code point, where classic uses JavaScript's `localeCompare`. Names that
 only in punctuation can swap places (`1IEP.pdb` and `1iep_imatinib_pose.pdb`).
 
 **files folders:** no `labels` (classic's map of folder to job name) and no `nextCursor`.
+
+**results --wait of a batch:** v1 can call a batch Complete before its archive is built.
+Under `--wait` the CLI asks again after v1's `retryAfterSeconds` until the archive is ready
+or `--timeout` passes (exit 7). Without `--wait` it says the archive is still being
+prepared.
+
+**custom-tools test:** v1 has no test marker, so the run doesn't appear in the website's
+Test history.
 
 **files delete of a missing file:** v1 answers 404 (exit 4); classic answers "File deleted
 successfully".

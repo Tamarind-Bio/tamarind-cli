@@ -158,12 +158,17 @@ def invoke(
         raise
 
 
+# 409s that say the key's first attempt did, or may have, taken effect: it may still be
+# running, or (submitAssay) its order was placed but can't be read back.
+_KEY_IN_USE = {"idempotency_in_progress", "idempotency_order_unavailable"}
+
+
 def outcome_unclear(exc: TamarindError) -> bool:
-    """No answer, a 5xx, or 409 `idempotency_in_progress` (the first attempt may be
-    running): the work may have been done. A 4xx refusal means nothing was, and so
-    does an error the SDK raises on an answer it got (a replayed key create with no
-    secret says so itself)."""
-    if getattr(exc, "code", None) == "idempotency_in_progress":
+    """No answer, a 5xx, or a 409 that says the key's first attempt may have taken
+    effect (``_KEY_IN_USE``): the work may have been done, so the key is shown for the
+    retry. A 4xx refusal means nothing was, and so does an error the SDK raises on an
+    answer it got (a replayed key create with no secret says so itself)."""
+    if getattr(exc, "code", None) in _KEY_IN_USE:
         return True
     status = getattr(exc, "status", None) or getattr(exc, "status_code", None)
     if isinstance(status, int):

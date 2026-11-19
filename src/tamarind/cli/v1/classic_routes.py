@@ -24,10 +24,22 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
+from uuid import uuid4
 from typing import Any, Callable
 
-from ...errors import APIError, NotFoundError, TamarindError, ValidationError
+import click
+
+from ...custom_tools.resources import CustomTool, CustomToolTestJob
+from ...errors import (
+    APIError,
+    CustomToolNotDeployableError,
+    JobTimeoutError,
+    NotFoundError,
+    TamarindError,
+    ValidationError,
+)
 from ...http import HTTPClient
 from . import sdk
 
@@ -240,33 +252,37 @@ def get_jobs(client: _OverV1, params: dict[str, Any]) -> dict[str, Any]:
 # -- validate -----------------------------------------------------------------------
 
 
-def _field(pointer: Any) -> str | None:
+def _field(pointer: Any, *, row: bool = False) -> str | None:
+    """The setting a v1 pointer names: ``/settings/x`` → ``x``; a batch row's
+    ``/settings/17/x`` → ``x`` too."""
     parts = [p for p in str(pointer or "").split("/") if p]
     if parts[:1] == ["settings"]:
         parts = parts[1:]
+        if row and parts[:1] and parts[0].isdigit():
+            parts = parts[1:]
     return ".".join(parts) or None
 
 
-def _classic_errors(errors: list[Any]) -> dict[str, Any]:
+def _classic_errors(errors: list[Any], *, row: bool = False) -> dict[str, Any]:
     """v1's ``errors[]`` as classic's ``error``, ``errors[{rule, field, message}]``,
-    ``unrecognized_settings`` and ``missing_fields``."""
+    ``unrecognized_settings`` and ``missing_fields`` (of one batch row with ``row``)."""
     items = [e for e in errors if isinstance(e, dict)]
     out: dict[str, Any] = {
         "error": "; ".join(str(e.get("detail") or e.get("code")) for e in items) or "Settings invalid",
         "errors": [
             {
                 "rule": e.get("code"),
-                "field": _field(e.get("pointer")),
+                "field": _field(e.get("pointer"), row=row),
                 "message": e.get("detail"),
                 **({"suggestion": e["suggestion"]} if e.get("suggestion") else {}),
             }
             for e in items
         ],
     }
-    unknown = [_field(e.get("pointer")) for e in items if e.get("code") == "unknown_field"]
+    unknown = [_field(e.get("pointer"), row=row) for e in items if e.get("code") == "unknown_field"]
     if unknown:
         out["unrecognized_settings"] = unknown
-    missing = [_field(e.get("pointer")) for e in items if e.get("code") in ("missing_field", "required")]
+    missing = [_field(e.get("pointer"), row=row) for e in items if e.get("code") in ("missing_field", "required")]
     if missing:
         out["missing_fields"] = [{"name": name} for name in missing]
     return out
@@ -281,14 +297,22 @@ def validate_job(client: _OverV1, body: dict[str, Any]) -> dict[str, Any]:
             request["names"] = body["jobNames"]
         report = sdk.plain(client.v1().jobs.validate(body=request))
         rows = report.get("results")
-        if not isinstance(rows, list):
-            # refused as a whole (no per-row verdicts): classic's {valid: false, error}
+        if report.get("errors") or not isinstance(rows, list):
+            # A problem with the batch as a whole: classic's {valid: false, error}, no rows.
             return {"valid": False, "error": _classic_errors(report.get("errors") or [])["error"]}
+        # v1 lists only the rows with an error or a warning; classic answers for every row.
+        # When v1 cut its list short, the rows it left out are unknown, so they get no
+        # verdict and the CLI refuses the batch rather than pass rows nobody checked.
+        listed = {row.get("index"): row for row in rows if isinstance(row, dict)}
+        indexes = sorted(i for i in listed if isinstance(i, int)) if report.get("resultsTruncated") else range(
+            int(report.get("count") or len(settings))
+        )
         results = []
-        for row in rows:
-            verdict: dict[str, Any] = {"index": row.get("index"), "valid": bool(row.get("valid"))}
+        for index in indexes:
+            row = listed.get(index) or {"valid": True}
+            verdict: dict[str, Any] = {"index": index, "valid": bool(row.get("valid"))}
             if not verdict["valid"]:
-                verdict.update(_classic_errors(row.get("errors") or []))
+                verdict.update(_classic_errors(row.get("errors") or [], row=True))
             results.append(verdict)
         return {
             "valid": all(r["valid"] for r in results) and not report.get("errors"),
@@ -428,10 +452,30 @@ def _not_complete(name: Any, item: dict[str, Any]) -> ValidationError:
     return ValidationError(f"Job {name} is not complete. Status: {item.get('status')}")
 
 
+def _waiting() -> tuple[bool, float | None]:
+    """Whether the command asked to wait (``--wait``), and its ``--timeout``."""
+    ctx = click.get_current_context(silent=True)
+    params = ctx.params if ctx is not None else {}
+    timeout = params.get("timeout")
+    return bool(params.get("wait")), float(timeout) if isinstance(timeout, (int, float)) else None
+
+
+def _archive(client: _OverV1, item: dict[str, Any]) -> dict[str, Any]:
+    v1 = client.v1()
+    if item.get("kind") == "pipeline":
+        return sdk.plain(v1.pipelines.archive_run(item["id"], body={}))
+    return sdk.plain(v1.jobs.archive(item["id"], body={}))
+
+
 def result(client: _OverV1, body: dict[str, Any]) -> str:
-    """POST /result → archiveJob (or getJobFile for ``fileName``); classic answers the
-    signed link. v1's archive is the stored ``result-<folder>.zip`` classic serves, so
-    the bytes are the same (the link itself is v1's, signed for the global endpoint)."""
+    """POST /result → archiveJob (archivePipelineRun for a run, getJobFile for
+    ``fileName``); classic answers the signed link. v1's archive is the stored
+    ``result-<folder>.zip`` classic serves, so the bytes are the same (the link itself is
+    v1's, signed for the global endpoint).
+
+    v1 can call a batch Complete before its archive is built, where classic's wait covers
+    the build. So under ``--wait`` a Complete item whose archive is still preparing is
+    asked again after ``retryAfterSeconds``, until it is ready or ``--timeout`` passes."""
     if body.get("jobEmail") is not None or body.get("pdbsOnly"):
         raise OnClassic  # another member's job (website#7795); best structures (not on v1 yet)
     name = body.get("jobName")
@@ -442,22 +486,30 @@ def result(client: _OverV1, body: dict[str, Any]) -> str:
     if file_name:
         link = sdk.plain(client.v1().jobs.get_file(item["id"], path=file_name, delivery="url"))
         return str(link.get("url"))
-    try:
-        answer = sdk.plain(client.v1().jobs.archive(item["id"], body={}))
-    except TamarindError as exc:
-        if getattr(exc, "code", None) == "archive_failed" and item.get("status") != "Complete":
-            raise _not_complete(name, item) from exc  # classic's words for a Stopped/Failed job
-        raise
-    if isinstance(answer, dict) and answer.get("status") == "preparing":
+    wait, timeout = _waiting()
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while True:
+        try:
+            answer = _archive(client, item)
+        except TamarindError as exc:
+            if getattr(exc, "code", None) == "archive_failed" and item.get("status") != "Complete":
+                raise _not_complete(name, item) from exc  # classic's words for a Stopped/Failed job
+            raise
+        if not (isinstance(answer, dict) and answer.get("status") == "preparing"):
+            return str(answer.get("downloadUrl"))
         current = sdk.plain(client.v1().jobs.get(item["id"]))
         if current.get("status") != "Complete":
             raise _not_complete(name, current)
-        raise TamarindError(
-            "The results archive is still being prepared; try again in "
-            f"{answer.get('retryAfterSeconds') or 5} s.",
-            detail=answer,
-        )
-    return str(answer.get("downloadUrl"))
+        delay = max(float(answer.get("retryAfterSeconds") or 5), 1.0)
+        if not wait:
+            raise TamarindError(
+                f"The results archive is still being prepared; try again in {delay:g} s.", detail=answer
+            )
+        if deadline is not None and time.monotonic() + delay > deadline:
+            raise JobTimeoutError(
+                f"The results archive of {name} was still being prepared when --timeout passed.", detail=answer
+            )
+        time.sleep(delay)
 
 
 def delete_job(client: _OverV1, body: dict[str, Any]) -> str:
@@ -614,6 +666,57 @@ def upload(state: Any, path: Path, remote: str) -> dict[str, Any] | None:
     except TamarindError as exc:
         raise _classic_error(exc) from exc
     return {"ok": True, "filename": remote, "bytes": path.stat().st_size}
+
+
+def test_custom_tool(
+    state: Any, tool: CustomTool, settings: Any, *, version: str, name: str | None
+) -> CustomToolTestJob:
+    """``custom-tools test`` on v1: submitJob pinned to the version (``toolVersion`` and
+    its ``toolLifetimeEtag``), where classic posts ``v2/jobs`` with a test marker. v1 has
+    no test marker, so the run isn't in the website's Test history. The checks before
+    and the receipt are the SDK's (``CustomTool.test``)."""
+    if not isinstance(settings, dict):
+        raise ValidationError("Test settings must be an object")
+    if name is not None and (not isinstance(name, str) or not name.strip()):
+        raise ValidationError("Test job name must be a non-empty string")
+    job_name = name if name is not None else f"{tool.name}-test-{uuid4().hex[:12]}"
+    selected = tool.get_version(version)
+    if selected.status != "Complete" or selected.error is not None:
+        raise CustomToolNotDeployableError(
+            f"Version {selected.version} is {selected.status}; test a completed build."
+        )
+    request = {
+        "kind": "job",
+        "tool": tool.name,
+        "name": job_name,
+        "settings": settings,
+        "toolVersion": selected.version,
+        "toolLifetimeEtag": selected._lifetime_etag,
+    }
+    try:
+        with sdk.make_client(state) as client:
+            job = sdk.plain(client.jobs.submit(body=request))
+    except TamarindError as exc:
+        if not sdk.outcome_unclear(exc):
+            raise
+        err = _classic_error(exc)
+        err.message += f" Query job {job_name!r} before retrying; submission may have succeeded."
+        err.detail = {
+            **(err.detail if isinstance(err.detail, dict) else {}),
+            "jobName": job_name,
+            "toolName": tool.name,
+            "version": selected.version,
+            "submitted": None,
+            "outcomeMayBeAmbiguous": True,
+        }
+        raise err from exc
+    return CustomToolTestJob(
+        id=_uuid(str(job.get("id") or "")),
+        job_name=str(job.get("name") or job_name),
+        job_type=str(job.get("tool") or tool.name),
+        status=str(job.get("status") or "In Queue"),
+        created_at=stamp(job.get("createdAt")) or "",
+    )
 
 
 def key_works(state: Any, api_key: str) -> bool:
