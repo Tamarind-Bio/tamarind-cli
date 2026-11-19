@@ -204,8 +204,8 @@ class Operation:
         self.path = path
         self.check = check
         # The contract makes this operation repeatable: a POST that only reads, or one its
-        # description calls safe to repeat or idempotent (the cancels, usage refresh,
-        # key revoke, molecule delete and group removal). It is retried after an
+        # description calls safe to repeat, idempotent or polled (the cancels, the two
+        # archive builds, usage refresh, key revoke, molecule delete and group removal). It is retried after an
         # ambiguous failure like a GET.
         self.repeat_safe = repeat_safe
         self.__doc__ = _doc(endpoint)
@@ -385,7 +385,7 @@ class Jobs(_Resource):
     delete = Operation(delete_job, "job_id")
     cancel = Operation(cancel_job, "job_id", repeat_safe=True)
     rerun = Operation(rerun_job, "job_id")
-    archive = Operation(archive_job, "job_id")
+    archive = Operation(archive_job, "job_id", repeat_safe=True)
     list_files = Operation(list_job_files, "job_id")
     get_file = Operation(get_job_file, "job_id")
     logs = Operation(get_job_logs, "job_id")
@@ -559,7 +559,7 @@ class Pipelines(_Resource):
     list_runs = Operation(list_pipeline_runs)
     submit = Operation(submit_pipeline)
     get_run = Operation(get_pipeline_run, "run_id")
-    archive_run = Operation(archive_pipeline_run, "run_id")
+    archive_run = Operation(archive_pipeline_run, "run_id", repeat_safe=True)
     cancel_run = Operation(cancel_pipeline_run, "run_id", repeat_safe=True)
     list_node_run_molecules = Operation(list_node_run_molecules, "run_id", "node_run_id")
     schema = Operation(get_pipeline_schema)
@@ -618,7 +618,8 @@ class Assays(_Resource):
     list_types = Operation(list_assay_types)
     list = Operation(list_assays)
     submit = Operation(submit_assay)
-    estimate = Operation(estimate_assay, repeat_safe=True)
+    # Not repeat-safe: an estimate sends the sequences to the lab, which files a quote.
+    estimate = Operation(estimate_assay)
     validate = Operation(validate_assay, repeat_safe=True)
     get = Operation(get_assay, "assay_id")
     cancel = Operation(cancel_assay, "assay_id", repeat_safe=True)

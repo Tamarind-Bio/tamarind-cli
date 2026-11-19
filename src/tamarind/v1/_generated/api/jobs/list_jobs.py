@@ -10,8 +10,8 @@ from ...models.job_status import JobStatus
 from ...models.list_jobs_kind import ListJobsKind
 from ...models.list_jobs_order import ListJobsOrder
 from ...models.list_jobs_scope import ListJobsScope
-from ...models.list_jobs_source import ListJobsSource
 from ...models.problem import Problem
+from ...models.submission_channel import SubmissionChannel
 from ...types import UNSET, Response, Unset
 
 
@@ -24,7 +24,7 @@ def _get_kwargs(
     batch_id: str | Unset = UNSET,
     pipeline_run_id: str | Unset = UNSET,
     search: str | Unset = UNSET,
-    source: ListJobsSource | Unset = UNSET,
+    source: SubmissionChannel | Unset = UNSET,
     order: ListJobsOrder | Unset = ListJobsOrder.DESC,
     project_id: str | Unset = UNSET,
     api_key_id: str | Unset = UNSET,
@@ -181,7 +181,7 @@ def sync_detailed(
     batch_id: str | Unset = UNSET,
     pipeline_run_id: str | Unset = UNSET,
     search: str | Unset = UNSET,
-    source: ListJobsSource | Unset = UNSET,
+    source: SubmissionChannel | Unset = UNSET,
     order: ListJobsOrder | Unset = ListJobsOrder.DESC,
     project_id: str | Unset = UNSET,
     api_key_id: str | Unset = UNSET,
@@ -217,6 +217,17 @@ def sync_detailed(
     naming anyone but you. Past its 15-second deadline a read is 503
     `jobs_dependency_unavailable`.
 
+    Organization scope (website#7795, not merged yet; until then the 400 above). With
+    `scope=org` the list is the organization's jobs and batches, not pipeline runs (those list
+    under `listPipelineRuns?scope=org`), as today's API shows them: every member's when the
+    organization shares within itself or you're its admin or its service account, otherwise
+    only yours. `createdBy` is another member's email and needs `scope=org` (400 without it); a
+    member whose jobs you can't see is 403 `forbidden`. Pages walk the members in turn (you
+    first, then the others by email), each page newest first. `name=` works with both.
+    `batchId`, `pipelineRunId`, `search`, `source`, `order=asc` and `kind=pipeline` can't be
+    combined with `scope=org` yet (400). `batchId=` of another member's batch needs no
+    `scope=org`: it lists the batch's jobs as today's batch read does, each admitted on its own.
+
     Args:
         name (str | Unset):
         kind (ListJobsKind | Unset):
@@ -225,7 +236,10 @@ def sync_detailed(
         batch_id (str | Unset):
         pipeline_run_id (str | Unset):
         search (str | Unset):
-        source (ListJobsSource | Unset):
+        source (SubmissionChannel | Unset): The channel a job, batch or pipeline run was submitted
+            through. Tamarind's SDK, CLI, MCP and agents declare theirs with `X-Tamarind-Client-
+            Channel` (see Attribution in the introduction); any other API-key submit is `api`, and the
+            app's is `web`.
         order (ListJobsOrder | Unset):  Default: ListJobsOrder.DESC.
         project_id (str | Unset):
         api_key_id (str | Unset):
@@ -283,7 +297,7 @@ def sync(
     batch_id: str | Unset = UNSET,
     pipeline_run_id: str | Unset = UNSET,
     search: str | Unset = UNSET,
-    source: ListJobsSource | Unset = UNSET,
+    source: SubmissionChannel | Unset = UNSET,
     order: ListJobsOrder | Unset = ListJobsOrder.DESC,
     project_id: str | Unset = UNSET,
     api_key_id: str | Unset = UNSET,
@@ -319,6 +333,17 @@ def sync(
     naming anyone but you. Past its 15-second deadline a read is 503
     `jobs_dependency_unavailable`.
 
+    Organization scope (website#7795, not merged yet; until then the 400 above). With
+    `scope=org` the list is the organization's jobs and batches, not pipeline runs (those list
+    under `listPipelineRuns?scope=org`), as today's API shows them: every member's when the
+    organization shares within itself or you're its admin or its service account, otherwise
+    only yours. `createdBy` is another member's email and needs `scope=org` (400 without it); a
+    member whose jobs you can't see is 403 `forbidden`. Pages walk the members in turn (you
+    first, then the others by email), each page newest first. `name=` works with both.
+    `batchId`, `pipelineRunId`, `search`, `source`, `order=asc` and `kind=pipeline` can't be
+    combined with `scope=org` yet (400). `batchId=` of another member's batch needs no
+    `scope=org`: it lists the batch's jobs as today's batch read does, each admitted on its own.
+
     Args:
         name (str | Unset):
         kind (ListJobsKind | Unset):
@@ -327,7 +352,10 @@ def sync(
         batch_id (str | Unset):
         pipeline_run_id (str | Unset):
         search (str | Unset):
-        source (ListJobsSource | Unset):
+        source (SubmissionChannel | Unset): The channel a job, batch or pipeline run was submitted
+            through. Tamarind's SDK, CLI, MCP and agents declare theirs with `X-Tamarind-Client-
+            Channel` (see Attribution in the introduction); any other API-key submit is `api`, and the
+            app's is `web`.
         order (ListJobsOrder | Unset):  Default: ListJobsOrder.DESC.
         project_id (str | Unset):
         api_key_id (str | Unset):
@@ -380,7 +408,7 @@ async def asyncio_detailed(
     batch_id: str | Unset = UNSET,
     pipeline_run_id: str | Unset = UNSET,
     search: str | Unset = UNSET,
-    source: ListJobsSource | Unset = UNSET,
+    source: SubmissionChannel | Unset = UNSET,
     order: ListJobsOrder | Unset = ListJobsOrder.DESC,
     project_id: str | Unset = UNSET,
     api_key_id: str | Unset = UNSET,
@@ -416,6 +444,17 @@ async def asyncio_detailed(
     naming anyone but you. Past its 15-second deadline a read is 503
     `jobs_dependency_unavailable`.
 
+    Organization scope (website#7795, not merged yet; until then the 400 above). With
+    `scope=org` the list is the organization's jobs and batches, not pipeline runs (those list
+    under `listPipelineRuns?scope=org`), as today's API shows them: every member's when the
+    organization shares within itself or you're its admin or its service account, otherwise
+    only yours. `createdBy` is another member's email and needs `scope=org` (400 without it); a
+    member whose jobs you can't see is 403 `forbidden`. Pages walk the members in turn (you
+    first, then the others by email), each page newest first. `name=` works with both.
+    `batchId`, `pipelineRunId`, `search`, `source`, `order=asc` and `kind=pipeline` can't be
+    combined with `scope=org` yet (400). `batchId=` of another member's batch needs no
+    `scope=org`: it lists the batch's jobs as today's batch read does, each admitted on its own.
+
     Args:
         name (str | Unset):
         kind (ListJobsKind | Unset):
@@ -424,7 +463,10 @@ async def asyncio_detailed(
         batch_id (str | Unset):
         pipeline_run_id (str | Unset):
         search (str | Unset):
-        source (ListJobsSource | Unset):
+        source (SubmissionChannel | Unset): The channel a job, batch or pipeline run was submitted
+            through. Tamarind's SDK, CLI, MCP and agents declare theirs with `X-Tamarind-Client-
+            Channel` (see Attribution in the introduction); any other API-key submit is `api`, and the
+            app's is `web`.
         order (ListJobsOrder | Unset):  Default: ListJobsOrder.DESC.
         project_id (str | Unset):
         api_key_id (str | Unset):
@@ -480,7 +522,7 @@ async def asyncio(
     batch_id: str | Unset = UNSET,
     pipeline_run_id: str | Unset = UNSET,
     search: str | Unset = UNSET,
-    source: ListJobsSource | Unset = UNSET,
+    source: SubmissionChannel | Unset = UNSET,
     order: ListJobsOrder | Unset = ListJobsOrder.DESC,
     project_id: str | Unset = UNSET,
     api_key_id: str | Unset = UNSET,
@@ -516,6 +558,17 @@ async def asyncio(
     naming anyone but you. Past its 15-second deadline a read is 503
     `jobs_dependency_unavailable`.
 
+    Organization scope (website#7795, not merged yet; until then the 400 above). With
+    `scope=org` the list is the organization's jobs and batches, not pipeline runs (those list
+    under `listPipelineRuns?scope=org`), as today's API shows them: every member's when the
+    organization shares within itself or you're its admin or its service account, otherwise
+    only yours. `createdBy` is another member's email and needs `scope=org` (400 without it); a
+    member whose jobs you can't see is 403 `forbidden`. Pages walk the members in turn (you
+    first, then the others by email), each page newest first. `name=` works with both.
+    `batchId`, `pipelineRunId`, `search`, `source`, `order=asc` and `kind=pipeline` can't be
+    combined with `scope=org` yet (400). `batchId=` of another member's batch needs no
+    `scope=org`: it lists the batch's jobs as today's batch read does, each admitted on its own.
+
     Args:
         name (str | Unset):
         kind (ListJobsKind | Unset):
@@ -524,7 +577,10 @@ async def asyncio(
         batch_id (str | Unset):
         pipeline_run_id (str | Unset):
         search (str | Unset):
-        source (ListJobsSource | Unset):
+        source (SubmissionChannel | Unset): The channel a job, batch or pipeline run was submitted
+            through. Tamarind's SDK, CLI, MCP and agents declare theirs with `X-Tamarind-Client-
+            Channel` (see Attribution in the introduction); any other API-key submit is `api`, and the
+            app's is `web`.
         order (ListJobsOrder | Unset):  Default: ListJobsOrder.DESC.
         project_id (str | Unset):
         api_key_id (str | Unset):

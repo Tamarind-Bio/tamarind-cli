@@ -8,8 +8,8 @@ from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 from dateutil.parser import isoparse
 
-from ..models.batch_channel import BatchChannel
 from ..models.job_status import JobStatus
+from ..models.submission_channel import SubmissionChannel
 
 if TYPE_CHECKING:
     from ..models.batch_links import BatchLinks
@@ -43,7 +43,9 @@ class Batch:
             project_id (None | str):
             rerun_of (None | str): The `job_` id of the job whose rerun the tool split into this batch, on batches an
                 earlier v1 rerun created. `rerunJob` now reruns in place and never sets it, so it's null otherwise.
-            source (BatchChannel): The channel the batch was submitted through; `web` when none was recorded.
+            source (SubmissionChannel): The channel a job, batch or pipeline run was submitted through. Tamarind's SDK, CLI,
+                MCP and agents declare theirs with `X-Tamarind-Client-Channel` (see Attribution in the introduction); any other
+                API-key submit is `api`, and the app's is `web`.
             started_at (datetime.datetime | None):
             status (JobStatus): Shared by jobs, batches and pipeline runs. `Complete`, `Stopped` and `Failed` are final.
                 `Failed` means it ended in an error (`stopReason.kind` `error`). `Stopped` means it was canceled, hit a limit,
@@ -76,7 +78,7 @@ class Batch:
     poll_after_seconds: int | None
     project_id: None | str
     rerun_of: None | str
-    source: BatchChannel
+    source: SubmissionChannel
     started_at: datetime.datetime | None
     status: JobStatus
     stop_reason: BatchStopReasonType0 | None
@@ -255,7 +257,7 @@ class Batch:
 
         rerun_of = _parse_rerun_of(d.pop("rerunOf"))
 
-        source = BatchChannel(d.pop("source"))
+        source = SubmissionChannel(d.pop("source"))
 
         def _parse_started_at(data: object) -> datetime.datetime | None:
             if data is None:

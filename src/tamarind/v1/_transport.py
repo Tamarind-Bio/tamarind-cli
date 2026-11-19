@@ -36,6 +36,7 @@ MAX_RETRY_AFTER = 120.0
 # Repeating these can't change anything. A DELETE is not here: after a lost answer a
 # repeat could delete a file or tool someone just made at the freed path or name.
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+_LOOPBACK = {"localhost", "127.0.0.1", "::1"}
 
 
 class Transport:
@@ -65,12 +66,15 @@ class Transport:
         self._owns_client = http_client is None
         self._headers = headers
         # Signed storage URLs must never see the API key.
-        self._storage = httpx.Client(timeout=timeout)
+        # A caller's client carries their network settings (proxy, trust store), so signed
+        # uploads go through its transports, but never its headers, cookies or params
+        # (see _put_unlogged).
+        self._storage = http_client or httpx.Client(timeout=timeout)
 
     def close(self) -> None:
         if self._owns_client:
             self._client.close()
-        self._storage.close()
+            self._storage.close()
 
     # -- API calls --------------------------------------------------------
     def call(
@@ -157,9 +161,9 @@ class Transport:
     # -- storage (signed URLs) --------------------------------------------
     def require_secure(self, url: object) -> None:
         """Signed query strings are credentials: never send them, or a file, in the clear,
-        unless the API itself is plain HTTP (a local development server)."""
+        unless the API itself is a plain-HTTP server on this machine (local development)."""
         secure = isinstance(url, str) and url.startswith("https://")
-        local = isinstance(url, str) and not self.base_url.startswith("https://")
+        local = isinstance(url, str) and httpx.URL(self.base_url).host in _LOOPBACK
         if not (secure or local):
             raise TamarindError("The upload session named a storage URL that isn't HTTPS.")
 
@@ -175,8 +179,18 @@ class Transport:
     def _put_unlogged(self, url: str, content: Any, headers: Mapping[str, str]) -> httpx.Response:
         """Send a PUT below ``httpx.Client``, whose INFO log line would carry the signed URL
         (a credential) into the application's logs. The transport is the one the client
-        picks for this URL, so ``HTTPS_PROXY``/``NO_PROXY`` routing still applies."""
-        request = self._storage.build_request("PUT", url, content=content, headers=dict(headers))
+        picks for this URL, so ``HTTPS_PROXY``/``NO_PROXY`` routing and a caller's proxy and
+        trust settings still apply. The request itself is built fresh, not with
+        ``build_request``: a caller's client would add its default headers, cookies and
+        query params, sending their credentials to the storage host (and its params would
+        replace the URL's signature)."""
+        request = httpx.Request(
+            "PUT",
+            url,
+            content=content,
+            headers=dict(headers),
+            extensions={"timeout": self._storage.timeout.as_dict()},
+        )
         response = self._storage._transport_for_url(request.url).handle_request(request)
         try:
             response.read()

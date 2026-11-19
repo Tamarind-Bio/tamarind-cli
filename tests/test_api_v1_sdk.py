@@ -704,3 +704,66 @@ def test_signed_uploads_follow_the_environments_proxy(monkeypatch: pytest.Monkey
     respx.post(f"{BASE}/files/complete").mock(return_value=httpx.Response(200, json={}))
     sdk.files.upload(b"abc", "m.bin", multipart=True)
     assert picked == ["https://storage.test/p1"]
+
+
+@respx.mock
+@pytest.mark.parametrize("multipart", [False, True])
+def test_signed_uploads_use_the_callers_client_without_its_credentials(multipart: bool) -> None:
+    mine = httpx.Client(
+        headers={"x-api-key": "should-not-travel", "X-Custom-Auth": "should-not-travel"},
+        cookies={"session": "should-not-travel"},
+        params={"token": "should-not-travel"},
+    )
+    sdk = Tamarind("test-key", base_url=BASE, http_client=mine)
+    picked: list[str] = []
+    original = mine._transport_for_url
+    mine._transport_for_url = lambda url: picked.append(str(url)) or original(url)  # type: ignore[method-assign]
+    signed = "https://storage.test/p1?X-Amz-Signature=sig"
+    if multipart:
+        payload = b"abc"
+        session = _multipart_session([1], 8)
+        session["upload"]["parts"][0]["url"] = signed
+        respx.post(f"{BASE}/files/complete").mock(return_value=httpx.Response(200, json={}))
+    else:
+        payload = b"z" * (3 * 1024 * 1024 + 1)  # above the inline limit: one signed PUT
+        session = {"file": {"path": "m.bin"}, "upload": {"method": "PUT", "url": signed}}
+    respx.post(f"{BASE}/files").mock(return_value=httpx.Response(201, json=session))
+    put = respx.put(signed).mock(return_value=httpx.Response(200, headers={"ETag": '"e"'}))
+    sdk.files.upload(payload, "m.bin", multipart=multipart)
+    sent = put.calls.last.request
+    assert signed in picked  # the caller's client picked the route (proxy, trust store)
+    assert str(sent.url) == signed  # its default params don't replace the signature
+    for name in ("x-api-key", "x-custom-auth", "cookie", "authorization"):
+        assert name not in sent.headers
+    sdk.close()
+    assert not mine.is_closed  # the caller's client stays theirs to close
+
+
+@respx.mock
+def test_plain_http_storage_only_for_a_local_api() -> None:
+    session = _multipart_session([1], 8, url="http://storage.test")
+    respx.put("http://storage.test/p1").mock(
+        return_value=httpx.Response(200, headers={"ETag": '"e"'})
+    )
+    for base, allowed in [("http://localhost:8000", True), ("http://staging.internal", False)]:
+        respx.post(f"{base}/files").mock(return_value=httpx.Response(201, json=session))
+        respx.post(f"{base}/files/complete").mock(return_value=httpx.Response(200, json={}))
+        sdk = Tamarind("k", base_url=base)
+        if allowed:
+            sdk.files.upload(b"abc", "m.bin", multipart=True)
+        else:
+            with pytest.raises(TamarindError, match="isn't HTTPS"):
+                sdk.files.upload(b"abc", "m.bin", multipart=True)
+
+
+@respx.mock
+def test_archives_repeat_but_lab_estimates_do_not(client: Tamarind) -> None:
+    archive = respx.post(f"{BASE}/jobs/job_1/archive").mock(
+        side_effect=[httpx.ReadTimeout("lost"), httpx.Response(202, json={"status": "preparing"})]
+    )
+    assert client.jobs.archive("job_1") == {"status": "preparing"}
+    assert archive.call_count == 2
+    estimate = respx.post(f"{BASE}/assays/estimate").mock(side_effect=httpx.ReadTimeout("lost"))
+    with pytest.raises(TamarindError):
+        client.assays.estimate({"assayType": "x"})
+    assert estimate.call_count == 1

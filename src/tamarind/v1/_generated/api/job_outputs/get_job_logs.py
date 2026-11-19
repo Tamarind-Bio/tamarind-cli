@@ -118,6 +118,10 @@ def sync_detailed(
     job is re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again
     without one.
 
+    Another member's job is 404 for now; once website#7795 merges, it follows today's
+    `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
+    rule refuses is the same 404.
+
     Args:
         job_id (str):
         max_bytes (int | Unset):  Default: 65536.
@@ -164,6 +168,10 @@ def sync(
     job is re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again
     without one.
 
+    Another member's job is 404 for now; once website#7795 merges, it follows today's
+    `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
+    rule refuses is the same 404.
+
     Args:
         job_id (str):
         max_bytes (int | Unset):  Default: 65536.
@@ -204,6 +212,10 @@ async def asyncio_detailed(
     yet answers 200 with empty `content`. A cursor is bound to the job's current attempt: once the
     job is re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again
     without one.
+
+    Another member's job is 404 for now; once website#7795 merges, it follows today's
+    `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
+    rule refuses is the same 404.
 
     Args:
         job_id (str):
@@ -248,6 +260,10 @@ async def asyncio(
     yet answers 200 with empty `content`. A cursor is bound to the job's current attempt: once the
     job is re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again
     without one.
+
+    Another member's job is 404 for now; once website#7795 merges, it follows today's
+    `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
+    rule refuses is the same 404.
 
     Args:
         job_id (str):

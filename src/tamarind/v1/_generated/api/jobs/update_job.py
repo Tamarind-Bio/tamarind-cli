@@ -133,6 +133,12 @@ def sync_detailed(
     answer is 503 `service_unavailable`, and the same request again finishes the rest. A job or
     batch deleted or moved to another account while this runs is 404.
 
+    Another member's job is 404 for now. Once built (decision 74), `projectId` on it follows
+    today's API: only in an organization that doesn't share within itself, where its admin's key
+    can file it under an organization project or one of the admin's own, and a key the job is
+    shared with can only clear it (null). A refusal of a job you can read is 403, otherwise 404.
+    `displayName` stays the owner's.
+
     Args:
         job_id (str):
         tamarind_version (str | Unset):
@@ -180,6 +186,12 @@ def sync(
     answer is 503 `service_unavailable`, and the same request again finishes the rest. A job or
     batch deleted or moved to another account while this runs is 404.
 
+    Another member's job is 404 for now. Once built (decision 74), `projectId` on it follows
+    today's API: only in an organization that doesn't share within itself, where its admin's key
+    can file it under an organization project or one of the admin's own, and a key the job is
+    shared with can only clear it (null). A refusal of a job you can read is 403, otherwise 404.
+    `displayName` stays the owner's.
+
     Args:
         job_id (str):
         tamarind_version (str | Unset):
@@ -221,6 +233,12 @@ async def asyncio_detailed(
     A batch's jobs are filed first and the batch last, so if some rows couldn't be written the
     answer is 503 `service_unavailable`, and the same request again finishes the rest. A job or
     batch deleted or moved to another account while this runs is 404.
+
+    Another member's job is 404 for now. Once built (decision 74), `projectId` on it follows
+    today's API: only in an organization that doesn't share within itself, where its admin's key
+    can file it under an organization project or one of the admin's own, and a key the job is
+    shared with can only clear it (null). A refusal of a job you can read is 403, otherwise 404.
+    `displayName` stays the owner's.
 
     Args:
         job_id (str):
@@ -266,6 +284,12 @@ async def asyncio(
     A batch's jobs are filed first and the batch last, so if some rows couldn't be written the
     answer is 503 `service_unavailable`, and the same request again finishes the rest. A job or
     batch deleted or moved to another account while this runs is 404.
+
+    Another member's job is 404 for now. Once built (decision 74), `projectId` on it follows
+    today's API: only in an organization that doesn't share within itself, where its admin's key
+    can file it under an organization project or one of the admin's own, and a key the job is
+    shared with can only clear it (null). A refusal of a job you can read is 403, otherwise 404.
+    `displayName` stays the owner's.
 
     Args:
         job_id (str):

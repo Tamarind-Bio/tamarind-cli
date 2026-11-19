@@ -130,10 +130,26 @@ def sync_detailed(
     `jobs_dependency_unavailable`; retry. Choosing files (`paths`, `glob`) isn't built yet, so
     either is 422 `not_supported` at its field.
 
+    Once website#7799 merges (not yet): `paths` or `glob` (one of them) chooses files: the answer
+    is a zip of just those files of that archive, copied from it as they are. `paths` are paths
+    inside the archive: a job's are the paths `listJobFiles` shows, and a batch's archive holds
+    each of its jobs' files under the job's name, plus its combined files. `glob` matches the
+    whole path (`*` spans `/`, case-sensitive). The zip is kept beside the archive, and asking
+    again answers the same one. A path the archive has no file at is 422 `file_not_found` at
+    `/paths/<i>` (each one), and a `glob` that matches nothing is 422 `file_not_found` at
+    `/glob`. More than 10,000 files or 1 GiB of zipped data is 422 `out_of_range` at the field:
+    nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
+    at `/glob`. A selection of every file answers the whole archive.
+
+    Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
+    `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
+    rule refuses is the same 404.
+
     Args:
         job_id (str):
         tamarind_version (str | Unset):
-        body (ArchiveRequest | Unset):
+        body (ArchiveRequest | Unset): Send at most one of `paths` and `glob`; send neither for
+            the whole archive. Not built yet (website#7799), so either is 422 `not_supported` for now.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -179,10 +195,26 @@ def sync(
     `jobs_dependency_unavailable`; retry. Choosing files (`paths`, `glob`) isn't built yet, so
     either is 422 `not_supported` at its field.
 
+    Once website#7799 merges (not yet): `paths` or `glob` (one of them) chooses files: the answer
+    is a zip of just those files of that archive, copied from it as they are. `paths` are paths
+    inside the archive: a job's are the paths `listJobFiles` shows, and a batch's archive holds
+    each of its jobs' files under the job's name, plus its combined files. `glob` matches the
+    whole path (`*` spans `/`, case-sensitive). The zip is kept beside the archive, and asking
+    again answers the same one. A path the archive has no file at is 422 `file_not_found` at
+    `/paths/<i>` (each one), and a `glob` that matches nothing is 422 `file_not_found` at
+    `/glob`. More than 10,000 files or 1 GiB of zipped data is 422 `out_of_range` at the field:
+    nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
+    at `/glob`. A selection of every file answers the whole archive.
+
+    Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
+    `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
+    rule refuses is the same 404.
+
     Args:
         job_id (str):
         tamarind_version (str | Unset):
-        body (ArchiveRequest | Unset):
+        body (ArchiveRequest | Unset): Send at most one of `paths` and `glob`; send neither for
+            the whole archive. Not built yet (website#7799), so either is 422 `not_supported` for now.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -223,10 +255,26 @@ async def asyncio_detailed(
     `jobs_dependency_unavailable`; retry. Choosing files (`paths`, `glob`) isn't built yet, so
     either is 422 `not_supported` at its field.
 
+    Once website#7799 merges (not yet): `paths` or `glob` (one of them) chooses files: the answer
+    is a zip of just those files of that archive, copied from it as they are. `paths` are paths
+    inside the archive: a job's are the paths `listJobFiles` shows, and a batch's archive holds
+    each of its jobs' files under the job's name, plus its combined files. `glob` matches the
+    whole path (`*` spans `/`, case-sensitive). The zip is kept beside the archive, and asking
+    again answers the same one. A path the archive has no file at is 422 `file_not_found` at
+    `/paths/<i>` (each one), and a `glob` that matches nothing is 422 `file_not_found` at
+    `/glob`. More than 10,000 files or 1 GiB of zipped data is 422 `out_of_range` at the field:
+    nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
+    at `/glob`. A selection of every file answers the whole archive.
+
+    Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
+    `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
+    rule refuses is the same 404.
+
     Args:
         job_id (str):
         tamarind_version (str | Unset):
-        body (ArchiveRequest | Unset):
+        body (ArchiveRequest | Unset): Send at most one of `paths` and `glob`; send neither for
+            the whole archive. Not built yet (website#7799), so either is 422 `not_supported` for now.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -270,10 +318,26 @@ async def asyncio(
     `jobs_dependency_unavailable`; retry. Choosing files (`paths`, `glob`) isn't built yet, so
     either is 422 `not_supported` at its field.
 
+    Once website#7799 merges (not yet): `paths` or `glob` (one of them) chooses files: the answer
+    is a zip of just those files of that archive, copied from it as they are. `paths` are paths
+    inside the archive: a job's are the paths `listJobFiles` shows, and a batch's archive holds
+    each of its jobs' files under the job's name, plus its combined files. `glob` matches the
+    whole path (`*` spans `/`, case-sensitive). The zip is kept beside the archive, and asking
+    again answers the same one. A path the archive has no file at is 422 `file_not_found` at
+    `/paths/<i>` (each one), and a `glob` that matches nothing is 422 `file_not_found` at
+    `/glob`. More than 10,000 files or 1 GiB of zipped data is 422 `out_of_range` at the field:
+    nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
+    at `/glob`. A selection of every file answers the whole archive.
+
+    Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
+    `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
+    rule refuses is the same 404.
+
     Args:
         job_id (str):
         tamarind_version (str | Unset):
-        body (ArchiveRequest | Unset):
+        body (ArchiveRequest | Unset): Send at most one of `paths` and `glob`; send neither for
+            the whole archive. Not built yet (website#7799), so either is 422 `not_supported` for now.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

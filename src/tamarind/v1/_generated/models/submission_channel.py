@@ -1,7 +1,7 @@
 from enum import Enum
 
 
-class JobSummarySource(str, Enum):
+class SubmissionChannel(str, Enum):
     AGENT = "agent"
     API = "api"
     CAMPAIGN_AGENT = "campaign-agent"
