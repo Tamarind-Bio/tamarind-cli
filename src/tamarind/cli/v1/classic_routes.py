@@ -13,8 +13,8 @@ changes. :class:`ClassicOverV1` stands in for the classic :class:`~tamarind.http
   today's setting names) ends exactly as classic ends it. For a write that is only a
   400, 401, 404 or 422 (:data:`WRITE_FALLBACK`): a 409, 403 or 429 is v1's answer and is
   raised, so a write is never done twice and v1's limits are never stepped around. A
-  read (``/result``) also falls back on 403 and 409 (a Stopped job's archive), never on
-  429.
+  read (``/result``) also falls back on 409 (a Stopped job's archive), never on 403 or
+  429: v1's access decisions stand.
 
 A v1 failure with no answer, a 5xx or a 409 ``idempotency_in_progress`` is not sent again
 (a submit may have gone through): it is raised the way the classic client raises one, so
@@ -45,8 +45,10 @@ class ClassicAnswer(Exception):
 # v1 refused before acting and classic would answer on its own: a malformed request or a
 # setting v1 refuses (today's names), a key v1 doesn't take, something v1 can't find.
 WRITE_FALLBACK = frozenset({400, 401, 404, 422})
-# A read can't be done twice, so it also falls back on 403 and 409; never on 429.
-READ_FALLBACK = WRITE_FALLBACK | {403, 409}
+# A read can't be done twice, so it also falls back on 409 (v1's archive_failed for a
+# Stopped job, which classic words as "not complete"). Never on 403 or 429: v1's access
+# decisions and limits stand.
+READ_FALLBACK = WRITE_FALLBACK | {409}
 
 
 def _falls_back(exc: TamarindError, statuses: frozenset[int]) -> bool:

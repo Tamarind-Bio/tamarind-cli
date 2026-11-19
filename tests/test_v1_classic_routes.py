@@ -255,11 +255,12 @@ def test_results_file_comes_from_get_job_file(env, tmp_path, monkeypatch):
     assert env.v1.calls[-1] == ("jobs.get_file", (JOB,), {"path": "out/a.pdb", "delivery": "url"})
 
 
-def test_results_rate_limited_by_v1_is_surfaced(env, tmp_path):
+@pytest.mark.parametrize("status, code, exit_code", [(429, "rate_limited", 6), (403, "organization_read_disabled", 1)])
+def test_results_refused_by_v1_for_access_or_limits_is_surfaced(env, tmp_path, status, code, exit_code):
     env.v1.answers["jobs.list"] = _job()
-    env.v1.answers["jobs.archive"] = problem(429, "rate_limited")
+    env.v1.answers["jobs.archive"] = problem(status, code)
     res = env.run("v1", "--json", "results", "n1", "--download", str(tmp_path))
-    assert classic_calls() == [] and res.exception.exit_code == 6
+    assert classic_calls() == [] and res.exception.exit_code == exit_code
 
 
 READY = {"status": "ready", "downloadUrl": SIGNED}
