@@ -25,11 +25,7 @@ class Jobs:
     def submit(
         self, job_type: str, settings: dict[str, Any], *, name: str, low_priority: bool = False,
     ) -> Any:
-        """Submit a single job (POST /submit-job). jobSource is stamped ``sdk``.
-
-        ``low_priority``: 20% off, no completion guarantee, and a job not started within 7 days
-        stops with no charge. Raises if the tier isn't available for this job.
-        """
+        """Submit a single job (POST /submit-job). jobSource is stamped ``sdk``."""
         return rest.submit_job(
             self._http, job_name=name, job_type=job_type, settings=settings, low_priority=low_priority,
         )
@@ -39,7 +35,7 @@ class Jobs:
         job_names: list[str] | None = None, max_runtime_seconds: int | None = None,
         low_priority: bool = False,
     ) -> Any:
-        """Submit many jobs as one batch (POST /submit-batch). See :meth:`submit` for ``low_priority``."""
+        """Submit many jobs as one batch (POST /submit-batch)."""
         return rest.submit_batch(
             self._http, batch_name=name, job_type=job_type, settings=settings,
             job_names=job_names, max_runtime_seconds=max_runtime_seconds, low_priority=low_priority,
