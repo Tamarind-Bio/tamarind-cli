@@ -157,12 +157,49 @@ def test_a_submit_v1_refuses_is_sent_to_classic(env):
     assert [c[1] for c in classic_calls()] == ["submit-job"]
 
 
-def test_a_refusal_classic_also_refuses_reads_as_classics(env):
-    FakeClassic.answers["submit-job"] = TamarindError("jobName n1 already exists, please choose a different name")
-    env.v1.answers["jobs.submit"] = problem(409, "name_taken")
+def test_a_name_already_used_reads_as_classic_words_it_without_asking_classic(env):
+    from tamarind.errors import ValidationError
+
+    FakeClassic.answers["submit-job"] = ValidationError("jobName n1 already exists, please choose a different name")
+    env.v1.answers["jobs.submit"] = problem(409, "job_name_conflict")
     classic = env.run("classic", "--json", "submit", "esmfold", "--skip-validate", "--set", "sequence=MK", "--name", "n1")
+    FakeClassic.instances = []
     v1 = env.run("v1", "--json", "submit", "esmfold", "--skip-validate", "--set", "sequence=MK", "--name", "n1")
     assert (type(classic.exception), str(classic.exception)) == (type(v1.exception), str(v1.exception))
+    assert classic.exception.detail == v1.exception.detail
+    assert classic_calls() == []  # rebuilt from v1's answer, not asked again
+
+
+@pytest.mark.parametrize("status", [400, 401, 404, 422])
+def test_a_write_v1_refused_before_acting_goes_to_classic(env, status):
+    FakeClassic.answers["submit-job"] = "n1 submitted to queue."
+    env.v1.answers["jobs.submit"] = problem(status, "refused")
+    res = env.run("v1", "--json", "submit", "esmfold", "--skip-validate", "--set", "sequence=MK", "--name", "n1")
+    assert res.exit_code == 0 and [c[1] for c in classic_calls()] == ["submit-job"]
+
+
+WRITES = {
+    "submit": (["submit", "esmfold", "--skip-validate", "--set", "sequence=MK", "--name", "n1"], {}, "jobs.submit"),
+    "delete": (["delete", "n1", "--yes"], {"jobs.list": {"items": [{"id": JOB, "kind": "job"}], "nextCursor": None}}, "jobs.delete"),
+    "files delete": (["files", "delete", "a.pdb", "--yes"], {}, "files.delete"),
+    "files upload": (None, {}, "files.upload"),
+}
+
+
+@pytest.mark.parametrize("command", sorted(WRITES))
+@pytest.mark.parametrize("status, code, exit_code", [(409, "conflict", 1), (403, "budget_exceeded", 8), (429, "rate_limited", 6)])
+def test_a_write_v1_answered_is_surfaced_never_redone_on_classic(env, tmp_path, monkeypatch, command, status, code, exit_code):
+    args, answers, method = WRITES[command]
+    if args is None:
+        local = tmp_path / "in.fasta"
+        local.write_text(">a\nMK\n")
+        args = ["files", "upload", str(local)]
+    monkeypatch.setattr("tamarind.uploads.upload_file", lambda *a, **k: pytest.fail("classic upload"))
+    env.v1.answers.update(answers)
+    env.v1.answers[method] = problem(status, code)
+    res = env.run("v1", "--json", *args)
+    assert classic_calls() == []
+    assert isinstance(res.exception, ProblemError) and res.exception.exit_code == exit_code
 
 
 @pytest.mark.parametrize("failure", [problem(503, "service_unavailable"), TamarindError("Network error")])
@@ -190,12 +227,13 @@ def _job(kind: str = "job", job_id: str = JOB) -> dict[str, Any]:
     return {"items": [{"id": job_id, "kind": kind, "name": "n1"}], "nextCursor": None}
 
 
-def test_results_show_url_comes_from_the_v1_archive(env):
+def test_results_show_url_prints_classics_link(env):
     FakeClassic.answers["result"] = SIGNED
     env.v1.answers["jobs.list"] = _job()
     env.v1.answers["jobs.archive"] = {"status": "ready", "downloadUrl": SIGNED}
     same_output(env, "--json", "results", "n1", "--show-url")
-    assert env.v1.calls == [("jobs.list", (), {"name": "n1"}), ("jobs.archive", (JOB,), {"body": {}})]
+    same_output(env, "--json", "results", "n1", "--file", "a.pdb", "--show-url")
+    assert env.v1.calls == []  # v1 signs a different (global-endpoint) link
 
 
 def test_results_download_saves_the_same_archive(env, tmp_path, monkeypatch):
@@ -208,12 +246,20 @@ def test_results_download_saves_the_same_archive(env, tmp_path, monkeypatch):
     assert fetched == [SIGNED, SIGNED]
 
 
-def test_results_file_comes_from_get_job_file(env):
+def test_results_file_comes_from_get_job_file(env, tmp_path, monkeypatch):
+    monkeypatch.setattr("tamarind.cli.commands.jobs._download", lambda url, dest: 3)
     FakeClassic.answers["result"] = SIGNED
     env.v1.answers["jobs.list"] = _job()
     env.v1.answers["jobs.get_file"] = {"url": SIGNED, "sizeBytes": 3}
-    same_output(env, "--json", "results", "n1", "--file", "out/a.pdb", "--show-url")
+    same_output(env, "--json", "results", "n1", "--file", "out/a.pdb", "--download", str(tmp_path))
     assert env.v1.calls[-1] == ("jobs.get_file", (JOB,), {"path": "out/a.pdb", "delivery": "url"})
+
+
+def test_results_rate_limited_by_v1_is_surfaced(env, tmp_path):
+    env.v1.answers["jobs.list"] = _job()
+    env.v1.answers["jobs.archive"] = problem(429, "rate_limited")
+    res = env.run("v1", "--json", "results", "n1", "--download", str(tmp_path))
+    assert classic_calls() == [] and res.exception.exit_code == 6
 
 
 READY = {"status": "ready", "downloadUrl": SIGNED}
@@ -235,23 +281,25 @@ READY = {"status": "ready", "downloadUrl": SIGNED}
         (["--file", "out/a.pdb"], {"jobs.list": _job("batch", BATCH), "jobs.get_file": {"url": SIGNED}}, False),
     ],
 )
-def test_results_v1_cant_answer_go_to_classic(env, args, v1_answers, archived):
+def test_results_v1_cant_answer_go_to_classic(env, tmp_path, monkeypatch, args, v1_answers, archived):
+    monkeypatch.setattr("tamarind.cli.commands.jobs._download", lambda url, dest: 3)
     FakeClassic.answers["result"] = SIGNED
     FakeClassic.answers["jobs"] = {"JobName": "n1", "JobStatus": "Complete", "User": "peer@example.com"}
     env.v1.answers.update(v1_answers)
-    res = env.run("v1", "--json", "results", "n1", "--show-url", *args)
+    res = env.run("v1", "--json", "results", "n1", "--download", str(tmp_path), *args)
     assert res.exit_code == 0, res.output
     assert ("POST", "result") in [(c[0], c[1]) for c in classic_calls()]
     called = [c[0] for c in env.v1.calls]
     assert ("jobs.archive" in called) is archived and "jobs.get_file" not in called
 
 
-def test_a_job_not_complete_reads_as_classic_words_it(env):
-    FakeClassic.answers["result"] = TamarindError("Job n1 is not complete. Status: Running")
+def test_a_stopped_jobs_archive_reads_as_classic_words_it(env, tmp_path):
+    # results only reads, so v1's 409 archive_failed may go to classic for its wording
+    FakeClassic.answers["result"] = TamarindError("Job n1 is not complete. Status: Stopped")
     env.v1.answers["jobs.list"] = _job()
-    env.v1.answers["jobs.archive"] = problem(409, "job_not_complete")
-    classic = env.run("classic", "--json", "results", "n1", "--show-url")
-    v1 = env.run("v1", "--json", "results", "n1", "--show-url")
+    env.v1.answers["jobs.archive"] = problem(409, "archive_failed")
+    classic = env.run("classic", "--json", "results", "n1", "--download", str(tmp_path))
+    v1 = env.run("v1", "--json", "results", "n1", "--download", str(tmp_path))
     assert (type(classic.exception), str(classic.exception)) == (type(v1.exception), str(v1.exception))
 
 

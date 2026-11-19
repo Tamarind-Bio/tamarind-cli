@@ -123,7 +123,7 @@ go to v1, and v1's answer is rebuilt into classic's:
 | Command | Request | v1 operation |
 |---|---|---|
 | `submit` | `/submit-job` | submitJob (classic validates first, as today) |
-| `results` (own job, not `--pdbs-only`) | `/result` | archiveJob, or getJobFile for `--file` (the same stored archive) |
+| `results --download` (own job, not `--pdbs-only`) | `/result` | archiveJob, or getJobFile for `--file` (the same stored archive) |
 | `delete` | `/delete-job` | deleteJob |
 | `files delete` | `/delete-file` | deleteFile |
 | `files upload` | presign + PUT | uploadFile (+ completeFileUpload) |
@@ -135,9 +135,13 @@ rows (`jobs`, `status`, `wait`; v1 has no `TamarindSchemaVersion`/`StorageFolder
 rounds differently), validation (`validate`, `batch --prevalidate`; v1 has no
 `missing_fields`/`unrecognized_settings`), `batch`, `cancel` (the cancelled counts), logs
 (byte offsets), files listings (classic's order), and the catalog (`tools`, `schema`,
-`modalities`, `functions`). A request v1 refuses (a 4xx: nothing was done) is sent to
-classic too, so a refusal reads exactly as classic words it. With v1 selected both bases
-must therefore name the same environment.
+`modalities`, `functions`), and the link `results --show-url` prints (v1 signs a
+global-endpoint one). A write v1 refused before acting (400, 401, 404, 422: a malformed
+request, today's setting names, a key or a job v1 doesn't know) is sent to classic too, so
+it ends exactly as classic ends it; a 409, 403 or 429 is v1's answer and is raised, so a
+write is never done twice and v1's limits are never stepped around (v1's 409 for a job name
+you already use is raised in classic's words). With v1 selected both bases must therefore
+name the same environment.
 
 **New commands come from the contract.** Each operation's `x-clients.cli` names its
 command, and `scripts/gen_v1_cli_manifest.py` writes the manifest the CLI builds them from

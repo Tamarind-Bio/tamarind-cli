@@ -8,12 +8,17 @@ changes. :class:`ClassicOverV1` stands in for the classic :class:`~tamarind.http
   rebuilt into the exact value classic returns;
 - every other request goes to the classic API, as it does without v1, because v1 can't
   give classic's answer to it (docs/architecture.md, "The v1 API", lists which and why);
-- a request v1 refuses (any 4xx, so nothing was done) is then sent to classic, so a
-  refusal, or a request classic accepts and v1 doesn't, ends exactly as classic ends it.
+- a request v1 refused before acting, where classic would answer on its own, is then
+  sent to classic, so the refusal (or a request classic accepts and v1 doesn't, such as
+  today's setting names) ends exactly as classic ends it. For a write that is only a
+  400, 401, 404 or 422 (:data:`WRITE_FALLBACK`): a 409, 403 or 429 is v1's answer and is
+  raised, so a write is never done twice and v1's limits are never stepped around. A
+  read (``/result``) also falls back on 403 and 409 (a Stopped job's archive), never on
+  429.
 
-A v1 failure with no answer, or a 5xx, is not sent again (a submit may have gone
-through): it is raised the way the classic client raises one, so the commands' own
-"outcome may be ambiguous" handling applies unchanged.
+A v1 failure with no answer, a 5xx or a 409 ``idempotency_in_progress`` is not sent again
+(a submit may have gone through): it is raised the way the classic client raises one, so
+the commands' own "outcome may be ambiguous" handling applies unchanged.
 """
 
 from __future__ import annotations
@@ -21,7 +26,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-from ...errors import APIError, TamarindError
+from ...errors import APIError, TamarindError, ValidationError
 from ...http import HTTPClient
 from . import sdk
 
@@ -37,15 +42,15 @@ class ClassicAnswer(Exception):
     """v1 can't give classic's answer to this request: ask classic."""
 
 
-def _refused(exc: TamarindError) -> bool:
-    """A 4xx answer: v1 did nothing, so asking classic can't do the work twice.
+# v1 refused before acting and classic would answer on its own: a malformed request or a
+# setting v1 refuses (today's names), a key v1 doesn't take, something v1 can't find.
+WRITE_FALLBACK = frozenset({400, 401, 404, 422})
+# A read can't be done twice, so it also falls back on 403 and 409; never on 429.
+READ_FALLBACK = WRITE_FALLBACK | {403, 409}
 
-    Not 409 ``idempotency_in_progress``: an earlier attempt with the same key may still
-    be doing the work."""
-    status = getattr(exc, "status", None)
-    if getattr(exc, "code", None) == "idempotency_in_progress":
-        return False
-    return isinstance(status, int) and 400 <= status < 500
+
+def _falls_back(exc: TamarindError, statuses: frozenset[int]) -> bool:
+    return getattr(exc, "status", None) in statuses
 
 
 def _classic_error(exc: TamarindError) -> TamarindError:
@@ -53,16 +58,15 @@ def _classic_error(exc: TamarindError) -> TamarindError:
 
     A 5xx becomes an :class:`APIError` with its status; a failure with no answer, or a
     409 ``idempotency_in_progress``, a plain :class:`TamarindError`, which is what the
-    commands read as "the outcome may be ambiguous".
+    commands read as "the outcome may be ambiguous". Any other 4xx (a 409, 403, 429) is
+    v1's own answer and keeps its exit code.
     """
     status = getattr(exc, "status", None)
     if getattr(exc, "code", None) == "idempotency_in_progress":
         return TamarindError(exc.message, detail=getattr(exc, "problem", None))
-    if isinstance(status, int):
+    if isinstance(status, int) and status >= 500:
         return APIError(exc.message, status_code=status, detail=getattr(exc, "problem", None))
-    if type(exc) is TamarindError:
-        return exc
-    return TamarindError(exc.message, detail=exc.detail)
+    return exc
 
 
 class ClassicOverV1:
@@ -76,6 +80,8 @@ class ClassicOverV1:
         self._state = state
         self._classic = HTTPClient(cfg.api_base, cfg.api_key)
         self._v1: Any = None
+        # Requests a command keeps on classic (see keep_on_classic).
+        self.on_classic: set[tuple[str, str]] = set()
 
     def close(self) -> None:
         self._classic.close()
@@ -112,16 +118,18 @@ class ClassicOverV1:
         )
 
     def _serve(self, method: str, path: str, payload: Any, classic: Callable[[], Any]) -> Any:
-        route = ON_V1.get((method, path.strip("/")))
+        key = (method, path.strip("/"))
+        route = ON_V1.get(key)
         # No key: classic's client says so, in its words, before sending anything.
-        if route is None or not self.api_key:
+        if route is None or not self.api_key or key in self.on_classic:
             return classic()
+        handler, fallback = route
         try:
-            return route(self, payload if isinstance(payload, dict) else {})
+            return handler(self, payload if isinstance(payload, dict) else {})
         except ClassicAnswer:
             return classic()
         except TamarindError as exc:
-            if _refused(exc):
+            if _falls_back(exc, fallback):
                 return classic()
             raise _classic_error(exc) from exc
 
@@ -151,7 +159,13 @@ def submit_job(client: ClassicOverV1, body: dict[str, Any]) -> str:
     low_priority = body.get("lowPriority") is True
     if low_priority:
         request["lowPriority"] = True
-    client.v1().jobs.submit(body=request)
+    try:
+        client.v1().jobs.submit(body=request)
+    except TamarindError as exc:
+        if getattr(exc, "code", None) == "job_name_conflict":
+            # v1's 409 for a name you already use; classic answers it as a 400 in these words.
+            raise ValidationError(f"jobName {name} already exists, please choose a different name") from exc
+        raise
     return f"{name} submitted to queue{LOW_PRIORITY_SUFFIX if low_priority else ''}."
 
 
@@ -208,12 +222,22 @@ def delete_file(client: ClassicOverV1, params: dict[str, Any]) -> dict[str, str]
     return {"message": "File deleted successfully"}
 
 
-ON_V1: dict[tuple[str, str], Callable[[ClassicOverV1, dict[str, Any]], Any]] = {
-    ("POST", "submit-job"): submit_job,
-    ("POST", "result"): result,
-    ("DELETE", "delete-job"): delete_job,
-    ("DELETE", "delete-file"): delete_file,
+Handler = Callable[[ClassicOverV1, dict[str, Any]], Any]
+# Each request v1 answers: its handler, and the v1 statuses that send it to classic.
+ON_V1: dict[tuple[str, str], tuple[Handler, frozenset[int]]] = {
+    ("POST", "submit-job"): (submit_job, WRITE_FALLBACK),
+    ("POST", "result"): (result, READ_FALLBACK),
+    ("DELETE", "delete-job"): (delete_job, WRITE_FALLBACK),
+    ("DELETE", "delete-file"): (delete_file, WRITE_FALLBACK),
 }
+
+
+def keep_on_classic(client: Any, method: str, path: str) -> None:
+    """Send this request to classic for the rest of ``client``'s life (nothing to do on
+    the classic client itself). ``results --show-url`` prints classic's link: v1 signs
+    a different (global-endpoint) one."""
+    if isinstance(client, ClassicOverV1):
+        client.on_classic.add((method, path))
 
 
 # -- outside the classic client ---------------------------------------------------
@@ -228,7 +252,7 @@ def upload(state: Any, path: Path, remote: str) -> dict[str, Any] | None:
         with sdk.make_client(state) as client:
             client.files.upload(path, path=remote)
     except TamarindError as exc:
-        if _refused(exc):
+        if _falls_back(exc, WRITE_FALLBACK):
             return None
         raise _classic_error(exc) from exc
     return {"ok": True, "filename": remote, "bytes": path.stat().st_size}
