@@ -521,7 +521,6 @@ def test_v1_request_flags_are_refused_in_classic(monkeypatch, tmp_path):
         ["jobs", "--kind", "batch"],
         ["logs", "j", "--cursor", "c"],
         ["cancel", "j", "--reason", "r"],
-        ["results", "j", "--download", str(tmp_path), "--glob", "*.cif"],
     ):
         res = runner.invoke(app, ["--json", *args])
         assert res.exit_code == 2, (args, res.output)
@@ -598,3 +597,19 @@ def test_signed_links_are_redacted_unless_asked_for(v1):
     assert signed not in json.dumps(out)
     out = _json(runner.invoke(app, ["--json", "molecules", "get", "mol_1", "--show-urls"]))
     assert out["files"]["boltz"][0]["downloadUrl"] == signed
+
+
+def test_a_pipeline_runs_archive_comes_from_archive_pipeline_run(v1, tmp_path, monkeypatch):
+    from tamarind.cli.commands import jobs as jobs_cmds
+
+    run = "run_0f8fad5b-d9cb-469f-a165-70867728950e"
+    v1.answers["pipelines.archive_run"] = {"status": "ready", "downloadUrl": "https://s3.example/r.zip", "expiresAt": "t", "sizeBytes": 1, "fileCount": None, "truncated": None}
+    monkeypatch.setattr(jobs_cmds, "_download", lambda url, dest: 1)
+    out = _json(runner.invoke(app, ["--json", "results", run, "--download", str(tmp_path)]))
+    assert out["download"]["bytes"] == 1
+    assert v1.calls[-1] == ("pipelines.archive_run", (run,), {"body": {}})
+
+
+def test_an_empty_example_is_a_runnable_example(v1):
+    v1.answers["tools.schema"] = {"tool": "noargs", "version": "1", "schema": {}, "example": {}}
+    assert _json(runner.invoke(app, ["--json", "schema", "noargs", "--example"])) == {"tool": "noargs", "settings": {}}

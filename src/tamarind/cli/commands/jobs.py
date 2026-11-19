@@ -930,9 +930,6 @@ def register(app: typer.Typer) -> None:
         download: Optional[Path] = typer.Option(None, "--download", help="Download the results bundle to this directory."),
         file: Optional[str] = typer.Option(None, "--file", help="A specific file within the results."),
         pdbs_only: bool = typer.Option(False, "--pdbs-only", help="Only PDB outputs."),
-        glob: Optional[str] = typer.Option(
-            None, "--glob", help="v1 only: an archive of just the outputs matching this glob, e.g. '*.cif'."
-        ),
         show_url: bool = typer.Option(
             False,
             "--show-url",
@@ -962,7 +959,6 @@ def register(app: typer.Typer) -> None:
                 download=download,
                 file=file,
                 pdbs_only=pdbs_only,
-                glob=glob,
                 show_url=show_url,
                 wait=wait,
                 poll_interval=poll_interval,
@@ -971,7 +967,6 @@ def register(app: typer.Typer) -> None:
                 email=email,
             )
             return
-        _refuse_v1_only(**{"--glob": glob})
         with state.rest_client() as client:
             final = None
             if wait:

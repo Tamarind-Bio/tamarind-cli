@@ -160,7 +160,8 @@ def schema(state: Any, tool: str, *, example: bool) -> None:
         body = call(client, "getToolSchema", tool)
     if example:
         settings = body.get("example")
-        if not settings:
+        # A tool with no settings has `{}` as its example, which is a runnable one.
+        if not isinstance(settings, dict):
             raise NotFoundError(
                 f"No runnable example is available for '{tool}'. "
                 f"Run `tamarind schema {tool}` to see its settings."
@@ -262,10 +263,15 @@ def _wait(client: Any, job_id: str, state: Any, *, poll_interval: float, timeout
 def _archive(
     client: Any, job_id: str, *, body: dict[str, Any] | None, wait: bool, timeout: float | None
 ) -> dict[str, Any]:
-    """The archive's download link, waiting while it's prepared if asked to."""
+    """The archive's download link, waiting while it's prepared if asked to.
+
+    A pipeline run's zip comes from ``archivePipelineRun``; ``archiveJob`` is for
+    jobs and batches (a ``run_`` id there is 404).
+    """
+    operation = "archivePipelineRun" if job_id.startswith("run_") else "archiveJob"
     deadline = None if timeout is None else time.monotonic() + timeout
     while True:
-        answer = call(client, "archiveJob", job_id, body=body or {})
+        answer = call(client, operation, job_id, body=body or {})
         if not isinstance(answer, dict) or answer.get("status") != "preparing":
             return answer
         retry = max(int(answer.get("retryAfterSeconds") or 5), 1)
@@ -408,7 +414,6 @@ def results(
     file: str | None,
     pdbs_only: bool,
     show_url: bool,
-    glob: str | None = None,
     wait: bool,
     poll_interval: float,
     timeout: float | None,
@@ -419,8 +424,8 @@ def results(
 
     from ..commands.jobs import _download
 
-    if sum(bool(x) for x in (file, pdbs_only, glob)) > 1:
-        raise UsageError("Use one of --file, --pdbs-only and --glob.")
+    if file and pdbs_only:
+        raise UsageError("--file and --pdbs-only can't be combined.")
     with sdk.make_client(state) as client:
         job_id = resolve_id(client, ref, organization=organization, email=email)
         result: dict[str, Any] = {"id": job_id}
@@ -436,9 +441,10 @@ def results(
             url = link["url"]
             name = Path(file).name
         else:
-            pattern = glob or ("*.pdb" if pdbs_only else None)
+            # `--pdbs-only` is the archive's `glob`; the server answers 422 `not_supported`
+            # until choosing files is built, and honors it from then on.
             link = _archive(
-                client, job_id, body={"glob": pattern} if pattern else None, wait=wait, timeout=timeout
+                client, job_id, body={"glob": "*.pdb"} if pdbs_only else None, wait=wait, timeout=timeout
             )
             url = link["downloadUrl"]
             name = f"{job_id if _ID.match(ref.strip()) else ref}.zip"
