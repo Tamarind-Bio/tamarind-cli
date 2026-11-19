@@ -95,18 +95,29 @@ def method(client: Any, sdk_name: str) -> Callable[..., Any]:
     return target
 
 
-def check_enums(op: dict[str, Any], query: dict[str, Any]) -> None:
-    """A value the contract doesn't list for a parameter is a usage error, not a traceback."""
+def check_values(op: dict[str, Any], query: dict[str, Any]) -> None:
+    """Values the SDK would have to coerce (an enum member, a date-time) are checked
+    against the contract first, so a bad one is a usage error rather than a traceback."""
+    from dateutil.parser import isoparse
+
     for param in op["query"]:
-        allowed = param.get("enum")
         value = query.get(param["name"])
-        if not allowed or value is None:
+        if value is None:
             continue
+        allowed = param.get("enum")
         for item in value if isinstance(value, (list, tuple)) else [value]:
-            if str(item) not in allowed:
+            if allowed and str(item) not in allowed:
                 raise UsageError(
                     f"--{param['option']} {item!r} isn't one of: {', '.join(allowed)}."
                 )
+            if param.get("format") == "date-time":
+                try:
+                    isoparse(str(item))
+                except ValueError:
+                    raise UsageError(
+                        f"--{param['option']} {item!r} isn't an RFC 3339 date-time "
+                        "(e.g. 2026-11-01T00:00:00Z)."
+                    ) from None
 
 
 def invoke(
@@ -119,7 +130,7 @@ def invoke(
     **query: Any,
 ) -> Any:
     """Call one operation through its SDK method; returns the plain answer (None for 204)."""
-    check_enums(op, query)
+    check_values(op, query)
     kwargs: dict[str, Any] = {argument(k): v for k, v in query.items() if v is not None}
     if body is not None:
         kwargs["body"] = body
@@ -133,7 +144,7 @@ def invoke(
 def collect(client: Any, op: dict[str, Any], *path_args: str, **query: Any) -> dict[str, Any]:
     """All items of a list operation as one page, ``{items, nextCursor: null}``,
     through the SDK's auto-paging helper."""
-    check_enums(op, query)
+    check_values(op, query)
     kwargs = {argument(k): v for k, v in query.items() if v is not None}
     items = client.paginate(method(client, op["sdk"]), *path_args, **kwargs)
     return {"items": plain(list(items)), "nextCursor": None}

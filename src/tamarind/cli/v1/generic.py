@@ -176,9 +176,18 @@ def operation_params(op: dict[str, Any]) -> list[click.Parameter]:
     return params
 
 
+# Operations that commit real money outside compute, which the contract says to
+# confirm first: an assay order goes to a partner lab.
+_CONFIRM_FIRST = {"submitAssay"}
+
+
 def destructive(op: dict[str, Any]) -> bool:
-    """Deletes, revocations and removals ask first, like today's `delete` commands."""
-    return op["method"] == "DELETE" or op["operationId"].startswith(("delete", "remove", "revoke"))
+    """Deletes, revocations, removals and lab orders ask first, like today's `delete`."""
+    return (
+        op["method"] == "DELETE"
+        or op["operationId"].startswith(("delete", "remove", "revoke"))
+        or op["operationId"] in _CONFIRM_FIRST
+    )
 
 
 def run_operation(op: dict[str, Any], values: dict[str, Any]) -> None:

@@ -33,6 +33,11 @@ _ID = re.compile(r"^(job|batch|run)_[0-9a-fA-F]{8}-?(?:[0-9a-fA-F]{4}-?){3}[0-9a
 FINAL = {"Complete", "Stopped", "Failed"}
 
 
+def _emit(body: Any, mode: Any, *, human: str | None = None) -> None:
+    """Print a v1 answer with signed links redacted, as today's job output is."""
+    output.emit(render.redact(body), mode, human=human)
+
+
 def op(operation_id: str) -> dict[str, Any]:
     return manifest.operation(operation_id)
 
@@ -159,14 +164,14 @@ def tools_list(
     human += f"\n\n{len(page['items'])} tools. Use `tamarind schema <name>` for parameters."
     if page.get("nextCursor"):
         human += "\nMore results: pass --cursor with the nextCursor in --json."
-    output.emit(page, state.output, human=human)
+    _emit(page, state.output, human=human)
 
 
 def facets(state: Any, part: str) -> None:
     with sdk.make_client(state) as client:
         body = call(client, "getToolFacets")
     rows = body.get(part) or []
-    output.emit(body, state.output, human=render.table(rows))
+    _emit(body, state.output, human=render.table(rows))
 
 
 def schema(state: Any, tool: str, *, example: bool) -> None:
@@ -180,7 +185,7 @@ def schema(state: Any, tool: str, *, example: bool) -> None:
                 f"No runnable example is available for '{tool}'. "
                 f"Run `tamarind schema {tool}` to see its settings."
             )
-        output.emit(
+        _emit(
             {"tool": tool, "settings": settings},
             state.output,
             human=yaml.safe_dump(settings, sort_keys=False).rstrip(),
@@ -205,7 +210,7 @@ def schema(state: Any, tool: str, *, example: bool) -> None:
         + output.render_table(rows, ["name", "type", "required", "default", "description"])
         + f"\n\nRun `tamarind schema {tool} --example` for example settings."
     )
-    output.emit(body, state.output, human=human)
+    _emit(body, state.output, human=human)
 
 
 # -- jobs ----------------------------------------------------------------------
@@ -257,7 +262,7 @@ def validate(state: Any, body: dict[str, Any]) -> None:
         report = call(client, "validateJob", body=body)
     valid = bool(report.get("valid"))
     human = "valid ✓" if valid else f"invalid ✗ {_validation_message(report)}"
-    output.emit(report, state.output, human=human)
+    _emit(report, state.output, human=human)
     if not valid:
         import typer
 
@@ -347,8 +352,8 @@ def submit(
     with sdk.make_client(state) as client:
         submitted = _submit(client, body, idempotency_key)
         if not wait:
-            output.emit(
-                render.redact(submitted),
+            _emit(
+                submitted,
                 state.output,
                 human=f"submitted: {submitted.get('name')} ({submitted.get('id')}, {submitted.get('status')})",
             )
@@ -363,7 +368,7 @@ def submit(
             written = _download(link["downloadUrl"], dest)
             result["download"] = {"path": str(dest), "bytes": written}
             output.info(f"  downloaded {written} bytes → {dest}", state.output)
-    output.emit(render.redact(result), state.output, human=status_line(final))
+    _emit(result, state.output, human=status_line(final))
     if failed(final):
         raise typer.Exit(ExitCode.JOB_FAILED)
 
@@ -379,8 +384,8 @@ def batch(
                     f"Batch settings invalid: {_validation_message(report)}", detail=report
                 )
         submitted = _submit(client, body, idempotency_key)
-    output.emit(
-        render.redact(submitted),
+    _emit(
+        submitted,
         state.output,
         human=(
             f"submitted batch '{submitted.get('name')}' ({submitted.get('id')}, "
@@ -423,13 +428,13 @@ def jobs_list(
     human = render.table(page["items"], ["id", "name", "tool", "status", "createdAt"])
     if page.get("nextCursor"):
         human += "\n\nMore results — re-run with --all, or --start-key with the nextCursor in --json."
-    output.emit(render.redact(page), state.output, human=human)
+    _emit(page, state.output, human=human)
 
 
 def get(state: Any, ref: str, *, organization: bool = False, email: str | None = None) -> None:
     with sdk.make_client(state) as client:
         job = call(client, "getJob", resolve_id(client, ref, organization=organization, email=email))
-    output.emit(render.redact(job), state.output, human=status_line(job))
+    _emit(job, state.output, human=status_line(job))
 
 
 def wait(
@@ -446,7 +451,7 @@ def wait(
     with sdk.make_client(state) as client:
         job_id = resolve_id(client, ref, organization=organization, email=email)
         final = _wait(client, job_id, state, poll_interval=poll_interval, timeout=timeout)
-    output.emit(render.redact(final), state.output, human=status_line(final))
+    _emit(final, state.output, human=status_line(final))
     if failed(final):
         raise typer.Exit(ExitCode.JOB_FAILED)
 
@@ -480,9 +485,14 @@ def results(
             final = _wait(client, job_id, state, poll_interval=poll_interval, timeout=timeout)
             result["final"] = final
             if failed(final):
-                output.emit(render.redact(result), state.output, human=status_line(final))
+                _emit(result, state.output, human=status_line(final))
                 raise typer.Exit(ExitCode.JOB_FAILED)
         if file:
+            if job_id.startswith("run_"):
+                raise UsageError(
+                    "--file reads one job's file; a pipeline run's outputs come as one zip "
+                    "(drop --file), or per step with `tamarind pipelines results`."
+                )
             link = call(client, "getJobFile", job_id, path=file, delivery="url")
             url = link["url"]
             name = Path(file).name
@@ -502,10 +512,11 @@ def results(
         dest = download / Path(name).name
         written = _download(url, dest)
         result["download"] = {"path": str(dest), "bytes": written}
-        output.emit(result, state.output, human=str(dest))
+        _emit(result, state.output, human=str(dest))
     else:
-        result["url"] = url
-        output.emit(result, state.output, human=url)
+        shown = render.redact(result)
+        shown["url"] = url  # asked for with --show-url
+        output.emit(shown, state.output, human=url)
 
 
 def logs(
@@ -516,21 +527,21 @@ def logs(
     content = chunk.get("content") or ""
     lines = content.splitlines()
     text = "\n".join(lines[-max_lines:]) if max_lines and len(lines) > max_lines else content
-    output.emit(chunk, state.output, human=text or "(no log yet)")
+    _emit(chunk, state.output, human=text or "(no log yet)")
 
 
 def cancel(state: Any, ref: str | None, batch: str | None, *, reason: str | None = None) -> None:
     with sdk.make_client(state) as client:
         target = resolve_batch_or_run(client, batch) if batch else resolve_id(client, ref or "")
         job = call(client, "cancelJob", target, body={"reason": reason} if reason else {})
-    output.emit(render.redact(job), state.output, human=status_line(job))
+    _emit(job, state.output, human=status_line(job))
 
 
 def delete(state: Any, ref: str) -> None:
     with sdk.make_client(state) as client:
         job_id = resolve_id(client, ref)
         call(client, "deleteJob", job_id)
-    output.emit({"id": job_id, "deleted": True}, state.output, human=f"deleted {job_id}")
+    _emit({"id": job_id, "deleted": True}, state.output, human=f"deleted {job_id}")
 
 
 # -- files ---------------------------------------------------------------------
@@ -566,12 +577,14 @@ def files_list(
     human = render.table(page["items"], ["path", "type", "sizeBytes", "modifiedAt"])
     if page.get("nextCursor"):
         human += "\n\nMore results: pass --cursor with the nextCursor in --json."
-    output.emit(page, state.output, human=human)
+    _emit(page, state.output, human=human)
 
 
 def files_folders(state: Any, *, limit: int, all_folders: bool, folder: str | None = None) -> None:
     """The folders of a listing. v1 lists files and folders together (at the root,
     uploads first), so this reads pages until it has ``limit`` folders, or all of them."""
+    if not all_folders and limit < 1:
+        raise UsageError("--limit must be at least 1.")
     query: dict[str, Any] = {"limit": 200}
     if folder:
         query["folder"] = folder
@@ -583,7 +596,7 @@ def files_folders(state: Any, *, limit: int, all_folders: bool, folder: str | No
                 if not all_folders and len(folders) >= limit:
                     break
     out = {"items": folders, "nextCursor": None}
-    output.emit(out, state.output, human="\n".join(str(f.get("path")) for f in folders) or "(none)")
+    _emit(out, state.output, human="\n".join(str(f.get("path")) for f in folders) or "(none)")
 
 
 def files_stats(state: Any, *, folder: str | None) -> None:
@@ -596,20 +609,20 @@ def files_stats(state: Any, *, folder: str | None) -> None:
         else by_ext
     )
     human = render.table(rows) + f"\n\n{body.get('fileCount')} files total."
-    output.emit(body, state.output, human=human)
+    _emit(body, state.output, human=human)
 
 
 def files_upload(state: Any, path: Path, remote: str) -> None:
     with sdk.make_client(state) as client:
         result = sdk.upload(client, path, remote)
-    output.emit(result, state.output, human=f"uploaded {remote}")
+    _emit(result, state.output, human=f"uploaded {remote}")
 
 
 def files_delete(state: Any, path: str | None, folder: str | None) -> None:
     with sdk.make_client(state) as client:
         call(client, "deleteFile", path=path, folder=folder)
     target = path or folder
-    output.emit({"deleted": target}, state.output, human=f"deleted {target}")
+    _emit({"deleted": target}, state.output, human=f"deleted {target}")
 
 
 def download_link(
@@ -621,10 +634,10 @@ def download_link(
     with sdk.make_client(state) as client:
         link = call(client, operation_id, *args, path=path, delivery="url")
     if show_url:
-        output.emit(link, state.output, human=link["url"])
+        output.emit(link, state.output, human=link["url"])  # asked for with --show-url
         return
     target = dest or Path(".")
     if target.is_dir() or str(target).endswith(("/", "\\")):
         target = target / Path(path).name
     written = _download(link["url"], target)
-    output.emit({"path": str(target), "bytes": written}, state.output, human=str(target))
+    _emit({"path": str(target), "bytes": written}, state.output, human=str(target))

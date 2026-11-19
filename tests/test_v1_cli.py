@@ -241,7 +241,7 @@ def test_idempotency_key_and_if_match_are_passed_through(v1):
     res = runner.invoke(app, ["--json", "custom-tools", "validate-config", "--set", "name=t"])
     assert _json(res) == {"valid": True}
     v1.answers["assays.submit"] = {"id": "asy_1"}
-    res = runner.invoke(app, ["--json", "assays", "submit", "--set", "x=1", "--idempotency-key", "k-1"])
+    res = runner.invoke(app, ["--json", "assays", "submit", "--set", "x=1", "--idempotency-key", "k-1", "--yes"])
     assert _json(res) == {"id": "asy_1"}
     assert v1.calls[-1][2]["idempotency_key"] == "k-1"
 
@@ -678,3 +678,37 @@ def test_submit_wait_download_shares_one_timeout(v1, tmp_path, monkeypatch):
     monkeypatch.setattr("tamarind.cli.commands.jobs._download", lambda url, dest: 1)
     runner.invoke(app, ["--json", "submit", "esmfold", "--set", "sequence=M", "--wait", "--timeout", "100", "--download", str(tmp_path)])
     assert seen["timeout"] == 40
+
+
+def test_an_assay_order_needs_yes(v1):
+    v1.answers["assays.submit"] = {"id": "asy_1"}
+    res = runner.invoke(app, ["--json", "assays", "submit", "--set", "x=1"])
+    assert res.exit_code == 2 and v1.calls == []
+
+
+def test_bad_date_times_are_usage_errors(v1):
+    res = runner.invoke(app, ["--json", "usage", "--from", "bogus"])
+    assert isinstance(res.exception, UsageError) and v1.calls == []
+    v1.answers["usage.get"] = {"items": [], "nextCursor": None}
+    _json(runner.invoke(app, ["--json", "usage", "--from", "2026-10-01T00:00:00Z"]))
+    assert v1.calls[-1][2]["from_"] == "2026-10-01T00:00:00Z"
+
+
+def test_results_file_of_a_pipeline_run_is_refused(v1, tmp_path):
+    res = runner.invoke(app, ["--json", "results", "run_0f8fad5b-d9cb-469f-a165-70867728950e", "--file", "x.pdb", "--download", str(tmp_path)])
+    assert isinstance(res.exception, UsageError) and v1.calls == []
+
+
+def test_files_folders_limit_must_be_positive(v1):
+    res = runner.invoke(app, ["--json", "files", "folders", "--limit", "0"])
+    assert isinstance(res.exception, UsageError) and v1.calls == []
+
+
+def test_results_wait_download_output_is_redacted(v1, tmp_path, monkeypatch):
+    signed = "https://bucket.s3.amazonaws.com/in.pdb?X-Amz-Signature=abc&X-Amz-Credential=k"
+    job = "job_0f8fad5b-d9cb-469f-a165-70867728950e"
+    v1.answers["jobs.wait"] = {"id": job, "status": "Complete", "settings": {"target": signed}}
+    v1.answers["jobs.archive"] = {"status": "ready", "downloadUrl": "https://s3.example/x.zip?X-Amz-Signature=z"}
+    monkeypatch.setattr("tamarind.cli.commands.jobs._download", lambda url, dest: 1)
+    res = runner.invoke(app, ["--json", "results", job, "--wait", "--download", str(tmp_path)])
+    assert signed not in res.stdout and "X-Amz-Signature" not in res.stdout

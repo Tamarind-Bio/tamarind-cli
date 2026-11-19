@@ -88,6 +88,8 @@ class Contract:
                 out["enum"] = [str(v) for v in items["enum"]]
         elif schema.get("enum"):
             out["enum"] = [str(v) for v in schema["enum"]]
+        if schema.get("format"):
+            out["format"] = schema["format"]
         if "default" in schema and schema["default"] is not None:
             out["default"] = schema["default"]
         return out

@@ -458,6 +458,7 @@
     },
     {
      "description": "Start of the range, inclusive, with a time zone offset.",
+     "format": "date-time",
      "name": "from",
      "option": "from",
      "required": false,
@@ -465,6 +466,7 @@
     },
     {
      "description": "End of the range, exclusive, with a time zone offset.",
+     "format": "date-time",
      "name": "to",
      "option": "to",
      "required": false,
@@ -861,6 +863,7 @@
     },
     {
      "description": "Another member's email.",
+     "format": "email",
      "name": "createdBy",
      "option": "created-by",
      "required": false,
@@ -868,6 +871,7 @@
     },
     {
      "description": "Not built yet, so any value is 400.",
+     "format": "date-time",
      "name": "createdAfter",
      "option": "created-after",
      "required": false,
@@ -875,6 +879,7 @@
     },
     {
      "description": "Not built yet, so any value is 400.",
+     "format": "date-time",
      "name": "createdBefore",
      "option": "created-before",
      "required": false,
