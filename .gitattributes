@@ -1,0 +1,2 @@
+# Vendored contracts are hash-locked: keep their bytes exact on every platform.
+openapi/api-v1.yaml -text
