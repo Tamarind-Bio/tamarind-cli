@@ -629,7 +629,7 @@ class Tamarind:
     """A Tamarind API v1 client.
 
     ``api_key`` defaults to ``TAMARIND_API_KEY`` and ``base_url`` to
-    ``TAMARIND_API_BASE``, then ``https://api.tamarind.bio``. ``version`` pins the
+    ``TAMARIND_V1_API_BASE``, then ``https://api.tamarind.bio``. ``version`` pins the
     ``Tamarind-Version`` header (``YYYY-MM-DD``); without it the API answers with its
     first version. ``max_retries`` bounds retries of a failed request.
     """
@@ -646,7 +646,7 @@ class Tamarind:
     ):
         self._transport = Transport(
             api_key=api_key or os.environ.get("TAMARIND_API_KEY") or None,
-            base_url=base_url or os.environ.get("TAMARIND_API_BASE") or DEFAULT_BASE_URL,
+            base_url=base_url or os.environ.get("TAMARIND_V1_API_BASE") or DEFAULT_BASE_URL,
             timeout=timeout,
             max_retries=max_retries,
             version=version,

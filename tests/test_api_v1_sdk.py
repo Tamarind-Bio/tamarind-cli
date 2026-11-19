@@ -28,7 +28,7 @@ def problem(status: int, code: str, **extra: object) -> dict[str, object]:
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> Tamarind:
-    monkeypatch.delenv("TAMARIND_API_BASE", raising=False)
+    monkeypatch.delenv("TAMARIND_V1_API_BASE", raising=False)
     sdk = Tamarind("test-key", base_url=BASE)
     sdk.sleeps = []  # type: ignore[attr-defined]
     sdk._transport._sleep = sdk.sleeps.append  # type: ignore[attr-defined]
@@ -36,10 +36,12 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Tamarind:
 
 
 def test_base_url_and_key_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("TAMARIND_API_BASE", raising=False)
+    monkeypatch.delenv("TAMARIND_V1_API_BASE", raising=False)
+    # TAMARIND_API_BASE is the classic client's base (app.tamarind.bio/api); v1 ignores it.
+    monkeypatch.setenv("TAMARIND_API_BASE", "https://app.tamarind.bio/api/")
     monkeypatch.setenv("TAMARIND_API_KEY", "env-key")
     assert Tamarind().base_url == "https://api.tamarind.bio"
-    monkeypatch.setenv("TAMARIND_API_BASE", "https://api-staging.tamarind.bio/")
+    monkeypatch.setenv("TAMARIND_V1_API_BASE", "https://api-staging.tamarind.bio/")
     sdk = Tamarind()
     assert sdk.base_url == "https://api-staging.tamarind.bio"
     assert sdk._transport._headers["x-api-key"] == "env-key"

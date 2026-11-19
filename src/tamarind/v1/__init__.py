@@ -2,7 +2,7 @@
 
     from tamarind.v1 import Tamarind, ProblemError
 
-    client = Tamarind()  # TAMARIND_API_KEY, and TAMARIND_API_BASE to point elsewhere
+    client = Tamarind()  # TAMARIND_API_KEY, and TAMARIND_V1_API_BASE to point elsewhere
     job = client.jobs.submit({"tool": "esmfold", "settings": {"sequence": "MKTAYIAK"}})
     done = client.jobs.wait(job["id"], timeout=600)
 
