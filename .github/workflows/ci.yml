@@ -31,6 +31,8 @@ jobs:
           diff -ru --exclude=.ruff_cache src/tamarind/pipelines/_generated "$tmp_dir/pipelines-generated"
       - name: Verify the API v1 contract lock and generated client freshness
         run: uv run --extra dev python scripts/sync_api_v1_contract.py --check
+      - name: Every API v1 operation has an SDK method
+        run: uv run --extra dev pytest tests/test_api_v1_parity.py
 
   typecheck:
     name: SDK type check
