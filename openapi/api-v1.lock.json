@@ -1,8 +1,8 @@
 {
-  "artifactSha256": "4911ee33bee4dda571e498f7487fdd5252704f3de7d7e8311f5705e6dcaa23ff",
+  "artifactSha256": "e9b2cc7ee56fb68a1839071d04c4a60f49e48cf52256bec0b63e2f27198d52ee",
   "generator": "openapi-python-client==0.28.4",
   "schemaVersion": 1,
-  "sourceCommit": "4e8b11f6b33664121b500e4625c39c5e9a4baf16",
+  "sourceCommit": "fdf12d8c7813558439db00429db71547cc535514",
   "sourcePath": "documentation/api-redesign/openapi-v1.yaml",
   "sourceRepository": "Tamarind-Bio/tamarind-website"
 }

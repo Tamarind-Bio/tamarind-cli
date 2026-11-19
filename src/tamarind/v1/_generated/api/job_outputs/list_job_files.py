@@ -129,6 +129,11 @@ def sync_detailed(
     5,000 stored files, so with a `glob` that matches few of them a page can be short while
     `nextCursor` says there's more.
 
+    Another member's job or batch is 404 for now. Once website#7795 merges, it is listed for
+    exactly the callers who may download its archive, under today's `/result` rule for a key
+    (decision 74; today's API has no key route that lists a member's files), and one that rule
+    refuses is the same 404.
+
     Args:
         job_id (str):
         prefix (str | Unset):
@@ -183,6 +188,11 @@ def sync(
     5,000 stored files, so with a `glob` that matches few of them a page can be short while
     `nextCursor` says there's more.
 
+    Another member's job or batch is 404 for now. Once website#7795 merges, it is listed for
+    exactly the callers who may download its archive, under today's `/result` rule for a key
+    (decision 74; today's API has no key route that lists a member's files), and one that rule
+    refuses is the same 404.
+
     Args:
         job_id (str):
         prefix (str | Unset):
@@ -231,6 +241,11 @@ async def asyncio_detailed(
     page, so there is no need for one call per file. Links expire in 1 hour. A page reads at most
     5,000 stored files, so with a `glob` that matches few of them a page can be short while
     `nextCursor` says there's more.
+
+    Another member's job or batch is 404 for now. Once website#7795 merges, it is listed for
+    exactly the callers who may download its archive, under today's `/result` rule for a key
+    (decision 74; today's API has no key route that lists a member's files), and one that rule
+    refuses is the same 404.
 
     Args:
         job_id (str):
@@ -283,6 +298,11 @@ async def asyncio(
     page, so there is no need for one call per file. Links expire in 1 hour. A page reads at most
     5,000 stored files, so with a `glob` that matches few of them a page can be short while
     `nextCursor` says there's more.
+
+    Another member's job or batch is 404 for now. Once website#7795 merges, it is listed for
+    exactly the callers who may download its archive, under today's `/result` rule for a key
+    (decision 74; today's API has no key route that lists a member's files), and one that rule
+    refuses is the same 404.
 
     Args:
         job_id (str):

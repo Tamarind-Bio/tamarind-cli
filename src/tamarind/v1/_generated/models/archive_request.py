@@ -12,10 +12,14 @@ T = TypeVar("T", bound="ArchiveRequest")
 
 @_attrs_define
 class ArchiveRequest:
-    """
-    Attributes:
-        glob (str | Unset): For example `*.pdb`.
-        paths (list[str] | Unset):
+    """Send at most one of `paths` and `glob`; send neither for the whole archive. Not built yet (website#7799), so either
+    is 422 `not_supported` for now.
+
+        Attributes:
+            glob (str | Unset): Matches the whole path inside the archive, case-sensitive, with `*` also matching `/`. For
+                example `*.pdb`.
+            paths (list[str] | Unset): Paths inside the archive. A job's are the paths `listJobFiles` shows; a batch's
+                archive holds each job's files under the job's name, plus its combined files.
     """
 
     glob: str | Unset = UNSET

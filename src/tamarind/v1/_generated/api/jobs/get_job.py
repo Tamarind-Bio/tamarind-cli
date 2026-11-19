@@ -126,7 +126,9 @@ def sync_detailed(
     item the list shows for it (`kind` `job`, with its `job_` id). Anything you can't read is the
     same 404 as an id that doesn't exist: someone else's item, a deleted one, a malformed id or a
     wrong prefix, and for a run also an archived run, a run with no start time, and a benchmark
-    run.
+    run. Once website#7795 merges, another member's job that `listJobs?scope=org` shows you reads
+    here too, with its settings as today's API shows them to you, and so does another member's
+    batch that today's batch read (`?batch=&jobEmail=`) shows you; until then both are 404.
 
     Args:
         job_id (str):
@@ -168,7 +170,9 @@ def sync(
     item the list shows for it (`kind` `job`, with its `job_` id). Anything you can't read is the
     same 404 as an id that doesn't exist: someone else's item, a deleted one, a malformed id or a
     wrong prefix, and for a run also an archived run, a run with no start time, and a benchmark
-    run.
+    run. Once website#7795 merges, another member's job that `listJobs?scope=org` shows you reads
+    here too, with its settings as today's API shows them to you, and so does another member's
+    batch that today's batch read (`?batch=&jobEmail=`) shows you; until then both are 404.
 
     Args:
         job_id (str):
@@ -205,7 +209,9 @@ async def asyncio_detailed(
     item the list shows for it (`kind` `job`, with its `job_` id). Anything you can't read is the
     same 404 as an id that doesn't exist: someone else's item, a deleted one, a malformed id or a
     wrong prefix, and for a run also an archived run, a run with no start time, and a benchmark
-    run.
+    run. Once website#7795 merges, another member's job that `listJobs?scope=org` shows you reads
+    here too, with its settings as today's API shows them to you, and so does another member's
+    batch that today's batch read (`?batch=&jobEmail=`) shows you; until then both are 404.
 
     Args:
         job_id (str):
@@ -245,7 +251,9 @@ async def asyncio(
     item the list shows for it (`kind` `job`, with its `job_` id). Anything you can't read is the
     same 404 as an id that doesn't exist: someone else's item, a deleted one, a malformed id or a
     wrong prefix, and for a run also an archived run, a run with no start time, and a benchmark
-    run.
+    run. Once website#7795 merges, another member's job that `listJobs?scope=org` shows you reads
+    here too, with its settings as today's API shows them to you, and so does another member's
+    batch that today's batch read (`?batch=&jobEmail=`) shows you; until then both are 404.
 
     Args:
         job_id (str):

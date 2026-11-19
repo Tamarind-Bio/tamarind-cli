@@ -31,9 +31,28 @@ info:
     When the key's account can't be confirmed yet, the answer is 503 `service_unavailable`, retryable. Use `GET /me` to check a key. A valid key without permission is always
     403. While v1 is behind the `api-v1` flag, a caller the flag doesn't cover gets the 404 an
     unknown path gets. A key can do everything its owner can do at the moment of each request, and
-    never more. A person's key is an organization member everywhere except two places: on
-    `/service-accounts` and on `GET /api-keys?scope=org`, an organization admin's own key acts as
-    admin (see `listServiceAccounts`). A key never makes a key for its own owner: creating one
+    never more. On `/service-accounts` and `GET /api-keys?scope=org`, an organization admin's own
+    key acts as admin (see `listServiceAccounts`). Who can see and act on another member's jobs is
+    the same as on today's API (decision 74), route by route, and none of it is built yet: today
+    `scope=org` is refused and another member's job is 404.
+
+    - Lists and lookups (`scope=org` and `createdBy` on `listJobs`, `name=` included, `searchJobs`
+      by `names`, and `getJob` of a member's job; website#7795): in an organization that shares
+      within itself, every member sees the organization's jobs; in any other, only its admin
+      (whose own key counts) and its service account do. A member's batch (`getJob` of its
+      `batch_` id, and `listJobs?batchId=`, with no `scope=org` needed) reads as today's batch read
+      shows it, each of its jobs admitted on its own (website#7795).
+    - A member's job's or batch's files, logs and archive (`listJobFiles`, `getJobFile`,
+      `getJobLogs`, `archiveJob`; website#7795) follow today's `/result` rule for a key, which is
+      stricter: on a job that records its organization, an admin's key has no admin exemption, and
+      access comes from the organization sharing within itself, the job being shared with you, a
+      project, or being the service account. Today's API has no key route that lists a member's
+      files, so `listJobFiles` answers exactly the callers who may download the archive.
+    - `cancelJob` of a job and `updateJob`'s `projectId` (a later PR) open to an admin's key and to
+      a key the job is shared with, only in an organization that doesn't share within itself.
+      Canceling a batch, `deleteJob`, `rerunJob` and `displayName` stay the owner's.
+
+    A key never makes a key for its own owner: creating one
     without `serviceAccountId` is 403 `session_required`, and creating and rotating your own keys
     stay on the website's keys page, which only a signed-in session can use.
 
@@ -129,7 +148,9 @@ info:
     reads. If the limit can't be checked, the request runs, without those headers. Separately, some
     reads run in bounded lanes so one caller can't slow everyone:
     a second list request from the same account while the first is still running is 429, and a
-    full lane is 503 `service_unavailable` with `retryable: true` and `Retry-After`. Use
+    full lane is 503 `service_unavailable` with `retryable: true` and `Retry-After`. A job's
+    detail runs in a wider lane, four per account; website#7790 (not merged yet) moves a
+    `listJobs?name=` lookup and a `searchJobs` of up to 4 values there too. Use
     `POST /jobs/search` to check up to 200 jobs by id and 200 by name in one request rather than one
     `getJob` each.
     `GET /me` reports the general allowance as `limits.requestsPerMinute` (1,200), or null on a
@@ -1113,7 +1134,8 @@ paths:
       - name: groupBy
         in: query
         description: |
-          Dimensions to break down by, comma-separated or repeated. `user`, `month` and `team` combine
+          Dimensions to break down by, comma-separated (`groupBy=tool,month`) or repeated
+          (`groupBy=tool&groupBy=month`): both forms are read, and every value counts. `user`, `month` and `team` combine
           with at most ONE stored breakdown: `tool`, `gpu`, `project`, `source`, `customTool` or
           `pipeline`, or `tool` and `gpu` together. Each breakdown stores only some metrics: `gpu` has
           `hours` and `jobs`; `tool` and `gpu` together, `hours`; `source`, `customTool` and `pipeline`,
@@ -1631,7 +1653,7 @@ paths:
     - $ref: '#/components/parameters/TamarindVersion'
     get:
       operationId: listJobs
-      x-build: 'merged (website#7530, #7550, #7558, #7562, #7584, #7640)'
+      x-build: 'merged (website#7530, #7550, #7558, #7562, #7584, #7640); `scope=org` and `createdBy` (decision 74) in website#7795, `name=` in the job-detail lane in website#7790, both open'
       tags:
       - Jobs
       summary: List your jobs, batches and pipeline runs, newest first
@@ -1657,6 +1679,17 @@ paths:
         `projectId`, `apiKeyId`, `createdAfter`, `createdBefore`, `scope=org`, and `createdBy`
         naming anyone but you. Past its 15-second deadline a read is 503
         `jobs_dependency_unavailable`.
+
+        Organization scope (website#7795, not merged yet; until then the 400 above). With
+        `scope=org` the list is the organization's jobs and batches, not pipeline runs (those list
+        under `listPipelineRuns?scope=org`), as today's API shows them: every member's when the
+        organization shares within itself or you're its admin or its service account, otherwise
+        only yours. `createdBy` is another member's email and needs `scope=org` (400 without it); a
+        member whose jobs you can't see is 403 `forbidden`. Pages walk the members in turn (you
+        first, then the others by email), each page newest first. `name=` works with both.
+        `batchId`, `pipelineRunId`, `search`, `source`, `order=asc` and `kind=pipeline` can't be
+        combined with `scope=org` yet (400). `batchId=` of another member's batch needs no
+        `scope=org`: it lists the batch's jobs as today's batch read does, each admitted on its own.
       x-change: reshaped
       x-replaces:
       - GET /jobs
@@ -1730,15 +1763,7 @@ paths:
         description: Only what was submitted through this channel. Includes pipeline runs that recorded
           their channel; runs from before recording started match no `source`.
         schema:
-          type: string
-          enum:
-          - api
-          - sdk
-          - cli
-          - mcp
-          - agent
-          - campaign-agent
-          - web
+          $ref: '#/components/schemas/SubmissionChannel'
       - $ref: '#/components/parameters/Order'
       - name: projectId
         in: query
@@ -1753,8 +1778,9 @@ paths:
       - $ref: '#/components/parameters/OwnershipScope'
       - name: createdBy
         in: query
-        description: Another member's email. Needs `scope=org`, so for now only your own email is accepted;
-          anyone else's is 400.
+        description: Another member's email, with `scope=org`. Not built yet (website#7795), so for now only your
+          own email is accepted, and anyone else's is 400. Then a member whose jobs you can't see is 403
+          `forbidden`.
         schema:
           type: string
           format: email
@@ -2103,7 +2129,7 @@ paths:
     - $ref: '#/components/parameters/TamarindVersion'
     post:
       operationId: searchJobs
-      x-build: 'merged (website#7628, #7711)'
+      x-build: 'merged (website#7628, #7711); `scope: org` and `createdBy` (decision 74) in website#7795, small searches in the job-detail lane in website#7790, both open'
       tags:
       - Jobs
       summary: Look up many jobs by name or id in one call
@@ -2117,10 +2143,14 @@ paths:
         With `includeSettings`, a job comes back as `Job`, and the request takes at most 50 distinct
         values and 4.3 MB of settings in all; past either it's 422 at `/includeSettings`. A name over
         2,048 bytes is 422 at `/names/{i}`. `scope: org` and another member's `createdBy` are 422
-        `not_supported` until organization scope is built. The batches one request counts share one
+        `not_supported` for now. Once website#7795 merges, they look up `names` among the jobs
+        `listJobs?scope=org` shows you: `ids` and `includeSettings` are 422 `not_supported` with
+        them, another member's `createdBy` without `scope: org` is 422 `needs_scope_org`, and a
+        member whose jobs you can't see is 403 `forbidden`. The batches one request counts share one
         budget of 40,000 jobs; past it the answer is 503 `jobs_dependency_unavailable`. A search runs
         in the same lane as a `listJobs` page, so a second one from your account while the first runs
-        is 429.
+        is 429; website#7790 (not merged yet) runs a search of up to 4 values in the job-detail lane
+        instead, four per account, as a `listJobs?name=` lookup.
       x-change: reshaped
       x-replaces:
       - POST /jobs/search
@@ -2170,7 +2200,8 @@ paths:
                   type: string
                   format: email
                   description: 'Another member''s email. Needs `scope: org`, so for now only your own email is
-                    accepted; anyone else''s is 422 `not_supported`.'
+                    accepted; anyone else''s is 422 `not_supported`. Once website#7795 merges, another member''s
+                    without `scope: org` is 422 `needs_scope_org`.'
       responses:
         '200':
           description: The matching jobs, batches and runs, as `JobSummary`, `Batch` and `PipelineRunItem`, or with
@@ -2352,7 +2383,7 @@ paths:
     - $ref: '#/components/parameters/JobId'
     get:
       operationId: getJob
-      x-build: 'merged (website#7530, #7550, #7562, #7584, #7628, #7640, #7711)'
+      x-build: 'merged (website#7530, #7550, #7562, #7584, #7628, #7640, #7711); another member''s job or batch (decision 74) in website#7795, open'
       tags:
       - Jobs
       summary: Get a job, a batch or a pipeline run
@@ -2365,7 +2396,9 @@ paths:
         item the list shows for it (`kind` `job`, with its `job_` id). Anything you can't read is the
         same 404 as an id that doesn't exist: someone else's item, a deleted one, a malformed id or a
         wrong prefix, and for a run also an archived run, a run with no start time, and a benchmark
-        run.
+        run. Once website#7795 merges, another member's job that `listJobs?scope=org` shows you reads
+        here too, with its settings as today's API shows them to you, and so does another member's
+        batch that today's batch read (`?batch=&jobEmail=`) shows you; until then both are 404.
       x-change: reshaped
       x-replaces:
       - GET /getJobById
@@ -2417,7 +2450,7 @@ paths:
           $ref: '#/components/responses/Error'
     patch:
       operationId: updateJob
-      x-build: 'merged (website#7628, #7663)'
+      x-build: 'merged (website#7628, #7663); `projectId` on another member''s job (decision 74) not built yet'
       tags:
       - Jobs
       summary: Change a job's or a batch's display name or project
@@ -2433,6 +2466,12 @@ paths:
         A batch's jobs are filed first and the batch last, so if some rows couldn't be written the
         answer is 503 `service_unavailable`, and the same request again finishes the rest. A job or
         batch deleted or moved to another account while this runs is 404.
+
+        Another member's job is 404 for now. Once built (decision 74), `projectId` on it follows
+        today's API: only in an organization that doesn't share within itself, where its admin's key
+        can file it under an organization project or one of the admin's own, and a key the job is
+        shared with can only clear it (null). A refusal of a job you can read is 403, otherwise 404.
+        `displayName` stays the owner's.
       x-change: reshaped
       x-replaces:
       - PUT /updateJobProject
@@ -2562,7 +2601,7 @@ paths:
     - $ref: '#/components/parameters/JobId'
     post:
       operationId: cancelJob
-      x-build: 'merged (website#7628, #7634, #7663)'
+      x-build: 'merged (website#7628, #7634, #7663); another member''s job (decision 74) not built yet'
       tags:
       - Jobs
       summary: Stop an unfinished job, batch or pipeline run and keep its outputs
@@ -2579,6 +2618,11 @@ paths:
         wasn't confirmed, or the pipeline engine didn't answer, the answer is 502
         `upstream_unavailable`; cancel again. A `reason` on a pipeline run or a tool run is 422 at
         `/reason`, because the run has nowhere to keep it.
+
+        Another member's job is 404 for now. Once built (decision 74), it follows today's API: only in
+        an organization that doesn't share within itself, for its admin's own key, or for a key the
+        job is shared with; a refusal of a job you can read is 403, otherwise 404. Another member's
+        batch or run stays theirs.
       x-change: reshaped
       x-replaces:
       - POST /stop-job
@@ -2778,7 +2822,7 @@ paths:
     - $ref: '#/components/parameters/JobId'
     post:
       operationId: archiveJob
-      x-build: 'merged (website#7629, #7663, #7729)'
+      x-build: 'merged (website#7629, #7663, #7729); choosing files (`paths`, `glob`) in website#7799, open; another member''s job (decision 74) in website#7795, open'
       tags:
       - Job Outputs
       summary: Get a zip of a job's or a batch's outputs
@@ -2796,6 +2840,21 @@ paths:
         when the stored zip is damaged. If storage fails while the zip is read, the answer is 503
         `jobs_dependency_unavailable`; retry. Choosing files (`paths`, `glob`) isn't built yet, so
         either is 422 `not_supported` at its field.
+
+        Once website#7799 merges (not yet): `paths` or `glob` (one of them) chooses files: the answer
+        is a zip of just those files of that archive, copied from it as they are. `paths` are paths
+        inside the archive: a job's are the paths `listJobFiles` shows, and a batch's archive holds
+        each of its jobs' files under the job's name, plus its combined files. `glob` matches the
+        whole path (`*` spans `/`, case-sensitive). The zip is kept beside the archive, and asking
+        again answers the same one. A path the archive has no file at is 422 `file_not_found` at
+        `/paths/<i>` (each one), and a `glob` that matches nothing is 422 `file_not_found` at
+        `/glob`. More than 10,000 files or 1 GiB of zipped data is 422 `out_of_range` at the field:
+        nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
+        at `/glob`. A selection of every file answers the whole archive.
+
+        Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
+        `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
+        rule refuses is the same 404.
       x-change: reshaped
       x-replaces:
       - POST /result
@@ -2870,7 +2929,7 @@ paths:
     - $ref: '#/components/parameters/JobId'
     get:
       operationId: listJobFiles
-      x-build: 'merged (website#7632, #7648)'
+      x-build: 'merged (website#7632, #7648); another member''s job (decision 74) in website#7795, open'
       tags:
       - Job Outputs
       summary: List the files a job or a batch produced
@@ -2881,6 +2940,11 @@ paths:
         page, so there is no need for one call per file. Links expire in 1 hour. A page reads at most
         5,000 stored files, so with a `glob` that matches few of them a page can be short while
         `nextCursor` says there's more.
+
+        Another member's job or batch is 404 for now. Once website#7795 merges, it is listed for
+        exactly the callers who may download its archive, under today's `/result` rule for a key
+        (decision 74; today's API has no key route that lists a member's files), and one that rule
+        refuses is the same 404.
       x-change: new
       x-replaces:
       - POST /result
@@ -2949,14 +3013,16 @@ paths:
     - $ref: '#/components/parameters/JobId'
     get:
       operationId: getJobFile
-      x-build: 'merged (website#7632, #7648)'
+      x-build: 'merged (website#7632, #7648); another member''s job (decision 74) in website#7795, open'
       tags:
       - Job Outputs
       summary: Download one file a job or a batch produced
       description: Takes a `job_` or `batch_` id and a `path` from `listJobFiles`; a `run_` id is 404, and so is a
         path with no file. A `path` that could leave the job's folder (a leading `/`, a backslash, a control
         character or an empty, `.` or `..` segment) is 422. `inline` content is gzip-encoded when the client
-        accepts gzip, as every response is.
+        accepts gzip, as every response is. Another member's job or batch is 404 for now; once
+        website#7795 merges, it follows today's `/result` rule for a key (decision 74), and one that rule
+        refuses is the same 404.
       x-change: reshaped
       x-replaces:
       - POST /result (fileName)
@@ -2996,7 +3062,7 @@ paths:
     - $ref: '#/components/parameters/JobId'
     get:
       operationId: getJobLogs
-      x-build: 'merged (website#7632, #7648, #7729)'
+      x-build: 'merged (website#7632, #7648, #7729); another member''s job (decision 74) in website#7795, open'
       tags:
       - Job Outputs
       summary: Read a job's logs
@@ -3008,6 +3074,10 @@ paths:
         yet answers 200 with empty `content`. A cursor is bound to the job's current attempt: once the
         job is re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again
         without one.
+
+        Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
+        `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
+        rule refuses is the same 404.
       x-change: new
       x-replaces:
       - GET /catalog/jobs/{jobName}/logs
@@ -3110,7 +3180,8 @@ paths:
       - name: extension
         in: query
         description: Comma-separated, e.g. `pdb,cif`. Case doesn't matter and a leading `.` is ignored. Folders are left
-          out while this is set. An empty value inside the list, as in `pdb,,cif`, is 400.
+          out while this is set. An empty value inside the list, as in `pdb,,cif`, is 400. Send one `extension`
+          parameter with the values joined by commas; a repeated `extension` keeps only the last one.
         style: form
         explode: false
         schema:
@@ -10629,10 +10700,11 @@ components:
   headers:
     TamarindVersion:
       description: The API version this response used, the date of the first version unless the request
-        pinned another with `Tamarind-Version`.
+        pinned another with `Tamarind-Version`, as a date string (`YYYY-MM-DD`).
       schema:
         type: string
-        format: date
+        examples:
+        - '2026-12-01'
     Location:
       description: The URL of the created resource.
       schema:
@@ -10674,11 +10746,10 @@ components:
     TamarindVersion:
       name: Tamarind-Version
       in: header
-      description: Pin the API version, as a date (`YYYY-MM-DD`). Without it the request gets the first version. An
-        unknown date is 400 `unsupported_version`. See "Base URL and versioning" above.
+      description: Pin the API version, as a date string (`YYYY-MM-DD`), matched exactly. Without it the request gets
+        the first version. An unknown date is 400 `unsupported_version`. See "Base URL and versioning" above.
       schema:
         type: string
-        format: date
         examples:
         - '2026-12-01'
     Limit:
@@ -10719,7 +10790,8 @@ components:
     StatusFilter:
       name: status
       in: query
-      description: Comma-separated and URL-encoded, e.g. `In%20Queue,Running` or `Stopped,Failed`.
+      description: Comma-separated and URL-encoded, e.g. `In%20Queue,Running` or `Stopped,Failed`. Send one
+        `status` parameter with the values joined by commas; a repeated `status` keeps only the last one.
       style: form
       explode: false
       schema:
@@ -11353,15 +11425,26 @@ components:
     ArchiveRequest:
       type: object
       additionalProperties: false
+      description: Send at most one of `paths` and `glob`; send neither for the whole archive. Not built yet
+        (website#7799), so either is 422 `not_supported` for now.
       properties:
         paths:
           type: array
+          minItems: 1
+          maxItems: 10000
+          description: Paths inside the archive. A job's are the paths `listJobFiles` shows; a batch's archive
+            holds each job's files under the job's name, plus its combined files.
           items:
             type: string
+            minLength: 1
+            maxLength: 1024
             pattern: \S
         glob:
           type: string
-          description: For example `*.pdb`.
+          minLength: 1
+          maxLength: 1024
+          description: Matches the whole path inside the archive, case-sensitive, with `*` also matching `/`. For
+            example `*.pdb`.
     AssayEstimate:
       type: object
       required:
@@ -12054,15 +12137,7 @@ components:
           - 'null'
           description: Null for now.
         source:
-          type: string
-          enum:
-          - api
-          - sdk
-          - cli
-          - mcp
-          - agent
-          - campaign-agent
-          - web
+          $ref: '#/components/schemas/SubmissionChannel'
           description: The channel the batch was submitted through; `web` when none was recorded.
         createdAt:
           type: string
@@ -14199,15 +14274,7 @@ components:
           - 'null'
           description: The key that submitted this job. Null for now.
         source:
-          type: string
-          enum:
-          - api
-          - sdk
-          - cli
-          - mcp
-          - agent
-          - campaign-agent
-          - web
+          $ref: '#/components/schemas/SubmissionChannel'
           description: The channel the job was submitted through; `web` when none was recorded.
         lowPriority:
           type: boolean
@@ -14306,7 +14373,9 @@ components:
               - member
               description: EFFECTIVE role for THIS credential, which may be lower than the person's role in the
                 app. A service account's key is `admin`; any other API key is `member`, an organization admin's
-                own key included. That key acts as admin only on `/service-accounts` and `GET /api-keys?scope=org`.
+                own key included. That key acts as admin on `/service-accounts` and `GET /api-keys?scope=org`, and
+                in reading, canceling and refiling members' jobs as far as today's API lets an admin's key
+                (decision 74, not built yet).
         credential:
           type: object
           required:
@@ -16317,15 +16386,7 @@ components:
           description: The channel the run was submitted through. Null for a run that recorded none,
             which is every run started before runs recorded it.
           oneOf:
-          - type: string
-            enum:
-            - api
-            - sdk
-            - cli
-            - mcp
-            - agent
-            - campaign-agent
-            - web
+          - $ref: '#/components/schemas/SubmissionChannel'
           - type: 'null'
         createdAt:
           type: string
@@ -17448,6 +17509,19 @@ components:
           type:
           - string
           - 'null'
+    SubmissionChannel:
+      type: string
+      description: The channel a job, batch or pipeline run was submitted through. Tamarind's SDK, CLI, MCP and agents
+        declare theirs with `X-Tamarind-Client-Channel` (see Attribution in the introduction); any other API-key
+        submit is `api`, and the app's is `web`.
+      enum:
+      - api
+      - sdk
+      - cli
+      - mcp
+      - agent
+      - campaign-agent
+      - web
     SubmitBatchRequest:
       description: A batch (`kind` `batch`). `submitJob` and `estimateJob` take either form; `validateJob` takes an
         inline batch only (a `source` there is 422 `not_supported` at `/source`). Send exactly one of `settings` (an

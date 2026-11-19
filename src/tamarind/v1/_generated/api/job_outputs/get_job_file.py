@@ -127,7 +127,9 @@ def sync_detailed(
      Takes a `job_` or `batch_` id and a `path` from `listJobFiles`; a `run_` id is 404, and so is a path
     with no file. A `path` that could leave the job's folder (a leading `/`, a backslash, a control
     character or an empty, `.` or `..` segment) is 422. `inline` content is gzip-encoded when the client
-    accepts gzip, as every response is.
+    accepts gzip, as every response is. Another member's job or batch is 404 for now; once website#7795
+    merges, it follows today's `/result` rule for a key (decision 74), and one that rule refuses is the
+    same 404.
 
     Args:
         job_id (str):
@@ -170,7 +172,9 @@ def sync(
      Takes a `job_` or `batch_` id and a `path` from `listJobFiles`; a `run_` id is 404, and so is a path
     with no file. A `path` that could leave the job's folder (a leading `/`, a backslash, a control
     character or an empty, `.` or `..` segment) is 422. `inline` content is gzip-encoded when the client
-    accepts gzip, as every response is.
+    accepts gzip, as every response is. Another member's job or batch is 404 for now; once website#7795
+    merges, it follows today's `/result` rule for a key (decision 74), and one that rule refuses is the
+    same 404.
 
     Args:
         job_id (str):
@@ -208,7 +212,9 @@ async def asyncio_detailed(
      Takes a `job_` or `batch_` id and a `path` from `listJobFiles`; a `run_` id is 404, and so is a path
     with no file. A `path` that could leave the job's folder (a leading `/`, a backslash, a control
     character or an empty, `.` or `..` segment) is 422. `inline` content is gzip-encoded when the client
-    accepts gzip, as every response is.
+    accepts gzip, as every response is. Another member's job or batch is 404 for now; once website#7795
+    merges, it follows today's `/result` rule for a key (decision 74), and one that rule refuses is the
+    same 404.
 
     Args:
         job_id (str):
@@ -249,7 +255,9 @@ async def asyncio(
      Takes a `job_` or `batch_` id and a `path` from `listJobFiles`; a `run_` id is 404, and so is a path
     with no file. A `path` that could leave the job's folder (a leading `/`, a backslash, a control
     character or an empty, `.` or `..` segment) is 422. `inline` content is gzip-encoded when the client
-    accepts gzip, as every response is.
+    accepts gzip, as every response is. Another member's job or batch is 404 for now; once website#7795
+    merges, it follows today's `/result` rule for a key (decision 74), and one that rule refuses is the
+    same 404.
 
     Args:
         job_id (str):

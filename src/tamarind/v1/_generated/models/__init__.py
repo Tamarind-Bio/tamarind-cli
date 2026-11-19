@@ -48,7 +48,6 @@ from .assay_type_includes_assays_item import AssayTypeIncludesAssaysItem
 from .assay_type_modalities_item import AssayTypeModalitiesItem
 from .assay_type_page import AssayTypePage
 from .batch import Batch
-from .batch_channel import BatchChannel
 from .batch_links import BatchLinks
 from .batch_source import BatchSource
 from .batch_source_format import BatchSourceFormat
@@ -154,7 +153,6 @@ from .job_stop_reason_kind import JobStopReasonKind
 from .job_summary import JobSummary
 from .job_summary_links import JobSummaryLinks
 from .job_summary_scores_type_0 import JobSummaryScoresType0
-from .job_summary_source import JobSummarySource
 from .list_api_keys_scope import ListApiKeysScope
 from .list_assay_targets_provider import ListAssayTargetsProvider
 from .list_assay_targets_response_200 import ListAssayTargetsResponse200
@@ -165,7 +163,6 @@ from .list_assays_status import ListAssaysStatus
 from .list_jobs_kind import ListJobsKind
 from .list_jobs_order import ListJobsOrder
 from .list_jobs_scope import ListJobsScope
-from .list_jobs_source import ListJobsSource
 from .list_molecules_view import ListMoleculesView
 from .list_pipeline_runs_scope_type_0 import ListPipelineRunsScopeType0
 from .list_pipeline_runs_source_type_0 import ListPipelineRunsSourceType0
@@ -258,7 +255,6 @@ from .pipeline_run import PipelineRun
 from .pipeline_run_inputs import PipelineRunInputs
 from .pipeline_run_item import PipelineRunItem
 from .pipeline_run_item_links import PipelineRunItemLinks
-from .pipeline_run_item_source_type_0 import PipelineRunItemSourceType0
 from .pipeline_run_page import PipelineRunPage
 from .pipeline_run_status import PipelineRunStatus
 from .pipeline_run_summary import PipelineRunSummary
@@ -332,6 +328,7 @@ from .search_molecules_public_molecule_search_request_view import (
 )
 from .service_account import ServiceAccount
 from .service_account_page import ServiceAccountPage
+from .submission_channel import SubmissionChannel
 from .submit_file_batch_request import SubmitFileBatchRequest
 from .submit_file_batch_request_kind import SubmitFileBatchRequestKind
 from .submit_file_batch_request_shared_settings import SubmitFileBatchRequestSharedSettings
@@ -460,7 +457,6 @@ __all__ = (
     "AssayTypeModalitiesItem",
     "AssayTypePage",
     "Batch",
-    "BatchChannel",
     "BatchLinks",
     "BatchSource",
     "BatchSourceFormat",
@@ -562,7 +558,6 @@ __all__ = (
     "JobSummary",
     "JobSummaryLinks",
     "JobSummaryScoresType0",
-    "JobSummarySource",
     "ListApiKeysScope",
     "ListAssaysResponse200",
     "ListAssaysScope",
@@ -573,7 +568,6 @@ __all__ = (
     "ListJobsKind",
     "ListJobsOrder",
     "ListJobsScope",
-    "ListJobsSource",
     "ListMoleculesView",
     "ListPipelineRunsScopeType0",
     "ListPipelineRunsSourceType0",
@@ -662,7 +656,6 @@ __all__ = (
     "PipelineRunInputs",
     "PipelineRunItem",
     "PipelineRunItemLinks",
-    "PipelineRunItemSourceType0",
     "PipelineRunPage",
     "PipelineRunStatus",
     "PipelineRunSummary",
@@ -724,6 +717,7 @@ __all__ = (
     "SearchMoleculesPublicMoleculeSearchRequestView",
     "ServiceAccount",
     "ServiceAccountPage",
+    "SubmissionChannel",
     "SubmitFileBatchRequest",
     "SubmitFileBatchRequestKind",
     "SubmitFileBatchRequestSharedSettings",

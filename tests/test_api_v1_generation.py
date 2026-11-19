@@ -16,7 +16,7 @@ import respx
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from sync_api_v1_contract import load_contract, operations, project_contract  # noqa: E402
+from sync_api_v1_contract import load_contract, operations  # noqa: E402
 
 from tamarind.v1._generated import AuthenticatedClient  # noqa: E402
 from tamarind.v1._generated.api.jobs import list_jobs, validate_job  # noqa: E402
@@ -59,17 +59,18 @@ def test_every_operation_has_a_generated_endpoint() -> None:
         assert path.split("{")[0].rstrip("/") in source, operation["operationId"]
 
 
-def test_projection_changes_only_the_two_generator_workarounds() -> None:
+def test_the_contract_generates_without_workarounds() -> None:
+    # Both generator blockers are fixed in the contract itself (website#7081 7c3fe34):
+    # the version header is a plain string and every channel field shares one enum.
     document = _contract()
-    projected = project_contract(document)
-    version = projected["components"]["parameters"]["TamarindVersion"]["schema"]
-    assert "format" not in version
-    assert projected["components"]["schemas"]["Batch"]["properties"]["source"]["title"] == "Channel"
-    # Undo both workarounds and nothing else differs.
-    version["format"] = document["components"]["parameters"]["TamarindVersion"]["schema"]["format"]
-    projected["components"]["schemas"]["Batch"]["properties"]["source"].pop("title")
-    assert projected == document
-    assert project_contract(projected) == project_contract(document)
+    version = document["components"]["parameters"]["TamarindVersion"]["schema"]
+    assert version == {**version, "type": "string"} and "format" not in version
+    source = document["components"]["schemas"]["Batch"]["properties"]["source"]
+    assert source["$ref"] == "#/components/schemas/SubmissionChannel"
+    from tamarind.v1._generated.models.batch import Batch
+    from tamarind.v1._generated.models.submission_channel import SubmissionChannel
+
+    assert "source" in Batch.__annotations__ and SubmissionChannel("cli").value == "cli"
 
 
 @respx.mock
