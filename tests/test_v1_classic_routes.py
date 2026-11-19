@@ -460,3 +460,19 @@ def test_jobs_with_v1_is_todays_listing_unless_a_contract_command_follows(env):
 )
 def test_todays_commands_have_the_same_help_with_v1(env, args):
     same_output(env, *args, "--help")
+
+
+def test_a_surfaced_v1_error_keeps_what_the_command_added(env, monkeypatch, capsys):
+    import sys
+
+    monkeypatch.setenv("TAMARIND_API", "v1")
+    env.v1.answers["jobs.submit"] = problem(429, "rate_limited")
+    monkeypatch.setattr(sys, "argv", ["tamarind", "--json", "submit", "esmfold", "--skip-validate", "--set", "sequence=MK", "--name", "n1"])
+    with pytest.raises(SystemExit) as raised:
+        cli_main.run()
+    assert raised.value.code == 6
+    detail = json.loads(capsys.readouterr().err)["error"]["detail"]
+    # v1's problem document and submit's own recovery context, together
+    assert detail["code"] == "rate_limited" and detail["status"] == 429
+    assert detail["jobName"] == "n1" and detail["phase"] == "submit" and detail["submitted"] is False
+    assert detail["recoveryCommand"] == "tamarind --json status n1"

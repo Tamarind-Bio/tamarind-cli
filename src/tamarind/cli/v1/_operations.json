@@ -13,6 +13,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getMe",
+   "paged": false,
    "path": "/me",
    "pathParams": [],
    "query": [],
@@ -34,6 +35,7 @@
    "links": false,
    "method": "GET",
    "operationId": "listApiKeys",
+   "paged": true,
    "path": "/api-keys",
    "pathParams": [],
    "query": [
@@ -91,6 +93,7 @@
    "links": false,
    "method": "POST",
    "operationId": "createApiKey",
+   "paged": false,
    "path": "/api-keys",
    "pathParams": [],
    "query": [],
@@ -115,6 +118,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getApiKey",
+   "paged": false,
    "path": "/api-keys/{keyId}",
    "pathParams": [
     {
@@ -147,6 +151,7 @@
    "links": false,
    "method": "PATCH",
    "operationId": "updateApiKey",
+   "paged": false,
    "path": "/api-keys/{keyId}",
    "pathParams": [
     {
@@ -173,6 +178,7 @@
    "links": false,
    "method": "DELETE",
    "operationId": "revokeApiKey",
+   "paged": false,
    "path": "/api-keys/{keyId}",
    "pathParams": [
     {
@@ -197,6 +203,7 @@
    "links": false,
    "method": "GET",
    "operationId": "listServiceAccounts",
+   "paged": true,
    "path": "/service-accounts",
    "pathParams": [],
    "query": [
@@ -240,6 +247,7 @@
    "links": false,
    "method": "POST",
    "operationId": "createServiceAccount",
+   "paged": false,
    "path": "/service-accounts",
    "pathParams": [],
    "query": [],
@@ -261,6 +269,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getServiceAccount",
+   "paged": false,
    "path": "/service-accounts/{serviceAccountId}",
    "pathParams": [
     {
@@ -287,6 +296,7 @@
    "links": false,
    "method": "DELETE",
    "operationId": "deleteServiceAccount",
+   "paged": false,
    "path": "/service-accounts/{serviceAccountId}",
    "pathParams": [
     {
@@ -311,6 +321,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getOrganization",
+   "paged": false,
    "path": "/organization",
    "pathParams": [],
    "query": [],
@@ -332,6 +343,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getOrganizationContract",
+   "paged": false,
    "path": "/organization/contract",
    "pathParams": [],
    "query": [],
@@ -353,6 +365,7 @@
    "links": false,
    "method": "GET",
    "operationId": "listOrganizationMembers",
+   "paged": true,
    "path": "/organization/members",
    "pathParams": [],
    "query": [
@@ -390,6 +403,7 @@
    "links": false,
    "method": "GET",
    "operationId": "listSubOrganizations",
+   "paged": true,
    "path": "/organization/sub-organizations",
    "pathParams": [],
    "query": [
@@ -427,6 +441,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getUsage",
+   "paged": true,
    "path": "/usage",
    "pathParams": [],
    "query": [
@@ -554,6 +569,7 @@
    "links": false,
    "method": "POST",
    "operationId": "refreshUsage",
+   "paged": false,
    "path": "/usage/refresh",
    "pathParams": [],
    "query": [],
@@ -575,6 +591,7 @@
    "links": true,
    "method": "GET",
    "operationId": "listTools",
+   "paged": true,
    "path": "/tools",
    "pathParams": [],
    "query": [
@@ -655,6 +672,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getToolFacets",
+   "paged": false,
    "path": "/tools/facets",
    "pathParams": [],
    "query": [],
@@ -682,6 +700,7 @@
    "links": false,
    "method": "POST",
    "operationId": "recommendTools",
+   "paged": false,
    "path": "/tools/recommend",
    "pathParams": [],
    "query": [],
@@ -703,6 +722,7 @@
    "links": true,
    "method": "GET",
    "operationId": "getTool",
+   "paged": false,
    "path": "/tools/{tool}",
    "pathParams": [
     {
@@ -729,6 +749,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getToolSchema",
+   "paged": false,
    "path": "/tools/{tool}/schema",
    "pathParams": [
     {
@@ -763,6 +784,7 @@
    "links": false,
    "method": "GET",
    "operationId": "listJobs",
+   "paged": true,
    "path": "/jobs",
    "pathParams": [],
    "query": [
@@ -949,6 +971,7 @@
    "links": false,
    "method": "POST",
    "operationId": "submitJob",
+   "paged": false,
    "path": "/jobs",
    "pathParams": [],
    "query": [],
@@ -979,6 +1002,7 @@
    "links": false,
    "method": "POST",
    "operationId": "estimateJob",
+   "paged": false,
    "path": "/jobs/estimate",
    "pathParams": [],
    "query": [],
@@ -1006,6 +1030,7 @@
    "links": false,
    "method": "POST",
    "operationId": "searchJobs",
+   "paged": false,
    "path": "/jobs/search",
    "pathParams": [],
    "query": [],
@@ -1033,6 +1058,7 @@
    "links": false,
    "method": "POST",
    "operationId": "validateJob",
+   "paged": false,
    "path": "/jobs/validate",
    "pathParams": [],
    "query": [],
@@ -1054,6 +1080,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getJob",
+   "paged": false,
    "path": "/jobs/{jobId}",
    "pathParams": [
     {
@@ -1086,6 +1113,7 @@
    "links": false,
    "method": "PATCH",
    "operationId": "updateJob",
+   "paged": false,
    "path": "/jobs/{jobId}",
    "pathParams": [
     {
@@ -1112,6 +1140,7 @@
    "links": false,
    "method": "DELETE",
    "operationId": "deleteJob",
+   "paged": false,
    "path": "/jobs/{jobId}",
    "pathParams": [
     {
@@ -1142,6 +1171,7 @@
    "links": false,
    "method": "POST",
    "operationId": "cancelJob",
+   "paged": false,
    "path": "/jobs/{jobId}/cancel",
    "pathParams": [
     {
@@ -1174,6 +1204,7 @@
    "links": false,
    "method": "POST",
    "operationId": "rerunJob",
+   "paged": false,
    "path": "/jobs/{jobId}/rerun",
    "pathParams": [
     {
@@ -1206,6 +1237,7 @@
    "links": true,
    "method": "POST",
    "operationId": "archiveJob",
+   "paged": false,
    "path": "/jobs/{jobId}/archive",
    "pathParams": [
     {
@@ -1235,6 +1267,7 @@
    "links": true,
    "method": "GET",
    "operationId": "listJobFiles",
+   "paged": true,
    "path": "/jobs/{jobId}/files",
    "pathParams": [
     {
@@ -1299,6 +1332,7 @@
    "links": true,
    "method": "GET",
    "operationId": "getJobFile",
+   "paged": false,
    "path": "/jobs/{jobId}/files/content",
    "pathParams": [
     {
@@ -1347,6 +1381,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getJobLogs",
+   "paged": false,
    "path": "/jobs/{jobId}/logs",
    "pathParams": [
     {
@@ -1389,6 +1424,7 @@
    "links": false,
    "method": "GET",
    "operationId": "listFiles",
+   "paged": true,
    "path": "/files",
    "pathParams": [],
    "query": [
@@ -1463,6 +1499,7 @@
    "links": true,
    "method": "POST",
    "operationId": "uploadFile",
+   "paged": false,
    "path": "/files",
    "pathParams": [],
    "query": [],
@@ -1484,6 +1521,7 @@
    "links": false,
    "method": "DELETE",
    "operationId": "deleteFile",
+   "paged": false,
    "path": "/files",
    "pathParams": [],
    "query": [
@@ -1524,6 +1562,7 @@
    "links": false,
    "method": "POST",
    "operationId": "completeFileUpload",
+   "paged": false,
    "path": "/files/complete",
    "pathParams": [],
    "query": [],
@@ -1545,6 +1584,7 @@
    "links": true,
    "method": "GET",
    "operationId": "getFile",
+   "paged": false,
    "path": "/files/content",
    "pathParams": [],
    "query": [
@@ -1588,6 +1628,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getFileStats",
+   "paged": false,
    "path": "/files/stats",
    "pathParams": [],
    "query": [
@@ -1617,6 +1658,7 @@
    "links": false,
    "method": "GET",
    "operationId": "listModels",
+   "paged": true,
    "path": "/models",
    "pathParams": [],
    "query": [
@@ -1661,6 +1703,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getModel",
+   "paged": false,
    "path": "/models/{modelId}",
    "pathParams": [
     {
@@ -1687,6 +1730,7 @@
    "links": false,
    "method": "GET",
    "operationId": "listProjects",
+   "paged": true,
    "path": "/projects",
    "pathParams": [],
    "query": [
@@ -1738,6 +1782,7 @@
    "links": false,
    "method": "POST",
    "operationId": "createProject",
+   "paged": false,
    "path": "/projects",
    "pathParams": [],
    "query": [],
@@ -1759,6 +1804,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getProject",
+   "paged": false,
    "path": "/projects/{projectId}",
    "pathParams": [
     {
@@ -1791,6 +1837,7 @@
    "links": false,
    "method": "PATCH",
    "operationId": "updateProject",
+   "paged": false,
    "path": "/projects/{projectId}",
    "pathParams": [
     {
@@ -1817,6 +1864,7 @@
    "links": false,
    "method": "DELETE",
    "operationId": "deleteProject",
+   "paged": false,
    "path": "/projects/{projectId}",
    "pathParams": [
     {
@@ -1857,6 +1905,7 @@
    "links": false,
    "method": "GET",
    "operationId": "listProjectMembers",
+   "paged": true,
    "path": "/projects/{projectId}/members",
    "pathParams": [
     {
@@ -1899,6 +1948,7 @@
    "links": false,
    "method": "DELETE",
    "operationId": "leaveProject",
+   "paged": false,
    "path": "/projects/{projectId}/members/me",
    "pathParams": [
     {
@@ -1923,6 +1973,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getProjectNotes",
+   "paged": false,
    "path": "/projects/{projectId}/notes",
    "pathParams": [
     {
@@ -1955,6 +2006,7 @@
    "links": false,
    "method": "PATCH",
    "operationId": "updateProjectNotes",
+   "paged": false,
    "path": "/projects/{projectId}/notes",
    "pathParams": [
     {
@@ -1987,6 +2039,7 @@
    "links": false,
    "method": "POST",
    "operationId": "createProjectNotesEntry",
+   "paged": false,
    "path": "/projects/{projectId}/notes/entries",
    "pathParams": [
     {
@@ -2013,6 +2066,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getProjectNotesEntry",
+   "paged": false,
    "path": "/projects/{projectId}/notes/entries/{entryId}",
    "pathParams": [
     {
@@ -2049,6 +2103,7 @@
    "links": false,
    "method": "PATCH",
    "operationId": "updateProjectNotesEntry",
+   "paged": false,
    "path": "/projects/{projectId}/notes/entries/{entryId}",
    "pathParams": [
     {
@@ -2079,6 +2134,7 @@
    "links": false,
    "method": "DELETE",
    "operationId": "deleteProjectNotesEntry",
+   "paged": false,
    "path": "/projects/{projectId}/notes/entries/{entryId}",
    "pathParams": [
     {
@@ -2121,6 +2177,7 @@
    "links": false,
    "method": "POST",
    "operationId": "appendProjectNotesNote",
+   "paged": false,
    "path": "/projects/{projectId}/notes/entries/{entryId}/notes",
    "pathParams": [
     {
@@ -2157,6 +2214,7 @@
    "links": false,
    "method": "PATCH",
    "operationId": "updateProjectNotesNote",
+   "paged": false,
    "path": "/projects/{projectId}/notes/entries/{entryId}/notes/{noteId}",
    "pathParams": [
     {
@@ -2191,6 +2249,7 @@
    "links": false,
    "method": "DELETE",
    "operationId": "deleteProjectNotesNote",
+   "paged": false,
    "path": "/projects/{projectId}/notes/entries/{entryId}/notes/{noteId}",
    "pathParams": [
     {
@@ -2237,6 +2296,7 @@
    "links": false,
    "method": "POST",
    "operationId": "estimatePipeline",
+   "paged": false,
    "path": "/pipelines/estimate",
    "pathParams": [],
    "query": [],
@@ -2258,6 +2318,7 @@
    "links": false,
    "method": "GET",
    "operationId": "listPipelineRuns",
+   "paged": true,
    "path": "/pipelines/runs",
    "pathParams": [],
    "query": [
@@ -2347,6 +2408,7 @@
    "links": false,
    "method": "POST",
    "operationId": "submitPipeline",
+   "paged": false,
    "path": "/pipelines/runs",
    "pathParams": [],
    "query": [],
@@ -2368,6 +2430,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getPipelineRun",
+   "paged": false,
    "path": "/pipelines/runs/{runId}",
    "pathParams": [
     {
@@ -2400,6 +2463,7 @@
    "links": true,
    "method": "POST",
    "operationId": "archivePipelineRun",
+   "paged": false,
    "path": "/pipelines/runs/{runId}/archive",
    "pathParams": [
     {
@@ -2429,6 +2493,7 @@
    "links": false,
    "method": "POST",
    "operationId": "cancelPipelineRun",
+   "paged": false,
    "path": "/pipelines/runs/{runId}/cancel",
    "pathParams": [
     {
@@ -2455,6 +2520,7 @@
    "links": false,
    "method": "GET",
    "operationId": "listNodeRunMolecules",
+   "paged": true,
    "path": "/pipelines/runs/{runId}/node-runs/{nodeRunId}/molecules",
    "pathParams": [
     {
@@ -2501,6 +2567,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getPipelineSchema",
+   "paged": false,
    "path": "/pipelines/schema",
    "pathParams": [],
    "query": [],
@@ -2522,6 +2589,7 @@
    "links": false,
    "method": "GET",
    "operationId": "listPipelineTemplates",
+   "paged": true,
    "path": "/pipelines/templates",
    "pathParams": [],
    "query": [
@@ -2590,6 +2658,7 @@
    "links": false,
    "method": "POST",
    "operationId": "createPipelineTemplate",
+   "paged": false,
    "path": "/pipelines/templates",
    "pathParams": [],
    "query": [],
@@ -2611,6 +2680,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getPipelineTemplate",
+   "paged": false,
    "path": "/pipelines/templates/{templateId}",
    "pathParams": [
     {
@@ -2645,6 +2715,7 @@
    "links": false,
    "method": "DELETE",
    "operationId": "deletePipelineTemplate",
+   "paged": false,
    "path": "/pipelines/templates/{templateId}",
    "pathParams": [
     {
@@ -2675,6 +2746,7 @@
    "links": false,
    "method": "POST",
    "operationId": "duplicatePipelineTemplate",
+   "paged": false,
    "path": "/pipelines/templates/{templateId}/duplicate",
    "pathParams": [
     {
@@ -2707,6 +2779,7 @@
    "links": false,
    "method": "POST",
    "operationId": "publishPipelineTemplate",
+   "paged": false,
    "path": "/pipelines/templates/{templateId}/publish",
    "pathParams": [
     {
@@ -2739,6 +2812,7 @@
    "links": false,
    "method": "POST",
    "operationId": "validatePipelineTemplate",
+   "paged": false,
    "path": "/pipelines/templates/{templateId}/validate",
    "pathParams": [
     {
@@ -2771,6 +2845,7 @@
    "links": false,
    "method": "POST",
    "operationId": "validatePipeline",
+   "paged": false,
    "path": "/pipelines/validate",
    "pathParams": [],
    "query": [],
@@ -2792,6 +2867,7 @@
    "links": true,
    "method": "GET",
    "operationId": "listMolecules",
+   "paged": true,
    "path": "/molecules",
    "pathParams": [],
    "query": [
@@ -2980,6 +3056,7 @@
    "links": false,
    "method": "GET",
    "operationId": "listMoleculeGroups",
+   "paged": true,
    "path": "/molecules/groups",
    "pathParams": [],
    "query": [
@@ -3063,6 +3140,7 @@
    "links": false,
    "method": "POST",
    "operationId": "createMoleculeGroup",
+   "paged": false,
    "path": "/molecules/groups",
    "pathParams": [],
    "query": [],
@@ -3084,6 +3162,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getMoleculeGroup",
+   "paged": false,
    "path": "/molecules/groups/{groupId}",
    "pathParams": [
     {
@@ -3116,6 +3195,7 @@
    "links": false,
    "method": "POST",
    "operationId": "removeMoleculesFromGroup",
+   "paged": false,
    "path": "/molecules/groups/{groupId}/molecules/remove",
    "pathParams": [
     {
@@ -3149,6 +3229,7 @@
    "links": false,
    "method": "POST",
    "operationId": "listMoleculeScoreObservations",
+   "paged": true,
    "path": "/molecules/groups/{groupId}/score-observations",
    "pathParams": [
     {
@@ -3181,6 +3262,7 @@
    "links": true,
    "method": "POST",
    "operationId": "startMoleculeImport",
+   "paged": false,
    "path": "/molecules/imports",
    "pathParams": [],
    "query": [],
@@ -3202,6 +3284,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getMoleculeImport",
+   "paged": false,
    "path": "/molecules/imports/{importId}",
    "pathParams": [
     {
@@ -3228,6 +3311,7 @@
    "links": false,
    "method": "DELETE",
    "operationId": "deleteMoleculeImport",
+   "paged": false,
    "path": "/molecules/imports/{importId}",
    "pathParams": [
     {
@@ -3258,6 +3342,7 @@
    "links": false,
    "method": "POST",
    "operationId": "commitMoleculeImport",
+   "paged": false,
    "path": "/molecules/imports/{importId}/commit",
    "pathParams": [
     {
@@ -3284,6 +3369,7 @@
    "links": false,
    "method": "GET",
    "operationId": "listMoleculeSchemas",
+   "paged": true,
    "path": "/molecules/schemas",
    "pathParams": [],
    "query": [
@@ -3335,6 +3421,7 @@
    "links": false,
    "method": "POST",
    "operationId": "createMoleculeSchema",
+   "paged": false,
    "path": "/molecules/schemas",
    "pathParams": [],
    "query": [],
@@ -3356,6 +3443,7 @@
    "links": false,
    "method": "GET",
    "operationId": "getMoleculeSchema",
+   "paged": false,
    "path": "/molecules/schemas/{schemaId}",
    "pathParams": [
     {
@@ -3388,6 +3476,7 @@
    "links": false,
    "method": "PATCH",
    "operationId": "updateMoleculeSchema",
+   "paged": false,
    "path": "/molecules/schemas/{schemaId}",
    "pathParams": [
     {
@@ -3421,6 +3510,7 @@
    "links": true,
    "method": "POST",
    "operationId": "searchMolecules",
+   "paged": true,
    "path": "/molecules/search",
    "pathParams": [],
    "query": [],
@@ -3448,6 +3538,7 @@
    "links": false,
    "method": "POST",
    "operationId": "uploadMolecules",
+   "paged": false,
    "path": "/molecules/upload",
    "pathParams": [],
    "query": [],
@@ -3469,6 +3560,7 @@
    "links": true,
    "method": "GET",
    "operationId": "getMolecule",
+   "paged": false,
    "path": "/molecules/{moleculeId}",
    "pathParams": [
     {
@@ -3503,6 +3595,7 @@
    "links": false,
    "method": "DELETE",
    "operationId": "deleteMolecule",
+   "paged": false,
    "path": "/molecules/{moleculeId}",
    "pathParams": [
     {
@@ -3527,6 +3620,7 @@
    "links": false,
    "method": "GET",
    "operationId": "listGroupsForMolecule",
+   "paged": true,
    "path": "/molecules/{moleculeId}/groups",
    "pathParams": [
     {
@@ -3575,6 +3669,7 @@
    "links": true,
    "method": "PATCH",
    "operationId": "updateMoleculeMetadata",
+   "paged": false,
    "path": "/molecules/{moleculeId}/metadata",
    "pathParams": [
     {
@@ -3601,6 +3696,7 @@
    "links": true,
    "method": "GET",
    "operationId": "listCustomTools",
+   "paged": true,
    "path": "/custom-tools",
    "pathParams": [],
    "query": [
@@ -3663,6 +3759,7 @@
    "links": true,
    "method": "POST",
    "operationId": "createCustomTool",
+   "paged": false,
    "path": "/custom-tools",
    "pathParams": [],
    "query": [],
@@ -3690,6 +3787,7 @@
    "links": false,
    "method": "POST",
    "operationId": "validateCustomToolConfig",
+   "paged": false,
    "path": "/custom-tools/validate-config",
    "pathParams": [],
    "query": [],
@@ -3713,6 +3811,7 @@
    "links": true,
    "method": "GET",
    "operationId": "getCustomTool",
+   "paged": false,
    "path": "/custom-tools/{name}",
    "pathParams": [
     {
@@ -3755,6 +3854,7 @@
    "links": true,
    "method": "PATCH",
    "operationId": "updateCustomTool",
+   "paged": false,
    "path": "/custom-tools/{name}",
    "pathParams": [
     {
@@ -3783,6 +3883,7 @@
    "links": false,
    "method": "DELETE",
    "operationId": "deleteCustomTool",
+   "paged": false,
    "path": "/custom-tools/{name}",
    "pathParams": [
     {
@@ -3816,6 +3917,7 @@
    "links": false,
    "method": "POST",
    "operationId": "buildCustomTool",
+   "paged": false,
    "path": "/custom-tools/{name}/build",
    "pathParams": [
     {
@@ -3844,6 +3946,7 @@
    "links": false,
    "method": "GET",
    "operationId": "listCustomToolBuildLogs",
+   "paged": true,
    "path": "/custom-tools/{name}/build-logs",
    "pathParams": [
     {
@@ -3887,6 +3990,7 @@
    "links": false,
    "method": "POST",
    "operationId": "cancelCustomToolBuild",
+   "paged": false,
    "path": "/custom-tools/{name}/cancel-build",
    "pathParams": [
     {
@@ -3923,6 +4027,7 @@
    "links": true,
    "method": "POST",
    "operationId": "publishCustomTool",
+   "paged": false,
    "path": "/custom-tools/{name}/publish",
    "pathParams": [
     {
@@ -3959,6 +4064,7 @@
    "links": true,
    "method": "POST",
    "operationId": "createCustomToolUpload",
+   "paged": false,
    "path": "/custom-tools/{name}/uploads",
    "pathParams": [
     {
@@ -3987,6 +4093,7 @@
    "links": false,
    "method": "GET",
    "operationId": "listCustomToolVersions",
+   "paged": true,
    "path": "/custom-tools/{name}/versions",
    "pathParams": [
     {
@@ -4042,6 +4149,7 @@
    "links": false,
    "method": "GET",
    "operationId": "listAssayTargets",
+   "paged": true,
    "path": "/assay-targets",
    "pathParams": [],
    "query": [
@@ -4099,6 +4207,7 @@
    "links": true,
    "method": "GET",
    "operationId": "listAssayTypes",
+   "paged": true,
    "path": "/assay-types",
    "pathParams": [],
    "query": [
@@ -4149,6 +4258,7 @@
    "links": true,
    "method": "GET",
    "operationId": "listAssays",
+   "paged": true,
    "path": "/assays",
    "pathParams": [],
    "query": [
@@ -4225,6 +4335,7 @@
    "links": true,
    "method": "POST",
    "operationId": "submitAssay",
+   "paged": false,
    "path": "/assays",
    "pathParams": [],
    "query": [],
@@ -4252,6 +4363,7 @@
    "links": false,
    "method": "POST",
    "operationId": "estimateAssay",
+   "paged": false,
    "path": "/assays/estimate",
    "pathParams": [],
    "query": [],
@@ -4279,6 +4391,7 @@
    "links": false,
    "method": "POST",
    "operationId": "validateAssay",
+   "paged": false,
    "path": "/assays/validate",
    "pathParams": [],
    "query": [],
@@ -4300,6 +4413,7 @@
    "links": true,
    "method": "GET",
    "operationId": "getAssay",
+   "paged": false,
    "path": "/assays/{assayId}",
    "pathParams": [
     {
@@ -4332,6 +4446,7 @@
    "links": true,
    "method": "POST",
    "operationId": "cancelAssay",
+   "paged": false,
    "path": "/assays/{assayId}/cancel",
    "pathParams": [
     {
@@ -4358,6 +4473,7 @@
    "links": true,
    "method": "GET",
    "operationId": "getAssayResults",
+   "paged": false,
    "path": "/assays/{assayId}/results",
    "pathParams": [
     {

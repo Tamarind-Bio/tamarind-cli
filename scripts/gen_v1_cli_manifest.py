@@ -161,6 +161,7 @@ def build(doc: dict[str, Any]) -> dict[str, Any]:
                     body["cursor"] = True
             success = {}
             links = False
+            paged = False
             for code, resp in op.get("responses", {}).items():
                 if not str(code).startswith("2"):
                     continue
@@ -168,6 +169,10 @@ def build(doc: dict[str, Any]) -> dict[str, Any]:
                 success[str(code)] = sorted(resp.get("content", {}))
                 for media in resp.get("content", {}).values():
                     links = links or _carries_links(contract, media.get("schema"))
+                # A page of items (not, say, a log chunk that also has a cursor): --all can collect it.
+                answer = contract.resolve((resp.get("content", {}).get("application/json") or {}).get("schema") or {})
+                shapes = [answer, *(contract.resolve(s) for k in ("anyOf", "oneOf") for s in answer.get(k) or [])]
+                paged = paged or any({"items", "nextCursor"} <= set(s.get("properties") or {}) for s in shapes)
             operations.append(
                 {
                     "operationId": op["operationId"],
@@ -187,6 +192,7 @@ def build(doc: dict[str, Any]) -> dict[str, Any]:
                     "body": body,
                     "success": success,
                     "links": links,
+                    "paged": paged,
                     # The contract asks clients to confirm these first (assay orders and
                     # their cancellation); the CLI makes them take --yes.
                     "confirmFirst": bool(

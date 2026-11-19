@@ -237,16 +237,23 @@ def run() -> None:
     except TamarindError as exc:
         # A v1 error carries its whole problem document (code, errors[], requestId);
         # agents get it under `detail`, and its message already says it for humans.
+        # What a command added on its way out (submit's jobName, phase, recoveryCommand)
+        # is kept beside it.
         problem = getattr(exc, "problem", None)
         problem = problem if isinstance(problem, dict) and problem else None
+        added = exc.detail if isinstance(exc.detail, dict) else None
+        if problem is not None:
+            detail = {**problem, **added} if added else problem
+        else:
+            detail = exc.detail
         output.error(
             exc.message,
             _active_output_mode,
             error_type=type(exc).__name__,
             exit_code=exc.exit_code,
-            detail=problem if problem is not None else exc.detail,
+            detail=detail,
         )
-        if exc.detail is not None and problem is None and not _active_output_mode.json:
+        if exc.detail is not None and (problem is None or added) and not _active_output_mode.json:
             typer.echo(typer.style(str(exc.detail), dim=True), err=True)
         raise SystemExit(exc.exit_code)
     except ClickException as exc:

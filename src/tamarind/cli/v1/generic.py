@@ -162,7 +162,8 @@ def operation_params(op: dict[str, Any]) -> list[click.Parameter]:
         params.append(
             click.Option(["--if-match", "if_match"], help="Only act if the ETag still matches.")
         )
-    if any(q["name"] == "cursor" for q in op["query"]) or (op.get("body") or {}).get("cursor"):
+    cursor = any(q["name"] == "cursor" for q in op["query"]) or (op.get("body") or {}).get("cursor")
+    if cursor and op.get("paged"):
         params.append(
             click.Option(["--all", "all_pages"], is_flag=True, help="Follow nextCursor to the end.")
         )
