@@ -183,6 +183,11 @@ def build(doc: dict[str, Any]) -> dict[str, Any]:
                     "body": body,
                     "success": success,
                     "links": links,
+                    # The contract asks clients to confirm these first (assay orders and
+                    # their cancellation); the CLI makes them take --yes.
+                    "confirmFirst": bool(
+                        re.search(r"confirm with the user first", op.get("description") or "", re.I)
+                    ),
                 }
             )
     return {

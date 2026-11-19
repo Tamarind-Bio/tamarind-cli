@@ -7,6 +7,7 @@
   {
    "body": null,
    "cli": "auth status",
+   "confirmFirst": false,
    "description": "The one call an agent or script should make first. `role` is the caller's EFFECTIVE privilege for this credential. `asOf` is when the answer was made: organization and team totals can trail it by up to about 30 minutes.",
    "headers": [],
    "links": false,
@@ -27,6 +28,7 @@
   {
    "body": null,
    "cli": "keys list",
+   "confirmFirst": false,
    "description": "Your own keys: the original one, the ones you created, and revoked ones. Never a short-lived key a Tamarind service made for you, and never a secret or a hash.",
    "headers": [],
    "links": false,
@@ -81,6 +83,7 @@
     "required": true
    },
    "cli": "keys create",
+   "confirmFirst": false,
    "description": "Makes a key for one of your organization's service accounts, named by `serviceAccountId`. Only an organization admin's own key can (the rule `listApiKeys` describes). An id that isn't one of your organization's service accounts is 404.",
    "headers": [
     "Idempotency-Key"
@@ -106,6 +109,7 @@
   {
    "body": null,
    "cli": "keys get",
+   "confirmFirst": false,
    "description": "One of your own keys or, for an organization admin, one of your organization's service accounts' keys. A member's key is 404 here, even to an admin, who sees it only in `scope=org`.",
    "headers": [],
    "links": false,
@@ -137,6 +141,7 @@
     "required": true
    },
    "cli": "keys update",
+   "confirmFirst": false,
    "description": "Renames a key you created with a person's key, or, for an organization admin, a service account's created key. Keys have no budget or expiry yet: a non-null `budget` or `expiresAt` is 422 `not_supported` at that field. A body without `name` renames nothing and returns the key. The original key and revoked keys can't be renamed: 409 `api_key_not_changeable`. A service account's key can't rename keys: 403 `org_admin_required`.",
    "headers": [],
    "links": false,
@@ -162,6 +167,7 @@
   {
    "body": null,
    "cli": "keys revoke",
+   "confirmFirst": false,
    "description": "Revokes a key you created with a person's key, or, for an organization admin, a service account's created key. Revoked keys stay listed with `status=revoked`. Revoking a revoked key answers 204 again. The original key can't be revoked here: 409 `api_key_not_changeable`. A service account's key can't revoke keys: 403 `org_admin_required`.",
    "headers": [],
    "links": false,
@@ -185,6 +191,7 @@
   {
    "body": null,
    "cli": "service-accounts list",
+   "confirmFirst": false,
    "description": "Organization admins only, with their own key (the rule `listApiKeys` describes). Anyone else is 403 `org_admin_required` (or `mfa_required`).",
    "headers": [],
    "links": false,
@@ -227,6 +234,7 @@
     "required": true
    },
    "cli": "service-accounts create",
+   "confirmFirst": false,
    "description": "Create its keys with `POST /api-keys` and `serviceAccountId`. Organization admins only, with their own key. The account starts with no key. Its `email` is the name, trimmed, lower-cased and with each run of spaces made one hyphen, at `<organization slug>.serviceaccount`. A name whose email is already taken (`Nightly Sync` and `nightly sync` are the same) is 409 `service_account_exists`.",
    "headers": [],
    "links": false,
@@ -247,6 +255,7 @@
   {
    "body": null,
    "cli": "service-accounts get",
+   "confirmFirst": false,
    "description": "Organization admins only, with their own key. An id that isn't one of your organization's service accounts is 404.",
    "headers": [],
    "links": false,
@@ -272,6 +281,7 @@
   {
    "body": null,
    "cli": "service-accounts delete",
+   "confirmFirst": false,
    "description": "Organization admins only, with their own key. Deletes the account, then marks every key it had revoked. An account that stops being this organization's service account while it's being deleted is 404, and nothing is deleted.",
    "headers": [],
    "links": false,
@@ -295,6 +305,7 @@
   {
    "body": null,
    "cli": "org get",
+   "confirmFirst": false,
    "description": "Any member of an organization can read it. A personal account is 404. `name` is the organization's slug for now, as on `GET /me`. Every `/organization` route first confirms your membership against your account, read fresh; when it can't, the answer is 503 and retryable, never the old organization's data.",
    "headers": [],
    "links": false,
@@ -315,6 +326,7 @@
   {
    "body": null,
    "cli": "org contract",
+   "confirmFirst": false,
    "description": "Every contract term, with contracted, promotional, rollover, effective, used and remaining hours, newest start first. The same people who see shared budgets on `GET /me` can read it: the organization's service account, or any member when the organization shares its budget with members. Anyone else is 403 `forbidden`, and a personal account is 404.",
    "headers": [],
    "links": false,
@@ -335,6 +347,7 @@
   {
    "body": null,
    "cli": "org members",
+   "confirmFirst": false,
    "description": "Any member can list them; a personal account is 404. In email order, not newest first. Service accounts aren't members here (see `listServiceAccounts`). A member's name and role come from the sign-in provider, read live; someone it has no membership for is `role: member` with a null `name`. If that read fails or comes back incomplete, the answer is 503 `upstream_unavailable` (retryable), so a list never calls an admin a member.",
    "headers": [],
    "links": false,
@@ -371,6 +384,7 @@
   {
    "body": null,
    "cli": "org sub-orgs",
+   "confirmFirst": false,
    "description": "The sub-organizations your organization lists that still exist, in slug order. Each one's `parentSlug` is your organization, and its `name` is its slug. Any member can list them; a personal account is 404.",
    "headers": [],
    "links": false,
@@ -407,6 +421,7 @@
   {
    "body": null,
    "cli": "usage",
+   "confirmFirst": false,
    "description": "One query over the stored monthly usage the web usage portal reads. Choose a `metric`, a range of Pacific months and up to three `groupBy` dimensions. Send `Accept: text/csv` for CSV. A CSV is one page, like the JSON form, and its next cursor is in the `X-Next-Cursor` header (also set on JSON pages). Items are in the order of their dimension values, months oldest first.",
    "headers": [],
    "links": false,
@@ -533,6 +548,7 @@
     "required": true
    },
    "cli": "usage refresh",
+   "confirmFirst": false,
    "description": "Starts the usage refresh once for each named person, as the portal's refresh button does, then answers 202. Poll `getUsage` and watch `asOf`. You can name yourself; you can name another member when your organization shares within itself or you are its service account. Anyone else (another organization, a different spelling of an address) is 403 `forbidden`, naming them, before anything starts. Addresses are matched exactly. Another refresh from the same account still running is 429. A start that fails is 503 and retryable, since a refresh is safe to repeat. A deployment without the refresh fu…",
    "headers": [],
    "links": false,
@@ -553,6 +569,7 @@
   {
    "body": null,
    "cli": "tools list",
+   "confirmFirst": false,
    "description": "The built-in tools your account may run, in the catalog's display order rather than newest first. Visibility rules live in this endpoint, not in clients: a tool a flag, a block or licensing hides from you isn't listed. Your organization's custom tools aren't listed here yet (`custom=true` is 400); see `listCustomTools`.",
    "headers": [],
    "links": true,
@@ -632,6 +649,7 @@
   {
    "body": null,
    "cli": "tools facets",
+   "confirmFirst": false,
    "description": "Modalities and functions, lower-cased, each with the number of tools you can see, so a count matches what `listTools` returns for it. Most tools first, then by name. No labels or descriptions.",
    "headers": [],
    "links": false,
@@ -658,6 +676,7 @@
     "required": true
    },
    "cli": "tools recommend",
+   "confirmFirst": false,
    "description": "Ranks tools for a structure-prediction or co-folding task from benchmark evidence, narrowed to the tools you can see: tools you can't see are left out and never named, and when that leaves none the answer abstains. A synchronous call, bounded to finish inside the gateway's 30 seconds: a request that takes more than 25 seconds is 503 and retryable (most take 12 to 18 seconds). Behind the `model-router` flag, and refused for an unclaimed agent account: both are 403 `forbidden`. At most two requests per account run at once on each server; more is 429. A deployment without the recommendation serv…",
    "headers": [],
    "links": false,
@@ -678,6 +697,7 @@
   {
    "body": null,
    "cli": "tools get",
+   "confirmFirst": false,
    "description": "A built-in tool as `listTools` shows it to you. A tool hidden from you answers exactly as an unknown name does, 404 `tool_not_found`, and so does a custom tool's name for now.",
    "headers": [],
    "links": true,
@@ -703,6 +723,7 @@
   {
    "body": null,
    "cli": "tools schema",
+   "confirmFirst": false,
    "description": "Built-in tools only for now: any other name, or a tool hidden from you, is 404 `tool_not_found`. Settings behind a flag that's off for you are left out, and so are settings that depend on one left out; settings limited to some organizations or surfaces are kept and annotated.",
    "headers": [],
    "links": false,
@@ -736,6 +757,7 @@
   {
    "body": null,
    "cli": "jobs list",
+   "confirmFirst": false,
    "description": "Returns summaries without `settings`. Each item has a `kind`: `job`, `batch` or `pipeline`. The default list is what you started: single jobs, batches and pipeline runs, but not the jobs inside a batch or a run. `batchId=` lists a batch's jobs and `pipelineRunId=` a run's. Pipeline runs are listed only for a caller in an organization, and benchmark runs never.",
    "headers": [],
    "links": false,
@@ -919,6 +941,7 @@
     "required": true
    },
    "cli": "jobs submit",
+   "confirmFirst": false,
    "description": "`kind` says what to create, the same word responses use: `job` (the default) with `settings` as an object, or `batch` with `settings` as an array (one object per job) or `source` to read the rows from an uploaded FASTA, CSV or JSONL file; `sharedSettings` apply to every row. A batch is never inferred from the shape of `settings`: a list of `settings` without `kind` is 422 at `/settings`. SDK, CLI and MCP always send `kind`. Use a batch for more than one input, not a loop of this call.",
    "headers": [
     "Idempotency-Key"
@@ -950,6 +973,7 @@
     "required": true
    },
    "cli": "jobs estimate",
+   "confirmFirst": false,
    "description": "Takes the same body as `submitJob`, for a job or a batch, and returns the runtime per job, the weighted hours and the job count that today's estimator computes for the submit budget gate, fan-out included. A batch, inline or from a `source` file (read now, as on submit), is priced from its first 500 rows and scaled to its full row count, with a note saying so; more than 30,000 rows is 422 `out_of_range`. Settings that can't be priced, such as a numeric field that isn't a finite number, are 422 `invalid_type` at `/settings`. With `lowPriority: true`, `weightedHours` is the low-priority price,…",
    "headers": [],
    "links": false,
@@ -976,6 +1000,7 @@
     "required": true
    },
    "cli": "jobs search",
+   "confirmFirst": false,
    "description": "For polling or fetching a set of jobs, batches and pipeline runs. Use this instead of many `getJob` calls. Up to 200 `ids` and 200 `names`. An id is looked up as `getJob` looks it up (`job_`, `batch_` or `run_`), and a name as `listJobs?name=` does: the newest job, batch or run with that name, jobs inside a batch included. Items come back ids first, then names, each item once however many values found it. Values with no match are in `notFound`.",
    "headers": [],
    "links": false,
@@ -1002,6 +1027,7 @@
     "required": true
    },
    "cli": "jobs validate",
+   "confirmFirst": false,
    "description": "Takes the same body as `submitJob` (a batch only inline) and runs every check `submitJob` runs, read-only: settings, tool access and licence (including a stale `toolLifetimeEtag`), the name, the project (an unknown `projectId` is a failed `project` check with an `invalid_option` error at `/projectId`), budgets and quotas. If this says `valid: true`, `submitJob` can only refuse for a reason that changed in between, or because its `Idempotency-Key` was already used with a different body, which this doesn't see. Spends nothing and writes nothing.",
    "headers": [],
    "links": false,
@@ -1022,6 +1048,7 @@
   {
    "body": null,
    "cli": "jobs get",
+   "confirmFirst": false,
    "description": "Takes a `job_`, `batch_` or `run_` id and answers with that item; `kind` says which. A job comes with `settings`; a batch with its `counts`; a pipeline run with `counts` of its steps and `jobCounts` of the jobs they launched, read at most 60 seconds ago (its steps and molecules are under `/pipelines/runs/{runId}`). A job a run's step launched is readable here too, though only `pipelineRunId=` lists it. A single-tool run's `run_` id answers its job, the item the list shows for it (`kind` `job`, with its `job_` id). Anything you can't read is the same 404 as an id that doesn't exist: someone el…",
    "headers": [],
    "links": false,
@@ -1053,6 +1080,7 @@
     "required": true
    },
    "cli": "jobs update",
+   "confirmFirst": false,
    "description": "Takes a `job_` or `batch_` id; a `run_` id is 404. `name` never changes after submission. `displayName` is the editable label; null or blank clears it. `projectId` files the job under a project, and null takes it out; a field you leave out is unchanged. A batch's jobs follow the batch, so `projectId` on a job inside a batch is 422 `not_supported`. A project that isn't available to you is 422 `invalid_option` at `/projectId`. An organization with projects turned off can't assign one, but can clear one. Where the organization requires a project, only one of its own projects is accepted, and nul…",
    "headers": [],
    "links": false,
@@ -1078,6 +1106,7 @@
   {
    "body": null,
    "cli": "jobs delete",
+   "confirmFirst": false,
    "description": "Takes a `job_` or `batch_` id; a `run_` id is 404. This is the app's Delete button: the job, or a batch with every job in it, is marked deleted and reads as 404 everywhere from then on, so deleting it again is 404 too. Its outputs stay in storage. A tool run that is still running is stopped first; if stopping its jobs isn't confirmed, the answer is 502 `upstream_unavailable` and nothing is deleted yet, so delete again.",
    "headers": [],
    "links": false,
@@ -1107,6 +1136,7 @@
     "required": false
    },
    "cli": "jobs cancel",
+   "confirmFirst": false,
    "description": "Takes a `job_`, `batch_` or `run_` id. A batch stops every unfinished job in it; a run stops its unfinished steps, through the same cancel as `cancelPipelineRun`. A single-tool run's `run_` id stops that run and answers its job, as `getJob` does. Safe to repeat: canceling something already `Stopped` with `stopReason.kind` `canceled` returns it (a batch or a run is swept again for anything still running). Anything else that has finished (`Complete`, `Stopped` or `Failed`) is 409 `job_already_finished`. Also stops any child work it started.",
    "headers": [],
    "links": false,
@@ -1138,6 +1168,7 @@
     "required": false
    },
    "cli": "jobs rerun",
+   "confirmFirst": false,
    "description": "Puts a finished job back in the queue as the same job, as the app's Rerun does: the same id, tool, settings and project, and its earlier outputs are overwritten as it runs. Takes a `job_` or `batch_` id; a `run_` id is 404. Answers 200 with the job back `In Queue`; poll it with `getJob` as usual.",
    "headers": [],
    "links": false,
@@ -1169,6 +1200,7 @@
     "required": false
    },
    "cli": "jobs results",
+   "confirmFirst": false,
    "description": "Takes a `job_` or `batch_` id; a `run_` id is 404 (use `archivePipelineRun`). Serves the stored archive the job's worker wrote, the one today's `POST /result` serves. 200 means ready, with a link that expires in 1 hour, its expiry, the size and the real `fileCount`, read from the zip itself. `truncated` is false, since a stored archive is never cut short. 202 means still preparing: the job or batch is still running, by the status `getJob` shows (a batch's is its jobs'; a single-tool pipeline run's job is its run's), or a `Complete` batch's archive is being rebuilt. Call again after `retryAfte…",
    "headers": [],
    "links": true,
@@ -1197,6 +1229,7 @@
   {
    "body": null,
    "cli": "jobs files",
+   "confirmFirst": false,
    "description": "Takes a `job_` or `batch_` id; a `run_` id is 404. Available while the job runs, in path order, every file type included. A batch's own folder holds its combined results; each job's files are under that job's id. With `includeDownloadUrls=true`, one call gives every link on the page, so there is no need for one call per file. Links expire in 1 hour. A page reads at most 5,000 stored files, so with a `glob` that matches few of them a page can be short while `nextCursor` says there's more.",
    "headers": [],
    "links": true,
@@ -1260,6 +1293,7 @@
   {
    "body": null,
    "cli": "jobs download",
+   "confirmFirst": false,
    "description": "Takes a `job_` or `batch_` id and a `path` from `listJobFiles`; a `run_` id is 404, and so is a path with no file. A `path` that could leave the job's folder (a leading `/`, a backslash, a control character or an empty, `.` or `..` segment) is 422. `inline` content is gzip-encoded when the client accepts gzip, as every response is.",
    "headers": [],
    "links": true,
@@ -1307,6 +1341,7 @@
   {
    "body": null,
    "cli": "jobs logs",
+   "confirmFirst": false,
    "description": "Takes a `job_` id only; a `batch_` or `run_` id is 404. Returns the most recent output first, up to `maxBytes`, starting at a line (or else at a character). Follow `nextCursor` to page back through older output; the pages put back together are the log byte for byte. A window is at least 4 bytes, one whole UTF-8 character, so `maxBytes` of 1 to 3 reads 4. A job with no log yet answers 200 with empty `content`. A cursor is bound to the job's current attempt: once the job is re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again without one.",
    "headers": [],
    "links": false,
@@ -1348,6 +1383,7 @@
   {
    "body": null,
    "cli": "files list",
+   "confirmFirst": false,
    "description": "Every filter is applied by the server. Each item's `type` is `file` or `folder`. Paths are literal and relative to your workspace; job output folders are folders like any other.",
    "headers": [],
    "links": false,
@@ -1421,6 +1457,7 @@
     "required": true
    },
    "cli": "files upload",
+   "confirmFirst": false,
    "description": "The only way to upload.",
    "headers": [],
    "links": true,
@@ -1441,6 +1478,7 @@
   {
    "body": null,
    "cli": "files delete",
+   "confirmFirst": false,
    "description": "Send exactly one of `path` or `folder`. Sending neither or both answers 422, and nothing is deleted. Names are literal: `folder` may be a job's output folder, by its folder name. A path or folder that doesn't exist is 404. The root can't be deleted (422). A folder of more than 10,000 files is 422 `folder_too_large`, refused before anything is touched. A file's sharing and links end before it is deleted, so a file uploaded again at that path is never reachable through an old share. If files keep arriving in a folder after three passes, the answer is 409 `folder_changed`. A private export is th…",
    "headers": [],
    "links": false,
@@ -1480,6 +1518,7 @@
     "required": true
    },
    "cli": "files upload",
+   "confirmFirst": false,
    "description": "Send every part the upload was started with (1 to N, each once, with the ETag its PUT returned), and the parts must add up to its `sizeBytes`; otherwise it is 422 at `/parts` and nothing is stored. An `uploadId` that isn't one of your uploads, or an upload that was aborted, is 404. A retry after a completion whose answer was lost answers 200 with the stored file. Abandoned uploads are cleaned up by storage after a few days.",
    "headers": [],
    "links": false,
@@ -1500,6 +1539,7 @@
   {
    "body": null,
    "cli": "files download",
+   "confirmFirst": false,
    "description": "Any file in your workspace by its exact path, hidden ones included. A private export is the same 404 as a missing file.",
    "headers": [],
    "links": true,
@@ -1542,6 +1582,7 @@
   {
    "body": null,
    "cli": "files stats",
+   "confirmFirst": false,
    "description": "Counts the files directly in `folder`, not its subfolders: what a listing of it without `recursive` shows. At the root that's your top-level uploads, read from the file catalog, the number today's MCP `getFileStats` gives; it follows storage by a few seconds. A file with no extension, or a suffix over 32 characters, counts under `\"\"`. A folder holding more than 250,000 files and folders (at the root, more than 250,000 uploads), or files with more than 1,000 distinct extensions, is 422 `folder_too_large`. A folder that doesn't exist counts zero.",
    "headers": [],
    "links": false,
@@ -1570,6 +1611,7 @@
   {
    "body": null,
    "cli": "models list",
+   "confirmFirst": false,
    "description": "Your models and your teammates', newest first; `owner` says whose it is. Teammates' models are included when your organization shares within itself or you are its service account; otherwise only yours. A person's key never gets an organization admin's wider view. A model id held by several stored rows is listed once, as its newest row. Deleted models and models of trainers hidden from you aren't listed.",
    "headers": [],
    "links": false,
@@ -1613,6 +1655,7 @@
   {
    "body": null,
    "cli": "models get",
+   "confirmFirst": false,
    "description": "A model you own, one your organization's sharing lets you read, or one shared with you by name. An unknown, deleted or unreadable model is the same 404.",
    "headers": [],
    "links": false,
@@ -1638,6 +1681,7 @@
   {
    "body": null,
    "cli": "projects list",
+   "confirmFirst": false,
    "description": "Your organization's projects, your own personal ones, then projects shared with you, each group by name. When your organization hides members' data from each other, only the organization projects you created or were added to. A shared project counts only while its creator's sharing still allows it, and an organization project only while you are in that organization. Archived projects are left out. When your organization's settings can't be read the answer is 503; retry.",
    "headers": [],
    "links": false,
@@ -1688,6 +1732,7 @@
     "required": true
    },
    "cli": "projects create",
+   "confirmFirst": false,
    "description": "The name and description are stored trimmed. A project created without a `color` gets one from the app's palette, and a color you send is stored in upper case. A name already used in the same place (your organization, or your personal projects) is 409 `project_name_taken`.",
    "headers": [],
    "links": false,
@@ -1708,6 +1753,7 @@
   {
    "body": null,
    "cli": "projects get",
+   "confirmFirst": false,
    "description": "Any project you can see, archived ones included. A project you can't see is 404, so its existence isn't disclosed.",
    "headers": [],
    "links": false,
@@ -1739,6 +1785,7 @@
     "required": true
    },
    "cli": "projects update",
+   "confirmFirst": false,
    "description": "Only the project's creator can do this. A project you can see but didn't create is 403; one you can't see is 404. Send only the fields to change. `null` clears `description`; for `name`, `color` and `isArchived` it is 422. `listProjectMembers` shows the result of `addMembers` and `removeMembers`. A member from outside who your sharing policy doesn't allow is 422 at `/addMembers/{i}` (diagnostic `not_in_org`), and 503 when that policy can't be read; nothing is written in either case. Adds that failed come back in `failedAdds`. A removal that fails answers 500 `members_not_removed`, because tha…",
    "headers": [],
    "links": false,
@@ -1764,6 +1811,7 @@
   {
    "body": null,
    "cli": "projects delete",
+   "confirmFirst": false,
    "description": "Only the project's creator can do this. A project with jobs needs one of two choices: `moveToProjectId` moves them to another project, and `confirmJobRemoval=true` leaves them in no project. With neither, the answer is 409 `project_not_empty`. If your organization requires a project on every job, leaving them in none is not allowed, so `moveToProjectId` is the only choice and anything else is 409 `project_move_required`. Only jobs the app lists count here: a project holding only deleted jobs needs no choice, and those are unfiled, or moved with the rest. `moveToProjectId` is checked only when…",
    "headers": [],
    "links": false,
@@ -1803,6 +1851,7 @@
   {
    "body": null,
    "cli": "projects members",
+   "confirmFirst": false,
    "description": "The member rows stored for the project, as they are stored, by address. Any project you can see; one you can't see is 404. A cursor works only for the project it came from.",
    "headers": [],
    "links": false,
@@ -1844,6 +1893,7 @@
   {
    "body": null,
    "cli": "projects leave",
+   "confirmFirst": false,
    "description": "Removes only you, from a personal or an organization project. 404 when you aren't a member. A removal that fails is 500 `members_not_removed`, which is retryable, because you may still have access. Access saved in an older address format is 500 `member_key_outdated`, not retryable; support removes it.",
    "headers": [],
    "links": false,
@@ -1867,6 +1917,7 @@
   {
    "body": null,
    "cli": "projects notes",
+   "confirmFirst": false,
    "description": "Fetch the project notes. This includes project metadata and entry data. Log notes are not included and can be fetched one entry at a time from `GET /projects/{projectId}/notes/entries/{entryId}`. The first read of a project sets its notes up, so it can be 400 `write_contended` (`retryable: true`) when another request does the same at that moment; send it again. A read-only member gets the notes as they would open, without anything being set up.",
    "headers": [],
    "links": false,
@@ -1898,6 +1949,7 @@
     "required": true
    },
    "cli": "projects notes update",
+   "confirmFirst": false,
    "description": "Update the project's details, its lanes and its statuses. Updatable fields: tags, owner, startDate, dueDate, laneOrder `lanes` and `statuses` take operations, so removing one can say where its work goes. The project's description isn't one of them: it belongs to the project (`updateProject`), so sending it is 422. A value the notes store refuses inside `lanes` or `statuses` names the field in `detail` rather than with a pointer. A key the operation doesn't take is 422 `unknown_field`, refused before anything else. A value the notes store refuses is 400 `validation_failed`, pointing at the fie…",
    "headers": [],
    "links": false,
@@ -1929,6 +1981,7 @@
     "required": true
    },
    "cli": "projects notes add",
+   "confirmFirst": false,
    "description": "Add an entry to the project. Resources that are included within `links` are added to the project. Unlinking a resource does not remove the resource from the project. A key the operation doesn't take is 422 `unknown_field`, refused before anything else. A value the notes store refuses is 400 `validation_failed`, pointing at the field. A stale `version` is 409 `version_conflict` with the `currentVersion` to retry with. A write that met another on the same records is 400 `write_contended` with `retryable: true`: nothing was stored, so send it again.",
    "headers": [],
    "links": false,
@@ -1954,6 +2007,7 @@
   {
    "body": null,
    "cli": "projects notes entry",
+   "confirmFirst": false,
    "description": "Get an entry for a project and all of its associated notes.",
    "headers": [],
    "links": false,
@@ -1989,6 +2043,7 @@
     "required": true
    },
    "cli": "projects notes edit",
+   "confirmFirst": false,
    "description": "Update an entry's fields. Resources that are included within `links` are added to the project. Unlinking a resource does not remove the resource from the project. A key the operation doesn't take is 422 `unknown_field`, refused before anything else. A value the notes store refuses is 400 `validation_failed`, pointing at the field. A stale `version` is 409 `version_conflict` with the `currentVersion` to retry with. A write that met another on the same records is 400 `write_contended` with `retryable: true`: nothing was stored, so send it again.",
    "headers": [],
    "links": false,
@@ -2018,6 +2073,7 @@
   {
    "body": null,
    "cli": "projects notes delete",
+   "confirmFirst": false,
    "description": "Delete an entry for a project and all of its associated notes. A missing or non-integer `version` is 422. A stale `version` is 409 `version_conflict` with the `currentVersion` to retry with. A write that met another on the same records is 400 `write_contended` with `retryable: true`: nothing was stored, so send it again.",
    "headers": [],
    "links": false,
@@ -2059,6 +2115,7 @@
     "required": true
    },
    "cli": "projects notes append",
+   "confirmFirst": false,
    "description": "Create a note and append it to an entry. `Location` points at the entry, because a note has no read of its own. It takes no `version`: a note can't conflict with an edit to its entry. A key the operation doesn't take is 422 `unknown_field`, refused before anything else. A value the notes store refuses is 400 `validation_failed`, pointing at the field. A write that met another on the same records is 400 `write_contended` with `retryable: true`: nothing was stored, so send it again.",
    "headers": [],
    "links": false,
@@ -2094,6 +2151,7 @@
     "required": true
    },
    "cli": "projects notes edit-note",
+   "confirmFirst": false,
    "description": "Update a note. Editing sets `editedAt`; `createdAt` and the note's place in the log don't change. A key the operation doesn't take is 422 `unknown_field`, refused before anything else. A value the notes store refuses is 400 `validation_failed`, pointing at the field. A stale `version` is 409 `version_conflict` with the `currentVersion` to retry with. A write that met another on the same records is 400 `write_contended` with `retryable: true`: nothing was stored, so send it again.",
    "headers": [],
    "links": false,
@@ -2127,6 +2185,7 @@
   {
    "body": null,
    "cli": "projects notes delete-note",
+   "confirmFirst": false,
    "description": "Delete a note from an entry's log. An agent actor can't delete a note a person wrote (403). A missing or non-integer `version` is 422. A stale `version` is 409 `version_conflict` with the `currentVersion` to retry with. A write that met another on the same records is 400 `write_contended` with `retryable: true`: nothing was stored, so send it again.",
    "headers": [],
    "links": false,
@@ -2172,6 +2231,7 @@
     "required": true
    },
    "cli": "pipelines estimate",
+   "confirmFirst": false,
    "description": "Estimate the compute a run would use without creating or executing it. Uses the same settings as `submitPipeline`, and nothing is created, saved, or charged.",
    "headers": [],
    "links": false,
@@ -2192,6 +2252,7 @@
   {
    "body": null,
    "cli": "pipelines runs",
+   "confirmFirst": false,
    "description": "List your pipeline runs, or with `scope=org` your organization's. A `status`, `scope` or `source` it doesn't know, or a `templateId` that isn't a template id, is 400 `validation_failed`, as on `GET /jobs`. The cursor is bound to the caller and the filters.",
    "headers": [],
    "links": false,
@@ -2278,6 +2339,7 @@
     "required": true
    },
    "cli": "pipelines submit",
+   "confirmFirst": false,
    "description": "Submit a pipeline run from an existing template, or from a new pipeline graph.",
    "headers": [
     "Idempotency-Key"
@@ -2300,6 +2362,7 @@
   {
    "body": null,
    "cli": "pipelines run",
+   "confirmFirst": false,
    "description": "Query a run for its status overall and per-node, along with output results. Takes a `run_` id; a bare UUID or any other prefix is the same 404 as an unknown run.",
    "headers": [],
    "links": false,
@@ -2331,6 +2394,7 @@
     "required": false
    },
    "cli": "pipelines results",
+   "confirmFirst": false,
    "description": "Waits up to 25 seconds for the archive. 200 means ready, with the zip's size and the link's expiry; `fileCount` and `truncated` are null, because nothing records them for a run's zip. 202 means still preparing, so call again after `retryAfterSeconds` (10, also sent as `Retry-After`). It is also 202 while the run (or the node run you named) hasn't finished: the zip is built only once it has. An archive that could not be built is 409 `archive_failed`, retryable after `Retry-After` (90 seconds), when the results service builds again. Building the zip starts work, so an organization that can't st…",
    "headers": [],
    "links": true,
@@ -2359,6 +2423,7 @@
   {
    "body": null,
    "cli": "pipelines cancel",
+   "confirmFirst": false,
    "description": "Stop a pipeline run.",
    "headers": [],
    "links": false,
@@ -2384,6 +2449,7 @@
   {
    "body": null,
    "cli": "pipelines molecules",
+   "confirmFirst": false,
    "description": "The molecules one node run produced, with their scores.",
    "headers": [],
    "links": false,
@@ -2429,6 +2495,7 @@
   {
    "body": null,
    "cli": "pipelines schema",
+   "confirmFirst": false,
    "description": "Read this before writing a `pipeline` graph. The guide's API walkthrough is written for this API. At launch it answers without a key, as today's public pipeline guide does, and requests without a key share one overall rate limit. Until launch it needs a key (401 without one) and, while v1 is behind the `api-v1` flag, a caller the flag covers.",
    "headers": [],
    "links": false,
@@ -2449,6 +2516,7 @@
   {
    "body": null,
    "cli": "pipelines templates",
+   "confirmFirst": false,
    "description": "List your pipeline templates, or with `scope=org` your organization's. A `scope` it doesn't know is 400 `validation_failed`. The cursor is bound to the caller and the filters.",
    "headers": [],
    "links": false,
@@ -2516,6 +2584,7 @@
     "required": true
    },
    "cli": "pipelines create-template",
+   "confirmFirst": false,
    "description": "Create a pipeline template from a `pipeline` graph of inputs, tools, and filters.",
    "headers": [],
    "links": false,
@@ -2536,6 +2605,7 @@
   {
    "body": null,
    "cli": "pipelines template",
+   "confirmFirst": false,
    "description": "Retrieve a template by id to view its nodes and required inputs.",
    "headers": [],
    "links": false,
@@ -2569,6 +2639,7 @@
   {
    "body": null,
    "cli": "pipelines delete-template",
+   "confirmFirst": false,
    "description": "Archive a template. Its versions and existing runs remain available historically.",
    "headers": [],
    "links": false,
@@ -2598,6 +2669,7 @@
     "required": false
    },
    "cli": "pipelines duplicate-template",
+   "confirmFirst": false,
    "description": "Create a copy of a version of your existing pipeline (latest by default).",
    "headers": [],
    "links": false,
@@ -2629,6 +2701,7 @@
     "required": true
    },
    "cli": "pipelines publish-template",
+   "confirmFirst": false,
    "description": "Publish a version of your pipeline template to your organization.",
    "headers": [],
    "links": false,
@@ -2660,6 +2733,7 @@
     "required": false
    },
    "cli": "pipelines validate-template",
+   "confirmFirst": false,
    "description": "Validate the settings and inputs of a template without creating or executing it.",
    "headers": [],
    "links": false,
@@ -2691,6 +2765,7 @@
     "required": true
    },
    "cli": "pipelines validate",
+   "confirmFirst": false,
    "description": "Validate the settings and inputs of a run without creating or executing it. Uses the same settings as `submitPipeline`.",
    "headers": [],
    "links": false,
@@ -2711,6 +2786,7 @@
   {
    "body": null,
    "cli": "molecules list",
+   "confirmFirst": false,
    "description": "List molecules in your organization. Set `scope=org` to search your organization.",
    "headers": [],
    "links": true,
@@ -2898,6 +2974,7 @@
   {
    "body": null,
    "cli": "molecules groups",
+   "confirmFirst": false,
    "description": "List your molecule groups.",
    "headers": [],
    "links": false,
@@ -2980,6 +3057,7 @@
     "required": true
    },
    "cli": "molecules create-group",
+   "confirmFirst": false,
    "description": "Create an empty molecule group.",
    "headers": [],
    "links": false,
@@ -3000,6 +3078,7 @@
   {
    "body": null,
    "cli": "molecules group",
+   "confirmFirst": false,
    "description": "Fetch one group by id — its name, size, and origin.",
    "headers": [],
    "links": false,
@@ -3031,6 +3110,7 @@
     "required": true
    },
    "cli": "molecules remove",
+   "confirmFirst": false,
    "description": "Remove molecules from a group.",
    "headers": [],
    "links": false,
@@ -3062,6 +3142,7 @@
     "required": true
    },
    "cli": "molecules scores",
+   "confirmFirst": false,
    "description": "List retained seed/sample observations for explicit concrete jobs in this group.",
    "headers": [],
    "links": false,
@@ -3093,6 +3174,7 @@
     "required": true
    },
    "cli": "molecules import",
+   "confirmFirst": false,
    "description": "Import molecules from a file. Step 1 of 3.",
    "headers": [],
    "links": true,
@@ -3113,6 +3195,7 @@
   {
    "body": null,
    "cli": "molecules import-status",
+   "confirmFirst": false,
    "description": "Poll an import's progress after upload or commit.",
    "headers": [],
    "links": false,
@@ -3138,6 +3221,7 @@
   {
    "body": null,
    "cli": "molecules import-delete",
+   "confirmFirst": false,
    "description": "Cancel an unclaimed import and clean its source objects.",
    "headers": [],
    "links": false,
@@ -3167,6 +3251,7 @@
     "required": false
    },
    "cli": "molecules import-commit",
+   "confirmFirst": false,
    "description": "Step 3 of 3: enqueue ingestion for the uploaded file. It answers 200 with the import `queued`, before ingestion runs; poll `getMoleculeImport` for the outcome.",
    "headers": [],
    "links": false,
@@ -3192,6 +3277,7 @@
   {
    "body": null,
    "cli": "molecules schemas",
+   "confirmFirst": false,
    "description": "List your schemas.",
    "headers": [],
    "links": false,
@@ -3242,6 +3328,7 @@
     "required": true
    },
    "cli": "molecules create-schema",
+   "confirmFirst": false,
    "description": "Define a reusable set of typed fields you can bind to a group.",
    "headers": [],
    "links": false,
@@ -3262,6 +3349,7 @@
   {
    "body": null,
    "cli": "molecules schema",
+   "confirmFirst": false,
    "description": "Fetch one schema by id. Where your organization hides members' data from each other, a coworker's schema answers as an unknown schema.",
    "headers": [],
    "links": false,
@@ -3293,6 +3381,7 @@
     "required": true
    },
    "cli": "molecules update-schema",
+   "confirmFirst": false,
    "description": "Update a schema's name and/or fields.",
    "headers": [],
    "links": false,
@@ -3324,6 +3413,7 @@
     "required": true
    },
    "cli": "molecules search",
+   "confirmFirst": false,
    "description": "Search molecules using the same filters as `GET /molecules`, with the same names (`groupId`, `jobId`), plus `jobName`, which only this body takes. Send repeated filters as arrays. Maximum request body: 4 MB.",
    "headers": [],
    "links": true,
@@ -3350,6 +3440,7 @@
     "required": true
    },
    "cli": "molecules upload",
+   "confirmFirst": false,
    "description": "Queue molecules for JSON upload ingestion.",
    "headers": [],
    "links": false,
@@ -3370,6 +3461,7 @@
   {
    "body": null,
    "cli": "molecules get",
+   "confirmFirst": false,
    "description": "Get one molecule — its chains, scores, files, provenance, and groups, all inline.",
    "headers": [],
    "links": true,
@@ -3403,6 +3495,7 @@
   {
    "body": null,
    "cli": "molecules delete",
+   "confirmFirst": false,
    "description": "Permanently delete a molecule. Organization admin only, and a person's API key is never an organization admin, so only a service account's key can delete.",
    "headers": [],
    "links": false,
@@ -3426,6 +3519,7 @@
   {
    "body": null,
    "cli": "molecules groups-of",
+   "confirmFirst": false,
    "description": "List every group a molecule belongs to.",
    "headers": [],
    "links": false,
@@ -3473,6 +3567,7 @@
     "required": true
    },
    "cli": "molecules update-metadata",
+   "confirmFirst": false,
    "description": "Update a molecule. All fields are optional and applied together. Leave one out to leave it unchanged, and send `null` to clear `source` or `fileId`.",
    "headers": [],
    "links": true,
@@ -3498,6 +3593,7 @@
   {
    "body": null,
    "cli": "custom-tools list",
+   "confirmFirst": false,
    "description": "List custom tools in your organization.",
    "headers": [],
    "links": true,
@@ -3559,6 +3655,7 @@
     "required": true
    },
    "cli": "custom-tools create",
+   "confirmFirst": false,
    "description": "Create a custom tool in Draft status.",
    "headers": [],
    "links": true,
@@ -3585,6 +3682,7 @@
     "required": true
    },
    "cli": "custom-tools validate-config",
+   "confirmFirst": false,
    "description": "Check a `config.json` against the contract a build applies, before spending a build on it.",
    "headers": [],
    "links": false,
@@ -3605,6 +3703,7 @@
   {
    "body": null,
    "cli": "custom-tools get",
+   "confirmFirst": false,
    "description": "Get a custom tool and one version.",
    "headers": [
     "If-Match"
@@ -3646,6 +3745,7 @@
     "required": true
    },
    "cli": "custom-tools update",
+   "confirmFirst": false,
    "description": "Update a custom tool's metadata or compute resources.",
    "headers": [
     "If-Match"
@@ -3673,6 +3773,7 @@
   {
    "body": null,
    "cli": "custom-tools delete",
+   "confirmFirst": false,
    "description": "Delete this custom tool and release its name for reuse.",
    "headers": [
     "If-Match"
@@ -3704,6 +3805,7 @@
     "required": true
    },
    "cli": "custom-tools build",
+   "confirmFirst": false,
    "description": "Build a version from an uploaded source archive.",
    "headers": [
     "Idempotency-Key",
@@ -3732,6 +3834,7 @@
   {
    "body": null,
    "cli": "custom-tools logs",
+   "confirmFirst": false,
    "description": "List build log events for a version.",
    "headers": [
     "If-Match"
@@ -3774,6 +3877,7 @@
   {
    "body": null,
    "cli": "custom-tools cancel",
+   "confirmFirst": false,
    "description": "Request cancellation of an active build.",
    "headers": [
     "If-Match"
@@ -3809,6 +3913,7 @@
   {
    "body": null,
    "cli": "custom-tools publish",
+   "confirmFirst": false,
    "description": "Publish a completed version.",
    "headers": [
     "If-Match"
@@ -3844,6 +3949,7 @@
   {
    "body": null,
    "cli": "custom-tools upload",
+   "confirmFirst": false,
    "description": "Create a temporary upload for a source archive.",
    "headers": [
     "If-Match"
@@ -3871,6 +3977,7 @@
   {
    "body": null,
    "cli": "custom-tools versions",
+   "confirmFirst": false,
    "description": "List versions of a custom tool.",
    "headers": [
     "If-Match"
@@ -3927,6 +4034,7 @@
   {
    "body": null,
    "cli": "assays targets",
+   "confirmFirst": false,
    "description": "Needs Assay Portal access: without it, 403 `wetlab_access_required`. A lab the portal doesn't offer you (Ginkgo where it isn't enabled, say) is 400 `validation_failed`. A lab's target list that can't be read is 502 `targets_unavailable`; retry shortly. The cursor is bound to `provider` and `search`.",
    "headers": [],
    "links": false,
@@ -3983,6 +4091,7 @@
   {
    "body": null,
    "cli": "assays types",
+   "confirmFirst": false,
    "description": "Any key can read the catalogue. A lab the portal doesn't offer you is left out, and naming it as `provider` is 400 `validation_failed`. `wetLabAccess` says whether you can place orders: Assay Portal access, on a credential that isn't an unclaimed agent trial. `requestAccessUrl` is where to ask for access.",
    "headers": [],
    "links": true,
@@ -4032,6 +4141,7 @@
   {
    "body": null,
    "cli": "assays list",
+   "confirmFirst": false,
    "description": "The orders you placed, newest first. Portal drafts and deleted orders are left out. The cursor is bound to `status`. Where assay orders aren't available on a deployment, this and the other order operations answer 503 `service_unavailable`.",
    "headers": [],
    "links": true,
@@ -4105,6 +4215,7 @@
     "required": true
    },
    "cli": "assays submit",
+   "confirmFirst": true,
    "description": "This commits real money and lab work. Confirm with the user first. Use `validateAssay` beforehand.",
    "headers": [
     "Idempotency-Key"
@@ -4133,6 +4244,7 @@
     "required": true
    },
    "cli": "assays estimate",
+   "confirmFirst": false,
    "description": "No order is created and nothing is charged, but the lab is sent your sequences, and A-Alpha keeps a quote on file. The order gets the same checks as `validateAssay` first: one that fails them is 422 `validation_failed` with the same problems in `errors`, and nothing reaches the lab. No Assay Portal access is 403 `wetlab_access_required`; an unclaimed agent trial credential is 403 `forbidden`. When Ginkgo gives no price, its catalog price is used.",
    "headers": [],
    "links": false,
@@ -4159,6 +4271,7 @@
     "required": true
    },
    "cli": "assays validate",
+   "confirmFirst": false,
    "description": "200 means the check ran, whatever the verdict. Only a body with no `assayType`, a field of the wrong JSON type, an unknown field, or text that isn't valid Unicode is 422, because there is nothing to check. The body is `AssayOrderCheckRequest`: every other rule of `AssayOrderRequest` (exactly one of `sequences` or `csvFile`, `modality`, the shape of each sequence) is part of the verdict. Runs the portal's own order checks, word for word: settings, sequences, a CSV file (read from your own files only), targets, residues, each lab's minimums and duplicates. Nothing is created and no lab is conta…",
    "headers": [],
    "links": false,
@@ -4179,6 +4292,7 @@
   {
    "body": null,
    "cli": "assays get",
+   "confirmFirst": false,
    "description": "Your own order. Another account's order, a portal draft, a deleted order and an unknown id are all 404.",
    "headers": [],
    "links": true,
@@ -4210,6 +4324,7 @@
     "required": false
    },
    "cli": "assays cancel",
+   "confirmFirst": true,
    "description": "Confirm with the user first. The order's `cancellable` field says whether this will work now. Safe to repeat: an order already `cancelled` or `cancelling` answers 200 as it is. When the lab holds the order it is told: Ginkgo confirms later, so the order reads `cancelling`; A-Alpha confirms at once. An order no lab holds yet is only recorded as `cancelled`. Ginkgo orders can be cancelled only before work starts, A-Alpha orders until they finish, and Adaptyv and GenScript orders only through Tamarind support.",
    "headers": [],
    "links": true,
@@ -4235,6 +4350,7 @@
   {
    "body": null,
    "cli": "assays results",
+   "confirmFirst": false,
    "description": "Links to what the lab delivered; `expiresAt` says when they stop working. Results stored with Tamarind are listed whatever the order's `status` says now; otherwise nothing is ready until the order is `completed`. A completed order with nothing stored yet asks the lab once more: GenScript's report or Adaptyv's results are fetched, stored and recorded on the order. Ginkgo and A-Alpha deliver on their own, so there is nothing to ask. An Adaptyv order's own data-package links are fetched again on each read, waiting at most 5 seconds. These lab calls only read: nothing is ordered, changed or charg…",
    "headers": [],
    "links": true,

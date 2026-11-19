@@ -680,10 +680,20 @@ def test_submit_wait_download_shares_one_timeout(v1, tmp_path, monkeypatch):
     assert seen["timeout"] == 40
 
 
-def test_an_assay_order_needs_yes(v1):
+def test_an_assay_order_and_its_cancel_need_yes(v1):
     v1.answers["assays.submit"] = {"id": "asy_1"}
     res = runner.invoke(app, ["--json", "assays", "submit", "--set", "x=1"])
     assert res.exit_code == 2 and v1.calls == []
+    v1.answers["assays.cancel"] = {"id": "asy_1", "status": "cancelled"}
+    res = runner.invoke(app, ["--json", "assays", "cancel", "asy_1"])
+    assert res.exit_code == 2 and v1.calls == []
+    assert _json(runner.invoke(app, ["--json", "assays", "cancel", "asy_1", "--yes"]))["status"] == "cancelled"
+
+
+def test_confirm_first_comes_from_the_contract():
+    from tamarind.cli.v1 import manifest
+
+    assert {o["operationId"] for o in manifest.operations() if o["confirmFirst"]} == {"submitAssay", "cancelAssay"}
 
 
 def test_bad_date_times_are_usage_errors(v1):
