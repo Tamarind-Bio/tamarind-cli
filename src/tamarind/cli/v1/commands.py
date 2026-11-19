@@ -297,7 +297,7 @@ def submit(
         submitted = call(client, "submitJob", body=body, idempotency_key=idempotency_key)
         if not wait:
             output.emit(
-                submitted,
+                render.redact(submitted),
                 state.output,
                 human=f"submitted: {submitted.get('name')} ({submitted.get('id')}, {submitted.get('status')})",
             )
@@ -308,11 +308,11 @@ def submit(
         result["final"] = final
         if download and final.get("status") == "Complete":
             link = _archive(client, final["id"], body=None, wait=True, timeout=timeout)
-            dest = download / f"{final.get('name') or final['id']}.zip"
+            dest = download / Path(f"{final.get('name') or final['id']}.zip").name
             written = _download(link["downloadUrl"], dest)
             result["download"] = {"path": str(dest), "bytes": written}
             output.info(f"  downloaded {written} bytes → {dest}", state.output)
-    output.emit(result, state.output, human=status_line(final))
+    output.emit(render.redact(result), state.output, human=status_line(final))
     if failed(final):
         raise typer.Exit(ExitCode.JOB_FAILED)
 
@@ -329,7 +329,7 @@ def batch(
                 )
         submitted = call(client, "submitJob", body=body, idempotency_key=idempotency_key)
     output.emit(
-        submitted,
+        render.redact(submitted),
         state.output,
         human=(
             f"submitted batch '{submitted.get('name')}' ({submitted.get('id')}, "
@@ -372,13 +372,13 @@ def jobs_list(
     human = render.table(page["items"], ["id", "name", "tool", "status", "createdAt"])
     if page.get("nextCursor"):
         human += "\n\nMore results — re-run with --all, or --start-key with the nextCursor in --json."
-    output.emit(page, state.output, human=human)
+    output.emit(render.redact(page), state.output, human=human)
 
 
 def get(state: Any, ref: str, *, organization: bool = False, email: str | None = None) -> None:
     with sdk.make_client(state) as client:
         job = call(client, "getJob", resolve_id(client, ref, organization=organization, email=email))
-    output.emit(job, state.output, human=status_line(job))
+    output.emit(render.redact(job), state.output, human=status_line(job))
 
 
 def wait(
@@ -395,7 +395,7 @@ def wait(
     with sdk.make_client(state) as client:
         job_id = resolve_id(client, ref, organization=organization, email=email)
         final = _wait(client, job_id, state, poll_interval=poll_interval, timeout=timeout)
-    output.emit(final, state.output, human=status_line(final))
+    output.emit(render.redact(final), state.output, human=status_line(final))
     if failed(final):
         raise typer.Exit(ExitCode.JOB_FAILED)
 
@@ -429,7 +429,7 @@ def results(
             final = _wait(client, job_id, state, poll_interval=poll_interval, timeout=timeout)
             result["final"] = final
             if failed(final):
-                output.emit(result, state.output, human=status_line(final))
+                output.emit(render.redact(result), state.output, human=status_line(final))
                 raise typer.Exit(ExitCode.JOB_FAILED)
         if file:
             link = call(client, "getJobFile", job_id, path=file, delivery="url")
@@ -467,7 +467,7 @@ def cancel(state: Any, ref: str | None, batch: str | None, *, reason: str | None
     with sdk.make_client(state) as client:
         target = resolve_id(client, batch, kind="batch") if batch else resolve_id(client, ref or "")
         job = call(client, "cancelJob", target, body={"reason": reason} if reason else {})
-    output.emit(job, state.output, human=status_line(job))
+    output.emit(render.redact(job), state.output, human=status_line(job))
 
 
 def delete(state: Any, ref: str) -> None:

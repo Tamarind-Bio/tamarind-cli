@@ -26,7 +26,7 @@ from typer.core import TyperGroup
 
 from ...config import API_V1, resolve_api
 from ...errors import UsageError, ValidationError
-from .. import inputs
+from .. import inputs, output
 from . import manifest, render, sdk
 
 DEFAULT_COMMAND = "_default"
@@ -161,7 +161,24 @@ def operation_params(op: dict[str, Any]) -> list[click.Parameter]:
         params.append(
             click.Option(["--all", "all_pages"], is_flag=True, help="Follow nextCursor to the end.")
         )
+    if op.get("links"):
+        params.append(
+            click.Option(
+                ["--show-urls", "show_urls"],
+                is_flag=True,
+                help="Print signed download/upload links (they are redacted otherwise).",
+            )
+        )
+    if destructive(op):
+        params.append(
+            click.Option(["--yes", "-y", "yes"], is_flag=True, help="Skip confirmation.")
+        )
     return params
+
+
+def destructive(op: dict[str, Any]) -> bool:
+    """Deletes, revocations and removals ask first, like today's `delete` commands."""
+    return op["method"] == "DELETE" or op["operationId"].startswith(("delete", "remove", "revoke"))
 
 
 def run_operation(op: dict[str, Any], values: dict[str, Any]) -> None:
@@ -174,6 +191,12 @@ def run_operation(op: dict[str, Any], values: dict[str, Any]) -> None:
     if op.get("body") is not None and op["body"].get("required") and body is None:
         # Let the server say which fields are missing, every one at once.
         body = {}
+    if destructive(op):
+        output.confirm_destructive(
+            f"run `tamarind {' '.join([op['cli'], *path_args])}`",
+            yes=bool(values.get("yes")),
+            mode=state.output,
+        )
     with sdk.make_client(state) as client:
         if values.get("all_pages"):
             result: Any = sdk.collect(client, op, *path_args, **query)
@@ -187,7 +210,7 @@ def run_operation(op: dict[str, Any], values: dict[str, Any]) -> None:
                 if_match=values.get("if_match"),
                 **query,
             )
-    render.emit(result, state.output)
+    render.emit(result, state.output, show_urls=bool(values.get("show_urls")))
 
 
 def operation_command(op: dict[str, Any], name: str, *, hidden: bool = False) -> click.Command:

@@ -61,5 +61,17 @@ def human(body: Any) -> str:
     return str(body)
 
 
-def emit(body: Any, mode: output.OutputMode, *, human_text: str | None = None) -> None:
+def redact(body: Any) -> Any:
+    """Signed download/upload links out of ordinary output, as today's job output does
+    (``--show-urls`` / ``--show-url`` print them on purpose)."""
+    from ..commands.jobs import _sanitize_job_output
+
+    return _sanitize_job_output(body)
+
+
+def emit(
+    body: Any, mode: output.OutputMode, *, human_text: str | None = None, show_urls: bool = False
+) -> None:
+    if not show_urls:
+        body = redact(body)
     output.emit(body if body is not None else {"ok": True}, mode, human=human_text or human(body))

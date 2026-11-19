@@ -93,6 +93,24 @@ class Contract:
         return out
 
 
+def _carries_links(contract: Contract, node: Any, seen: set[int] | None = None) -> bool:
+    """Whether an answer schema can hold a URL (a field named *url, or format uri)."""
+    seen = set() if seen is None else seen
+    node = contract.resolve(node)
+    if not isinstance(node, dict) or id(node) in seen:
+        return False
+    seen.add(id(node))
+    if node.get("format") == "uri":
+        return True
+    for name, child in (node.get("properties") or {}).items():
+        if name.lower().endswith("url") or _carries_links(contract, child, seen):
+            return True
+    children = [node.get("items"), node.get("additionalProperties")]
+    for key in ("oneOf", "anyOf", "allOf"):
+        children.extend(node.get(key) or [])
+    return any(_carries_links(contract, c, seen) for c in children if isinstance(c, dict))
+
+
 def build(doc: dict[str, Any]) -> dict[str, Any]:
     contract = Contract(doc)
     operations = []
@@ -136,11 +154,14 @@ def build(doc: dict[str, Any]) -> dict[str, Any]:
                     "description": _first_sentence(rb.get("description")),
                 }
             success = {}
+            links = False
             for code, resp in op.get("responses", {}).items():
                 if not str(code).startswith("2"):
                     continue
                 resp = contract.resolve(resp)
                 success[str(code)] = sorted(resp.get("content", {}))
+                for media in resp.get("content", {}).values():
+                    links = links or _carries_links(contract, media.get("schema"))
             operations.append(
                 {
                     "operationId": op["operationId"],
@@ -159,6 +180,7 @@ def build(doc: dict[str, Any]) -> dict[str, Any]:
                     "headers": [h for h in headers if h in ("Idempotency-Key", "If-Match")],
                     "body": body,
                     "success": success,
+                    "links": links,
                 }
             )
     return {

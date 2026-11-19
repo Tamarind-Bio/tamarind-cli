@@ -580,3 +580,21 @@ def test_help_honors_an_explicit_profile(monkeypatch, tmp_path):
     assert "projects" in runner.invoke(app, ["--profile", "next", "--help"]).stdout
     monkeypatch.setattr(sys, "argv", ["tamarind", "--help"])
     assert "projects" not in runner.invoke(app, ["--help"]).stdout
+
+
+def test_generated_destructive_commands_need_yes(v1):
+    v1.answers["api_keys.revoke"] = None
+    res = runner.invoke(app, ["--json", "keys", "revoke", "key_1"])
+    assert res.exit_code == 2 and v1.calls == []
+    res = runner.invoke(app, ["--json", "keys", "revoke", "key_1", "--yes"])
+    assert _json(res) == {"ok": True}
+    assert v1.calls == [("api_keys.revoke", ("key_1",), {})]
+
+
+def test_signed_links_are_redacted_unless_asked_for(v1):
+    signed = "https://bucket.s3.amazonaws.com/m.pdb?X-Amz-Signature=abc&X-Amz-Credential=k"
+    v1.answers["molecules.get"] = {"id": "mol_1", "files": {"boltz": [{"path": "m.pdb", "downloadUrl": signed}]}}
+    out = _json(runner.invoke(app, ["--json", "molecules", "get", "mol_1"]))
+    assert signed not in json.dumps(out)
+    out = _json(runner.invoke(app, ["--json", "molecules", "get", "mol_1", "--show-urls"]))
+    assert out["files"]["boltz"][0]["downloadUrl"] == signed
