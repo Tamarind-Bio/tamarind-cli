@@ -113,18 +113,20 @@ class Transport:
         for name in COMMA_JOINED_QUERY.get(endpoint.__name__.rsplit(".", 1)[-1], ()):
             if params and isinstance(params.get(name), list):
                 params[name] = ",".join(str(item) for item in params[name])
+        headers = httpx.Headers(request.get("headers") or {})
+        headers.update(extra_headers or {})
         try:
             return self.send(
                 request["method"].upper(),
                 self.base_url + request["url"],
                 params=request.get("params"),
-                headers={**(request.get("headers") or {}), **(extra_headers or {})},
+                headers=headers,
                 json=request.get("json"),
                 repeat_safe=repeat_safe,
             )
         except TamarindError as error:
-            # An inconclusive submit can be retried with the same key, without duplicating it.
-            error.idempotency_key = values.get("idempotency_key")  # type: ignore[attr-defined]
+            # The key on the wire, so an inconclusive submit can be repeated without duplicating it.
+            error.idempotency_key = headers.get("idempotency-key")  # type: ignore[attr-defined]
             raise
 
     def send(
@@ -133,7 +135,7 @@ class Transport:
         url: str,
         *,
         params: Mapping[str, Any] | None = None,
-        headers: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | httpx.Headers | None = None,
         json: Any = None,
         repeat_safe: bool = False,
     ) -> httpx.Response:
@@ -147,12 +149,17 @@ class Transport:
         )
 
     # -- storage (signed URLs) --------------------------------------------
+    def require_secure(self, url: object) -> None:
+        """Signed query strings are credentials: never send them, or a file, in the clear,
+        unless the API itself is plain HTTP (a local development server)."""
+        secure = isinstance(url, str) and url.startswith("https://")
+        local = isinstance(url, str) and not self.base_url.startswith("https://")
+        if not (secure or local):
+            raise TamarindError("The upload session named a storage URL that isn't HTTPS.")
+
     def put_signed(self, url: str, content: Any, headers: Mapping[str, str]) -> httpx.Response:
         """PUT bytes to a signed storage URL, without the API key."""
-        # Signed query strings are credentials: never send them, or the file, in the clear
-        # unless the API itself is plain HTTP (a local development server).
-        if self.base_url.startswith("https://") and not url.startswith("https://"):
-            raise TamarindError("The upload session named a storage URL that isn't HTTPS.")
+        self.require_secure(url)
         return self._with_retries(
             lambda: self._storage.put(url, content=content(), headers=dict(headers)),
             repeat_safe=True,

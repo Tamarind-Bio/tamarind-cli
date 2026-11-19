@@ -449,6 +449,12 @@ def _multipart_session(parts: list[int], part_size: int, url: str = "https://sto
     }
 
 
+def _late_plain_part() -> dict:
+    session = _multipart_session([1, 2, 3], 4)
+    session["upload"]["parts"][2]["url"] = "http://storage.test/p3"
+    return session
+
+
 @respx.mock
 def test_a_malformed_upload_session_sends_nothing(client: Tamarind) -> None:
     import io
@@ -462,6 +468,7 @@ def test_a_malformed_upload_session_sends_nothing(client: Tamarind) -> None:
         (_multipart_session([1, 2], 4), "cover the file"),
         (_multipart_session([1, 2, 3, 4], 4), "cover the file"),
         (_multipart_session([1, 2, 3], 4, url="http://storage.test"), "isn't HTTPS"),
+        (_late_plain_part(), "isn't HTTPS"),
     ]:
         respx.post(f"{BASE}/files").mock(return_value=httpx.Response(201, json=session))
         with pytest.raises(TamarindError, match=message):
@@ -508,6 +515,13 @@ def test_an_inconclusive_submit_names_its_idempotency_key(client: Tamarind) -> N
     key = raised.value.idempotency_key  # type: ignore[attr-defined]
     assert route.call_count == client._transport.max_retries + 1
     assert {call.request.headers["Idempotency-Key"] for call in route.calls} == {key}
+
+    with pytest.raises(TamarindError) as raised:
+        client.jobs.submit(
+            {"tool": "t", "settings": {}}, extra_headers={"idempotency-key": "caller-key"}
+        )
+    assert raised.value.idempotency_key == "caller-key"  # type: ignore[attr-defined]
+    assert route.calls.last.request.headers.get_list("Idempotency-Key") == ["caller-key"]
 
 
 @respx.mock

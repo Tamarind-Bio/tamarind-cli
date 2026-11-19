@@ -476,6 +476,8 @@ class Files(_Resource):
                 len(numbers) * part_size < content.size
             ):
                 raise TamarindError("The upload session's parts don't cover the file.")
+            for part in upload["parts"]:
+                self._transport.require_secure(part.get("url"))
             parts = []
             for part in upload["parts"]:
                 number = int(part["partNumber"])
@@ -652,9 +654,7 @@ class Tamarind:
         ``client.paginate(client.jobs.list, status="Running", limit=200)``. Takes the
         same arguments as ``method``; ``limit`` sets the page size.
         """
-        if not isinstance(method, BoundOperation) or not (
-            method.pageable or method.body_pageable
-        ):
+        if not isinstance(method, BoundOperation) or not (method.pageable or method.body_pageable):
             raise TypeError("paginate() takes a list operation such as client.jobs.list")
         if method.pageable:
             cursor = params.pop("cursor", None)
