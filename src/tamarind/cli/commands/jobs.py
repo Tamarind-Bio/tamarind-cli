@@ -19,7 +19,6 @@ from ...errors import ExitCode, NotFoundError, TamarindError, ValidationError
 from .. import output
 from ..guidance import rewrite_validation_guidance
 from ..inputs import effective_job_name, effective_job_type, resolve_job_input
-from ..v1 import classic_routes
 
 _ORG_LOOKUP_HELP = (
     "Find the job across your org's members (a name several members share, "
@@ -806,9 +805,6 @@ def register(app: typer.Typer) -> None:
             owner = jobs_helpers.resolve_owner(
                 client, job_name, organization=organization, job_email=email, job=final
             )
-            if show_url:
-                # The link printed is classic's (v1 signs a different one).
-                classic_routes.keep_on_classic(client, "POST", "result")
             url = _result_url(
                 rest.get_result(
                     client,

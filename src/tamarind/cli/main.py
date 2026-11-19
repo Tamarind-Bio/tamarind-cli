@@ -110,9 +110,8 @@ class State:
         return self.config().is_v1
 
     def rest_client(self) -> HTTPClient:
-        """Today's job API. With v1 selected, the requests v1 can answer exactly as
-        classic does go to v1 instead (see :mod:`.v1.classic_routes`); the commands
-        and their output are the same either way."""
+        """Today's job API. With v1 selected, its requests go to v1 instead and the
+        answers are rebuilt in classic's layout (see :mod:`.v1.classic_routes`)."""
         cfg = self.config()
         if cfg.is_v1:
             from .v1.classic_routes import ClassicOverV1
@@ -121,7 +120,13 @@ class State:
         return HTTPClient(cfg.api_base, cfg.api_key)
 
     def catalog_client(self) -> HTTPClient:
+        """The catalog (tools, schemas, facets, job logs). With v1 selected, job logs come
+        from v1; the rest stays on the catalog until v1 serves it alike."""
         cfg = self.config()
+        if cfg.is_v1:
+            from .v1.classic_routes import CatalogOverV1
+
+            return CatalogOverV1(self)  # type: ignore[return-value]
         return HTTPClient(cfg.catalog_base, cfg.api_key)
 
     def sdk_client(self) -> Tamarind:

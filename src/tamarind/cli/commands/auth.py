@@ -28,13 +28,10 @@ def _check_key(api_base: str, api_key: str) -> bool:
 
 
 def _key_works(state, api_key: str) -> bool:
-    """Whether the API takes the key. With v1 selected v1's getMe answers, and the
-    classic check decides whenever v1 can't say."""
+    """Whether the API takes the key (with v1 selected, v1's getMe says)."""
     cfg = state.config()
     if cfg.is_v1:
-        verdict = classic_routes.key_works(state, api_key)
-        if verdict is not None:
-            return verdict
+        return classic_routes.key_works(state, api_key)
     return _check_key(cfg.api_base, api_key)
 
 

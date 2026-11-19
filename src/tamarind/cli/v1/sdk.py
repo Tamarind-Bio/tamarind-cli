@@ -187,7 +187,12 @@ def retry_hint(exc: TamarindError, op: dict[str, Any], key: str) -> TamarindErro
 
 
 def collect(
-    client: Any, op: dict[str, Any], *path_args: str, body: Any = None, **query: Any
+    client: Any,
+    op: dict[str, Any],
+    *path_args: str,
+    body: Any = None,
+    if_match: str | None = None,
+    **query: Any,
 ) -> dict[str, Any]:
     """All items of a list operation as one page, with a null ``nextCursor``.
 
@@ -198,7 +203,7 @@ def collect(
     the body; a page still being prepared (``waiting``) is waited for as the SDK's
     own paging does (``retryAfterMs``).
     """
-    page = invoke(client, op, *path_args, body=body, **query)
+    page = invoke(client, op, *path_args, body=body, if_match=if_match, **query)
     if not isinstance(page, dict):
         return page
     items = list(page.get("items") or [])
@@ -210,8 +215,10 @@ def collect(
         if page.get("waiting") and isinstance(page.get("retryAfterMs"), (int, float)):
             time.sleep(page["retryAfterMs"] / 1000)
         if in_query:
-            page = invoke(client, op, *path_args, body=body, **{**query, "cursor": cursor})
+            page = invoke(client, op, *path_args, body=body, if_match=if_match, **{**query, "cursor": cursor})
         else:
-            page = invoke(client, op, *path_args, body={**(body or {}), "cursor": cursor}, **query)
+            page = invoke(
+                client, op, *path_args, body={**(body or {}), "cursor": cursor}, if_match=if_match, **query
+            )
         items.extend(page.get("items") or [])
     return {**page, "items": items, "nextCursor": None}

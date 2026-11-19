@@ -114,34 +114,22 @@ v1 is opt-in (`TAMARIND_API=v1`, or `"api": "v1"` in a profile) until it launche
 classic stays the default. v1's base is its own setting (`TAMARIND_V1_API_BASE`, profile
 `"v1_api_base"`); classic's (`TAMARIND_API_BASE`, `--api-base`) is never sent a v1 call.
 
-**Today's commands keep their output.** With v1 selected, every command the CLI already
-had keeps its names, flags, human and `--json` output and exit codes: it runs its classic
-code, and only where some of its requests go changes. `tamarind/cli/v1/classic_routes.py`
-stands in for the classic HTTP client. The requests v1 can answer exactly as classic does
-go to v1, and v1's answer is rebuilt into classic's:
+**Today's commands, on v1.** With v1 selected, every command the CLI already had keeps
+its names, flags, output layout and exit codes: it runs its classic code, and its
+requests go to v1 instead. `tamarind/cli/v1/classic_routes.py` stands in for the classic
+HTTP client (and for the catalog client's job logs). It answers each classic request with
+the v1 operation behind it, and rebuilds v1's answer in the layout classic returns: job
+rows for `jobs`, `status` and `wait`, the verdict for `validate`, `submit-job` and
+`submit-batch`'s answer text, cancel's counts, the logs tail, the files listing in
+classic's order. A field v1 doesn't have is left out; [v1-mode.md](v1-mode.md) lists
+these differences.
 
-| Command | Request | v1 operation |
-|---|---|---|
-| `submit` | `/submit-job` | submitJob (classic validates first, as today) |
-| `results --download` (own job, not `--pdbs-only`) | `/result` | archiveJob, or getJobFile for `--file` (the same stored archive) |
-| `delete` | `/delete-job` | deleteJob |
-| `files delete` | `/delete-file` | deleteFile |
-| `files upload` | presign + PUT | uploadFile (+ completeFileUpload) |
-| `auth status`, `auth login` | key check | getMe |
-| `custom-tools *` | `/custom-tools…` | the same operations at the v1 base |
-
-Every other request stays on classic, because v1 can't give classic's answer to it: job
-rows (`jobs`, `status`, `wait`; v1 has no `TamarindSchemaVersion`/`StorageFolder`, and
-rounds differently), validation (`validate`, `batch --prevalidate`; v1 has no
-`missing_fields`/`unrecognized_settings`), `batch`, `cancel` (the cancelled counts), logs
-(byte offsets), files listings (classic's order), and the catalog (`tools`, `schema`,
-`modalities`, `functions`), and the link `results --show-url` prints (v1 signs a
-global-endpoint one). A write v1 refused before acting (400, 401, 404, 422: a malformed
-request, today's setting names, a key or a job v1 doesn't know) is sent to classic too, so
-it ends exactly as classic ends it; a 409, 403 or 429 is v1's answer and is raised, so a
-write is never done twice and v1's limits are never stepped around (v1's 409 for a job name
-you already use is raised in classic's words). With v1 selected both bases must therefore
-name the same environment.
+There is no fallback: what v1 refuses is raised as v1's error, with the CLI's exit codes,
+so a run with v1 selected shows what v1 does. Only the requests v1 has no form for yet go
+to classic: the catalog (`tools`, `schema`, `modalities`, `functions`), another member's
+jobs (`--organization`, `--email`), `jobs --include-subjobs`, `results --pdbs-only`, the
+logs of a batch or run, and `files delete` of a path and a folder together. With v1 selected the classic base must therefore name the
+same environment as the v1 base.
 
 **New commands come from the contract.** Each operation's `x-clients.cli` names its
 command, and `scripts/gen_v1_cli_manifest.py` writes the manifest the CLI builds them from

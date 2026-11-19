@@ -158,8 +158,7 @@ def upload(
     state = ctx.obj
     remote = name or path.name
     output.info(f"Uploading {path} → {remote}…", state.output)
-    # With v1 selected the file goes up through v1 (same answer); classic uploads it
-    # when v1 refuses.
+    # With v1 selected the file goes up through v1, with classic's answer.
     result = classic_routes.upload(state, path, remote) if state.is_v1 else None
     if result is None:
         with state.rest_client() as client:

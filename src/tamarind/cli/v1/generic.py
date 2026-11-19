@@ -210,7 +210,9 @@ def run_operation(op: dict[str, Any], values: dict[str, Any]) -> None:
         )
     with sdk.make_client(state) as client:
         if values.get("all_pages"):
-            result: Any = sdk.collect(client, op, *path_args, body=body, **query)
+            result: Any = sdk.collect(
+                client, op, *path_args, body=body, if_match=values.get("if_match"), **query
+            )
         else:
             result = sdk.invoke(
                 client,

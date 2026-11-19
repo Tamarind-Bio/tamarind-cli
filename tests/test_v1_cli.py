@@ -470,3 +470,13 @@ def test_all_keeps_polling_a_waiting_cursor(v1, monkeypatch):
     v1.answers["molecules.list"] = lambda **kw: next(answers)
     out = _json(runner.invoke(app, ["--json", "molecules", "list", "--all"]))
     assert [m["id"] for m in out["items"]] == ["mol_1", "mol_2"] and out["nextCursor"] is None
+
+
+def test_all_sends_if_match_on_every_page():
+    from tamarind.cli.v1 import manifest
+
+    pages = {None: {"items": [1], "nextCursor": "c1"}, "c1": {"items": [2], "nextCursor": None}}
+    recorder = Recorder({"custom_tools.list_versions": lambda *a, cursor=None, **kw: pages[cursor]})
+    out = sdk.collect(recorder, manifest.operation("listCustomToolVersions"), "tool-a", if_match="etag-1")
+    assert out["items"] == [1, 2]
+    assert [c[2].get("if_match") for c in recorder.calls] == ["etag-1", "etag-1"]
