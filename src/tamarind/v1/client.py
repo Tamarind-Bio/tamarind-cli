@@ -203,8 +203,10 @@ class Operation:
         self.endpoint = endpoint
         self.path = path
         self.check = check
-        # The contract makes this POST repeatable (a query, or a cancel that is safe to
-        # repeat), so it is retried after an ambiguous failure like a GET.
+        # The contract makes this operation repeatable: a POST that only reads, or one its
+        # description calls safe to repeat or idempotent (the cancels, usage refresh,
+        # key revoke, molecule delete and group removal). It is retried after an
+        # ambiguous failure like a GET.
         self.repeat_safe = repeat_safe
         self.__doc__ = _doc(endpoint)
 
@@ -340,7 +342,7 @@ class ApiKeys(_Resource):
     create = Operation(create_api_key, check=_secret_shown)
     get = Operation(get_api_key, "key_id")
     update = Operation(update_api_key, "key_id")
-    revoke = Operation(revoke_api_key, "key_id")
+    revoke = Operation(revoke_api_key, "key_id", repeat_safe=True)
 
 
 class ServiceAccounts(_Resource):
@@ -359,7 +361,7 @@ class Organization(_Resource):
 
 class Usage(_Resource):
     get = Operation(get_usage)
-    refresh = Operation(refresh_usage)
+    refresh = Operation(refresh_usage, repeat_safe=True)
 
 
 class Tools(_Resource):
@@ -413,7 +415,10 @@ class Jobs(_Resource):
                 on_update(item)
             if item.get("status") in TERMINAL_STATUSES:
                 return item
-            delay = float(poll_interval or item.get("pollAfterSeconds") or 15)
+            if poll_interval is not None:
+                delay = float(poll_interval)
+            else:
+                delay = float(item.get("pollAfterSeconds") or 15)
             if deadline is not None:
                 delay = min(delay, max(0.0, deadline - time.monotonic()))
             self._transport._sleep(delay)
@@ -573,7 +578,7 @@ class Molecules(_Resource):
     list_groups = Operation(list_molecule_groups)
     create_group = Operation(create_molecule_group)
     get_group = Operation(get_molecule_group, "group_id")
-    remove_from_group = Operation(remove_molecules_from_group, "group_id")
+    remove_from_group = Operation(remove_molecules_from_group, "group_id", repeat_safe=True)
     list_score_observations = Operation(
         list_molecule_score_observations, "group_id", repeat_safe=True
     )
@@ -588,7 +593,7 @@ class Molecules(_Resource):
     search = Operation(search_molecules, repeat_safe=True)
     upload = Operation(upload_molecules)
     get = Operation(get_molecule, "molecule_id")
-    delete = Operation(delete_molecule, "molecule_id")
+    delete = Operation(delete_molecule, "molecule_id", repeat_safe=True)
     list_groups_for = Operation(list_groups_for_molecule, "molecule_id")
     update_metadata = Operation(update_molecule_metadata, "molecule_id")
 

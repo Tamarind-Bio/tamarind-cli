@@ -82,6 +82,8 @@ def test_bad_arguments_fail_before_any_request(client: Tamarind) -> None:
         client.jobs.list(status="Done")
     with pytest.raises(TypeError, match="unexpected"):
         client.jobs.list(nope=1)
+    with pytest.raises(TypeError, match="stauts"):
+        client.jobs.list(stauts=None)
     with pytest.raises(TypeError, match="missing job_id"):
         client.jobs.get()
     with pytest.raises(TypeError, match="takes no request body"):
@@ -617,3 +619,29 @@ def test_paginate_waits_out_a_page_still_being_prepared(client: Tamarind) -> Non
     )
     assert list(client.paginate(client.molecules.search, {"searchCaps": "x"})) == ["m"]
     assert client.sleeps == [1.5]  # type: ignore[attr-defined]
+
+
+@respx.mock
+def test_wait_honors_a_zero_poll_interval(client: Tamarind) -> None:
+    respx.get(f"{BASE}/jobs/job_1").mock(
+        side_effect=[
+            httpx.Response(200, json={"status": "Running", "pollAfterSeconds": 15}),
+            httpx.Response(200, json={"status": "Complete"}),
+        ]
+    )
+    assert client.jobs.wait("job_1", poll_interval=0)["status"] == "Complete"
+    assert client.sleeps == [0.0]  # type: ignore[attr-defined]
+
+
+@respx.mock
+def test_idempotent_writes_the_contract_names_are_retried(client: Tamarind) -> None:
+    remove = respx.post(f"{BASE}/molecules/groups/grp_1/molecules/remove").mock(
+        side_effect=[httpx.ReadTimeout("lost"), httpx.Response(200, json={"removedIds": []})]
+    )
+    assert client.molecules.remove_from_group("grp_1", {"moleculeIds": ["m"]}) == {"removedIds": []}
+    assert remove.call_count == 2
+    revoke = respx.delete(f"{BASE}/api-keys/key_1").mock(
+        side_effect=[httpx.Response(502, text="bad"), httpx.Response(204)]
+    )
+    assert client.api_keys.revoke("key_1") is None
+    assert revoke.call_count == 2

@@ -89,14 +89,14 @@ class Transport:
         """
         build = endpoint._get_kwargs
         hints = _hints(build)
+        unknown = set(arguments) - set(hints) - {"return", "body"}
+        if unknown:
+            raise TypeError(f"unexpected argument(s): {', '.join(sorted(unknown))}")
         values = {
             name: _coerce(hints.get(name), value)
             for name, value in arguments.items()
             if value is not None
         }
-        unknown = set(values) - set(hints) - {"return"}
-        if unknown:
-            raise TypeError(f"unexpected argument(s): {', '.join(sorted(unknown))}")
         if "idempotency_key" in hints and "idempotency_key" not in values:
             values["idempotency_key"] = str(uuid.uuid4())
         if self.version is not None:
