@@ -36,6 +36,7 @@ MAX_RETRY_AFTER = 120.0
 # Repeating these can't change anything. A DELETE is not here: after a lost answer a
 # repeat could delete a file or tool someone just made at the freed path or name.
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+_LOOPBACK = {"localhost", "127.0.0.1", "::1"}
 
 
 class Transport:
@@ -65,12 +66,14 @@ class Transport:
         self._owns_client = http_client is None
         self._headers = headers
         # Signed storage URLs must never see the API key.
-        self._storage = httpx.Client(timeout=timeout)
+        # A caller's client carries their network settings (proxy, trust store), so signed
+        # uploads use it too; the API key is never one of its headers (see _put_unlogged).
+        self._storage = http_client or httpx.Client(timeout=timeout)
 
     def close(self) -> None:
         if self._owns_client:
             self._client.close()
-        self._storage.close()
+            self._storage.close()
 
     # -- API calls --------------------------------------------------------
     def call(
@@ -157,9 +160,9 @@ class Transport:
     # -- storage (signed URLs) --------------------------------------------
     def require_secure(self, url: object) -> None:
         """Signed query strings are credentials: never send them, or a file, in the clear,
-        unless the API itself is plain HTTP (a local development server)."""
+        unless the API itself is a plain-HTTP server on this machine (local development)."""
         secure = isinstance(url, str) and url.startswith("https://")
-        local = isinstance(url, str) and not self.base_url.startswith("https://")
+        local = isinstance(url, str) and httpx.URL(self.base_url).host in _LOOPBACK
         if not (secure or local):
             raise TamarindError("The upload session named a storage URL that isn't HTTPS.")
 
@@ -177,6 +180,8 @@ class Transport:
         (a credential) into the application's logs. The transport is the one the client
         picks for this URL, so ``HTTPS_PROXY``/``NO_PROXY`` routing still applies."""
         request = self._storage.build_request("PUT", url, content=content, headers=dict(headers))
+        for name in ("x-api-key", "authorization"):
+            request.headers.pop(name, None)
         response = self._storage._transport_for_url(request.url).handle_request(request)
         try:
             response.read()
