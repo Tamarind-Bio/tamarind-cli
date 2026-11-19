@@ -3138,6 +3138,7 @@
     "contentTypes": [
      "application/json"
     ],
+    "cursor": true,
     "description": "",
     "required": true
    },
@@ -3409,6 +3410,7 @@
     "contentTypes": [
      "application/json"
     ],
+    "cursor": true,
     "description": "",
     "required": true
    },

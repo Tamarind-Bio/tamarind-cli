@@ -38,19 +38,26 @@ class ClassicAnswer(Exception):
 
 
 def _refused(exc: TamarindError) -> bool:
-    """A 4xx answer: v1 did nothing, so asking classic can't do the work twice."""
+    """A 4xx answer: v1 did nothing, so asking classic can't do the work twice.
+
+    Not 409 ``idempotency_in_progress``: an earlier attempt with the same key may still
+    be doing the work."""
     status = getattr(exc, "status", None)
+    if getattr(exc, "code", None) == "idempotency_in_progress":
+        return False
     return isinstance(status, int) and 400 <= status < 500
 
 
 def _classic_error(exc: TamarindError) -> TamarindError:
     """A v1 failure raised the way the classic client raises one.
 
-    A 5xx becomes an :class:`APIError` with its status, and a failure with no answer a
-    plain :class:`TamarindError`, which is what the commands read as "the outcome may be
-    ambiguous".
+    A 5xx becomes an :class:`APIError` with its status; a failure with no answer, or a
+    409 ``idempotency_in_progress``, a plain :class:`TamarindError`, which is what the
+    commands read as "the outcome may be ambiguous".
     """
     status = getattr(exc, "status", None)
+    if getattr(exc, "code", None) == "idempotency_in_progress":
+        return TamarindError(exc.message, detail=getattr(exc, "problem", None))
     if isinstance(status, int):
         return APIError(exc.message, status_code=status, detail=getattr(exc, "problem", None))
     if type(exc) is TamarindError:
@@ -190,6 +197,8 @@ def delete_job(client: ClassicOverV1, body: dict[str, Any]) -> str:
 def delete_file(client: ClassicOverV1, params: dict[str, Any]) -> dict[str, str]:
     """DELETE /delete-file → deleteFile; classic answers ``{message}``."""
     path, folder = params.get("filePath"), params.get("folder")
+    if path and folder:
+        raise ClassicAnswer  # v1 takes exactly one; classic decides as it does today
     if folder:
         client.v1().files.delete(folder=folder)
         return {"message": "Folder deleted successfully"}

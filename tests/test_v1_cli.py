@@ -38,7 +38,16 @@ class Recorder:
         return _Path(self, (name,))
 
     def paginate(self, method: "_Path", *args: Any, **params: Any):
-        """Like ``tamarind.v1.Tamarind.paginate``: every item, following nextCursor."""
+        """Like ``tamarind.v1.Tamarind.paginate``: every item, following nextCursor
+        (in the body when the call has one, as for molecules.search)."""
+        if "body" in params:
+            body = dict(params.pop("body") or {})
+            while True:
+                page = method(*args, body=body, **params)
+                yield from page.get("items") or []
+                if not page.get("nextCursor"):
+                    return
+                body = {**body, "cursor": page["nextCursor"]}
         cursor = params.pop("cursor", None)
         while True:
             page = method(*args, cursor=cursor, **params)
@@ -375,3 +384,37 @@ def test_show_urls_shows_them_in_human_output_too(v1):
     v1.answers["jobs.list_files"] = {"items": [{"path": "a.pdb", "downloadUrl": signed}], "nextCursor": None}
     res = runner.invoke(app, ["--no-json", "jobs", "files", "job_0f8fad5b-d9cb-469f-a165-70867728950e", "--include-download-urls", "--show-urls"])
     assert signed in res.stdout
+
+
+def test_all_follows_a_body_cursor(v1):
+    pages = {None: {"items": [{"id": "mol_1"}], "nextCursor": "c1"}, "c1": {"items": [{"id": "mol_2"}], "nextCursor": None}}
+    v1.answers["molecules.search"] = lambda body=None, **kw: pages[(body or {}).get("cursor")]
+    out = _json(runner.invoke(app, ["--json", "molecules", "search", "--set", "text=abc", "--all"]))
+    assert [m["id"] for m in out["items"]] == ["mol_1", "mol_2"] and out["nextCursor"] is None
+    assert [c[2]["body"] for c in v1.calls] == [{"text": "abc"}, {"text": "abc", "cursor": "c1"}]
+
+
+def test_an_error_on_an_answer_is_not_called_unclear(v1):
+    from tamarind.errors import TamarindError
+
+    v1.answers["api_keys.create"] = TamarindError(
+        "Key key_1 was made by an earlier attempt with this Idempotency-Key, and its secret can't be shown again."
+    )
+    res = runner.invoke(app, ["--json", "keys", "create", "--set", "name=k"])
+    assert "--idempotency-key" not in str(res.exception)
+    assert str(res.exception).startswith("Key key_1 was made by an earlier attempt")
+
+
+def test_no_answer_is_an_unclear_outcome(v1):
+    import httpx
+
+    from tamarind.errors import TamarindError
+
+    def lost(**kwargs):
+        raise TamarindError("Network error: connection reset") from httpx.ConnectError("reset")
+
+    v1.answers["api_keys.create"] = lost
+    res = runner.invoke(app, ["--json", "keys", "create", "--set", "name=k"])
+    assert res.exception.detail["outcomeMayBeAmbiguous"] is True
+    assert "--idempotency-key" in str(res.exception)
+

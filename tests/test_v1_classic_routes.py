@@ -176,6 +176,13 @@ def test_a_submit_with_no_clear_answer_is_not_sent_again(env, failure):
         assert isinstance(res.exception, APIError) and res.exception.status_code == 503
 
 
+def test_a_submit_still_in_progress_is_not_sent_to_classic(env):
+    env.v1.answers["jobs.submit"] = problem(409, "idempotency_in_progress")
+    res = env.run("v1", "--json", "submit", "esmfold", "--skip-validate", "--set", "sequence=MK", "--name", "n1")
+    assert classic_calls() == []  # the first attempt may still be making the job
+    assert res.exception.detail["outcomeMayBeAmbiguous"] is True
+
+
 # -- result ------------------------------------------------------------------------
 
 
@@ -281,6 +288,12 @@ def test_files_delete_goes_to_v1(env, args, message, call):
     env.v1.answers["files.delete"] = None
     same_output(env, "--json", "files", "delete", *args, "--yes")
     assert env.v1.calls == [("files.delete", (), call)] * 1
+
+
+def test_files_delete_of_a_file_and_a_folder_is_classics_to_decide(env):
+    FakeClassic.answers["delete-file"] = {"message": "Folder deleted successfully"}
+    same_output(env, "--json", "files", "delete", "a.pdb", "--folder", "runs", "--yes")
+    assert env.v1.calls == []
 
 
 def test_files_delete_v1_refuses_goes_to_classic(env):

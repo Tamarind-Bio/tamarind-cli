@@ -162,7 +162,7 @@ def operation_params(op: dict[str, Any]) -> list[click.Parameter]:
         params.append(
             click.Option(["--if-match", "if_match"], help="Only act if the ETag still matches.")
         )
-    if any(q["name"] == "cursor" for q in op["query"]):
+    if any(q["name"] == "cursor" for q in op["query"]) or (op.get("body") or {}).get("cursor"):
         params.append(
             click.Option(["--all", "all_pages"], is_flag=True, help="Follow nextCursor to the end.")
         )
@@ -209,7 +209,7 @@ def run_operation(op: dict[str, Any], values: dict[str, Any]) -> None:
         )
     with sdk.make_client(state) as client:
         if values.get("all_pages"):
-            result: Any = sdk.collect(client, op, *path_args, **query)
+            result: Any = sdk.collect(client, op, *path_args, body=body, **query)
         else:
             result = sdk.invoke(
                 client,

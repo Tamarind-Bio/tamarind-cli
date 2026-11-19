@@ -155,6 +155,10 @@ def build(doc: dict[str, Any]) -> dict[str, Any]:
                     "contentTypes": sorted(rb.get("content", {})),
                     "description": _first_sentence(rb.get("description")),
                 }
+                # A page cursor in the body (molecules search): the command takes --all too.
+                schema = contract.resolve(((rb.get("content") or {}).get("application/json") or {}).get("schema") or {})
+                if "cursor" in (schema.get("properties") or {}):
+                    body["cursor"] = True
             success = {}
             links = False
             for code, resp in op.get("responses", {}).items():

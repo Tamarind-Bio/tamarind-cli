@@ -14,6 +14,8 @@ import re
 import uuid
 from typing import Any, Callable
 
+import httpx
+
 from ...errors import TamarindError, UsageError
 
 # openapi-python-client (pinned) renames a parameter that would shadow a builtin
@@ -157,11 +159,16 @@ def invoke(
 
 def outcome_unclear(exc: TamarindError) -> bool:
     """No answer, a 5xx, or 409 `idempotency_in_progress` (the first attempt may be
-    running): the work may have been done. A 4xx refusal means nothing was."""
+    running): the work may have been done. A 4xx refusal means nothing was, and so
+    does an error the SDK raises on an answer it got (a replayed key create with no
+    secret says so itself)."""
     if getattr(exc, "code", None) == "idempotency_in_progress":
         return True
     status = getattr(exc, "status", None) or getattr(exc, "status_code", None)
-    return not isinstance(status, int) or status >= 500
+    if isinstance(status, int):
+        return status >= 500
+    # No status: unclear only when no answer came back (the SDK's network error).
+    return isinstance(exc.__cause__, httpx.HTTPError)
 
 
 def retry_hint(exc: TamarindError, op: dict[str, Any], key: str) -> TamarindError:
@@ -178,16 +185,23 @@ def retry_hint(exc: TamarindError, op: dict[str, Any], key: str) -> TamarindErro
     return err
 
 
-def collect(client: Any, op: dict[str, Any], *path_args: str, **query: Any) -> dict[str, Any]:
+def collect(
+    client: Any, op: dict[str, Any], *path_args: str, body: Any = None, **query: Any
+) -> dict[str, Any]:
     """All items of a list operation as one page: the first page's other fields (a
     usage page's ``total``, ``metric``, ``asOf``...) with every page's ``items`` and a
-    null ``nextCursor``. Pages after the first come through the SDK's auto-paging."""
-    first = invoke(client, op, *path_args, **query)
+    null ``nextCursor``. Pages after the first come through the SDK's auto-paging,
+    with the cursor in the query or, for an operation that pages through its body
+    (``molecules search``), in the body."""
+    first = invoke(client, op, *path_args, body=body, **query)
     if not isinstance(first, dict):
         return first
     items = list(first.get("items") or [])
     if first.get("nextCursor"):
-        kwargs = {argument(k): v for k, v in query.items() if v is not None}
-        kwargs["cursor"] = first["nextCursor"]
+        kwargs: dict[str, Any] = {argument(k): v for k, v in query.items() if v is not None}
+        if any(q["name"] == "cursor" for q in op["query"]):
+            kwargs["cursor"] = first["nextCursor"]
+        else:
+            kwargs["body"] = {**(body or {}), "cursor": first["nextCursor"]}
         items.extend(plain(list(client.paginate(method(client, op["sdk"]), *path_args, **kwargs))))
     return {**first, "items": items, "nextCursor": None}
