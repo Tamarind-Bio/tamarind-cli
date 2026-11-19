@@ -1,4 +1,4 @@
-"""Offline tests for the hand-written v1 SDK (tamarind.v1)."""
+"""Offline tests for the hand-written v1 SDK (tamarind._v1)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pytest
 import respx
 
 from tamarind.errors import ExitCode, JobTimeoutError, TamarindError
-from tamarind.v1 import ProblemError, Tamarind, paginate
+from tamarind._v1 import ProblemError, Tamarind, paginate
 
 BASE = "https://api.test.tamarind.bio"
 
@@ -36,16 +36,14 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Tamarind:
 
 
 def test_base_url_and_key_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("TAMARIND_V1_API_BASE", raising=False)
-    # TAMARIND_API_BASE is the classic client's base (app.tamarind.bio/api); v1 ignores it.
-    monkeypatch.setenv("TAMARIND_API_BASE", "https://app.tamarind.bio/api/")
-    monkeypatch.setenv("TAMARIND_API_KEY", "env-key")
-    assert Tamarind().base_url == "https://api.tamarind.bio"
+    # The private client reads only the key; HTTPClient passes it the v1 base of its own
+    # environment (tamarind._v1.switch), so no base setting of its own is read here.
     monkeypatch.setenv("TAMARIND_V1_API_BASE", "https://api-staging.tamarind.bio/")
+    monkeypatch.setenv("TAMARIND_API_KEY", "env-key")
     sdk = Tamarind()
-    assert sdk.base_url == "https://api-staging.tamarind.bio"
+    assert sdk.base_url == "https://api.tamarind.bio"
     assert sdk._transport._headers["x-api-key"] == "env-key"
-    assert Tamarind(base_url="https://other.example").base_url == "https://other.example"
+    assert Tamarind(base_url="https://other.example/").base_url == "https://other.example"
 
 
 @respx.mock
@@ -291,7 +289,7 @@ def test_wait_times_out_without_reading_after_the_deadline(
     client: Tamarind, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     clock = iter([0.0, 0.0, 5.0, 5.0, 11.0])
-    monkeypatch.setattr("tamarind.v1.client.time.monotonic", lambda: next(clock))
+    monkeypatch.setattr("tamarind._v1.client.time.monotonic", lambda: next(clock))
     route = respx.get(f"{BASE}/jobs/batch_1").mock(
         return_value=httpx.Response(
             200, json={"id": "batch_1", "status": "Running", "pollAfterSeconds": 15}
@@ -561,7 +559,7 @@ def test_logs_are_not_an_item_page(client: Tamarind) -> None:
 def test_files_over_the_single_put_limit_always_go_in_parts(
     client: Tamarind, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("tamarind.v1.client.SIGNED_UPLOAD_LIMIT", 4)
+    monkeypatch.setattr("tamarind._v1.client.SIGNED_UPLOAD_LIMIT", 4)
     start = respx.post(f"{BASE}/files").mock(
         return_value=httpx.Response(201, json=_multipart_session([1, 2, 3], 4))
     )

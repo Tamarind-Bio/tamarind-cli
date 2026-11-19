@@ -50,7 +50,7 @@ jobs:
           src/tamarind/custom_tools
           src/tamarind/finetune
           src/tamarind/pipelines
-          src/tamarind/v1
+          src/tamarind/_v1
           src/tamarind/cli/v1
           src/tamarind/http.py
           src/tamarind/errors.py

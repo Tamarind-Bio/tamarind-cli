@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import re
 import tempfile
+import time
 import uuid
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qsl, urlsplit
@@ -32,6 +34,15 @@ _LOW_PRIORITY_HELP = (
     "within 7 days stops with no charge. Refused if unavailable for this job."
 )
 _LOW_PRIORITY_NOTE = " at low priority (20% off, no completion guarantee, stops with no charge if not started within 7 days)"
+
+
+def _left(started: float, timeout: Optional[float]) -> Optional[float]:
+    """What's left of a command's --timeout (None: no limit), counted from ``started``.
+    A results request answered from v1 waits for an archive still being built until
+    then (see HTTPClient.results_wait)."""
+    if timeout is None:
+        return None
+    return max(0.0, timeout - (time.monotonic() - started))
 
 
 def _gen_name(tool: str) -> str:
@@ -437,6 +448,7 @@ def register(app: typer.Typer) -> None:
                 poll_interval=poll_interval, timeout=timeout
             )
 
+        started = time.monotonic()
         with state.rest_client() as client:
             if not skip_validate:
                 v = _rewrite_validation_guidance(
@@ -500,7 +512,8 @@ def register(app: typer.Typer) -> None:
                     result["final"] = final
                     status = jobs_helpers.job_status(final)
                     if download and jobs_helpers.is_success(status):
-                        url = _result_url(rest.get_result(client, job_name=job_name))
+                        with client.results_wait(_left(started, timeout)):
+                            url = _result_url(rest.get_result(client, job_name=job_name))
                         dest = download / Path(f"{job_name}.zip").name
                         written = _download(url, dest)
                         result["download"] = {"path": str(dest), "bytes": written}
@@ -776,7 +789,10 @@ def register(app: typer.Typer) -> None:
             )
         if download is not None and show_url:
             raise typer.BadParameter("--download and --show-url are mutually exclusive.")
-        with state.rest_client() as client:
+        started = time.monotonic()
+        with state.rest_client() as client, (
+            client.results_wait(_left(started, timeout)) if wait else nullcontext()
+        ):
             final = None
             if wait:
                 output.info("Waiting for completion…", state.output)
@@ -886,7 +902,7 @@ def register(app: typer.Typer) -> None:
 
 
 # v1 only: `tamarind jobs download`, one output file of a job saved to disk (v1
-# getJobFile). With v1 selected, `tamarind jobs <contract command>` reaches it and the
+# getJobFile). With v1 on for the key, `tamarind jobs <contract command>` reaches it and the
 # contract's other `jobs` commands (generic.RootGroup); `tamarind jobs` with anything
 # else is the listing above, unchanged.
 v1_jobs_app = typer.Typer()

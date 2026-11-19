@@ -25,8 +25,10 @@ from typing import Any
 import click
 from typer.core import TyperGroup
 
-from ...config import API_V1, resolve_api
-from ...errors import UsageError, ValidationError
+from ...config import config_dir, load_config
+from ...http import HTTPClient
+from ..._v1.switch import FileFlagCache, v1_base_for
+from ...errors import TamarindError, ValidationError
 from .. import inputs, output
 from . import manifest, render, sdk
 
@@ -35,7 +37,7 @@ DEFAULT_COMMAND = "_default"
 # out of --help in classic mode, like the generated ones.
 V1_ONLY_COMMANDS = {("files", "download")}
 # Today's flat commands whose name the contract also uses as a group (`jobs list`,
-# `tools schema`). With v1 selected, `tamarind jobs <contract command>` runs that
+# `tools schema`). With v1 on for the key, `tamarind jobs <contract command>` runs that
 # command; anything else is today's flat command, exactly as in classic mode.
 LISTING_GROUPS = ("jobs", "tools")
 
@@ -244,30 +246,44 @@ def operation_command(op: dict[str, Any], name: str, *, hidden: bool = False) ->
     return command
 
 
-def v1_selected(ctx: click.Context) -> bool:
-    """Whether this invocation selected v1, for showing v1 commands in --help."""
+def _argv_option(argv: list[str], name: str) -> str | None:
+    value: str | None = None
+    for index, arg in enumerate(argv):
+        if arg == name and index + 1 < len(argv):
+            value = argv[index + 1]
+        elif arg.startswith(name + "="):
+            value = arg.split("=", 1)[1]
+    return value
+
+
+def _client_for(ctx: click.Context) -> HTTPClient:
     state = ctx.find_root().obj
-    try:
-        is_v1 = getattr(state, "is_v1", None)
-    except UsageError:  # a bad `api` setting; the command itself will say so
-        return False
-    if isinstance(is_v1, bool):
-        return is_v1
+    if hasattr(state, "rest_client"):
+        return state.rest_client()
     import sys
 
-    # Before the root callback has run (resolving a command): the profile can come
-    # from the command line; TAMARIND_API and the profile's "api" do the rest.
+    # Before the root callback has run (resolving a command): the key, base and profile
+    # can come from the command line; the environment and the profile do the rest.
     argv = sys.argv[1:]
-    profile: str | None = None
-    for index, arg in enumerate(argv):
-        if arg == "--profile" and index + 1 < len(argv):
-            profile = argv[index + 1]
-        elif arg.startswith("--profile="):
-            profile = arg.split("=", 1)[1]
+    cfg = load_config(
+        api_key=_argv_option(argv, "--api-key"),
+        api_base=_argv_option(argv, "--api-base"),
+        profile=_argv_option(argv, "--profile"),
+    )
+    return HTTPClient(
+        cfg.api_base, cfg.api_key, v1_base=v1_base_for(cfg.api_base), flag_cache=FileFlagCache(config_dir())
+    )
+
+
+def v1_selected(ctx: click.Context, *, ask: bool = False) -> bool:
+    """Whether v1 is on for this invocation's key. ``--help`` listings only read the
+    cached answer (``ask=False``) and never the network; resolving a v1 command asks."""
     try:
-        return resolve_api(profile=profile) == API_V1
-    except UsageError:
+        client = _client_for(ctx)
+    except TamarindError:  # a bad profile or setting; the command itself will say so
         return False
+    with client:
+        return client.uses_v1() if ask else bool(client.cached_uses_v1())
 
 
 class ContractGroup(TyperGroup):
@@ -367,7 +383,7 @@ def build(path: tuple[str, ...]) -> click.Command | None:
 
 
 def listing_group(name: str) -> ContractGroup:
-    """``tamarind jobs <contract command>`` with v1 selected: the contract's commands
+    """``tamarind jobs <contract command>`` with v1 on for the key: the contract's commands
     under ``name``, plus the hand-written v1 ones (``jobs download``)."""
     group = ContractGroup(name=name, help=manifest.group_help((name,)))
     group.contract_path = (name,)
@@ -393,9 +409,11 @@ class RootGroup(ContractGroup):
         self, ctx: click.Context, args: list[str]
     ) -> tuple[str | None, click.Command | None, list[str]]:
         cmd_name, command, rest = super().resolve_command(ctx, args)
-        if cmd_name in LISTING_GROUPS and rest and v1_selected(ctx):
+        if cmd_name in LISTING_GROUPS and rest:
             group = listing_group(cmd_name)
-            if rest[0] in group.extra_commands or rest[0] in manifest.children((cmd_name,)):
+            named = rest[0] in group.extra_commands or rest[0] in manifest.children((cmd_name,))
+            # Only a contract command name asks the server (today's options never do).
+            if named and v1_selected(ctx, ask=True):
                 return cmd_name, group, rest
         return cmd_name, command, rest
 

@@ -1,7 +1,7 @@
 """The CLI through the real v1 SDK, down to the HTTP requests it sends.
 
 ``tests/test_v1_cli.py`` and ``tests/test_v1_classic_routes.py`` check what each
-command asks the SDK for; these run a few commands through ``tamarind.v1.Tamarind``
+command asks the SDK for; these run a few commands through ``tamarind._v1.Tamarind``
 over a mock transport, so the requests on the wire (path, query, body, headers) and
 the error mapping are checked too.
 """
@@ -16,8 +16,9 @@ import pytest
 from typer.testing import CliRunner
 
 from tamarind.cli.main import app
-from tamarind.cli.v1 import sdk
-from tamarind.v1 import ProblemError, Tamarind
+from tamarind._v1 import ProblemError, Tamarind
+
+from conftest import turn_v1_on
 
 runner = CliRunner()
 BASE = "https://api.test"
@@ -27,7 +28,6 @@ BASE = "https://api.test"
 def wire(monkeypatch, tmp_path):
     monkeypatch.setenv("TAMARIND_CONFIG_DIR", str(tmp_path))
     monkeypatch.setenv("TAMARIND_API_KEY", "test-key")
-    monkeypatch.setenv("TAMARIND_API", "v1")
     monkeypatch.setenv("TAMARIND_V1_API_BASE", BASE)
     seen: list[httpx.Request] = []
     routes: dict[tuple[str, str], Any] = {}
@@ -40,16 +40,15 @@ def wire(monkeypatch, tmp_path):
         status, body = answer
         return httpx.Response(status, json=body) if body is not None else httpx.Response(status)
 
-    def make_client(state: Any, api_key: str | None = None) -> Tamarind:
-        cfg = state.config()
+    def make_client(http: Any, **options: Any) -> Tamarind:
         return Tamarind(
-            api_key or cfg.api_key,
-            base_url=cfg.v1_api_base.rstrip("/"),
+            http.api_key,
+            base_url=http.v1_base,
             max_retries=0,
             http_client=httpx.Client(transport=httpx.MockTransport(handler)),
         )
 
-    monkeypatch.setattr(sdk, "make_client", make_client)
+    turn_v1_on(monkeypatch, factory=make_client)
     return seen, routes
 
 
@@ -107,16 +106,18 @@ def test_small_upload_goes_inline(wire, tmp_path):
 
 
 def test_auth_status_with_a_rejected_key_says_not_verified(wire):
+    # With v1 on, the key check is classic's (one job listing), answered from v1.
     seen, routes = wire
-    routes[("GET", "/me")] = (401, {"type": "about:blank", "title": "Unauthorized", "status": 401, "code": "invalid_api_key", "detail": "bad key"})
+    routes[("GET", "/jobs")] = (401, {"type": "about:blank", "title": "Unauthorized", "status": 401, "code": "invalid_api_key", "detail": "bad key"})
     res = runner.invoke(app, ["--json", "auth", "status"])
     assert res.exit_code == 0, res.output
     assert json.loads(res.stdout) == {"profile": "default", "hasKey": True, "verified": False}
+    assert seen[-1].url.path == "/jobs"
 
 
 def test_auth_login_refuses_a_rejected_key(wire):
     seen, routes = wire
-    routes[("GET", "/me")] = (401, {"type": "about:blank", "title": "Unauthorized", "status": 401, "code": "invalid_api_key"})
+    routes[("GET", "/jobs")] = (401, {"type": "about:blank", "title": "Unauthorized", "status": 401, "code": "invalid_api_key"})
     res = runner.invoke(app, ["--json", "auth", "login", "--api-key", "nope"])
     assert res.exception is not None and res.exception.exit_code == 3
-    assert seen[-1].url.path == "/me"
+    assert seen[-1].url.path == "/jobs" and seen[-1].headers["x-api-key"] == "nope"

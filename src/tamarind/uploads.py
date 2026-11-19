@@ -56,11 +56,17 @@ def upload_file(
     content_type: str = "application/octet-stream",
 ) -> dict[str, Any]:
     """End-to-end upload: presign (POST /getPresignedUploadUrl) then PUT the bytes.
+    With v1 on for the key, the v1 upload (one request, or multipart for a large file).
 
     Returns ``{"ok": True, "filename": <remote>, "bytes": <size>}``.
     """
+    from ._v1 import classic
+
     path = Path(path)
     remote = remote or path.name
+    routed = classic.upload(client, path, remote, content_type)
+    if routed is not None:
+        return routed
     signed = rest.upload_file_url(client, filename=remote, content_type=content_type)
     url = signed.get("uploadUrl") if isinstance(signed, dict) else None
     if not isinstance(url, str) or not url:

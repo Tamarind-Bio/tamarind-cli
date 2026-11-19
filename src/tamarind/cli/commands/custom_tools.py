@@ -19,7 +19,6 @@ from ...custom_tools.validation import ValidationProblem, ValidationReport, vali
 from ...errors import ExitCode, TamarindError, ValidationError
 from ..inputs import effective_job_name, effective_job_type, resolve_job_input
 from .. import output
-from ..v1 import classic_routes
 from ..v1.generic import ContractGroup
 
 
@@ -217,17 +216,11 @@ def test_tool(
     tool_name = effective_job_type(tool_name, job_input.job_type)
     job_name = effective_job_name(name, job_input.job_name)
     with state.sdk_client() as client:
-        tool = client.custom_tools.get(tool_name)
-        if state.is_v1:
-            job = classic_routes.test_custom_tool(
-                state, tool, job_input.settings, version=version, name=job_name
-            )
-        else:
-            job = tool.test(
-                job_input.settings,
-                version=version,
-                name=job_name,
-            )
+        job = client.custom_tools.get(tool_name).test(
+            job_input.settings,
+            version=version,
+            name=job_name,
+        )
     output.emit(
         {
             "jobName": job.job_name,

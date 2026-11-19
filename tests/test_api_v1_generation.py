@@ -18,11 +18,11 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from sync_api_v1_contract import load_contract, operations  # noqa: E402
 
-from tamarind.v1._generated import AuthenticatedClient  # noqa: E402
-from tamarind.v1._generated.api.jobs import list_jobs, validate_job  # noqa: E402
-from tamarind.v1._generated.models.job_page import JobPage  # noqa: E402
-from tamarind.v1._generated.models.submit_job_request import SubmitJobRequest  # noqa: E402
-from tamarind.v1._generated.models.problem import Problem  # noqa: E402
+from tamarind._v1._generated import AuthenticatedClient  # noqa: E402
+from tamarind._v1._generated.api.jobs import list_jobs, validate_job  # noqa: E402
+from tamarind._v1._generated.models.job_page import JobPage  # noqa: E402
+from tamarind._v1._generated.models.submit_job_request import SubmitJobRequest  # noqa: E402
+from tamarind._v1._generated.models.problem import Problem  # noqa: E402
 
 BASE = "https://api.test.tamarind.bio"
 
@@ -49,7 +49,7 @@ def test_every_operation_has_a_generated_endpoint() -> None:
     for method, path, operation in found:
         tag = re.sub(r"[^a-z0-9]+", "_", operation["tags"][0].lower())
         module = importlib.import_module(
-            f"tamarind.v1._generated.api.{tag}.{_snake(operation['operationId'])}"
+            f"tamarind._v1._generated.api.{tag}.{_snake(operation['operationId'])}"
         )
         kwargs = module._get_kwargs.__code__.co_varnames
         assert hasattr(module, "sync_detailed"), operation["operationId"]
@@ -67,8 +67,8 @@ def test_the_contract_generates_without_workarounds() -> None:
     assert version == {**version, "type": "string"} and "format" not in version
     source = document["components"]["schemas"]["Batch"]["properties"]["source"]
     assert source["$ref"] == "#/components/schemas/SubmissionChannel"
-    from tamarind.v1._generated.models.batch import Batch
-    from tamarind.v1._generated.models.submission_channel import SubmissionChannel
+    from tamarind._v1._generated.models.batch import Batch
+    from tamarind._v1._generated.models.submission_channel import SubmissionChannel
 
     assert "source" in Batch.__annotations__ and SubmissionChannel("cli").value == "cli"
 
@@ -119,7 +119,7 @@ def test_generated_client_parses_pages_and_problems() -> None:
 
 
 def test_comma_joined_query_parameters_match_the_contract() -> None:
-    from tamarind.v1._contract import COMMA_JOINED_QUERY
+    from tamarind._v1._contract import COMMA_JOINED_QUERY
 
     assert COMMA_JOINED_QUERY["list_jobs"] == {"status"}
     assert COMMA_JOINED_QUERY["list_files"] == {"extension"}

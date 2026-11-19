@@ -1,7 +1,7 @@
 """Parity: every operation in the v1 contract has its SDK method (DESIGN, "Parity").
 
 Each operation's ``x-clients.sdk`` (``projects.notes.createEntry``) must resolve on a
-``tamarind.v1.Tamarind`` client in snake_case (``projects.notes.create_entry``), and a
+``tamarind._v1.Tamarind`` client in snake_case (``projects.notes.create_entry``), and a
 1:1 method must be built on that operation's generated module with the path
 parameters in path order. Fails when the contract gains an operation the SDK lacks.
 """
@@ -18,8 +18,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from sync_api_v1_contract import load_contract, operations  # noqa: E402
 
-from tamarind.v1 import Tamarind  # noqa: E402
-from tamarind.v1.client import BoundOperation  # noqa: E402
+from tamarind._v1 import Tamarind  # noqa: E402
+from tamarind._v1.client import BoundOperation  # noqa: E402
 
 # Operations whose x-clients method is a documented helper rather than a 1:1 method.
 HELPERS = {"uploadFile": "files.upload", "completeFileUpload": "files.upload"}

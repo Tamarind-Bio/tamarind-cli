@@ -13,6 +13,8 @@ from pathlib import Path
 
 import click
 import pytest
+
+from conftest import turn_v1_on
 import typer
 import yaml
 
@@ -57,8 +59,9 @@ def test_every_contract_operation_names_a_cli_command_and_sdk_method():
 
 @pytest.fixture(autouse=True)
 def _v1_selected(monkeypatch, tmp_path):
-    """The contract's commands are the CLI's with v1 selected."""
-    monkeypatch.setenv("TAMARIND_API", "v1")
+    """The contract's commands are the CLI's when v1 is on for the key."""
+    turn_v1_on(monkeypatch)
+    monkeypatch.setenv("TAMARIND_API_KEY", "test-key")
     monkeypatch.setenv("TAMARIND_CONFIG_DIR", str(tmp_path))
 
 
@@ -102,7 +105,7 @@ def _generated_endpoint(operation_id: str):
     import importlib
     import pkgutil
 
-    import tamarind.v1._generated.api as api
+    import tamarind._v1._generated.api as api
 
     name = sdk_snake(operation_id)
     for package in pkgutil.iter_modules(api.__path__):

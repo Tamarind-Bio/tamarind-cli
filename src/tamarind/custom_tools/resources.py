@@ -54,6 +54,7 @@ from tamarind.errors import (
     TamarindError,
     ValidationError,
 )
+from tamarind._v1.public import v1_method
 from tamarind.http import DEFAULT_TIMEOUT
 
 T = TypeVar("T")
@@ -468,11 +469,18 @@ class Version:
 class CustomTools:
     """Organization-scoped Custom Tool collection."""
 
+    # v1 only: check a config.json without a build (raises V1NotEnabledError without
+    # sending anything when v1 isn't on for the key).
+    validate_config = v1_method("custom_tools")
+
     def __init__(
         self, transport: GeneratedCustomToolsTransport, *, upload_timeout: float = DEFAULT_TIMEOUT
     ):
         self._transport = transport
         self._upload_timeout = upload_timeout
+
+    def _v1_http(self) -> Any:
+        return self._transport._client
 
     def create(
         self,

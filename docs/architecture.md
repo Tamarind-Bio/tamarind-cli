@@ -106,36 +106,41 @@ pages without introducing another public vocabulary.
 
 ### 5. The v1 API — source of truth: the v1 contract
 
-`openapi/api-v1.yaml` (vendored from tamarind-website) is the v1 contract. The SDK
-(`tamarind.v1`) is generated from it, one method per operation. The CLI calls v1 only
-through that SDK.
+`openapi/api-v1.yaml` (vendored from tamarind-website) is the v1 contract. The private
+client `tamarind._v1` is generated from it, one method per operation. `tamarind.Tamarind`
+stays the only public entry point, and the CLI calls v1 only through `tamarind._v1`.
 
-v1 is opt-in (`TAMARIND_API=v1`, or `"api": "v1"` in a profile) until it launches, and
-classic stays the default. v1's base is its own setting (`TAMARIND_V1_API_BASE`, profile
-`"v1_api_base"`); classic's (`TAMARIND_API_BASE`, `--api-base`) is never sent a v1 call.
+Whether a key uses v1 is the server's call, not a client setting: the per-user flag
+`cli-sdk-v1-api`, answered on v1 `GET /me` as `clients.useV1`
+(`tamarind/_v1/switch.py`). The v1 base is the one in the classic base's environment, so
+one setting (`TAMARIND_API_BASE`, `--api-base`) names the environment.
 
-**Today's commands, on v1.** With v1 selected, every command the CLI already had keeps
-its names, flags, output layout and exit codes: it runs its classic code, and its
-requests go to v1 instead. `tamarind/cli/v1/classic_routes.py` stands in for the classic
-HTTP client (and for the catalog client's job logs). It answers each classic request with
-the v1 operation behind it, and rebuilds v1's answer in the layout classic returns: job
-rows for `jobs`, `status` and `wait`, the verdict for `validate`, `submit-job` and
+**Today's surfaces, on v1.** `tamarind.http.HTTPClient` is the switch. With v1 on for the
+key, every classic request v1 has a form for is answered by the v1 operation behind it
+(`tamarind/_v1/classic.py`), and v1's answer is rebuilt in the layout classic returns:
+job rows for `jobs`, `status` and `wait`, the verdict for `validate`, `submit-job` and
 `submit-batch`'s answer text, cancel's counts, the logs tail, the files listing in
-classic's order. A field v1 doesn't have is left out; [v1-mode.md](v1-mode.md) lists
-these differences.
+classic's order. Custom tools and pipeline-run reads are the same paths at the v1 base. So
+`tamarind.rest`, `Tamarind()`'s resources and the CLI's commands keep their signatures and
+layouts; a field v1 doesn't have is left out, and [v1-mode.md](v1-mode.md) lists these
+differences.
 
-There is no fallback: what v1 refuses is raised as v1's error, with the CLI's exit codes,
-so a run with v1 selected shows what v1 does. Only the requests v1 has no form for yet go
-to classic: the catalog (`tools`, `schema`, `modalities`, `functions`), another member's
-jobs (`--organization`, `--email`), `jobs --include-subjobs`, `results --pdbs-only`, the
-logs of a batch or run, and `files delete` of a path and a folder together. With v1 selected the classic base must therefore name the
-same environment as the v1 base.
+There is no fallback: what v1 refuses is raised as v1's error (also the classic class for
+its status), with the CLI's exit codes. Only the requests v1 has no form for yet go to
+classic: the catalog (`tools`, `schema`, `modalities`, `functions`), another member's jobs
+(`--organization`, `--email`), `jobs --include-subjobs`, `results --pdbs-only`, the logs
+of a batch or run, and `files delete` of a path and a folder together.
+
+**v1-only operations** join the same client (`tamarind/_v1/public.py`): new resources
+(`client.projects`, `client.molecules`, `client.assays`...) and new methods on today's
+(`client.jobs.get`, `client.tools.facets`...), with v1's arguments and answers. They run
+only when v1 is on for the key.
 
 **New commands come from the contract.** Each operation's `x-clients.cli` names its
 command, and `scripts/gen_v1_cli_manifest.py` writes the manifest the CLI builds them from
 (path parameters → arguments, query parameters → options, a body → `--input`/`--set`).
 They print v1's fields. Where a contract name is also a flat command today (`jobs`,
-`tools`), `tamarind jobs list` and the other contract commands run with v1 selected, and
+`tools`), `tamarind jobs list` and the other contract commands run when v1 is on, and
 `tamarind jobs …` with anything else is today's command. `tests/test_v1_cli_parity.py`
 fails when the manifest is stale, when an operation has no command, or when an argument
 name doesn't match the SDK's.

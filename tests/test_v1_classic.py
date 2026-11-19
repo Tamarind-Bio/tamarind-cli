@@ -1,10 +1,11 @@
-"""Today's commands with v1 selected: their requests go to v1, in classic's layout.
+"""Today's classic requests, answered by v1 when the server turns v1 on for the key.
 
-``ClassicOverV1`` (and ``CatalogOverV1`` for logs) stand in for the classic clients.
-These tests check what each request asks v1, how its answer is rebuilt into classic's
-layout (end to end: the same command prints the same thing with either API, given the
-same data), that v1's refusals are raised as v1's errors with no fallback, and that only
-the requests v1 has no form for yet go to classic.
+``tamarind._v1.classic`` answers them inside :class:`~tamarind.http.HTTPClient`. These
+tests check what each request asks v1, how its answer is rebuilt into classic's layout
+(end to end: the same command prints the same thing with either API, given the same
+data), that v1's refusals are raised as v1's errors (also the classic class for the
+status) with no fallback, and that only the requests v1 has no form for yet go to
+classic.
 """
 
 from __future__ import annotations
@@ -17,12 +18,14 @@ import httpx
 import pytest
 from typer.testing import CliRunner
 
+from tamarind._v1 import classic
 from tamarind.cli import main as cli_main
 from tamarind.cli.main import app
-from tamarind.cli.v1 import classic_routes, sdk
 from tamarind.errors import APIError, AuthError, JobTimeoutError, NotFoundError, TamarindError, ValidationError
-from tamarind.v1.errors import ProblemError
+from tamarind.http import HTTPClient
+from tamarind._v1.errors import ProblemError
 
+from conftest import turn_v1_on
 from test_v1_cli import Recorder
 
 runner = CliRunner()
@@ -36,46 +39,25 @@ def problem(status: int, code: str = "x") -> ProblemError:
 
 
 class FakeClassic:
-    """The classic HTTPClient: records requests, answers from a table keyed by path."""
+    """The classic API behind HTTPClient: records requests, answers from a table keyed by path."""
 
-    instances: list["FakeClassic"] = []
+    calls: list[tuple[str, str, Any]] = []
     answers: dict[str, Any] = {}
 
-    def __init__(self, base_url: str, api_key: str | None, **_: Any) -> None:
-        self.base_url, self.api_key = base_url, api_key
-        self.calls: list[tuple[str, str, Any]] = []
-        FakeClassic.instances.append(self)
-
-    def __enter__(self) -> "FakeClassic":
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        return None
-
-    def close(self) -> None:
-        return None
-
-    def _answer(self, method: str, path: str, payload: Any) -> Any:
-        self.calls.append((method, path, payload))
-        if not self.api_key:
+    @staticmethod
+    def answer(client: HTTPClient, method: str, path: str, *, params: Any = None, json: Any = None, timeout: Any = None) -> Any:
+        payload = json if json is not None else params
+        FakeClassic.calls.append((method, path, payload))
+        if not client.api_key:
             raise AuthError("No API key configured. Set TAMARIND_API_KEY, pass --api-key, or run `tamarind auth login`.")
         answer = FakeClassic.answers.get(path)
         if isinstance(answer, BaseException):
             raise answer
         return answer(payload) if callable(answer) else answer
 
-    def get_json(self, path: str, *, params: Any = None, timeout: Any = None) -> Any:
-        return self._answer("GET", path, params)
-
-    def post_json(self, path: str, *, json: Any = None) -> Any:
-        return self._answer("POST", path, json)
-
-    def delete_json(self, path: str, *, params: Any = None, json: Any = None) -> Any:
-        return self._answer("DELETE", path, json if json is not None else params)
-
 
 def classic_calls() -> list[tuple[str, str, Any]]:
-    return [call for client in FakeClassic.instances for call in client.calls]
+    return list(FakeClassic.calls)
 
 
 @pytest.fixture
@@ -83,21 +65,22 @@ def env(monkeypatch, tmp_path):
     """Both APIs faked: ``env.v1`` is the v1 SDK recorder; classic is ``FakeClassic``."""
     monkeypatch.setenv("TAMARIND_CONFIG_DIR", str(tmp_path))
     monkeypatch.setenv("TAMARIND_API_KEY", "test-key")
-    monkeypatch.delenv("TAMARIND_API", raising=False)
-    FakeClassic.instances = []
+    FakeClassic.calls = []
     FakeClassic.answers = {}
-    monkeypatch.setattr(cli_main, "HTTPClient", FakeClassic)
-    monkeypatch.setattr(classic_routes, "HTTPClient", FakeClassic)
-    monkeypatch.setattr("tamarind.cli.commands.auth.HTTPClient", FakeClassic)
+    monkeypatch.setattr(HTTPClient, "_classic_json", FakeClassic.answer)
     recorder = Recorder({})
-    monkeypatch.setattr(sdk, "make_client", lambda state, api_key=None, **options: recorder)
+    turn_v1_on(monkeypatch, client=recorder)
 
     class Env:
         v1 = recorder
 
         @staticmethod
         def run(api: str, *args: str) -> Any:
-            monkeypatch.setenv("TAMARIND_API", api)
+            # "classic" is the escape hatch; otherwise the server says v1 is on.
+            if api == "classic":
+                monkeypatch.setenv("TAMARIND_API", "classic")
+            else:
+                monkeypatch.delenv("TAMARIND_API", raising=False)
             return runner.invoke(app, list(args))
 
     return Env
@@ -261,7 +244,7 @@ def test_submit_validates_and_submits_on_v1(env):
 
 
 def test_low_priority_submit_keeps_classics_wording(env):
-    FakeClassic.answers["submit-job"] = "n1 submitted to queue" + classic_routes.LOW_PRIORITY_SUFFIX + "."
+    FakeClassic.answers["submit-job"] = "n1 submitted to queue" + classic.LOW_PRIORITY_SUFFIX + "."
     env.v1.answers["jobs.submit"] = {"id": JOB}
     same_output(env, "--json", "submit", "esmfold", "--skip-validate", "--low-priority", "--set", "sequence=MK", "--name", "n1")
     assert env.v1.calls[0][2]["body"]["lowPriority"] is True
@@ -271,7 +254,7 @@ def test_a_name_already_used_reads_as_classic_words_it(env):
     FakeClassic.answers["submit-job"] = ValidationError("jobName n1 already exists, please choose a different name")
     env.v1.answers["jobs.submit"] = problem(409, "job_name_conflict")
     classic = env.run("classic", "--json", "submit", "esmfold", "--skip-validate", "--set", "sequence=MK", "--name", "n1")
-    FakeClassic.instances = []
+    FakeClassic.calls = []
     v1 = env.run("v1", "--json", "submit", "esmfold", "--skip-validate", "--set", "sequence=MK", "--name", "n1")
     assert (type(classic.exception), str(classic.exception)) == (type(v1.exception), str(v1.exception))
     assert classic_calls() == []
@@ -375,9 +358,8 @@ def test_v1_refusals_are_raised_never_sent_to_classic(env, tmp_path, monkeypatch
     args, answers, method = WRITES[command]
     if args is None:
         local = tmp_path / "in.fasta"
-        local.write_text(">a\nMK\n")
+        local.write_bytes(b">a\nMK\n")
         args = ["files", "upload", str(local)]
-    monkeypatch.setattr("tamarind.uploads.upload_file", lambda *a, **k: pytest.fail("classic upload"))
     env.v1.answers.update(answers)
     env.v1.answers[method] = problem(status, code)
     res = env.run("v1", "--json", *args)
@@ -499,7 +481,7 @@ def _preparing_then_ready(times: int):
 @pytest.fixture
 def sleeps(monkeypatch):
     slept: list[float] = []
-    monkeypatch.setattr(classic_routes.time, "sleep", slept.append)
+    monkeypatch.setattr(classic.time, "sleep", slept.append)
     return slept
 
 
@@ -531,7 +513,7 @@ def test_results_wait_stops_at_its_timeout(env, sleeps):
 
 def test_results_wait_counts_its_timeout_from_the_commands_start(env, sleeps, monkeypatch):
     clock = iter([0.0])  # the command starts at 0; everything after reads 12 s later
-    monkeypatch.setattr(classic_routes.time, "monotonic", lambda: next(clock, 12.0))
+    monkeypatch.setattr(classic.time, "monotonic", lambda: next(clock, 12.0))
     env.v1.answers["jobs.list"] = _found("batch", BATCH, status="Complete")
     env.v1.answers["jobs.get"] = {"kind": "batch", "id": BATCH, "name": "n1", "status": "Complete"}
     env.v1.answers["jobs.archive"] = _preparing_then_ready(1)
@@ -541,7 +523,7 @@ def test_results_wait_counts_its_timeout_from_the_commands_start(env, sleeps, mo
 
 def test_a_waits_status_request_is_one_try_bounded_by_its_deadline(env, monkeypatch):
     made: list[dict[str, Any]] = []
-    monkeypatch.setattr(sdk, "make_client", lambda state, api_key=None, **options: (made.append(options), env.v1)[1])
+    turn_v1_on(monkeypatch, factory=lambda http, **options: (made.append(options), env.v1)[1])
     env.v1.answers["jobs.list"] = _found()
     env.v1.answers["jobs.get"] = V1_JOB
     res = env.run("v1", "--json", "wait", "n1", "--timeout", "30", "--poll-interval", "1")
@@ -552,7 +534,7 @@ def test_a_waits_status_request_is_one_try_bounded_by_its_deadline(env, monkeypa
 
 def test_results_wait_bounds_each_archive_request_by_what_is_left(env, monkeypatch):
     made: list[dict[str, Any]] = []
-    monkeypatch.setattr(sdk, "make_client", lambda state, api_key=None, **options: (made.append(options), env.v1)[1])
+    turn_v1_on(monkeypatch, factory=lambda http, **options: (made.append(options), env.v1)[1])
     seen: list[dict[str, Any]] = []
     env.v1.answers["jobs.list"] = _found()
     env.v1.answers["jobs.get"] = V1_JOB
@@ -763,38 +745,39 @@ def test_files_delete_of_a_file_and_a_folder_is_classics_to_decide(env):
 
 def test_files_upload_goes_to_v1(env, tmp_path, monkeypatch):
     local = tmp_path / "in.fasta"
-    local.write_text(">a\nMK\n")
-    monkeypatch.setattr(
-        "tamarind.uploads.upload_file",
-        lambda client, path, remote: {"ok": True, "filename": remote, "bytes": Path(path).stat().st_size},
-    )
+    local.write_bytes(b">a\nMK\n")
+    FakeClassic.answers["getPresignedUploadUrl"] = {"uploadUrl": "https://bucket.s3.amazonaws.com/in.fasta?sig=1"}
+    monkeypatch.setattr("tamarind.uploads.put_presigned_upload", lambda url, path, **k: Path(path).stat().st_size)
     env.v1.answers["files.upload"] = {"path": "in.fasta", "type": "file", "sizeBytes": 6}
     same_output(env, "--json", "files", "upload", str(local))
-    assert env.v1.calls[0] == ("files.upload", (local,), {"path": "in.fasta"})
+    assert env.v1.calls[0] == ("files.upload", (local,), {"path": "in.fasta", "content_type": "application/octet-stream"})
+    assert [c[1] for c in classic_calls()] == ["getPresignedUploadUrl"]  # the classic run only
 
 
 # -- auth -----------------------------------------------------------------------------
 
 
 def test_auth_status_checks_the_key_on_v1_and_prints_classics_fields(env):
+    # The key check is classic's own (one job listing); with v1 on, v1 answers it.
     FakeClassic.answers["jobs"] = {"jobs": [], "statuses": {}}
-    env.v1.answers["me.get"] = {"user": {"email": "a@b"}}
+    env.v1.answers["jobs.list"] = _page()
     res = same_output(env, "--json", "auth", "status")
     assert json.loads(res.stdout) == {"profile": "default", "hasKey": True, "verified": True}
-    assert ("me.get", (), {}) in env.v1.calls
+    assert ("jobs.list", (), {"limit": 1}) in env.v1.calls
 
 
 def test_a_key_v1_refuses_is_not_verified(env):
     FakeClassic.answers["jobs"] = AuthError("Unauthorized: Invalid API key")
-    env.v1.answers["me.get"] = problem(401, "invalid_api_key")
+    env.v1.answers["jobs.list"] = problem(401, "invalid_api_key")
     res = same_output(env, "--json", "auth", "status")
     assert json.loads(res.stdout)["verified"] is False
 
 
 def test_any_other_answer_to_the_key_check_is_v1s_error(env):
-    env.v1.answers["me.get"] = problem(404, "not_found")  # v1 not on for this account
+    env.v1.answers["jobs.list"] = problem(503, "service_unavailable")
     res = env.run("v1", "--json", "auth", "status")
-    assert isinstance(res.exception, ProblemError) and classic_calls() == []
+    assert isinstance(res.exception, ProblemError) and isinstance(res.exception, APIError)
+    assert classic_calls() == []
 
 
 def test_without_a_key_classic_says_so(env, monkeypatch):
@@ -834,7 +817,7 @@ def test_todays_commands_have_the_same_help_with_v1(env, args):
 def test_a_surfaced_v1_error_keeps_what_the_command_added(env, monkeypatch, capsys):
     import sys
 
-    monkeypatch.setenv("TAMARIND_API", "v1")
+    monkeypatch.delenv("TAMARIND_API", raising=False)
     env.v1.answers["jobs.submit"] = problem(429, "rate_limited")
     monkeypatch.setattr(sys, "argv", ["tamarind", "--json", "submit", "esmfold", "--skip-validate", "--set", "sequence=MK", "--name", "n1"])
     with pytest.raises(SystemExit) as raised:

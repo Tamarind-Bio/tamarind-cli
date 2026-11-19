@@ -584,32 +584,3 @@ def test_publish_uses_numbered_version(monkeypatch):
     assert json.loads(result.stdout)["defaultVersion"] == VERSION
 
 
-def test_test_command_on_v1_submits_the_pinned_version_with_submit_job(monkeypatch):
-    """With v1 selected, `custom-tools test` is v1's submitJob pinned to the version
-    (toolVersion + its toolLifetimeEtag), not classic's `v2/jobs` at the v1 base."""
-    from tamarind.cli.v1 import sdk as cli_sdk
-    from test_v1_cli import Recorder
-
-    fake = _install_sdk(monkeypatch)
-    fake.version.status = PublicVersionStatus.COMPLETE
-    fake.version._lifetime_etag = "etag-3"
-    fake.custom_tools.tool.test = lambda *a, **k: pytest.fail("classic v2/jobs test submission")
-    recorder = Recorder({"jobs.submit": {
-        "kind": "job", "id": "job_0f8fad5b-d9cb-469f-a165-70867728950e", "name": "smoke",
-        "tool": "fold-local", "status": "In Queue", "createdAt": "2026-11-19T08:00:00Z",
-    }})
-    monkeypatch.setattr(cli_sdk, "make_client", lambda state, api_key=None, **options: recorder)
-    result = runner.invoke(
-        app,
-        ["--json", "custom-tools", "test", "fold-local", "--version", VERSION, "--set", "sequence=AAA", "--name", "smoke"],
-        env={**ENV, "TAMARIND_API": "v1"},
-    )
-    assert result.exit_code == 0, result.output
-    assert recorder.calls == [("jobs.submit", (), {"body": {
-        "kind": "job", "tool": "fold-local", "name": "smoke", "settings": {"sequence": "AAA"},
-        "toolVersion": VERSION, "toolLifetimeEtag": "etag-3",
-    }})]
-    assert json.loads(result.stdout) == {
-        "jobName": "smoke", "id": "0f8fad5b-d9cb-469f-a165-70867728950e", "type": "fold-local",
-        "status": "In Queue", "createdAt": "2026-11-19 08:00:00",
-    }

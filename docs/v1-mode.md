@@ -1,31 +1,38 @@
 # v1 mode
 
-With v1 selected, today's commands keep their names, flags, output layout and exit codes,
-and the requests behind them go to the v1 API. This page lists what runs on v1, what still
-runs on classic, and where the output differs from classic mode.
+The CLI and the Python SDK (`tamarind.Tamarind`, `tamarind.rest`) call the v1 API for a
+key when the server says to. Nothing changes on the client side: today's commands and
+methods keep their names, flags, signatures, output layout and exit codes, and the
+requests behind them go to v1. This page lists what runs on v1, what still runs on
+classic, and where the output differs from classic.
 
-## Selecting v1
+## How v1 is chosen
 
-| Setting | Values | Default |
-|---|---|---|
-| `TAMARIND_API` / profile `"api"` | `classic`, `v1` | `classic` |
-| `TAMARIND_V1_API_BASE` / profile `"v1_api_base"` | URL | `https://api.tamarind.bio` |
+The server decides, per user: the LaunchDarkly flag `cli-sdk-v1-api`, answered on v1
+`GET /me` as `clients.useV1`. The client asks on the first request v1 can answer (never
+for `--help`, `--version` or other offline commands) and keeps the answer for 5 minutes,
+per key and environment. The CLI keeps it in `~/.tamarind/v1-flag.json` (or under
+`TAMARIND_CONFIG_DIR`), mode 0600, which holds a hash of the key, never the key itself.
+Anything but an explicit `true` means classic: no answer, a 401, a 404 (a caller outside
+v1), the field false or missing. Once a client (or a CLI command) has its answer it keeps
+it, so a long `wait` never changes API halfway; a flag change reaches the next command
+within 5 minutes. `--help` lists the v1-only commands from the last answer kept, so a
+flagged user's very first `--help`, before any command has asked, doesn't list them yet.
 
-`TAMARIND_API_BASE` / `--api-base` stay the classic base. A few requests still go to
-classic with v1 selected (below), so both bases must name the same environment. The
-defaults do; on staging set both:
+The v1 API is the one in the classic base's environment: `app.tamarind.bio` →
+`api.tamarind.bio`, `staging.tamarind.bio` → `api-staging.tamarind.bio`. Any other
+`--api-base` (a local server) has no v1 and stays classic. `TAMARIND_V1_API_BASE`
+overrides the v1 base for tests; `TAMARIND_API=classic` turns v1 off.
 
-```bash
-export TAMARIND_API=v1
-export TAMARIND_V1_API_BASE=https://api-staging.tamarind.bio
-export TAMARIND_API_BASE=https://staging.tamarind.bio/api/
-```
+Operations only v1 has (`tamarind projects`, `client.projects`, `client.jobs.get`...)
+run only when v1 is on for the key; otherwise they say "uses the v1 API, which isn't
+enabled for this account yet" (exit 2) and send nothing.
 
 ## What runs on v1
 
 | Command | v1 operation |
 |---|---|
-| `auth status`, `auth login` (the key check) | getMe |
+| `auth status`, `auth login` (the key check) | listJobs (classic's check, one job) |
 | `jobs`, `jobs --batch`, `status`, `wait`, `submit --wait` | listJobs, getJob |
 | `validate`, the check `submit` makes first, `batch --prevalidate` | validateJob |
 | `submit`, `batch` | submitJob |
@@ -36,18 +43,31 @@ export TAMARIND_API_BASE=https://staging.tamarind.bio/api/
 | `files list`, `files stats`, `files folders` | listFiles |
 | `files upload` | uploadFile |
 | `files delete` | deleteFile |
-| `custom-tools …` | the same operations at the v1 base; `custom-tools test` is submitJob pinned to the version |
+| `custom-tools …` | the same operations at the v1 base; `custom-tools test` is submitJob pinned to the version; a build's upload session (v1 `id`) is read as classic's `uploadId` |
+
+In the SDK, `Tamarind().jobs`, `.files`, `.custom_tools`, `.pipelines.get_run` and the
+`tamarind.rest` functions follow the same table: the SDK and the CLI share one mapping
+(`tamarind._v1.classic`).
 
 There is no fallback to classic. When v1 refuses a request, the CLI shows v1's error with
 today's exit codes (401 → 3, 404 → 4, 400/422 → 5, 429 → 6, budget or quota → 8, anything
-else → 1). A 5xx or no answer is "outcome unclear", as in classic mode, so `submit` and
-`batch` print their recovery command instead of retrying.
+else → 1). The error is a `ProblemError` (with v1's problem document) that is also the
+classic class for its status (`AuthError`, `NotFoundError`, `ValidationError`,
+`RateLimitError`, `BudgetError`, `APIError` with `status_code`), so existing `except`
+clauses still match. On the requests v1 serves at the same path (custom tools, pipeline
+runs) the error is the class classic gives the same answer (`CustomToolExistsError`...),
+also a `ProblemError`; a refusal v1 codes as about the key or budget is the auth or
+budget error. A 5xx or no answer is "outcome unclear", as in classic mode, so
+`submit` and `batch` print their recovery command instead of retrying.
 
 ## What still runs on classic
 
-These have no v1 form yet, so they stay on classic even with v1 selected:
+These have no v1 form yet, so they stay on classic even with v1 on:
 
-- the catalog: `tools`, `schema`, `modalities`, `functions` (until the catalog server PRs land);
+- the catalog: `tools`, `schema`, `modalities`, `functions`, and in the SDK
+  `tamarind.catalog` and `Tamarind().tools.list/schema/modalities/functions/example`.
+  Pending: once website#7796 and #7807 land (catalog visibility and fields), they move to
+  v1, with v1's schema mapped back to today's parameter list;
 - another member's jobs: `--organization`, `--email` (until website#7795);
 - `jobs --include-subjobs`;
 - `results --pdbs-only` (until v1 serves `bestStructures`);
@@ -97,8 +117,27 @@ Under `--wait` the CLI asks again after v1's `retryAfterSeconds` until the archi
 or `--timeout` passes (exit 7). Without `--wait` it says the archive is still being
 prepared.
 
-**custom-tools test:** v1 has no test marker, so the run doesn't appear in the website's
-Test history.
+**custom-tools test** (and the SDK's `CustomTool.test`): v1 has no test marker, so the
+run doesn't appear in the website's Test history.
 
 **files delete of a missing file:** v1 answers 404 (exit 4); classic answers "File deleted
 successfully".
+
+**SDK pipeline runs:** `pipelines.get_run` takes classic's bare run id (sent to v1 as
+`run_<id>`) and answers with it; the run, its node runs and a node run's `molecules()`
+are read in classic's shape (v1's molecule `id` is classic's `complex_id`, the same
+value). Checked live on staging: the typed objects are equal. v1's added
+`failureReason` isn't on the typed objects.
+
+**SDK `files.list`:** like classic, it reads only `folder` and `include_folders` (classic's
+`pages/api/files.js` ignores `include_all`, `include_metadata` and the paging options).
+With `include_folders`, folders are listed as `path/` ahead of the newest files, as
+classic dates them "now".
+
+**SDK `jobs.list` filters:** `kind`, `status`, `tool` and `search` are v1's. With v1 off,
+passing one raises "isn't enabled for this account yet"; they can't be combined with
+`organization`, `job_email`, `include_subjobs` or `job_name`.
+
+**Job rows, three more** (from review, not yet changed): a v1 `Failed` job shows `Failed`
+where classic says `Stopped`; `stopReason` is kept only for a low-priority job; a pipeline
+step's job has no `Batch`.
