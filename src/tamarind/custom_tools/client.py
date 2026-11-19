@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from typing import Any, Iterator
+
+from tamarind._v1 import public as _v1_public
 from tamarind.config import load_config
 from tamarind.custom_tools.transport import GeneratedCustomToolsTransport
 from tamarind.custom_tools.resources import CustomTools
@@ -12,7 +15,17 @@ from tamarind.resources import Files, Jobs, Tools
 
 
 class Tamarind:
-    """Configured Tamarind SDK session."""
+    """Configured Tamarind SDK session.
+
+    Whether its requests go to the v1 API is the server's answer for this key, asked
+    once on the first request v1 can answer and cached for a few minutes. Every method
+    behaves the same either way; ``docs/v1-mode.md`` lists the small differences.
+
+    The v1-only parts (``me``, ``api_keys``, ``service_accounts``, ``organization``,
+    ``usage``, ``models``, ``projects``, ``molecules``, ``assays``, and the methods marked
+    "v1 only" on the other resources) take v1's arguments and return its answers; they
+    raise ``V1NotEnabledError`` without sending anything when v1 isn't on for the key.
+    """
 
     def __init__(
         self,
@@ -21,9 +34,12 @@ class Tamarind:
         api_base: str | None = None,
         profile: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
+        _flag_cache: Any = None,
     ):
         config = load_config(api_key=api_key, api_base=api_base, profile=profile)
-        self._http = HTTPClient(config.api_base, config.api_key, timeout=timeout)
+        self._http = HTTPClient(
+            config.api_base, config.api_key, timeout=timeout, flag_cache=_flag_cache
+        )
         self.custom_tools = CustomTools(
             GeneratedCustomToolsTransport(self._http),
             upload_timeout=timeout,
@@ -33,6 +49,23 @@ class Tamarind:
         self.jobs = Jobs(self._http)
         self.tools = Tools(self._http)
         self.files = Files(self._http)
+        # v1 only.
+        v1_only = _v1_public.resources(self._http)
+        self.me = v1_only["me"]
+        self.api_keys = v1_only["api_keys"]
+        self.service_accounts = v1_only["service_accounts"]
+        self.organization = v1_only["organization"]
+        self.usage = v1_only["usage"]
+        self.models = v1_only["models"]
+        self.projects = v1_only["projects"]
+        self.molecules = v1_only["molecules"]
+        self.assays = v1_only["assays"]
+
+    @staticmethod
+    def paginate(method: Any, *args: Any, **params: Any) -> Iterator[Any]:
+        """Every item of a v1 list operation, page by page (v1 only):
+        ``Tamarind.paginate(client.projects.list, limit=200)``."""
+        return _v1_public.paginate(method, *args, **params)
 
     def close(self) -> None:
         self._http.close()

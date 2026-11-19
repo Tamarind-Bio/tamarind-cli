@@ -1,8 +1,9 @@
 """The CLI's one doorway to the v1 SDK.
 
-Every v1 command calls the API through these functions, which call the SDK
-(``tamarind.v1``); nothing in the CLI sends v1 HTTP itself, so the CLI and the
-SDK can't drift. An operation is called by its ``x-clients.sdk`` name, e.g.
+Every v1 command calls the API through these functions, which call the private v1
+SDK (``tamarind._v1``); nothing in the CLI sends v1 HTTP itself, so the CLI and the
+SDK can't drift. v1-only commands run only when the server has turned v1 on for the
+key (``cli-sdk-v1-api``); otherwise they say so and send nothing. An operation is called by its ``x-clients.sdk`` name, e.g.
 ``projects.notes.createEntry`` → ``client.projects.notes.create_entry(...)``.
 """
 
@@ -18,6 +19,7 @@ from typing import Any, Callable
 import httpx
 
 from ...errors import TamarindError, UsageError
+from ..._v1.classic import plain
 
 # openapi-python-client (pinned) renames a parameter that would shadow a builtin
 # or a keyword by adding "_": `from` → `from_`, `filter` → `filter_`.
@@ -35,14 +37,12 @@ def argument(name: str) -> str:
     return value + "_" if value in _RESERVED or keyword.iskeyword(value) else value
 
 
-def make_client(state: Any, *, api_key: str | None = None, **options: Any) -> Any:
-    """The v1 SDK client for this invocation's key (or ``api_key``) and v1 base URL;
-    ``options`` (``timeout``, ``max_retries``) go to the client."""
-    from tamarind.v1 import Tamarind as V1Client  # the v1 SDK's client
-
-    cfg = state.config()
-    key = api_key if api_key is not None else cfg.api_key
-    return V1Client(api_key=key, base_url=cfg.v1_api_base.rstrip("/"), **options)
+def make_client(state: Any, *, what: str = "This command", **options: Any) -> Any:
+    """The v1 SDK client for this invocation's key; ``options`` (``timeout``,
+    ``max_retries``) go to the client. Raises ``V1NotEnabledError`` (exit 2) when the
+    server hasn't turned v1 on for the key (``cli-sdk-v1-api``)."""
+    with state.rest_client() as http:
+        return http.v1_client(what, **options)
 
 
 def wait(
@@ -72,25 +72,9 @@ def upload(client: Any, local_path: Any, remote_path: str) -> dict[str, Any]:
 
 
 def require_v1(state: Any, command: str) -> None:
-    if not state.is_v1:
-        raise UsageError(
-            f"`tamarind {command}` uses the v1 API (https://api.tamarind.bio). "
-            "Select it with TAMARIND_API=v1, or \"api\": \"v1\" in your profile."
-        )
-
-
-def plain(value: Any) -> Any:
-    """SDK models → their wire dicts (camelCase), recursively; everything else as is."""
-    to_dict = getattr(value, "to_dict", None)
-    if callable(to_dict):
-        return to_dict()
-    if isinstance(value, list):
-        return [plain(v) for v in value]
-    if isinstance(value, tuple):
-        return [plain(v) for v in value]
-    if isinstance(value, dict):
-        return {k: plain(v) for k, v in value.items()}
-    return value
+    """Refuse a v1-only command, before anything is sent, when v1 isn't on for the key."""
+    with state.rest_client() as http:
+        http.require_v1(f"`tamarind {command}`")
 
 
 def method(client: Any, sdk_name: str) -> Callable[..., Any]:

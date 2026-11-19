@@ -1351,6 +1351,40 @@ def test_test_command_pins_completed_version_and_marks_history(job_type):
     assert submit.calls[0].request.headers["x-api-key"] == "key"
 
 
+@respx.mock
+def test_with_v1_on_a_test_is_submit_job_pinned_to_the_version(monkeypatch):
+    """With v1 on for the key, custom-tools requests go to the v1 base (same paths) and a
+    test is v1's submitJob pinned to the version; the receipt is classic's."""
+    from conftest import turn_v1_on
+
+    monkeypatch.setenv("TAMARIND_V1_API_BASE", "https://v1.test")
+    turn_v1_on(monkeypatch)
+    respx.get("https://v1.test/custom-tools/example", params__eq={}).mock(
+        return_value=httpx.Response(200, json=_tool())
+    )
+    respx.get(f"https://v1.test/custom-tools/example?version={VERSION}").mock(
+        return_value=httpx.Response(200, json=_detail(_version(status="Complete")))
+    )
+    submit = respx.post("https://v1.test/jobs").mock(
+        return_value=httpx.Response(201, json={
+            "kind": "job", "id": "job_0f8fad5b-d9cb-469f-a165-70867728950e", "name": "smoke-test",
+            "tool": "example", "status": "In Queue", "createdAt": "2026-11-19T08:00:00Z",
+        })
+    )
+    classic = respx.post(f"{BASE}v2/jobs")
+    with Tamarind(api_key="key", api_base="https://app.tamarind.bio/api") as client:
+        job = client.custom_tools.get("example").test({"sequence": "AAA"}, version=VERSION, name="smoke-test")
+    assert (job.id, job.job_name, job.job_type, job.status, job.created_at) == (
+        "0f8fad5b-d9cb-469f-a165-70867728950e", "smoke-test", "example", "In Queue", "2026-11-19 08:00:00",
+    )
+    assert json.loads(submit.calls[0].request.content) == {
+        "kind": "job", "tool": "example", "name": "smoke-test", "settings": {"sequence": "AAA"},
+        "toolVersion": VERSION, "toolLifetimeEtag": '"lifetime-etag"',
+    }
+    assert submit.calls[0].request.headers["x-api-key"] == "key"
+    assert not classic.called
+
+
 @pytest.mark.parametrize("status", ["Queued", "Running", "Stopped", "Complete"])
 @respx.mock
 def test_test_rejects_unfinished_or_failed_versions(status):

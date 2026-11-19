@@ -20,9 +20,10 @@ except ImportError:  # pragma: no cover - older Typer uses the external Click pa
     from click import ClickException
 
 from .. import __version__, attribution
-from ..config import Config, load_config
+from ..config import Config, config_dir, load_config
 from ..errors import ExitCode, TamarindError
 from ..http import HTTPClient
+from .._v1.switch import FileFlagCache, v1_base_for
 from ..custom_tools.client import Tamarind
 from . import output
 from .output import OutputMode
@@ -104,40 +105,37 @@ class State:
     def config(self) -> Config:
         return load_config(**self._kwargs)
 
-    @property
-    def is_v1(self) -> bool:
-        """Whether this invocation talks to the v1 API (opt-in; classic is the default)."""
-        return self.config().is_v1
+    def _http(self, base: str) -> HTTPClient:
+        """A client for ``base``. Whether its requests go to v1 is the server's answer
+        for this key (``cli-sdk-v1-api``), cached in the config directory for a few
+        minutes so each command doesn't ask again; see :mod:`tamarind._v1.switch`."""
+        cfg = self.config()
+        return HTTPClient(
+            base,
+            cfg.api_key,
+            v1_base=v1_base_for(cfg.api_base),
+            flag_cache=FileFlagCache(config_dir()),
+        )
 
     def rest_client(self) -> HTTPClient:
-        """Today's job API. With v1 selected, its requests go to v1 instead and the
-        answers are rebuilt in classic's layout (see :mod:`.v1.classic_routes`)."""
-        cfg = self.config()
-        if cfg.is_v1:
-            from .v1.classic_routes import ClassicOverV1
-
-            return ClassicOverV1(self)  # type: ignore[return-value]
-        return HTTPClient(cfg.api_base, cfg.api_key)
+        """Today's job API. With v1 on for this key, its requests go to v1 and the answers
+        are rebuilt in classic's layout (see :mod:`tamarind._v1.classic`)."""
+        return self._http(self.config().api_base)
 
     def catalog_client(self) -> HTTPClient:
-        """The catalog (tools, schemas, facets, job logs). With v1 selected, job logs come
-        from v1; the rest stays on the catalog until v1 serves it alike."""
-        cfg = self.config()
-        if cfg.is_v1:
-            from .v1.classic_routes import CatalogOverV1
-
-            return CatalogOverV1(self)  # type: ignore[return-value]
-        return HTTPClient(cfg.catalog_base, cfg.api_key)
+        """The catalog (tools, schemas, facets, job logs). With v1 on, job logs come from
+        v1; the rest stays on the catalog until v1 serves it alike."""
+        return self._http(self.config().catalog_base)
 
     def sdk_client(self) -> Tamarind:
-        """Build the shared SDK with this invocation's resolved credentials.
-
-        With v1 selected, its Custom Tools resource talks to the v1 base, which
-        serves the same ``/custom-tools`` operations.
-        """
+        """Build the shared SDK with this invocation's resolved credentials."""
         cfg = self.config()
-        base = cfg.v1_api_base if cfg.is_v1 else cfg.api_base
-        return Tamarind(api_key=cfg.api_key, api_base=base, profile=cfg.profile)
+        return Tamarind(
+            api_key=cfg.api_key,
+            api_base=cfg.api_base,
+            profile=cfg.profile,
+            _flag_cache=FileFlagCache(config_dir()),
+        )
 
 
 app = typer.Typer(

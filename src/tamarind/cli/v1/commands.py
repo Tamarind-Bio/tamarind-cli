@@ -1,8 +1,9 @@
 """The hand-written v1 commands: ``jobs download`` and ``files download``.
 
 They save a file to disk, which a command built from the contract can't. Calls go
-through :mod:`.sdk`, never raw HTTP. (Today's commands don't come here: with v1
-selected they keep their classic code, see :mod:`.classic_routes`.)
+through :mod:`.sdk`, never raw HTTP. (Today's commands don't come here: with v1 on
+they keep their classic code, and HTTPClient answers it from v1: see
+:mod:`tamarind._v1.classic`.)
 """
 
 from __future__ import annotations

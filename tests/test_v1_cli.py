@@ -13,9 +13,10 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-from tamarind import config
 from tamarind.cli.main import app
-from tamarind.cli.v1 import sdk
+from tamarind.cli.v1 import sdk  # noqa: F401
+
+from conftest import remember_v1, turn_v1_on
 from tamarind.errors import NotFoundError, UsageError
 
 runner = CliRunner()
@@ -34,11 +35,14 @@ class Recorder:
     def __exit__(self, *exc: object) -> None:
         return None
 
+    def close(self) -> None:
+        return None
+
     def __getattr__(self, name: str) -> "_Path":
         return _Path(self, (name,))
 
     def paginate(self, method: "_Path", *args: Any, **params: Any):
-        """Like ``tamarind.v1.Tamarind.paginate``: every item, following nextCursor
+        """Like ``tamarind._v1.Tamarind.paginate``: every item, following nextCursor
         (in the body when the call has one, as for molecules.search)."""
         if "body" in params:
             body = dict(params.pop("body") or {})
@@ -80,9 +84,10 @@ class _Path:
 def v1(monkeypatch, tmp_path):
     monkeypatch.setenv("TAMARIND_CONFIG_DIR", str(tmp_path))
     monkeypatch.setenv("TAMARIND_API_KEY", "test-key")
-    monkeypatch.setenv("TAMARIND_API", "v1")
+    monkeypatch.delenv("TAMARIND_API", raising=False)
     recorder = Recorder({})
-    monkeypatch.setattr(sdk, "make_client", lambda state, api_key=None, **options: recorder)
+    turn_v1_on(monkeypatch, client=recorder)
+    remember_v1(tmp_path, "test-key")  # what --help lists v1 commands by
     return recorder
 
 
@@ -94,65 +99,23 @@ def _json(result) -> Any:
 # -- selection -------------------------------------------------------------
 
 
-def test_classic_is_the_default(monkeypatch, tmp_path):
-    monkeypatch.setenv("TAMARIND_CONFIG_DIR", str(tmp_path))
-    monkeypatch.delenv("TAMARIND_API", raising=False)
-    cfg = config.load_config()
-    assert cfg.api == "classic" and not cfg.is_v1
-    assert cfg.v1_api_base == "https://api.tamarind.bio/"
-
-
-def test_v1_is_chosen_by_env_or_profile(monkeypatch, tmp_path):
-    monkeypatch.setenv("TAMARIND_CONFIG_DIR", str(tmp_path))
-    monkeypatch.delenv("TAMARIND_API", raising=False)
-    assert config.load_config(api="v1").is_v1
-    monkeypatch.setenv("TAMARIND_API", "V1")
-    assert config.load_config().is_v1
-    assert config.load_config(api="classic").api == "classic"
-    monkeypatch.delenv("TAMARIND_API")
-    (tmp_path / "config.json").write_text(json.dumps({"profiles": {"default": {"api": "v1"}}}))
-    assert config.load_config().is_v1
-
-
-def test_unknown_api_value_is_a_usage_error(monkeypatch, tmp_path):
-    monkeypatch.setenv("TAMARIND_CONFIG_DIR", str(tmp_path))
-    monkeypatch.setenv("TAMARIND_API", "v2")
-    with pytest.raises(UsageError):
-        config.load_config()
-
-
-def test_v1_base_never_falls_back_to_a_classic_base(monkeypatch, tmp_path):
-    monkeypatch.setenv("TAMARIND_CONFIG_DIR", str(tmp_path))
-    monkeypatch.setenv("TAMARIND_API_BASE", "https://classic.example/api")
-    (tmp_path / "config.json").write_text(
-        json.dumps({"profiles": {"default": {"api_base": "https://profile.example/api"}}})
-    )
-    cfg = config.load_config(api="v1")
-    assert cfg.v1_api_base == "https://api.tamarind.bio/"
-    assert cfg.api_base == "https://classic.example/api/"
-    monkeypatch.setenv("TAMARIND_V1_API_BASE", "https://api-staging.example")
-    assert config.load_config(api="v1").v1_api_base == "https://api-staging.example/"
-    explicit = config.load_config(api="v1", v1_api_base="https://v1.example", api_base="https://c.example")
-    assert explicit.v1_api_base == "https://v1.example/"
-    # An explicit classic base is honored whichever API is selected (the classic
-    # SDK's custom-tools resource is pointed at the v1 base this way).
-    assert explicit.api_base == "https://c.example/"
-
-
-def test_custom_tools_on_v1_use_the_v1_base(monkeypatch, tmp_path):
+def test_custom_tools_on_v1_go_to_the_v1_base(monkeypatch, tmp_path):
     from tamarind.cli.main import State
     from tamarind.cli.output import OutputMode
 
     monkeypatch.setenv("TAMARIND_CONFIG_DIR", str(tmp_path))
-    monkeypatch.setenv("TAMARIND_API", "v1")
     monkeypatch.setenv("TAMARIND_V1_API_BASE", "https://api-staging.example")
+    turn_v1_on(monkeypatch)
     state = State(
         output=OutputMode(json=True, quiet=False),
-        _kwargs={"api_key": "k", "api_base": None, "catalog_base": None, "profile": None, "api": None},
+        _kwargs={"api_key": "k", "api_base": None, "catalog_base": None, "profile": None},
     )
     client = state.sdk_client()
     try:
-        assert str(client._http.base_url) == "https://api-staging.example/"
+        # The classic base stays the client's; a custom-tools request is sent to v1's.
+        assert str(client._http.base_url) == "https://app.tamarind.bio/api/"
+        assert client._http._raw_client("custom-tools").base_url == "https://api-staging.example"
+        assert client._http._raw_client("submit-job") is client._http
     finally:
         client.close()
 
@@ -166,7 +129,7 @@ def test_v1_only_commands_are_hidden_and_refused_in_classic(monkeypatch, tmp_pat
     assert "download" not in runner.invoke(app, ["files", "--help"]).stdout
     res = runner.invoke(app, ["projects", "list"])
     assert isinstance(res.exception, UsageError)
-    assert "TAMARIND_API=v1" in str(res.exception)
+    assert "isn't enabled for this account yet" in str(res.exception)
 
 
 def test_v1_commands_show_in_help_when_selected(v1):
@@ -281,12 +244,26 @@ def test_help_honors_an_explicit_profile(monkeypatch, tmp_path):
     monkeypatch.setenv("TAMARIND_CONFIG_DIR", str(tmp_path))
     monkeypatch.delenv("TAMARIND_API", raising=False)
     monkeypatch.delenv("TAMARIND_PROFILE", raising=False)
+    monkeypatch.delenv("TAMARIND_API_KEY", raising=False)
     (tmp_path / "config.json").write_text(
-        json.dumps({"current_profile": "default", "profiles": {"default": {}, "next": {"api": "v1"}}})
+        json.dumps({"current_profile": "default", "profiles": {"default": {"api_key": "k1"}, "next": {"api_key": "k2"}}})
     )
+    remember_v1(tmp_path, "k2")  # v1 is on for the next profile's key, not the default's
     monkeypatch.setattr(sys, "argv", ["tamarind", "--profile", "next", "--help"])
     assert "projects" in runner.invoke(app, ["--profile", "next", "--help"]).stdout
     monkeypatch.setattr(sys, "argv", ["tamarind", "--help"])
+    assert "projects" not in runner.invoke(app, ["--help"]).stdout
+
+
+def test_help_never_asks_the_server(monkeypatch, tmp_path):
+    monkeypatch.setenv("TAMARIND_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("TAMARIND_API_KEY", "k")
+    monkeypatch.delenv("TAMARIND_API", raising=False)
+    from tamarind._v1 import switch
+
+    monkeypatch.setattr(switch, "probe", lambda *a, **k: pytest.fail("--help asked /me"))
+    for args in (["--help"], ["jobs", "--help"], ["files", "--help"], ["--version"]):
+        assert runner.invoke(app, args).exit_code == 0
     assert "projects" not in runner.invoke(app, ["--help"]).stdout
 
 
@@ -408,7 +385,7 @@ def test_an_error_on_an_answer_is_not_called_unclear(v1):
 def test_an_assay_order_its_key_cant_read_back_is_an_unclear_outcome(v1):
     """409 idempotency_order_unavailable: the key's order was placed, so the key is shown
     for the retry rather than read as a refusal (a new key would order again)."""
-    from tamarind.v1.errors import ProblemError
+    from tamarind._v1.errors import ProblemError
 
     v1.answers["assays.submit"] = ProblemError(
         status=409, code="idempotency_order_unavailable", title="Conflict",

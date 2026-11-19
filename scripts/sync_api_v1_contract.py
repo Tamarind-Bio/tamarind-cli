@@ -43,8 +43,8 @@ GENERATOR = "openapi-python-client==0.28.4"
 SPEC = Path("openapi/api-v1.yaml")
 LOCK = Path("openapi/api-v1.lock.json")
 CONFIG = Path("openapi/api-v1-openapi-python-client.json")
-TARGET = Path("src/tamarind/v1/_generated")
-METADATA = Path("src/tamarind/v1/_contract.py")
+TARGET = Path("src/tamarind/_v1/_generated")
+METADATA = Path("src/tamarind/_v1/_contract.py")
 LOCK_KEYS = {
     "artifactSha256",
     "generator",

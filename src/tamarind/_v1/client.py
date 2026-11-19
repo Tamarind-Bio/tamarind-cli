@@ -2,7 +2,7 @@
 
 Each method is named from its operation's ``x-clients.sdk`` in the contract, in
 snake_case (``projects.notes.createEntry`` is ``client.projects.notes.create_entry``),
-and is built on that operation's generated module in ``tamarind.v1._generated``.
+and is built on that operation's generated module in ``tamarind._v1._generated``.
 
 - Path parameters are positional, in path order; a request body (a ``dict``, or a
   generated model) comes next or as ``body=``; query parameters are keyword
@@ -11,7 +11,7 @@ and is built on that operation's generated module in ``tamarind.v1._generated``.
   empty answer, or ``bytes`` for file content. Fields and enum values the API adds
   later reach you unchanged; the generated models stay available for typed parsing
   (``Job.from_dict(answer)``).
-- A failure raises :class:`~tamarind.v1.errors.ProblemError`.
+- A failure raises :class:`~tamarind._v1.errors.ProblemError`.
 
 Helpers (DESIGN decision 25): :meth:`Jobs.wait`, :meth:`Files.upload`,
 :meth:`Tamarind.paginate`, and in every call an automatic ``Idempotency-Key`` and
@@ -34,14 +34,14 @@ import attrs
 import httpx
 
 from tamarind.errors import JobTimeoutError, TamarindError
-from tamarind.v1._generated.api.api_keys import (
+from tamarind._v1._generated.api.api_keys import (
     create_api_key,
     get_api_key,
     list_api_keys,
     revoke_api_key,
     update_api_key,
 )
-from tamarind.v1._generated.api.assays import (
+from tamarind._v1._generated.api.assays import (
     cancel_assay,
     estimate_assay,
     get_assay,
@@ -52,7 +52,7 @@ from tamarind.v1._generated.api.assays import (
     submit_assay,
     validate_assay,
 )
-from tamarind.v1._generated.api.custom_tools import (
+from tamarind._v1._generated.api.custom_tools import (
     build_custom_tool,
     cancel_custom_tool_build,
     create_custom_tool,
@@ -66,7 +66,7 @@ from tamarind.v1._generated.api.custom_tools import (
     update_custom_tool,
     validate_custom_tool_config,
 )
-from tamarind.v1._generated.api.files import (
+from tamarind._v1._generated.api.files import (
     complete_file_upload,
     delete_file,
     get_file,
@@ -74,14 +74,14 @@ from tamarind.v1._generated.api.files import (
     list_files,
     upload_file,
 )
-from tamarind.v1._generated.api.identity import get_me
-from tamarind.v1._generated.api.job_outputs import (
+from tamarind._v1._generated.api.identity import get_me
+from tamarind._v1._generated.api.job_outputs import (
     archive_job,
     get_job_file,
     get_job_logs,
     list_job_files,
 )
-from tamarind.v1._generated.api.jobs import (
+from tamarind._v1._generated.api.jobs import (
     cancel_job,
     delete_job,
     estimate_job,
@@ -93,8 +93,8 @@ from tamarind.v1._generated.api.jobs import (
     update_job,
     validate_job,
 )
-from tamarind.v1._generated.api.models import get_model, list_models
-from tamarind.v1._generated.api.molecules import (
+from tamarind._v1._generated.api.models import get_model, list_models
+from tamarind._v1._generated.api.molecules import (
     commit_molecule_import,
     create_molecule_group,
     create_molecule_schema,
@@ -116,13 +116,13 @@ from tamarind.v1._generated.api.molecules import (
     update_molecule_schema,
     upload_molecules,
 )
-from tamarind.v1._generated.api.organization import (
+from tamarind._v1._generated.api.organization import (
     get_organization,
     get_organization_contract,
     list_organization_members,
     list_sub_organizations,
 )
-from tamarind.v1._generated.api.pipelines import (
+from tamarind._v1._generated.api.pipelines import (
     archive_pipeline_run,
     cancel_pipeline_run,
     create_pipeline_template,
@@ -140,7 +140,7 @@ from tamarind.v1._generated.api.pipelines import (
     validate_pipeline,
     validate_pipeline_template,
 )
-from tamarind.v1._generated.api.project_notes import (
+from tamarind._v1._generated.api.project_notes import (
     append_project_notes_note,
     create_project_notes_entry,
     delete_project_notes_entry,
@@ -151,7 +151,7 @@ from tamarind.v1._generated.api.project_notes import (
     update_project_notes_entry,
     update_project_notes_note,
 )
-from tamarind.v1._generated.api.projects import (
+from tamarind._v1._generated.api.projects import (
     create_project,
     delete_project,
     get_project,
@@ -160,22 +160,22 @@ from tamarind.v1._generated.api.projects import (
     list_projects,
     update_project,
 )
-from tamarind.v1._generated.api.service_accounts import (
+from tamarind._v1._generated.api.service_accounts import (
     create_service_account,
     delete_service_account,
     get_service_account,
     list_service_accounts,
 )
-from tamarind.v1._generated.api.tools import (
+from tamarind._v1._generated.api.tools import (
     get_tool,
     get_tool_facets,
     get_tool_schema,
     list_tools,
     recommend_tools,
 )
-from tamarind.v1._generated.api.usage import get_usage, refresh_usage
-from tamarind.v1._generated.types import UNSET
-from tamarind.v1._transport import (
+from tamarind._v1._generated.api.usage import get_usage, refresh_usage
+from tamarind._v1._generated.types import UNSET
+from tamarind._v1._transport import (
     DEFAULT_BASE_URL,
     DEFAULT_MAX_RETRIES,
     DEFAULT_TIMEOUT,
@@ -231,7 +231,7 @@ def _doc(endpoint: types.ModuleType) -> str:
         "\n\nextra_headers (dict): headers to add to this one request, such as"
         " ``{'Accept': 'text/csv'}``."
         "\n\nReturns the decoded JSON answer (bytes for file content, None when empty)."
-        "\nRaises tamarind.v1.ProblemError for an error answer."
+        "\nRaises tamarind._v1.ProblemError for an error answer."
     )
 
 
@@ -630,7 +630,8 @@ class Tamarind:
     """A Tamarind API v1 client.
 
     ``api_key`` defaults to ``TAMARIND_API_KEY`` and ``base_url`` to
-    ``TAMARIND_V1_API_BASE``, then ``https://api.tamarind.bio``. ``version`` pins the
+    ``https://api.tamarind.bio``; :class:`tamarind.http.HTTPClient` passes the v1 base of
+    its own environment (``tamarind._v1.switch``). ``version`` pins the
     ``Tamarind-Version`` header (``YYYY-MM-DD``); without it the API answers with its
     first version. ``max_retries`` bounds retries of a failed request.
     """
@@ -647,7 +648,7 @@ class Tamarind:
     ):
         self._transport = Transport(
             api_key=api_key or os.environ.get("TAMARIND_API_KEY") or None,
-            base_url=base_url or os.environ.get("TAMARIND_V1_API_BASE") or DEFAULT_BASE_URL,
+            base_url=base_url or DEFAULT_BASE_URL,
             timeout=timeout,
             max_retries=max_retries,
             version=version,

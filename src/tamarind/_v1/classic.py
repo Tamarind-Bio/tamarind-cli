@@ -1,23 +1,22 @@
-"""Today's commands on the v1 API.
+"""Today's classic requests, answered by the v1 API.
 
-With v1 selected, every command the CLI already had keeps its classic code (its flags,
-its human and ``--json`` layout, its exit codes) and its requests go to v1 instead.
-:class:`ClassicOverV1` stands in for the classic :class:`~tamarind.http.HTTPClient`,
-and :class:`CatalogOverV1` for the catalog client's job logs: each classic request is
-answered by the v1 operation behind it, and v1's answer is rebuilt into the layout
-classic returns. A field v1 doesn't have is left out; docs/v1-mode.md lists those
-differences.
+When the server says a key uses v1 (``tamarind._v1.switch``), every classic request
+v1 has a form for is answered by the v1 operation behind it, and v1's answer is
+rebuilt into the layout classic returns. :class:`~tamarind.http.HTTPClient` does
+this for every caller, so ``tamarind.rest``, ``tamarind.Tamarind`` and the CLI's
+commands keep their signatures, layouts and exit codes. A field v1 doesn't have is
+left out; docs/v1-mode.md lists those differences.
 
-There is no fallback. What v1 refuses is raised as v1's error (a ``ProblemError``,
-whose exit code follows the CLI's table), so a run with v1 selected shows what v1
-does. The few requests v1 has no form for yet go to classic on purpose
-(:class:`OnClassic`): the catalog, another member's jobs (``--organization`` /
-``--email``), a list with ``--include-subjobs``, ``results --pdbs-only``, and the logs
-of anything but a single job.
+There is no fallback. What v1 refuses is raised as v1's error, a ``ProblemError``
+that is also the classic error class for its status (``NotFoundError`` for a 404...),
+so existing ``except`` clauses still match. The few requests v1 has no form for yet
+go to classic on purpose (:class:`OnClassic`): the catalog, another member's jobs
+(``organization`` / ``jobEmail``), a list with ``includeSubjobs``, ``pdbsOnly``
+results, and the logs of anything but a single job.
 
 A v1 failure with no answer, a 5xx or a 409 ``idempotency_in_progress`` is raised the
-way the classic client raises one, so the commands' own "outcome may be ambiguous"
-handling applies unchanged.
+way the classic client raises one, so callers' "outcome may be ambiguous" handling
+applies unchanged.
 """
 
 from __future__ import annotations
@@ -27,22 +26,19 @@ import re
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from uuid import uuid4
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, NoReturn
 
-import click
-
-from ...custom_tools.resources import CustomTool, CustomToolTestJob
-from ...errors import (
+from ..errors import (
     APIError,
-    CustomToolNotDeployableError,
+    AuthError,
+    BudgetError,
     JobTimeoutError,
     NotFoundError,
+    RateLimitError,
     TamarindError,
     ValidationError,
 )
-from ...http import HTTPClient
-from . import sdk
+from .errors import _BUDGET_CODES, ProblemError
 
 # What submit-job and submit-batch append for a low-priority job (classic's
 # `lowPrioritySubmittedSuffix(true)`, src/lib/jobs/lowPriority.js).
@@ -57,93 +53,115 @@ class OnClassic(Exception):
     """v1 has no form for this request yet: it goes to classic."""
 
 
-def _classic_error(exc: TamarindError) -> TamarindError:
+def plain(value: Any) -> Any:
+    """SDK models → their wire dicts (camelCase), recursively; everything else as is."""
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        return to_dict()
+    if isinstance(value, (list, tuple)):
+        return [plain(v) for v in value]
+    if isinstance(value, dict):
+        return {k: plain(v) for k, v in value.items()}
+    return value
+
+
+# -- errors -------------------------------------------------------------------------
+
+
+class AuthProblem(ProblemError, AuthError):
+    """v1 refused the key or its access (401, or an auth code)."""
+
+
+class NotFoundProblem(ProblemError, NotFoundError):
+    """v1 answered 404."""
+
+
+class ValidationProblem(ProblemError, ValidationError):
+    """v1 answered 400 or 422."""
+
+
+class RateLimitProblem(ProblemError, RateLimitError):
+    """v1 answered 429."""
+
+
+class BudgetProblem(ProblemError, BudgetError):
+    """v1 refused for budget or quota."""
+
+
+class APIProblem(ProblemError, APIError):
+    """Any other v1 refusal; ``status_code`` is its status, as classic's APIError has."""
+
+
+_AUTH_CODES = {"authentication_required", "invalid_api_key", "agent_trial_expired"}
+
+
+def _classic_class(error: ProblemError) -> type[ProblemError]:
+    if error.code in _BUDGET_CODES:
+        return BudgetProblem
+    if error.status == 401 or error.code in _AUTH_CODES:
+        return AuthProblem
+    if error.status == 404:
+        return NotFoundProblem
+    if error.status in (400, 422):
+        return ValidationProblem
+    if error.status == 429:
+        return RateLimitProblem
+    return APIProblem
+
+
+def classic_error(exc: TamarindError) -> TamarindError:
     """A v1 failure raised the way the classic client raises one.
 
-    A 5xx becomes an :class:`APIError` with its status; a failure with no answer, or a
-    409 ``idempotency_in_progress``, a plain :class:`TamarindError`, which is what the
-    commands read as "the outcome may be ambiguous". Any other error is v1's own answer
-    and keeps its exit code.
+    A failure with no answer is already a plain :class:`TamarindError`; a 409
+    ``idempotency_in_progress`` (or ``idempotency_order_unavailable``) becomes one too,
+    which is what callers read as "the outcome may be ambiguous". Any other v1 answer
+    stays a ``ProblemError`` (its problem document, its exit code) and also becomes the
+    classic class for its status; a 5xx is an ``APIError`` with ``status_code``.
     """
-    status = getattr(exc, "status", None)
-    if getattr(exc, "code", None) == "idempotency_in_progress":
-        return TamarindError(exc.message, detail=getattr(exc, "problem", None))
-    if isinstance(status, int) and status >= 500:
-        return APIError(exc.message, status_code=status, detail=getattr(exc, "problem", None))
+    if not isinstance(exc, ProblemError):
+        return exc
+    if exc.code in ("idempotency_in_progress", "idempotency_order_unavailable"):
+        return TamarindError(exc.message, detail=exc.problem or None)
+    if not isinstance(exc, (AuthError, NotFoundError, ValidationError, RateLimitError, BudgetError, APIError)):
+        exc.__class__ = _classic_class(exc)
+        if isinstance(exc, APIError):
+            exc.status_code = exc.status
     return exc
 
 
-Route = tuple[Callable[..., Any], tuple[str, ...]]
+def _raise_classic(exc: TamarindError) -> NoReturn:
+    converted = classic_error(exc)
+    if converted is exc:
+        raise exc
+    raise converted from exc
 
 
-class _OverV1:
-    """A classic client's interface, answering the requests :meth:`_route` names from v1."""
+Handler = Callable[..., Any]
+Route = tuple[Handler, tuple[str, ...]]
 
-    def __init__(self, state: Any, classic: HTTPClient):
-        self._state = state
-        self._classic = classic
-        self.base_url = classic.base_url
-        self.api_key = classic.api_key
-        self._v1: Any = None
+
+class Router:
+    """One classic client's requests on v1: its lookups, remembered for its life, and
+    the state a results wait carries."""
+
+    def __init__(self, http: Any):
+        self._http = http
+        self._bounded_client: Any = None
         self._items: dict[tuple[str, tuple[str, ...]], dict[str, Any]] = {}
         self._names: dict[str, str] = {}
-        # When the command began: its --timeout counts from here, across every wait.
-        self.started = time.monotonic()
+        # (waiting, deadline): set by HTTPClient.results_wait; deadline is monotonic.
+        self.results_deadline: tuple[bool, float | None] = (False, None)
 
-    def close(self) -> None:
-        self._classic.close()
-        if self._v1 is not None:
-            self._v1.__exit__(None, None, None)
-
-    def __enter__(self) -> Any:
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        self.close()
+    @property
+    def api_key(self) -> str | None:
+        return self._http.api_key
 
     def v1(self) -> Any:
-        if self._v1 is None:
-            self._v1 = sdk.make_client(self._state)
-        return self._v1
+        if self._bounded_client is not None:
+            return self._bounded_client
+        return self._http.v1()
 
-    def get_json(
-        self, path: str, *, params: dict[str, Any] | None = None, timeout: float | None = None
-    ) -> Any:
-        return self._serve(
-            "GET",
-            path,
-            params,
-            lambda: self._classic.get_json(path, params=params, timeout=timeout),
-            timeout=timeout,
-        )
-
-    def post_json(self, path: str, *, json: Any | None = None) -> Any:
-        return self._serve("POST", path, json, lambda: self._classic.post_json(path, json=json))
-
-    def delete_json(
-        self, path: str, *, params: dict[str, Any] | None = None, json: Any | None = None
-    ) -> Any:
-        payload = json if json is not None else params
-        return self._serve(
-            "DELETE", path, payload, lambda: self._classic.delete_json(path, params=params, json=json)
-        )
-
-    def _route(self, method: str, path: str) -> Route | None:
-        raise NotImplementedError
-
-    def _serve(
-        self,
-        method: str,
-        path: str,
-        payload: Any,
-        classic: Callable[[], Any],
-        *,
-        timeout: float | None = None,
-    ) -> Any:
-        route = self._route(method, path.strip("/"))
-        # No key: classic's client says so, in its words, before sending anything.
-        if route is None or not self.api_key:
-            return classic()
+    def serve(self, route: Route, payload: Any, classic: Callable[[], Any], *, timeout: float | None = None) -> Any:
         handler, args = route
         try:
             with self._bounded(timeout):
@@ -151,7 +169,7 @@ class _OverV1:
         except OnClassic:
             return classic()
         except TamarindError as exc:
-            raise _classic_error(exc) from exc
+            _raise_classic(exc)
 
     @contextmanager
     def _bounded(self, timeout: float | None) -> Iterator[None]:
@@ -161,13 +179,13 @@ class _OverV1:
         if timeout is None:
             yield
             return
-        saved = self._v1
-        self._v1 = sdk.make_client(self._state, timeout=max(float(timeout), 0.001), max_retries=0)
+        saved = self._bounded_client
+        self._bounded_client = self._http.v1_client(timeout=max(float(timeout), 0.001), max_retries=0)
         try:
             yield
         finally:
-            self._v1.__exit__(None, None, None)
-            self._v1 = saved
+            self._bounded_client.close()
+            self._bounded_client = saved
 
     # -- lookups -----------------------------------------------------------
 
@@ -182,7 +200,7 @@ class _OverV1:
             found: list[dict[str, Any]] = []
             for kind in kinds or (None,):
                 query = {"name": name, **({"kind": kind} if kind else {})}
-                page = sdk.plain(self.v1().jobs.list(**query))
+                page = plain(self.v1().jobs.list(**query))
                 found.extend((page or {}).get("items") or [])
             if not found:
                 return None
@@ -192,7 +210,7 @@ class _OverV1:
     def name_of(self, item_id: str) -> str | None:
         """A batch's (or run's) name, from its id."""
         if item_id not in self._names:
-            self._names[item_id] = str(sdk.plain(self.v1().jobs.get(item_id)).get("name") or "")
+            self._names[item_id] = str(plain(self.v1().jobs.get(item_id)).get("name") or "")
         return self._names[item_id] or None
 
 
@@ -249,20 +267,31 @@ def statuses(rows: list[dict[str, Any]]) -> dict[str, int]:
     return {key: sum(1 for row in rows if row.get("JobStatus") == key) for key in keys}
 
 
-def get_jobs(client: _OverV1, params: dict[str, Any]) -> dict[str, Any]:
+# listJobs filters only v1 has (rest.get_jobs checks v1 is on before sending them).
+_V1_JOB_FILTERS = ("kind", "status", "tool", "search")
+
+
+def get_jobs(client: Router, params: dict[str, Any]) -> dict[str, Any]:
     """GET /jobs: one job by name (getJob), or a page (listJobs)."""
+    filters = {key: params[key] for key in _V1_JOB_FILTERS if params.get(key) is not None}
     if params.get("organization") or params.get("jobEmail") or params.get("includeSubjobs"):
+        if filters:
+            raise ValidationError(
+                f"{', '.join(filters)} can't be combined with organization, job_email or include_subjobs yet."
+            )
         raise OnClassic  # another member's jobs (website#7795); subjobs mixed into the list
     name = params.get("jobName")
+    if name and filters:
+        raise ValidationError(f"{', '.join(filters)} can't be combined with job_name.")
     if name:
         found = client.find(name)
         if found is None:
             raise NotFoundError(f"Job {name} not found")
-        job = sdk.plain(client.v1().jobs.get(found["id"]))
+        job = plain(client.v1().jobs.get(found["id"]))
         batch = client.name_of(job["batchId"]) if job.get("batchId") else None
         row = job_row(job, batch_name=batch)
         return {**row, "statuses": statuses([row])}
-    query: dict[str, Any] = {"limit": params.get("limit")}
+    query: dict[str, Any] = {"limit": params.get("limit"), **filters}
     if params.get("startKey"):
         query["cursor"] = params["startKey"]
     batch_name = None
@@ -272,7 +301,7 @@ def get_jobs(client: _OverV1, params: dict[str, Any]) -> dict[str, Any]:
             return {"jobs": [], "statuses": statuses([])}
         key = "pipeline_run_id" if parent.get("kind") == "pipeline" else "batch_id"
         query[key], batch_name = parent["id"], parent.get("name")
-    page = sdk.plain(client.v1().jobs.list(**{k: v for k, v in query.items() if v is not None}))
+    page = plain(client.v1().jobs.list(**{k: v for k, v in query.items() if v is not None}))
     rows = [job_row(item, batch_name=batch_name) for item in page.get("items") or []]
     out: dict[str, Any] = {"jobs": rows}
     if page.get("nextCursor"):
@@ -320,14 +349,14 @@ def _classic_errors(errors: list[Any], *, row: bool = False) -> dict[str, Any]:
     return out
 
 
-def validate_job(client: _OverV1, body: dict[str, Any]) -> dict[str, Any]:
+def validate_job(client: Router, body: dict[str, Any]) -> dict[str, Any]:
     """POST /validate-job → validateJob, the report rebuilt as classic's verdict."""
     settings, tool = body.get("settings"), body.get("type")
     if isinstance(settings, list):
         request: dict[str, Any] = {"kind": "batch", "tool": tool, "settings": settings}
         if body.get("jobNames") is not None:
             request["names"] = body["jobNames"]
-        report = sdk.plain(client.v1().jobs.validate(body=request))
+        report = plain(client.v1().jobs.validate(body=request))
         rows = report.get("results")
         if report.get("errors") or not isinstance(rows, list):
             # A problem with the batch as a whole: classic's {valid: false, error}, no rows.
@@ -355,7 +384,7 @@ def validate_job(client: _OverV1, body: dict[str, Any]) -> dict[str, Any]:
     request = {"kind": "job", "tool": tool, "settings": settings}
     if body.get("jobName"):
         request["name"] = body["jobName"]
-    report = sdk.plain(client.v1().jobs.validate(body=request))
+    report = plain(client.v1().jobs.validate(body=request))
     if report.get("valid"):
         out: dict[str, Any] = {"valid": True}
         if report.get("normalized") is not None:
@@ -368,7 +397,7 @@ def validate_job(client: _OverV1, body: dict[str, Any]) -> dict[str, Any]:
 # -- submit -------------------------------------------------------------------------
 
 
-def _submit(client: _OverV1, request: dict[str, Any], name: str) -> None:
+def _submit(client: Router, request: dict[str, Any], name: str) -> None:
     try:
         client.v1().jobs.submit(body=request)
     except TamarindError as exc:
@@ -378,7 +407,7 @@ def _submit(client: _OverV1, request: dict[str, Any], name: str) -> None:
         raise
 
 
-def submit_job(client: _OverV1, body: dict[str, Any]) -> str:
+def submit_job(client: Router, body: dict[str, Any]) -> str:
     """POST /submit-job → submitJob; classic answers ``<name> submitted to queue.``"""
     name = body.get("jobName")
     request: dict[str, Any] = {"kind": "job", "tool": body.get("type"), "name": name, "settings": body.get("settings")}
@@ -389,7 +418,7 @@ def submit_job(client: _OverV1, body: dict[str, Any]) -> str:
     return f"{name} submitted to queue{LOW_PRIORITY_SUFFIX if low_priority else ''}."
 
 
-def submit_batch(client: _OverV1, body: dict[str, Any]) -> str:
+def submit_batch(client: Router, body: dict[str, Any]) -> str:
     """POST /submit-batch → submitJob (kind batch); classic answers
     ``<name> batch submitted to queue.``"""
     name = body.get("batchName")
@@ -412,13 +441,13 @@ def _uuid(item_id: str) -> str:
     return item_id.split("_", 1)[1] if "_" in item_id else item_id
 
 
-def _cancel_many(client: _OverV1, item: dict[str, Any], *, cascaded: bool) -> dict[str, Any]:
+def _cancel_many(client: Router, item: dict[str, Any], *, cascaded: bool) -> dict[str, Any]:
     """Cancel a batch or run: classic's answer, its counts read from v1 just before."""
-    before = sdk.plain(client.v1().jobs.get(item["id"]))
+    before = plain(client.v1().jobs.get(item["id"]))
     counts = before.get("counts") or {}
     live = int(counts.get("inQueue") or 0) + int(counts.get("running") or 0)
     parent_live = before.get("status") not in FINAL
-    after = sdk.plain(client.v1().jobs.cancel(item["id"], body={}))
+    after = plain(client.v1().jobs.cancel(item["id"], body={}))
     name = item.get("name")
     cancelled = live + (1 if parent_live else 0)
     out: dict[str, Any] = {
@@ -440,7 +469,7 @@ def _cancel_many(client: _OverV1, item: dict[str, Any], *, cascaded: bool) -> di
     return out
 
 
-def cancel_job(client: _OverV1, body: dict[str, Any]) -> dict[str, Any]:
+def cancel_job(client: Router, body: dict[str, Any]) -> dict[str, Any]:
     """POST /cancelJob → cancelJob; a batch or run name cancels all of it, as classic does."""
     name = body.get("jobName")
     if not name:
@@ -450,7 +479,7 @@ def cancel_job(client: _OverV1, body: dict[str, Any]) -> dict[str, Any]:
         raise NotFoundError(f"Job {name} not found")
     if item.get("kind") != "job":
         return _cancel_many(client, item, cascaded=True)
-    job = sdk.plain(client.v1().jobs.cancel(item["id"], body={}))
+    job = plain(client.v1().jobs.cancel(item["id"], body={}))
     return {
         "success": True,
         "message": "Job cancelled successfully",
@@ -468,7 +497,7 @@ def cancel_job(client: _OverV1, body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def cancel_batch(client: _OverV1, body: dict[str, Any]) -> dict[str, Any]:
+def cancel_batch(client: Router, body: dict[str, Any]) -> dict[str, Any]:
     """POST /cancelBatch → cancelJob on the batch or run."""
     name = body.get("batchName")
     item = client.find(name, kinds=("batch", "pipeline"))
@@ -484,14 +513,6 @@ def _not_complete(name: Any, item: dict[str, Any]) -> ValidationError:
     return ValidationError(f"Job {name} is not complete. Status: {item.get('status')}")
 
 
-def _waiting() -> tuple[bool, float | None]:
-    """Whether the command asked to wait (``--wait``), and its ``--timeout``."""
-    ctx = click.get_current_context(silent=True)
-    params = ctx.params if ctx is not None else {}
-    timeout = params.get("timeout")
-    return bool(params.get("wait")), float(timeout) if isinstance(timeout, (int, float)) else None
-
-
 def _retry_after(exc: Exception, default: float) -> float:
     """The seconds an error's ``Retry-After`` asks for (``default`` if it gives none)."""
     headers = getattr(exc, "headers", None)
@@ -501,22 +522,23 @@ def _retry_after(exc: Exception, default: float) -> float:
         return default
 
 
-def _archive(client: _OverV1, item: dict[str, Any]) -> dict[str, Any]:
+def _archive(client: Router, item: dict[str, Any]) -> dict[str, Any]:
     v1 = client.v1()
     if item.get("kind") == "pipeline":
-        return sdk.plain(v1.pipelines.archive_run(item["id"], body={}))
-    return sdk.plain(v1.jobs.archive(item["id"], body={}))
+        return plain(v1.pipelines.archive_run(item["id"], body={}))
+    return plain(v1.jobs.archive(item["id"], body={}))
 
 
-def result(client: _OverV1, body: dict[str, Any]) -> str:
+def result(client: Router, body: dict[str, Any]) -> str:
     """POST /result → archiveJob (archivePipelineRun for a run, getJobFile for
     ``fileName``); classic answers the signed link. v1's archive is the stored
     ``result-<folder>.zip`` classic serves, so the bytes are the same (the link itself is
     v1's, signed for the global endpoint).
 
     v1 can call a batch Complete before its archive is built, where classic's wait covers
-    the build. So under ``--wait`` a Complete item whose archive is still preparing is
-    asked again after ``retryAfterSeconds``, until it is ready or ``--timeout`` passes."""
+    the build. So inside ``HTTPClient.results_wait`` (the CLI's ``--wait``) a Complete item
+    whose archive is still preparing is asked again after ``retryAfterSeconds``, until it
+    is ready or the wait's deadline passes."""
     if body.get("jobEmail") is not None or body.get("pdbsOnly"):
         raise OnClassic  # another member's job (website#7795); best structures (not on v1 yet)
     name = body.get("jobName")
@@ -527,10 +549,9 @@ def result(client: _OverV1, body: dict[str, Any]) -> str:
     if file_name:
         if item.get("kind") == "pipeline":
             raise OnClassic  # getJobFile takes a job or a batch; one file of a run has no v1 form
-        link = sdk.plain(client.v1().jobs.get_file(item["id"], path=file_name, delivery="url"))
+        link = plain(client.v1().jobs.get_file(item["id"], path=file_name, delivery="url"))
         return str(link.get("url"))
-    wait, timeout = _waiting()
-    deadline = None if timeout is None else client.started + timeout
+    wait, deadline = client.results_deadline
     def remaining() -> float | None:
         """What's left of --timeout under --wait (each request is bounded by it); None if unbounded."""
         if not wait or deadline is None:
@@ -558,7 +579,7 @@ def result(client: _OverV1, body: dict[str, Any]) -> str:
                 # archivePipelineRun's archive_failed is retryable: the results service builds
                 # the zip of a finished run again after Retry-After (90 s). Asked a few times.
                 with client._bounded(remaining()):
-                    current = sdk.plain(client.v1().jobs.get(item["id"]))
+                    current = plain(client.v1().jobs.get(item["id"]))
                 if current.get("status") != "Complete":
                     raise _not_complete(name, current) from exc
                 rebuilds += 1
@@ -570,7 +591,7 @@ def result(client: _OverV1, body: dict[str, Any]) -> str:
         if not (isinstance(answer, dict) and answer.get("status") == "preparing"):
             return str(answer.get("downloadUrl"))
         with client._bounded(remaining()):
-            current = sdk.plain(client.v1().jobs.get(item["id"]))
+            current = plain(client.v1().jobs.get(item["id"]))
         if current.get("status") != "Complete":
             raise _not_complete(name, current)
         delay = max(float(answer.get("retryAfterSeconds") or 5), 1.0)
@@ -581,7 +602,7 @@ def result(client: _OverV1, body: dict[str, Any]) -> str:
         pause(delay, answer)
 
 
-def delete_job(client: _OverV1, body: dict[str, Any]) -> str:
+def delete_job(client: Router, body: dict[str, Any]) -> str:
     """DELETE /delete-job → deleteJob; classic answers ``<name> deleted``."""
     name = body.get("jobName")
     item = client.find(name, kinds=("job", "batch"))  # deleteJob takes a job or a batch
@@ -596,12 +617,12 @@ def delete_job(client: _OverV1, body: dict[str, Any]) -> str:
 # -- files ----------------------------------------------------------------------------
 
 
-def _entries(client: _OverV1, **query: Any) -> Any:
+def _entries(client: Router, **query: Any) -> Any:
     v1 = client.v1()
-    return (sdk.plain(entry) for entry in v1.paginate(v1.files.list, limit=200, **query))
+    return (plain(entry) for entry in v1.paginate(v1.files.list, limit=200, **query))
 
 
-def get_files(client: _OverV1, params: dict[str, Any]) -> list[str]:
+def get_files(client: Router, params: dict[str, Any]) -> list[str]:
     """GET /files → listFiles: the folder's files (not folders, not zips) by path, in
     classic's order: the five newest first, then the rest by name."""
     folder = params.get("folder") or None
@@ -615,7 +636,7 @@ def get_files(client: _OverV1, params: dict[str, Any]) -> list[str]:
     return [str(e.get("path")) for e in files[:5] + rest]
 
 
-def get_folders(client: _OverV1, params: dict[str, Any]) -> dict[str, Any]:
+def get_folders(client: Router, params: dict[str, Any]) -> dict[str, Any]:
     """GET /getFolders → listFiles' folder entries at the root."""
     limit = None if params.get("loadAll") else int(params.get("limit") or 20)
     folders: list[str] = []
@@ -630,7 +651,7 @@ def get_folders(client: _OverV1, params: dict[str, Any]) -> dict[str, Any]:
     return {"folders": folders, "hasMore": more}
 
 
-def delete_file(client: _OverV1, params: dict[str, Any]) -> dict[str, str]:
+def delete_file(client: Router, params: dict[str, Any]) -> dict[str, str]:
     """DELETE /delete-file → deleteFile; classic answers ``{message}``."""
     path, folder = params.get("filePath"), params.get("folder")
     if path and folder:
@@ -657,18 +678,6 @@ _JOB_API: dict[tuple[str, str], Callable[..., Any]] = {
 }
 
 
-class ClassicOverV1(_OverV1):
-    """The job API (``State.rest_client()``) with v1 selected."""
-
-    def __init__(self, state: Any):
-        cfg = state.config()
-        super().__init__(state, HTTPClient(cfg.api_base, cfg.api_key))
-
-    def _route(self, method: str, path: str) -> Route | None:
-        handler = _JOB_API.get((method, path))
-        return (handler, ()) if handler else None
-
-
 # -- logs (the catalog client) --------------------------------------------------------------
 
 _LOGS = re.compile(r"^catalog/jobs/(?P<name>.+)/logs$")
@@ -678,7 +687,7 @@ _LOGS = re.compile(r"^catalog/jobs/(?P<name>.+)/logs$")
 LOG_PAGE_BYTES = 256 * 1024
 
 
-def job_logs(client: _OverV1, name: str, params: dict[str, Any]) -> dict[str, Any]:
+def job_logs(client: Router, name: str, params: dict[str, Any]) -> dict[str, Any]:
     """The catalog's job logs → getJobLogs, cut the way classic cuts them: the log split
     on newlines (so a final newline ends in an empty line), the last ``maxLines`` of those,
     and their byte offsets. v1 sends the newest output first, so the page always ends at
@@ -689,7 +698,7 @@ def job_logs(client: _OverV1, name: str, params: dict[str, Any]) -> dict[str, An
         return {"error": f"Job {name} not found"}
     if item.get("kind") != "job":
         raise OnClassic  # v1 reads one job's log; classic decides for a batch or run
-    chunk = sdk.plain(client.v1().jobs.logs(item["id"], max_bytes=LOG_PAGE_BYTES))
+    chunk = plain(client.v1().jobs.logs(item["id"], max_bytes=LOG_PAGE_BYTES))
     raw = str(chunk.get("content") or "").encode()
     whole = not chunk.get("nextCursor")
     lines = raw.split(b"\n")
@@ -710,95 +719,70 @@ def job_logs(client: _OverV1, name: str, params: dict[str, Any]) -> dict[str, An
     }
 
 
-class CatalogOverV1(_OverV1):
-    """The catalog client (``State.catalog_client()``) with v1 selected: job logs come
-    from v1; tools, schemas and facets stay on the catalog until v1 serves them alike."""
-
-    def __init__(self, state: Any):
-        cfg = state.config()
-        super().__init__(state, HTTPClient(cfg.catalog_base, cfg.api_key))
-
-    def _route(self, method: str, path: str) -> Route | None:
-        match = _LOGS.match(path)
-        return (job_logs, (match.group("name"),)) if method == "GET" and match else None
+# -- custom tool tests -------------------------------------------------------------------
 
 
-# -- outside the classic clients ---------------------------------------------------------
-
-
-def upload(state: Any, path: Path, remote: str) -> dict[str, Any] | None:
-    """``files upload`` on v1 (uploadFile, the PUTs, completeFileUpload); the answer
-    classic's upload gives. None without a key: classic's client says so."""
-    if not state.config().api_key:
-        return None
-    try:
-        with sdk.make_client(state) as client:
-            client.files.upload(path, path=remote)
-    except TamarindError as exc:
-        raise _classic_error(exc) from exc
-    return {"ok": True, "filename": remote, "bytes": path.stat().st_size}
-
-
-def test_custom_tool(
-    state: Any, tool: CustomTool, settings: Any, *, version: str, name: str | None
-) -> CustomToolTestJob:
-    """``custom-tools test`` on v1: submitJob pinned to the version (``toolVersion`` and
-    its ``toolLifetimeEtag``), where classic posts ``v2/jobs`` with a test marker. v1 has
-    no test marker, so the run isn't in the website's Test history. The checks before
-    and the receipt are the SDK's (``CustomTool.test``)."""
-    if not isinstance(settings, dict):
-        raise ValidationError("Test settings must be an object")
-    if name is not None and (not isinstance(name, str) or not name.strip()):
-        raise ValidationError("Test job name must be a non-empty string")
-    job_name = name if name is not None else f"{tool.name}-test-{uuid4().hex[:12]}"
-    selected = tool.get_version(version)
-    if selected.status != "Complete" or selected.error is not None:
-        raise CustomToolNotDeployableError(
-            f"Version {selected.version} is {selected.status}; test a completed build."
-        )
+def custom_tool_test(client: Router, body: dict[str, Any]) -> dict[str, Any]:
+    """POST /v2/jobs with a test marker (``toolRef``, what ``CustomTool.test`` sends) →
+    submitJob pinned to the version (``toolVersion`` and its ``toolLifetimeEtag``).
+    v1 has no test marker, so the run isn't in the website's Test history. The answer
+    is the receipt classic gives: ``Id``, ``JobName``, ``Type``, ``JobStatus``,
+    ``Created``."""
+    if not body.get("toolRef"):
+        raise OnClassic  # any other v2/jobs request
+    name = body.get("jobName")
     request = {
         "kind": "job",
-        "tool": tool.name,
-        "name": job_name,
-        "settings": settings,
-        "toolVersion": selected.version,
-        "toolLifetimeEtag": selected._lifetime_etag,
+        "tool": body.get("type"),
+        "name": name,
+        "settings": body.get("settings"),
+        "toolVersion": body.get("toolRef"),
+        "toolLifetimeEtag": body.get("toolLifetimeEtag"),
     }
     try:
-        with sdk.make_client(state) as client:
-            job = sdk.plain(client.jobs.submit(body=request))
+        job = plain(client.v1().jobs.submit(body=request))
     except TamarindError as exc:
-        if not sdk.outcome_unclear(exc):
-            raise
-        err = _classic_error(exc)
-        err.message += f" Query job {job_name!r} before retrying; submission may have succeeded."
-        err.detail = {
-            **(err.detail if isinstance(err.detail, dict) else {}),
-            "jobName": job_name,
-            "toolName": tool.name,
-            "version": selected.version,
-            "submitted": None,
-            "outcomeMayBeAmbiguous": True,
-        }
-        raise err from exc
-    return CustomToolTestJob(
-        id=_uuid(str(job.get("id") or "")),
-        job_name=str(job.get("name") or job_name),
-        job_type=str(job.get("tool") or tool.name),
-        status=str(job.get("status") or "In Queue"),
-        created_at=stamp(job.get("createdAt")) or "",
-    )
-
-
-def key_works(state: Any, api_key: str) -> bool:
-    """Whether v1 takes ``api_key`` (getMe); any error but v1 refusing the key is raised."""
-    if not api_key.strip():
-        return False
-    try:
-        with sdk.make_client(state, api_key=api_key) as client:
-            client.me.get()
-    except TamarindError as exc:
-        if getattr(exc, "status", None) == 401:
-            return False
+        if getattr(exc, "code", None) == "job_name_conflict":
+            raise ValidationError(f"jobName {name} already exists, please choose a different name") from exc
         raise
-    return True
+    return {
+        "Id": _uuid(str(job.get("id") or "")),
+        "JobName": str(job.get("name") or name),
+        "Type": str(job.get("tool") or body.get("type")),
+        "JobStatus": str(job.get("status") or "In Queue"),
+        "Created": stamp(job.get("createdAt")) or "",
+    }
+
+
+# -- the routes ---------------------------------------------------------------------------
+
+_ROUTES: dict[tuple[str, str], Handler] = {
+    **_JOB_API,
+    ("POST", "v2/jobs"): custom_tool_test,
+}
+
+
+def route(method: str, path: str) -> Route | None:
+    """The handler for a classic request v1 has a form for; None for the rest."""
+    handler = _ROUTES.get((method, path))
+    if handler is not None:
+        return handler, ()
+    match = _LOGS.match(path)
+    if method == "GET" and match:
+        return job_logs, (match.group("name"),)
+    return None
+
+
+# -- uploads ------------------------------------------------------------------------------
+
+
+def upload(http: Any, path: Path, remote: str) -> dict[str, Any] | None:
+    """An upload on v1 (uploadFile, the PUTs, completeFileUpload), answered as classic's
+    upload is: ``{ok, filename, bytes}``. None when v1 isn't on for this key."""
+    if not http.api_key or not http.uses_v1():
+        return None
+    try:
+        http.v1().files.upload(path, path=remote)
+    except TamarindError as exc:
+        _raise_classic(exc)
+    return {"ok": True, "filename": remote, "bytes": path.stat().st_size}

@@ -10,7 +10,6 @@ import typer
 from ... import rest, uploads
 from ...errors import TamarindError
 from .. import output
-from ..v1 import classic_routes
 from ..v1.generic import ContractGroup
 
 app = typer.Typer(no_args_is_help=True, cls=ContractGroup)
@@ -158,12 +157,10 @@ def upload(
     state = ctx.obj
     remote = name or path.name
     output.info(f"Uploading {path} → {remote}…", state.output)
-    # With v1 selected the file goes up through v1, with classic's answer.
-    result = classic_routes.upload(state, path, remote) if state.is_v1 else None
-    if result is None:
-        with state.rest_client() as client:
-            # Shared with the SDK's `client.files.upload` — one presign-then-PUT code path.
-            result = uploads.upload_file(client, path, remote=remote)
+    with state.rest_client() as client:
+        # Shared with the SDK's `client.files.upload` — one upload code path (v1's when
+        # v1 is on for the key).
+        result = uploads.upload_file(client, path, remote=remote)
     output.emit(result, state.output, human=f"uploaded {result['filename']}")
 
 

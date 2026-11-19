@@ -129,8 +129,22 @@ def get_jobs(
     include_subjobs: bool = False,
     job_email: str | None = None,
     timeout: float | None = None,
+    kind: str | None = None,
+    status: str | list[str] | None = None,
+    tool: str | None = None,
+    search: str | None = None,
 ) -> Any:
-    """GET /jobs — list jobs, or fetch one when ``job_name`` is given."""
+    """GET /jobs — list jobs, or fetch one when ``job_name`` is given.
+
+    ``kind`` (job, batch, pipeline), ``status`` (one or a list), ``tool`` and ``search``
+    are v1-only filters: honoured when v1 is on for the key, and otherwise raise
+    ``V1NotEnabledError`` without sending anything.
+    """
+    v1_filters = {"kind": kind, "status": status, "tool": tool, "search": search}
+    v1_filters = {key: value for key, value in v1_filters.items() if value is not None}
+    if v1_filters:
+        passed = ", ".join(f"{key}=" for key in v1_filters)
+        client.require_v1(f"jobs.list({passed})")
     params = {
         "jobName": job_name,
         "batch": batch,
@@ -139,6 +153,7 @@ def get_jobs(
         "organization": _TRUE if organization else None,
         "includeSubjobs": _TRUE if include_subjobs else None,
         "jobEmail": job_email,
+        **v1_filters,
     }
     return client.get_json("jobs", params=params, timeout=timeout)
 

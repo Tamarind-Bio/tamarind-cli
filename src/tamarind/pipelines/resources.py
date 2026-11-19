@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Generic, Mapping, TypeVar
 
+from tamarind._v1.public import v1_method
 from tamarind.errors import TamarindError
 from tamarind.pipelines._generated.models.node_run_status import NodeRunStatus
 from tamarind.pipelines._generated.models.run_status import RunStatus
@@ -71,10 +72,34 @@ class PipelineRun:
 
 
 class Pipelines:
-    """Entry point for typed Pipeline run reads."""
+    """Entry point for typed Pipeline run reads.
+
+    The methods marked "v1 only" are v1 operations with v1 arguments and answers; they
+    raise ``V1NotEnabledError`` without sending anything when v1 isn't on for the key.
+    """
+
+    # v1 only.
+    estimate = v1_method("pipelines")
+    list_runs = v1_method("pipelines")
+    submit = v1_method("pipelines")
+    archive_run = v1_method("pipelines")
+    cancel_run = v1_method("pipelines")
+    list_node_run_molecules = v1_method("pipelines")
+    schema = v1_method("pipelines")
+    list_templates = v1_method("pipelines")
+    create_template = v1_method("pipelines")
+    get_template = v1_method("pipelines")
+    delete_template = v1_method("pipelines")
+    duplicate_template = v1_method("pipelines")
+    publish_template = v1_method("pipelines")
+    validate_template = v1_method("pipelines")
+    validate = v1_method("pipelines")
 
     def __init__(self, transport: GeneratedPipelinesTransport):
         self._transport = transport
+
+    def _v1_http(self) -> Any:
+        return self._transport._client
 
     def get_run(self, run_id: str) -> PipelineRun:
         if not isinstance(run_id, str) or not run_id:

@@ -24,9 +24,9 @@ from dateutil.parser import isoparse
 
 from tamarind.attribution import client_headers
 from tamarind.errors import TamarindError
-from tamarind.v1._contract import COMMA_JOINED_QUERY
-from tamarind.v1._generated.types import UNSET, Unset
-from tamarind.v1.errors import ProblemError
+from tamarind._v1._contract import COMMA_JOINED_QUERY
+from tamarind._v1._generated.types import UNSET, Unset
+from tamarind._v1.errors import ProblemError
 
 DEFAULT_BASE_URL = "https://api.tamarind.bio"
 DEFAULT_TIMEOUT = 60.0

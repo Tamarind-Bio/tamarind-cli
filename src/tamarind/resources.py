@@ -4,6 +4,11 @@ Each method is a 1:1 wrapper over the same pure functions the CLI commands call
 (:mod:`tamarind.rest`, :mod:`tamarind.catalog`, :mod:`tamarind.jobs`,
 :mod:`tamarind.uploads`), so the SDK and CLI share one code path and one server contract.
 Reached as ``client.jobs`` / ``client.tools`` / ``client.files`` on :class:`tamarind.Tamarind`.
+
+With v1 on for the key (the server's switch), these same methods are answered by the v1
+API in the layouts they return today (see :mod:`tamarind._v1.classic`). The methods
+marked "v1 only" are v1 operations with v1 arguments and answers; they raise
+``V1NotEnabledError`` without sending anything when v1 isn't on for the key.
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import catalog, rest, uploads
+from ._v1.public import v1_method
 from .http import HTTPClient
 from .jobs import fetch_job, resolve_owner, wait_for_job
 
@@ -19,8 +25,22 @@ from .jobs import fetch_job, resolve_owner, wait_for_job
 class Jobs:
     """Submit and manage jobs — mirrors ``tamarind submit/batch/validate/jobs/status/...``."""
 
+    # v1 only: by id (``job_...``, ``batch_...``, ``run_...``), v1's arguments and answers.
+    get = v1_method("jobs")
+    estimate = v1_method("jobs")
+    search = v1_method("jobs")
+    update = v1_method("jobs")
+    rerun = v1_method("jobs")
+    archive = v1_method("jobs")
+    list_files = v1_method("jobs")
+    get_file = v1_method("jobs")
+    logs = v1_method("jobs")
+
     def __init__(self, http: HTTPClient) -> None:
         self._http = http
+
+    def _v1_http(self) -> HTTPClient:
+        return self._http
 
     def submit(
         self, job_type: str, settings: dict[str, Any], *, name: str, low_priority: bool = False,
@@ -56,7 +76,8 @@ class Jobs:
         return rest.validate_jobs(self._http, job_type=job_type, settings=settings, job_names=job_names)
 
     def list(self, **kwargs: Any) -> Any:
-        """List jobs (GET /jobs). Accepts the same filters as :func:`tamarind.rest.get_jobs`."""
+        """List jobs (GET /jobs). Accepts the same filters as :func:`tamarind.rest.get_jobs`,
+        including its v1-only ones (``kind``, ``status``, ``tool``, ``search``)."""
         return rest.get_jobs(self._http, **kwargs)
 
     def status(
@@ -109,8 +130,16 @@ class Jobs:
 class Tools:
     """Discover the tool catalog and schemas — mirrors ``tamarind tools/modalities/schema/...``."""
 
+    # v1 only.
+    facets = v1_method("tools")
+    get = v1_method("tools")
+    recommend = v1_method("tools")
+
     def __init__(self, http: HTTPClient) -> None:
         self._http = http
+
+    def _v1_http(self) -> HTTPClient:
+        return self._http
 
     def list(
         self, *, modality: str | None = None, function: str | None = None,
@@ -152,8 +181,14 @@ def _file_type_counts(files: list) -> dict:
 class Files:
     """Workspace file management — mirrors ``tamarind files list/stats/folders/upload/delete``."""
 
+    # v1 only: a file's link or bytes.
+    get = v1_method("files")
+
     def __init__(self, http: HTTPClient) -> None:
         self._http = http
+
+    def _v1_http(self) -> HTTPClient:
+        return self._http
 
     def list(self, **kwargs: Any) -> Any:
         """List files (GET /files). Same filters as :func:`tamarind.rest.get_files`."""

@@ -8,6 +8,9 @@ callers (and the CLI's exit codes) get consistent behaviour.
 from __future__ import annotations
 
 import re
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import httpx
@@ -33,6 +36,10 @@ from .errors import (
 
 DEFAULT_TIMEOUT = 120.0
 USER_AGENT = "tamarind-cli"
+_NO_KEY = "No API key configured. Set TAMARIND_API_KEY, pass --api-key, or run `tamarind auth login`."
+_DERIVED: Any = object()
+# Paths the v1 API serves exactly as here (the custom-tools router wraps this one's).
+_SAME_PATH_ON_V1 = re.compile(r"^(?:custom-tools(?:/|$)|pipelines/runs/[^/]+(?:/node-runs/[^/]+/molecules)?$)")
 
 
 class HTTPClient:
@@ -44,10 +51,21 @@ class HTTPClient:
         api_key: str | None,
         *,
         timeout: float = DEFAULT_TIMEOUT,
+        v1_base: Any = _DERIVED,
+        flag_cache: Any = None,
     ):
+        from ._v1.switch import Switch, v1_base_for
+
         self.base_url = base_url
         self.api_key = api_key
         self._timeout = timeout
+        # Whether this key's requests go to the v1 API: the server says (`GET /me`,
+        # asked on the first request v1 can answer). `v1_base` defaults to the v1 API
+        # of this base's environment; None means classic only.
+        self._switch = Switch(api_key, v1_base_for(base_url) if v1_base is _DERIVED else v1_base, flag_cache)
+        self._v1: Any = None
+        self._v1_raw: HTTPClient | None = None
+        self._router: Any = None
         headers = {
             "Accept": "application/json",
             # Brotli is still decoded transparently by httpx; we just don't want
@@ -65,12 +83,99 @@ class HTTPClient:
     # -- lifecycle ---------------------------------------------------------
     def close(self) -> None:
         self._client.close()
+        if self._v1 is not None:
+            self._v1.close()
+        if self._v1_raw is not None:
+            self._v1_raw.close()
 
     def __enter__(self) -> "HTTPClient":
         return self
 
     def __exit__(self, *exc: object) -> None:
         self.close()
+
+    # -- the v1 API --------------------------------------------------------
+    @property
+    def v1_base(self) -> str | None:
+        return self._switch.v1_base
+
+    def uses_v1(self) -> bool:
+        """Whether this key's requests go to the v1 API (asks the server once, cached)."""
+        return self._switch.on()
+
+    def cached_uses_v1(self) -> bool | None:
+        """The last answer kept for this key, however old (what ``--help`` lists v1
+        commands by); never the network."""
+        return self._switch.last_known()
+
+    def _new_v1(self, **options: Any) -> Any:
+        from ._v1.client import Tamarind as V1
+
+        options.setdefault("timeout", self._timeout)
+        return V1(self.api_key, base_url=self._switch.v1_base, **options)
+
+    def require_v1(self, what: str) -> None:
+        """Raise unless v1 is on for this key: no key is classic's AuthError, and a
+        key v1 isn't on for is :class:`~tamarind._v1.switch.V1NotEnabledError`."""
+        from ._v1.switch import V1NotEnabledError
+
+        if not self.api_key:
+            raise AuthError(_NO_KEY)
+        if not self.uses_v1():
+            raise V1NotEnabledError(what)
+
+    def v1(self, what: str = "This operation") -> Any:
+        """The v1 client for this key, closed with this client. Raises
+        :class:`~tamarind._v1.switch.V1NotEnabledError` when v1 isn't on for it."""
+        self.require_v1(what)
+        if self._v1 is None:
+            self._v1 = self._new_v1()
+        return self._v1
+
+    def v1_client(self, what: str = "This operation", **options: Any) -> Any:
+        """A new v1 client (``timeout``, ``max_retries``...); the caller closes it."""
+        self.require_v1(what)
+        return self._new_v1(**options)
+
+    def _routes(self) -> Any:
+        if self._router is None:
+            from ._v1.classic import Router
+
+            self._router = Router(self)
+        return self._router
+
+    @contextmanager
+    def results_wait(self, timeout: float | None) -> Iterator[None]:
+        """Within this block a results request (``/result``) answered from v1 waits for
+        an archive that is still being built, until ``timeout`` seconds from now (no
+        limit if None), as classic's results wait does. Outside it, such a request
+        says the archive is being prepared."""
+        router = self._routes()
+        saved = router.results_deadline
+        router.results_deadline = (True, None if timeout is None else time.monotonic() + timeout)
+        try:
+            yield
+        finally:
+            router.results_deadline = saved
+
+    def _serve(self, method: str, path: str, payload: Any, classic: Any, timeout: float | None = None) -> Any:
+        from ._v1 import classic as on_v1
+
+        handler = on_v1.route(method, path.strip("/"))
+        if handler is None or not self.api_key or not self.uses_v1():
+            return classic()
+        return self._routes().serve(handler, payload, classic, timeout=timeout)
+
+    def _raw_client(self, path: str) -> "HTTPClient":
+        """Requests the v1 API serves at the same path (custom tools, pipeline runs) go
+        to its base when v1 is on for this key; the rest stay here."""
+        if not (self.api_key and _SAME_PATH_ON_V1.match(path.lstrip("/")) and self.uses_v1()):
+            return self
+        if self._v1_raw is None:
+            self._v1_raw = HTTPClient(
+                str(self._switch.v1_base), self.api_key, timeout=self._timeout, v1_base=None
+            )
+        return self._v1_raw
 
     # -- requests ----------------------------------------------------------
     def request(
@@ -83,11 +188,22 @@ class HTTPClient:
         json: Any | None = None,
         timeout: float | None = None,
     ) -> httpx.Response:
+        return self._raw_client(path)._classic_request(
+            method, path, params=params, headers=headers, json=json, timeout=timeout
+        )
+
+    def _classic_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str | None] | None = None,
+        json: Any | None = None,
+        timeout: float | None = None,
+    ) -> httpx.Response:
         if not self.api_key:
-            raise AuthError(
-                "No API key configured. Set TAMARIND_API_KEY, pass --api-key, "
-                "or run `tamarind auth login`."
-            )
+            raise AuthError(_NO_KEY)
         clean_params = _without_none_values(params)
         clean_headers = _without_none_values(headers)
         try:
@@ -121,11 +237,22 @@ class HTTPClient:
         The client is scoped to the coroutine so cancellation closes its socket
         before returning. Synchronous calls keep their pooled client above.
         """
+        return await self._raw_client(path)._classic_request_async(
+            method, path, params=params, headers=headers, json=json, timeout=timeout
+        )
+
+    async def _classic_request_async(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str | None] | None = None,
+        json: Any | None = None,
+        timeout: float | None = None,
+    ) -> httpx.Response:
         if not self.api_key:
-            raise AuthError(
-                "No API key configured. Set TAMARIND_API_KEY, pass --api-key, "
-                "or run `tamarind auth login`."
-            )
+            raise AuthError(_NO_KEY)
         clean_params = _without_none_values(params)
         clean_headers = _without_none_values(headers)
         try:
@@ -149,6 +276,8 @@ class HTTPClient:
             return resp
         raise _map_error(resp, request_path=path)
 
+    # With v1 on for this key, the requests v1 has a form for are answered from it and
+    # rebuilt in this API's layout (tamarind._v1.classic); the rest are sent here.
     def get_json(
         self,
         path: str,
@@ -156,15 +285,35 @@ class HTTPClient:
         params: dict[str, Any] | None = None,
         timeout: float | None = None,
     ) -> Any:
-        return _parse_json(self.request("GET", path, params=params, timeout=timeout))
+        return self._serve(
+            "GET", path, params,
+            lambda: self._classic_json("GET", path, params=params, timeout=timeout),
+            timeout=timeout,
+        )
 
     def post_json(self, path: str, *, json: Any | None = None) -> Any:
-        return _parse_json(self.request("POST", path, json=json))
+        return self._serve("POST", path, json, lambda: self._classic_json("POST", path, json=json))
 
     def delete_json(
         self, path: str, *, params: dict[str, Any] | None = None, json: Any | None = None
     ) -> Any:
-        return _parse_json(self.request("DELETE", path, params=params, json=json))
+        return self._serve(
+            "DELETE", path, json if json is not None else params,
+            lambda: self._classic_json("DELETE", path, params=params, json=json),
+        )
+
+    def _classic_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: Any | None = None,
+        timeout: float | None = None,
+    ) -> Any:
+        return _parse_json(
+            self._classic_request(method, path, params=params, json=json, timeout=timeout)
+        )
 
 
 def _parse_json(resp: httpx.Response) -> Any:
