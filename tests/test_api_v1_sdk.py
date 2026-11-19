@@ -434,3 +434,36 @@ def test_file_content_comes_back_as_bytes(client: Tamarind) -> None:
     assert client.files.get(path="a.pdb", delivery="inline") == b"ATOM"
     respx.delete(f"{BASE}/files").mock(return_value=httpx.Response(204))
     assert client.files.delete(path="a.pdb") is None
+
+
+def _multipart_session(parts: list[int], part_size: int, url: str = "https://storage.test") -> dict:
+    return {
+        "file": {"path": "m.bin"},
+        "upload": {
+            "id": "up_1",
+            "method": "PUT",
+            "partSizeBytes": part_size,
+            "parts": [{"partNumber": n, "url": f"{url}/p{n}"} for n in parts],
+            "expiresAt": "2026-11-19T00:00:00Z",
+        },
+    }
+
+
+@respx.mock
+def test_a_malformed_upload_session_sends_nothing(client: Tamarind) -> None:
+    import io
+
+    stream = io.BytesIO(b"SECRET-PREFIX|0123456789")
+    stream.seek(len(b"SECRET-PREFIX|"))
+    puts = respx.put(url__startswith="https://storage.test/").mock(return_value=httpx.Response(200))
+    plain = respx.put(url__startswith="http://storage.test/").mock(return_value=httpx.Response(200))
+    for session, message in [
+        (_multipart_session([0, 1, 2], 4), "number 1 to N"),
+        (_multipart_session([1, 2], 4), "cover the file"),
+        (_multipart_session([1, 2, 3, 4], 4), "cover the file"),
+        (_multipart_session([1, 2, 3], 4, url="http://storage.test"), "isn't HTTPS"),
+    ]:
+        respx.post(f"{BASE}/files").mock(return_value=httpx.Response(201, json=session))
+        with pytest.raises(TamarindError, match=message):
+            client.files.upload(stream, "m.bin", multipart=True)
+    assert puts.call_count == 0 and plain.call_count == 0

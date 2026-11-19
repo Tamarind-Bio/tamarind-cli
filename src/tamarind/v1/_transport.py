@@ -134,14 +134,15 @@ class Transport:
     # -- storage (signed URLs) --------------------------------------------
     def put_signed(self, url: str, content: Any, headers: Mapping[str, str]) -> httpx.Response:
         """PUT bytes to a signed storage URL, without the API key."""
+        # Signed query strings are credentials: never send them, or the file, in the clear
+        # unless the API itself is plain HTTP (a local development server).
+        if self.base_url.startswith("https://") and not url.startswith("https://"):
+            raise TamarindError("The upload session named a storage URL that isn't HTTPS.")
         return self._with_retries(
             lambda: self._storage.put(url, content=content(), headers=dict(headers)),
             repeat_safe=True,
             api=False,
         )
-
-    def get_signed(self, url: str) -> httpx.Response:
-        return self._with_retries(lambda: self._storage.get(url), repeat_safe=True, api=False)
 
     # -- retries ----------------------------------------------------------
     def _with_retries(

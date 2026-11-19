@@ -458,11 +458,18 @@ class Files(_Resource):
                 )
                 return dict(answer["file"])
             part_size = int(upload["partSizeBytes"])
+            numbers = [int(part["partNumber"]) for part in upload["parts"]]
+            if part_size <= 0 or sorted(numbers) != list(range(1, len(numbers) + 1)):
+                raise TamarindError("The upload session's parts don't number 1 to N.")
+            if (len(numbers) - 1) * part_size >= max(content.size, 1) or (
+                len(numbers) * part_size < content.size
+            ):
+                raise TamarindError("The upload session's parts don't cover the file.")
             parts = []
             for part in upload["parts"]:
                 number = int(part["partNumber"])
                 start = (number - 1) * part_size
-                length = max(0, min(part_size, content.size - start))
+                length = min(part_size, content.size - start)
                 response = self._transport.put_signed(
                     part["url"],
                     lambda start=start, length=length: content.stream(start, length),
