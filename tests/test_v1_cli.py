@@ -787,3 +787,39 @@ def test_idempotency_in_progress_is_an_unclear_outcome(v1):
 def test_max_lines_must_be_positive(v1):
     res = runner.invoke(app, ["--json", "logs", "job_0f8fad5b-d9cb-469f-a165-70867728950e", "--max-lines", "0"])
     assert isinstance(res.exception, UsageError) and v1.calls == []
+
+
+def test_each_command_takes_only_the_kinds_its_operation_does(v1):
+    batch = "batch_0f8fad5b-d9cb-469f-a165-70867728950e"
+    for args in (["cancel", batch], ["logs", batch], ["logs", "run_0f8fad5b-d9cb-469f-a165-70867728950e"]):
+        res = runner.invoke(app, ["--json", *args])
+        assert isinstance(res.exception, UsageError), args
+    assert v1.calls == []
+    v1.answers["jobs.list"] = lambda **kw: {"items": [{"id": "job_0f8fad5b-d9cb-469f-a165-70867728950e", "kind": "job"}] if kw.get("kind") == "job" else [], "nextCursor": None}
+    v1.answers["jobs.logs"] = {"content": "x\n", "nextCursor": None, "complete": True}
+    _json(runner.invoke(app, ["--json", "logs", "my-job"]))
+    assert v1.calls[0] == ("jobs.list", (), {"name": "my-job", "kind": "job"})
+
+
+def test_prevalidate_goes_in_chunks_the_operation_takes(v1, tmp_path):
+    rows = tmp_path / "rows.json"
+    rows.write_text(json.dumps([{"sequence": "M"}] * 2500))
+    reports = iter(
+        [
+            {"valid": True, "results": [], "errors": []},
+            {"valid": False, "errors": [], "results": [{"index": 3, "valid": False, "errors": [{"pointer": "/settings/3/sequence", "detail": "bad"}]}]},
+        ]
+    )
+    v1.answers["jobs.validate"] = lambda **kw: next(reports)
+    res = runner.invoke(app, ["--json", "batch", "esmfold", "-i", str(rows), "--prevalidate"])
+    assert res.exception is not None and res.exception.exit_code == 5
+    assert [len(c[2]["body"]["settings"]) for c in v1.calls] == [1000, 1000]
+    assert res.exception.detail["validation"]["results"][0]["index"] == 1003
+    assert not any(c[0] == "jobs.submit" for c in v1.calls)
+
+
+def test_show_urls_shows_them_in_human_output_too(v1):
+    signed = "https://bucket.s3.amazonaws.com/a.pdb?X-Amz-Signature=abc"
+    v1.answers["jobs.list_files"] = {"items": [{"path": "a.pdb", "downloadUrl": signed}], "nextCursor": None}
+    res = runner.invoke(app, ["--no-json", "jobs", "files", "job_0f8fad5b-d9cb-469f-a165-70867728950e", "--include-download-urls", "--show-urls"])
+    assert signed in res.stdout

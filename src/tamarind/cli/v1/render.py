@@ -74,4 +74,8 @@ def emit(
 ) -> None:
     if not show_urls:
         body = redact(body)
-    output.emit(body if body is not None else {"ok": True}, mode, human=human_text or human(body))
+        text = human_text or human(body)
+    else:
+        # Links were asked for: show the whole answer, since a page's table has no link column.
+        text = human_text or yaml.safe_dump(body, sort_keys=False, allow_unicode=True).rstrip()
+    output.emit(body if body is not None else {"ok": True}, mode, human=text)

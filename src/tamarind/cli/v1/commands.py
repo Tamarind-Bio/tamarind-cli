@@ -61,62 +61,55 @@ def status_line(job: dict[str, Any]) -> str:
     return text
 
 
+_PREFIX_KIND = {"job_": "job", "batch_": "batch", "run_": "pipeline"}
+ANY_KIND = ("job", "batch", "pipeline")
+_KIND_WORDS = {"job": "a job", "batch": "a batch", "pipeline": "a pipeline run"}
+
+
+def _kinds_text(kinds: tuple[str, ...]) -> str:
+    words = [_KIND_WORDS[k] for k in kinds]
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " or " + words[-1]
+
+
 def resolve_id(
     client: Any,
     ref: str,
     *,
-    kind: str | None = None,
+    kinds: tuple[str, ...] = ANY_KIND,
+    what: str = "this command",
     organization: bool = False,
     email: str | None = None,
 ) -> str:
-    """A ``job_``/``batch_``/``run_`` id as given, or a name looked up with ``listJobs?name=``.
+    """The id of the job, batch or pipeline run ``ref`` names, limited to ``kinds``.
 
-    ``organization``/``email`` look the name up across the organization
-    (``scope=org``, ``createdBy``); the server answers where that isn't built yet.
+    An id (``job_``/``batch_``/``run_`` + UUID) is used as given once its kind is one
+    ``what`` takes; anything else is a name, looked up with ``listJobs?name=``. That
+    answers only the newest match, so with a narrower ``kinds`` each kind is asked
+    for and the newest wins: a newer item of another kind can't hide the one meant.
+    ``organization``/``email`` look the name up across the organization (``scope=org``,
+    ``createdBy``); the server answers where that isn't built yet.
     """
     ref = ref.strip()
     if _ID.match(ref):
+        kind = next(k for prefix, k in _PREFIX_KIND.items() if ref.startswith(prefix))
+        if kind not in kinds:
+            raise UsageError(f"{what} takes {_kinds_text(kinds)}, not {_KIND_WORDS[kind]} ({ref}).")
         return ref
     query: dict[str, Any] = {"name": ref}
-    if kind:
-        query["kind"] = kind
     if organization or email:
         query["scope"] = "org"
     if email:
         query["createdBy"] = email
-    page = call(client, "listJobs", **query)
-    items = page.get("items") if isinstance(page, dict) else None
-    if not items:
-        what = kind or "job"
-        raise NotFoundError(f"No {what} named '{ref}'.", detail={"name": ref})
-    return str(items[0]["id"])
-
-
-def refuse_run_for_one_file(job_id: str, what: str) -> None:
-    """getJobFile reads a job's or a batch's file; a pipeline run's is a 404 there."""
-    if job_id.startswith("run_"):
-        raise UsageError(
-            f"{what} reads one job's file; a pipeline run's outputs come as one zip "
-            "(`tamarind results ID --download DIR`), or per step with `tamarind pipelines results`."
-        )
-
-
-def resolve_batch_or_run(client: Any, ref: str) -> str:
-    """``--batch``: a batch or a pipeline run, by id or by name (today's flag takes both)."""
-    ref = ref.strip()
-    if _ID.match(ref):
-        if ref.startswith("job_"):
-            raise UsageError("--batch takes a batch_ or run_ id; cancel one job without --batch.")
-        return ref
-    # `name=` answers only the newest match, so ask per kind: a newer single job with
-    # the same name must not hide the batch or run.
-    found = [
-        item
-        for kind in ("batch", "pipeline")
-        for item in (call(client, "listJobs", name=ref, kind=kind).get("items") or [])
-    ]
+    if set(kinds) == set(ANY_KIND):
+        found = list(call(client, "listJobs", **query).get("items") or [])
+    else:
+        found = [
+            item
+            for kind in kinds
+            for item in (call(client, "listJobs", **query, kind=kind).get("items") or [])
+        ]
     if not found:
-        raise NotFoundError(f"No batch or pipeline run named '{ref}'.", detail={"name": ref})
+        raise NotFoundError(f"No {_kinds_text(kinds)} named '{ref}'.", detail={"name": ref})
     return str(max(found, key=lambda item: str(item.get("createdAt") or ""))["id"])
 
 
@@ -369,16 +362,36 @@ def submit(
         raise typer.Exit(ExitCode.JOB_FAILED)
 
 
+# validateJob checks an inline batch of at most this many rows (the contract's limit).
+VALIDATE_BATCH_ROWS = 1000
+
+
+def _prevalidate(client: Any, body: dict[str, Any]) -> None:
+    """validateJob over the batch in chunks the operation takes; the first chunk with a
+    problem stops it, its row indexes renumbered to the whole batch."""
+    rows = body["settings"]
+    for offset in range(0, len(rows), VALIDATE_BATCH_ROWS):
+        part = {**body, "settings": rows[offset : offset + VALIDATE_BATCH_ROWS]}
+        if body.get("names") is not None:
+            part["names"] = body["names"][offset : offset + VALIDATE_BATCH_ROWS]
+        report = call(client, "validateJob", body=part)
+        if not report.get("valid"):
+            for row in report.get("results") or []:
+                if isinstance(row, dict) and isinstance(row.get("index"), int):
+                    row["index"] += offset
+            raise ValidationError(
+                f"Batch settings invalid (rows {offset + 1}-{offset + len(part['settings'])}): "
+                f"{_validation_message(report)}",
+                detail={"offset": offset, "validation": report},
+            )
+
+
 def batch(
     state: Any, body: dict[str, Any], *, prevalidate: bool, idempotency_key: str | None
 ) -> None:
     with sdk.make_client(state) as client:
         if prevalidate:
-            report = call(client, "validateJob", body=body)
-            if not report.get("valid"):
-                raise ValidationError(
-                    f"Batch settings invalid: {_validation_message(report)}", detail=report
-                )
+            _prevalidate(client, body)
         submitted = _submit(client, body, idempotency_key)
     _emit(
         submitted,
@@ -410,7 +423,7 @@ def jobs_list(
         if status:
             query["status"] = [s.strip() for s in status.split(",") if s.strip()]
         if batch:
-            query["batchId"] = resolve_id(client, batch, kind="batch")
+            query["batchId"] = resolve_id(client, batch, kinds=("batch",), what="--batch")
         if organization or email:
             query["scope"] = "org"
         if email:
@@ -474,7 +487,14 @@ def results(
         raise UsageError("--file and --pdbs-only can't be combined.")
     deadline = None if timeout is None else time.monotonic() + timeout
     with sdk.make_client(state) as client:
-        job_id = resolve_id(client, ref, organization=organization, email=email)
+        job_id = resolve_id(
+            client,
+            ref,
+            kinds=("job", "batch") if file else ANY_KIND,
+            what="results --file" if file else "results",
+            organization=organization,
+            email=email,
+        )
         result: dict[str, Any] = {"id": job_id}
         if wait:
             output.info("Waiting for completion…", state.output)
@@ -484,7 +504,6 @@ def results(
                 _emit(result, state.output, human=status_line(final))
                 raise typer.Exit(ExitCode.JOB_FAILED)
         if file:
-            refuse_run_for_one_file(job_id, "--file")
             link = call(client, "getJobFile", job_id, path=file, delivery="url")
             url = link["url"]
             name = Path(file).name
@@ -517,7 +536,8 @@ def logs(
     if max_lines < 1:
         raise UsageError("--max-lines must be at least 1.")
     with sdk.make_client(state) as client:
-        chunk = call(client, "getJobLogs", resolve_id(client, ref), maxBytes=max_bytes, cursor=cursor)
+        job_id = resolve_id(client, ref, kinds=("job",), what="logs")
+        chunk = call(client, "getJobLogs", job_id, maxBytes=max_bytes, cursor=cursor)
     content = chunk.get("content") or ""
     lines = content.splitlines(keepends=True)
     if len(lines) > max_lines:
@@ -530,14 +550,18 @@ def logs(
 
 def cancel(state: Any, ref: str | None, batch: str | None, *, reason: str | None = None) -> None:
     with sdk.make_client(state) as client:
-        target = resolve_batch_or_run(client, batch) if batch else resolve_id(client, ref or "")
+        if batch:
+            target = resolve_id(client, batch, kinds=("batch", "pipeline"), what="cancel --batch")
+        else:
+            # One job, as today; a batch or a run is stopped with --batch.
+            target = resolve_id(client, ref or "", kinds=("job",), what="cancel (without --batch)")
         job = call(client, "cancelJob", target, body={"reason": reason} if reason else {})
     _emit(job, state.output, human=status_line(job))
 
 
 def delete(state: Any, ref: str) -> None:
     with sdk.make_client(state) as client:
-        job_id = resolve_id(client, ref)
+        job_id = resolve_id(client, ref, kinds=("job", "batch"), what="delete")
         call(client, "deleteJob", job_id)
     _emit({"id": job_id, "deleted": True}, state.output, human=f"deleted {job_id}")
 
