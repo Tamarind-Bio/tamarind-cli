@@ -492,6 +492,15 @@ def _waiting() -> tuple[bool, float | None]:
     return bool(params.get("wait")), float(timeout) if isinstance(timeout, (int, float)) else None
 
 
+def _retry_after(exc: Exception, default: float) -> float:
+    """The seconds an error's ``Retry-After`` asks for (``default`` if it gives none)."""
+    headers = getattr(exc, "headers", None)
+    try:
+        return max(float(headers.get("retry-after")), 1.0) if headers else default
+    except (TypeError, ValueError):
+        return default
+
+
 def _archive(client: _OverV1, item: dict[str, Any]) -> dict[str, Any]:
     v1 = client.v1()
     if item.get("kind") == "pipeline":
@@ -522,16 +531,46 @@ def result(client: _OverV1, body: dict[str, Any]) -> str:
         return str(link.get("url"))
     wait, timeout = _waiting()
     deadline = None if timeout is None else client.started + timeout
+    def remaining() -> float | None:
+        """What's left of --timeout under --wait (each request is bounded by it); None if unbounded."""
+        if not wait or deadline is None:
+            return None
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise JobTimeoutError(f"The results archive of {name} wasn't ready when --timeout passed.")
+        return left
+
+    def pause(delay: float, detail: Any) -> None:
+        if deadline is not None and time.monotonic() + delay > deadline:
+            raise JobTimeoutError(
+                f"The results archive of {name} wasn't ready when --timeout passed.", detail=detail
+            )
+        time.sleep(delay)
+
+    rebuilds = 0
     while True:
         try:
-            answer = _archive(client, item)
+            with client._bounded(remaining()):
+                answer = _archive(client, item)
         except TamarindError as exc:
-            if getattr(exc, "code", None) == "archive_failed" and item.get("status") != "Complete":
+            code = getattr(exc, "code", None)
+            if code == "archive_failed" and item.get("kind") == "pipeline" and wait and rebuilds < 3:
+                # archivePipelineRun's archive_failed is retryable: the results service builds
+                # the zip of a finished run again after Retry-After (90 s). Asked a few times.
+                with client._bounded(remaining()):
+                    current = sdk.plain(client.v1().jobs.get(item["id"]))
+                if current.get("status") != "Complete":
+                    raise _not_complete(name, current) from exc
+                rebuilds += 1
+                pause(_retry_after(exc, 90.0), None)
+                continue
+            if code == "archive_failed" and item.get("status") != "Complete":
                 raise _not_complete(name, item) from exc  # classic's words for a Stopped/Failed job
             raise
         if not (isinstance(answer, dict) and answer.get("status") == "preparing"):
             return str(answer.get("downloadUrl"))
-        current = sdk.plain(client.v1().jobs.get(item["id"]))
+        with client._bounded(remaining()):
+            current = sdk.plain(client.v1().jobs.get(item["id"]))
         if current.get("status") != "Complete":
             raise _not_complete(name, current)
         delay = max(float(answer.get("retryAfterSeconds") or 5), 1.0)
@@ -539,11 +578,7 @@ def result(client: _OverV1, body: dict[str, Any]) -> str:
             raise TamarindError(
                 f"The results archive is still being prepared; try again in {delay:g} s.", detail=answer
             )
-        if deadline is not None and time.monotonic() + delay > deadline:
-            raise JobTimeoutError(
-                f"The results archive of {name} was still being prepared when --timeout passed.", detail=answer
-            )
-        time.sleep(delay)
+        pause(delay, answer)
 
 
 def delete_job(client: _OverV1, body: dict[str, Any]) -> str:

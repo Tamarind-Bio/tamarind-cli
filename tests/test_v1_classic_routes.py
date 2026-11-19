@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from typer.testing import CliRunner
 
@@ -547,6 +548,58 @@ def test_a_waits_status_request_is_one_try_bounded_by_its_deadline(env, monkeypa
     assert res.exit_code == 0, res.output
     bounded = [o for o in made if o]
     assert bounded and all(o["max_retries"] == 0 and 0 < o["timeout"] <= 30 for o in bounded)
+
+
+def test_results_wait_bounds_each_archive_request_by_what_is_left(env, monkeypatch):
+    made: list[dict[str, Any]] = []
+    monkeypatch.setattr(sdk, "make_client", lambda state, api_key=None, **options: (made.append(options), env.v1)[1])
+    seen: list[dict[str, Any]] = []
+    env.v1.answers["jobs.list"] = _found()
+    env.v1.answers["jobs.get"] = V1_JOB
+    env.v1.answers["jobs.archive"] = lambda *a, **k: (seen.append(made[-1]), READY)[1]
+    res = env.run("v1", "--json", "results", "n1", "--wait", "--poll-interval", "1", "--timeout", "30", "--show-url")
+    assert res.exit_code == 0, res.output
+    assert seen and seen[0]["max_retries"] == 0 and 0 < seen[0]["timeout"] <= 30
+
+
+def _archive_failed(retry_after: str = "90") -> ProblemError:
+    return ProblemError(
+        status=409, code="archive_failed", title="Conflict", detail="The archive could not be built.",
+        headers=httpx.Headers({"Retry-After": retry_after}),
+    )
+
+
+def test_results_wait_asks_a_pipeline_run_to_rebuild_its_archive(env, sleeps):
+    answers = [_archive_failed(), READY]
+
+    def archive_run(*a, **k):
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    env.v1.answers["jobs.list"] = _found("pipeline", RUN, status="Complete")
+    env.v1.answers["jobs.get"] = {"kind": "pipeline", "id": RUN, "name": "n1", "status": "Complete"}
+    env.v1.answers["pipelines.archive_run"] = archive_run
+    res = env.run("v1", "--json", "results", "n1", "--wait", "--poll-interval", "1", "--show-url")
+    assert res.exit_code == 0, res.output
+    assert json.loads(res.stdout)["url"] == SIGNED and sleeps == [90.0]
+
+
+def test_results_wait_stops_asking_for_a_rebuild_after_three_tries(env, sleeps):
+    env.v1.answers["jobs.list"] = _found("pipeline", RUN, status="Complete")
+    env.v1.answers["jobs.get"] = {"kind": "pipeline", "id": RUN, "name": "n1", "status": "Complete"}
+    env.v1.answers["pipelines.archive_run"] = _archive_failed("5")
+    res = env.run("v1", "--json", "results", "n1", "--wait", "--poll-interval", "1", "--show-url")
+    assert isinstance(res.exception, ProblemError) and res.exception.code == "archive_failed"
+    assert sleeps == [5.0, 5.0, 5.0]
+
+
+def test_results_without_wait_reports_a_runs_failed_archive(env, sleeps):
+    env.v1.answers["jobs.list"] = _found("pipeline", RUN, status="Complete")
+    env.v1.answers["pipelines.archive_run"] = _archive_failed()
+    res = env.run("v1", "--json", "results", "n1", "--show-url")
+    assert isinstance(res.exception, ProblemError) and sleeps == []
 
 
 def test_results_file_of_a_pipeline_run_stays_on_classic(env):
