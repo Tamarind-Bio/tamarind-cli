@@ -82,7 +82,7 @@ def v1(monkeypatch, tmp_path):
     monkeypatch.setenv("TAMARIND_API_KEY", "test-key")
     monkeypatch.setenv("TAMARIND_API", "v1")
     recorder = Recorder({})
-    monkeypatch.setattr(sdk, "make_client", lambda state, api_key=None: recorder)
+    monkeypatch.setattr(sdk, "make_client", lambda state, api_key=None, **options: recorder)
     return recorder
 
 

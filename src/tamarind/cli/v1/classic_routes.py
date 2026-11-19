@@ -25,9 +25,10 @@ from __future__ import annotations
 import json
 import re
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 import click
 
@@ -86,6 +87,8 @@ class _OverV1:
         self._v1: Any = None
         self._items: dict[tuple[str, tuple[str, ...]], dict[str, Any]] = {}
         self._names: dict[str, str] = {}
+        # When the command began: its --timeout counts from here, across every wait.
+        self.started = time.monotonic()
 
     def close(self) -> None:
         self._classic.close()
@@ -107,7 +110,11 @@ class _OverV1:
         self, path: str, *, params: dict[str, Any] | None = None, timeout: float | None = None
     ) -> Any:
         return self._serve(
-            "GET", path, params, lambda: self._classic.get_json(path, params=params, timeout=timeout)
+            "GET",
+            path,
+            params,
+            lambda: self._classic.get_json(path, params=params, timeout=timeout),
+            timeout=timeout,
         )
 
     def post_json(self, path: str, *, json: Any | None = None) -> Any:
@@ -124,18 +131,43 @@ class _OverV1:
     def _route(self, method: str, path: str) -> Route | None:
         raise NotImplementedError
 
-    def _serve(self, method: str, path: str, payload: Any, classic: Callable[[], Any]) -> Any:
+    def _serve(
+        self,
+        method: str,
+        path: str,
+        payload: Any,
+        classic: Callable[[], Any],
+        *,
+        timeout: float | None = None,
+    ) -> Any:
         route = self._route(method, path.strip("/"))
         # No key: classic's client says so, in its words, before sending anything.
         if route is None or not self.api_key:
             return classic()
         handler, args = route
         try:
-            return handler(self, *args, payload if isinstance(payload, dict) else {})
+            with self._bounded(timeout):
+                return handler(self, *args, payload if isinstance(payload, dict) else {})
         except OnClassic:
             return classic()
         except TamarindError as exc:
             raise _classic_error(exc) from exc
+
+    @contextmanager
+    def _bounded(self, timeout: float | None) -> Iterator[None]:
+        """A request its caller bounds (a wait's remaining deadline) is sent the way
+        classic's client sends it: one try of at most ``timeout`` seconds, not the SDK's
+        retries, which could run past the deadline."""
+        if timeout is None:
+            yield
+            return
+        saved = self._v1
+        self._v1 = sdk.make_client(self._state, timeout=max(float(timeout), 0.001), max_retries=0)
+        try:
+            yield
+        finally:
+            self._v1.__exit__(None, None, None)
+            self._v1 = saved
 
     # -- lookups -----------------------------------------------------------
 
@@ -484,10 +516,12 @@ def result(client: _OverV1, body: dict[str, Any]) -> str:
         raise NotFoundError(f"Job {name} not found")
     file_name = body.get("fileName")
     if file_name:
+        if item.get("kind") == "pipeline":
+            raise OnClassic  # getJobFile takes a job or a batch; one file of a run has no v1 form
         link = sdk.plain(client.v1().jobs.get_file(item["id"], path=file_name, delivery="url"))
         return str(link.get("url"))
     wait, timeout = _waiting()
-    deadline = None if timeout is None else time.monotonic() + timeout
+    deadline = None if timeout is None else client.started + timeout
     while True:
         try:
             answer = _archive(client, item)
@@ -515,8 +549,10 @@ def result(client: _OverV1, body: dict[str, Any]) -> str:
 def delete_job(client: _OverV1, body: dict[str, Any]) -> str:
     """DELETE /delete-job → deleteJob; classic answers ``<name> deleted``."""
     name = body.get("jobName")
-    item = client.find(name)
+    item = client.find(name, kinds=("job", "batch"))  # deleteJob takes a job or a batch
     if item is None:
+        if client.find(name) is not None:
+            raise OnClassic  # only a pipeline run has this name: v1 has no delete for one
         raise NotFoundError(f"{name} does not exist")
     client.v1().jobs.delete(item["id"])
     return f"{name} deleted"

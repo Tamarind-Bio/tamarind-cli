@@ -89,7 +89,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(classic_routes, "HTTPClient", FakeClassic)
     monkeypatch.setattr("tamarind.cli.commands.auth.HTTPClient", FakeClassic)
     recorder = Recorder({})
-    monkeypatch.setattr(sdk, "make_client", lambda state, api_key=None: recorder)
+    monkeypatch.setattr(sdk, "make_client", lambda state, api_key=None, **options: recorder)
 
     class Env:
         v1 = recorder
@@ -526,6 +526,59 @@ def test_results_wait_stops_at_its_timeout(env, sleeps):
     env.v1.answers["jobs.archive"] = _preparing_then_ready(5)
     res = env.run("v1", "--json", "results", "n1", "--wait", "--poll-interval", "1", "--timeout", "5", "--show-url")
     assert isinstance(res.exception, JobTimeoutError) and sleeps == []
+
+
+def test_results_wait_counts_its_timeout_from_the_commands_start(env, sleeps, monkeypatch):
+    clock = iter([0.0])  # the command starts at 0; everything after reads 12 s later
+    monkeypatch.setattr(classic_routes.time, "monotonic", lambda: next(clock, 12.0))
+    env.v1.answers["jobs.list"] = _found("batch", BATCH, status="Complete")
+    env.v1.answers["jobs.get"] = {"kind": "batch", "id": BATCH, "name": "n1", "status": "Complete"}
+    env.v1.answers["jobs.archive"] = _preparing_then_ready(1)
+    res = env.run("v1", "--json", "results", "n1", "--wait", "--poll-interval", "1", "--timeout", "15", "--show-url")
+    assert isinstance(res.exception, JobTimeoutError) and sleeps == []  # 12 + 10 > 15
+
+
+def test_a_waits_status_request_is_one_try_bounded_by_its_deadline(env, monkeypatch):
+    made: list[dict[str, Any]] = []
+    monkeypatch.setattr(sdk, "make_client", lambda state, api_key=None, **options: (made.append(options), env.v1)[1])
+    env.v1.answers["jobs.list"] = _found()
+    env.v1.answers["jobs.get"] = V1_JOB
+    res = env.run("v1", "--json", "wait", "n1", "--timeout", "30", "--poll-interval", "1")
+    assert res.exit_code == 0, res.output
+    bounded = [o for o in made if o]
+    assert bounded and all(o["max_retries"] == 0 and 0 < o["timeout"] <= 30 for o in bounded)
+
+
+def test_results_file_of_a_pipeline_run_stays_on_classic(env):
+    FakeClassic.answers["result"] = SIGNED
+    env.v1.answers["jobs.list"] = _found("pipeline", RUN, status="Complete")
+    res = env.run("v1", "--json", "results", "n1", "--file", "out/a.pdb", "--show-url")
+    assert res.exit_code == 0, res.output
+    assert ("POST", "result") in [c[:2] for c in classic_calls()]
+    assert "jobs.get_file" not in [c[0] for c in env.v1.calls]
+
+
+def _by_kind(**pages: dict[str, Any]):
+    return lambda **query: pages.get(query.get("kind") or "any", _page())
+
+
+def test_delete_resolves_a_name_among_jobs_and_batches(env):
+    newer_run = {"id": RUN, "kind": "pipeline", "name": "n1", "createdAt": "2026-11-19T06:00:00Z"}
+    env.v1.answers["jobs.list"] = _by_kind(job=_found(), any=_page(newer_run))
+    env.v1.answers["jobs.delete"] = None
+    res = env.run("v1", "--json", "delete", "n1", "--yes")
+    assert res.exit_code == 0, res.output
+    assert ("jobs.delete", (JOB,), {}) in env.v1.calls
+    assert [c[2].get("kind") for c in env.v1.calls if c[0] == "jobs.list"] == ["job", "batch"]
+
+
+def test_delete_of_a_name_only_a_run_has_stays_on_classic(env):
+    FakeClassic.answers["delete-job"] = "n1 deleted"
+    env.v1.answers["jobs.list"] = _by_kind(any=_found("pipeline", RUN))
+    res = env.run("v1", "--json", "delete", "n1", "--yes")
+    assert res.exit_code == 0, res.output
+    assert ("DELETE", "delete-job") in [c[:2] for c in classic_calls()]
+    assert "jobs.delete" not in [c[0] for c in env.v1.calls]
 
 
 def test_delete_job_goes_to_v1(env):

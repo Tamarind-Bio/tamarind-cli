@@ -598,7 +598,7 @@ def test_test_command_on_v1_submits_the_pinned_version_with_submit_job(monkeypat
         "kind": "job", "id": "job_0f8fad5b-d9cb-469f-a165-70867728950e", "name": "smoke",
         "tool": "fold-local", "status": "In Queue", "createdAt": "2026-11-19T08:00:00Z",
     }})
-    monkeypatch.setattr(cli_sdk, "make_client", lambda state, api_key=None: recorder)
+    monkeypatch.setattr(cli_sdk, "make_client", lambda state, api_key=None, **options: recorder)
     result = runner.invoke(
         app,
         ["--json", "custom-tools", "test", "fold-local", "--version", VERSION, "--set", "sequence=AAA", "--name", "smoke"],

@@ -35,13 +35,14 @@ def argument(name: str) -> str:
     return value + "_" if value in _RESERVED or keyword.iskeyword(value) else value
 
 
-def make_client(state: Any, *, api_key: str | None = None) -> Any:
-    """The v1 SDK client for this invocation's key (or ``api_key``) and v1 base URL."""
+def make_client(state: Any, *, api_key: str | None = None, **options: Any) -> Any:
+    """The v1 SDK client for this invocation's key (or ``api_key``) and v1 base URL;
+    ``options`` (``timeout``, ``max_retries``) go to the client."""
     from tamarind.v1 import Tamarind as V1Client  # the v1 SDK's client
 
     cfg = state.config()
     key = api_key if api_key is not None else cfg.api_key
-    return V1Client(api_key=key, base_url=cfg.v1_api_base.rstrip("/"))
+    return V1Client(api_key=key, base_url=cfg.v1_api_base.rstrip("/"), **options)
 
 
 def wait(

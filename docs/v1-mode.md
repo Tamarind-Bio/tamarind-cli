@@ -52,6 +52,8 @@ These have no v1 form yet, so they stay on classic even with v1 selected:
 - `jobs --include-subjobs`;
 - `results --pdbs-only` (until v1 serves `bestStructures`);
 - `logs` of a batch or a pipeline run (v1 reads one job's log);
+- `results RUN --file PATH`, one file of a pipeline run (v1's file read takes a job or a batch);
+- `delete NAME` when only a pipeline run has that name (v1 deletes jobs and batches);
 - `files delete PATH --folder F` (a path and a folder together).
 
 ## Differences from classic mode
