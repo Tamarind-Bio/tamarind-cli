@@ -104,6 +104,22 @@ Generated endpoint code owns URL encoding and wire-model parsing. A small resour
 adapter adds strict runtime checks and composes `PipelineRun` → `NodeRun` → molecule
 pages without introducing another public vocabulary.
 
+### 5. The v1 API — source of truth: the v1 contract
+
+`openapi/api-v1.yaml` (vendored from tamarind-website) is the v1 contract. The SDK
+(`tamarind.v1`) is generated from it, one method per operation. The CLI's v1 commands
+call only that SDK (`tamarind/cli/v1/sdk.py` is the one place they do), and the commands
+themselves come from the contract too: each operation's `x-clients.cli` names its command,
+and `scripts/gen_v1_cli_manifest.py` writes the manifest the CLI builds them from (path
+parameters → arguments, query parameters → options, a body → `--input`/`--set`). Today's
+commands are written by hand and keep their names and flags; with v1 selected they call
+the v1 operations instead. `tests/test_v1_cli_parity.py` fails when the manifest is stale,
+when an operation has no command, or when an argument name doesn't match the SDK's.
+
+v1 is opt-in (`TAMARIND_API=v1`, `--api v1`, or `"api": "v1"` in a profile) until it
+launches; classic stays the default, and its base (`TAMARIND_API_BASE`) is never used for
+v1 calls (`TAMARIND_V1_API_BASE` is).
+
 ## Why not a single binary that re-encodes the API?
 
 A from-scratch client in another language would re-encode the request shapes and

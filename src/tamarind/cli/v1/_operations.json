@@ -1,0 +1,4153 @@
+{
+ "info": {
+  "title": "Tamarind API",
+  "version": "1.0.0-draft.10"
+ },
+ "operations": [
+  {
+   "body": null,
+   "cli": "auth status",
+   "description": "The one call an agent or script should make first. `role` is the caller's EFFECTIVE privilege for this credential. `asOf` is when the answer was made: organization and team totals can trail it by up to about 30 minutes.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getMe",
+   "path": "/me",
+   "pathParams": [],
+   "query": [],
+   "sdk": "me.get",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get the caller's identity, role, limits and remaining budget",
+   "tag": "Identity"
+  },
+  {
+   "body": null,
+   "cli": "keys list",
+   "description": "Your own keys: the original one, the ones you created, and revoked ones. Never a short-lived key a Tamarind service made for you, and never a secret or a hash.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listApiKeys",
+   "path": "/api-keys",
+   "pathParams": [],
+   "query": [
+    {
+     "default": "mine",
+     "description": "`mine` is what you own.",
+     "enum": [
+      "mine",
+      "org"
+     ],
+     "name": "scope",
+     "option": "scope",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": 50,
+     "description": "Page size.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "`nextCursor` from the previous page.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "apiKeys.list",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List API keys",
+   "tag": "API Keys"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "keys create",
+   "description": "Makes a key for one of your organization's service accounts, named by `serviceAccountId`. Only an organization admin's own key can (the rule `listApiKeys` describes). An id that isn't one of your organization's service accounts is 404.",
+   "headers": [
+    "Idempotency-Key"
+   ],
+   "method": "POST",
+   "operationId": "createApiKey",
+   "path": "/api-keys",
+   "pathParams": [],
+   "query": [],
+   "sdk": "apiKeys.create",
+   "success": {
+    "200": [
+     "application/json"
+    ],
+    "201": [
+     "application/json"
+    ]
+   },
+   "summary": "Create a service account's API key",
+   "tag": "API Keys"
+  },
+  {
+   "body": null,
+   "cli": "keys get",
+   "description": "One of your own keys or, for an organization admin, one of your organization's service accounts' keys. A member's key is 404 here, even to an admin, who sees it only in `scope=org`.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getApiKey",
+   "path": "/api-keys/{keyId}",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "keyId"
+    }
+   ],
+   "query": [],
+   "sdk": "apiKeys.get",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get an API key",
+   "tag": "API Keys"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "keys update",
+   "description": "Renames a key you created with a person's key, or, for an organization admin, a service account's created key. Keys have no budget or expiry yet: a non-null `budget` or `expiresAt` is 422 `not_supported` at that field. A body without `name` renames nothing and returns the key. The original key and revoked keys can't be renamed: 409 `api_key_not_changeable`. A service account's key can't rename keys: 403 `org_admin_required`.",
+   "headers": [],
+   "method": "PATCH",
+   "operationId": "updateApiKey",
+   "path": "/api-keys/{keyId}",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "keyId"
+    }
+   ],
+   "query": [],
+   "sdk": "apiKeys.update",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Rename an API key",
+   "tag": "API Keys"
+  },
+  {
+   "body": null,
+   "cli": "keys revoke",
+   "description": "Revokes a key you created with a person's key, or, for an organization admin, a service account's created key. Revoked keys stay listed with `status=revoked`. Revoking a revoked key answers 204 again. The original key can't be revoked here: 409 `api_key_not_changeable`. A service account's key can't revoke keys: 403 `org_admin_required`.",
+   "headers": [],
+   "method": "DELETE",
+   "operationId": "revokeApiKey",
+   "path": "/api-keys/{keyId}",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "keyId"
+    }
+   ],
+   "query": [],
+   "sdk": "apiKeys.revoke",
+   "success": {
+    "204": []
+   },
+   "summary": "Revoke a key, effective immediately",
+   "tag": "API Keys"
+  },
+  {
+   "body": null,
+   "cli": "service-accounts list",
+   "description": "Organization admins only, with their own key (the rule `listApiKeys` describes). Anyone else is 403 `org_admin_required` (or `mfa_required`).",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listServiceAccounts",
+   "path": "/service-accounts",
+   "pathParams": [],
+   "query": [
+    {
+     "default": 50,
+     "description": "Page size.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "`nextCursor` from the previous page.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "serviceAccounts.list",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List your organization's service accounts",
+   "tag": "Service Accounts"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "service-accounts create",
+   "description": "Create its keys with `POST /api-keys` and `serviceAccountId`. Organization admins only, with their own key. The account starts with no key. Its `email` is the name, trimmed, lower-cased and with each run of spaces made one hyphen, at `<organization slug>.serviceaccount`. A name whose email is already taken (`Nightly Sync` and `nightly sync` are the same) is 409 `service_account_exists`.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "createServiceAccount",
+   "path": "/service-accounts",
+   "pathParams": [],
+   "query": [],
+   "sdk": "serviceAccounts.create",
+   "success": {
+    "201": [
+     "application/json"
+    ]
+   },
+   "summary": "Create a service account",
+   "tag": "Service Accounts"
+  },
+  {
+   "body": null,
+   "cli": "service-accounts get",
+   "description": "Organization admins only, with their own key. An id that isn't one of your organization's service accounts is 404.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getServiceAccount",
+   "path": "/service-accounts/{serviceAccountId}",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "serviceAccountId"
+    }
+   ],
+   "query": [],
+   "sdk": "serviceAccounts.get",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get a service account",
+   "tag": "Service Accounts"
+  },
+  {
+   "body": null,
+   "cli": "service-accounts delete",
+   "description": "Organization admins only, with their own key. Deletes the account, then marks every key it had revoked. An account that stops being this organization's service account while it's being deleted is 404, and nothing is deleted.",
+   "headers": [],
+   "method": "DELETE",
+   "operationId": "deleteServiceAccount",
+   "path": "/service-accounts/{serviceAccountId}",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "serviceAccountId"
+    }
+   ],
+   "query": [],
+   "sdk": "serviceAccounts.delete",
+   "success": {
+    "204": []
+   },
+   "summary": "Delete a service account and revoke its keys",
+   "tag": "Service Accounts"
+  },
+  {
+   "body": null,
+   "cli": "org get",
+   "description": "Any member of an organization can read it. A personal account is 404. `name` is the organization's slug for now, as on `GET /me`. Every `/organization` route first confirms your membership against your account, read fresh; when it can't, the answer is 503 and retryable, never the old organization's data.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getOrganization",
+   "path": "/organization",
+   "pathParams": [],
+   "query": [],
+   "sdk": "organization.get",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get your organization",
+   "tag": "Organization"
+  },
+  {
+   "body": null,
+   "cli": "org contract",
+   "description": "Every contract term, with contracted, promotional, rollover, effective, used and remaining hours, newest start first. The same people who see shared budgets on `GET /me` can read it: the organization's service account, or any member when the organization shares its budget with members. Anyone else is 403 `forbidden`, and a personal account is 404.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getOrganizationContract",
+   "path": "/organization/contract",
+   "pathParams": [],
+   "query": [],
+   "sdk": "organization.getContract",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get contract terms and the compute balance",
+   "tag": "Organization"
+  },
+  {
+   "body": null,
+   "cli": "org members",
+   "description": "Any member can list them; a personal account is 404. In email order, not newest first. Service accounts aren't members here (see `listServiceAccounts`). A member's name and role come from the sign-in provider, read live; someone it has no membership for is `role: member` with a null `name`. If that read fails or comes back incomplete, the answer is 503 `upstream_unavailable` (retryable), so a list never calls an admin a member.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listOrganizationMembers",
+   "path": "/organization/members",
+   "pathParams": [],
+   "query": [
+    {
+     "default": 50,
+     "description": "Page size.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "`nextCursor` from the previous page.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "organization.listMembers",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List your organization's members",
+   "tag": "Organization"
+  },
+  {
+   "body": null,
+   "cli": "org sub-orgs",
+   "description": "The sub-organizations your organization lists that still exist, in slug order. Each one's `parentSlug` is your organization, and its `name` is its slug. Any member can list them; a personal account is 404.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listSubOrganizations",
+   "path": "/organization/sub-organizations",
+   "pathParams": [],
+   "query": [
+    {
+     "default": 50,
+     "description": "Page size.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "`nextCursor` from the previous page.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "organization.listSubOrganizations",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List your organization's sub-organizations",
+   "tag": "Organization"
+  },
+  {
+   "body": null,
+   "cli": "usage",
+   "description": "One query over the stored monthly usage the web usage portal reads. Choose a `metric`, a range of Pacific months and up to three `groupBy` dimensions. Send `Accept: text/csv` for CSV. A CSV is one page, like the JSON form, and its next cursor is in the `X-Next-Cursor` header (also set on JSON pages). Items are in the order of their dimension values, months oldest first.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getUsage",
+   "path": "/usage",
+   "pathParams": [],
+   "query": [
+    {
+     "default": "weightedHours",
+     "description": "`hours` (GPU hours), `weightedHours` (what budgets bill against) or `jobs`.",
+     "enum": [
+      "hours",
+      "weightedHours",
+      "jobs",
+      "dollars",
+      "llmTokens",
+      "llmCost"
+     ],
+     "name": "metric",
+     "option": "metric",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Dimensions to break down by, comma-separated or repeated.",
+     "enum": [
+      "tool",
+      "user",
+      "team",
+      "project",
+      "gpu",
+      "source",
+      "apiKey",
+      "customTool",
+      "pipeline",
+      "month",
+      "day",
+      "model",
+      "agent",
+      "campaignMode"
+     ],
+     "items": "string",
+     "name": "groupBy",
+     "option": "group-by",
+     "required": false,
+     "type": "array"
+    },
+    {
+     "description": "Start of the range, inclusive, with a time zone offset.",
+     "name": "from",
+     "option": "from",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "End of the range, exclusive, with a time zone offset.",
+     "name": "to",
+     "option": "to",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": "mine",
+     "description": "`mine` is what you own.",
+     "enum": [
+      "mine",
+      "org"
+     ],
+     "name": "scope",
+     "option": "scope",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "A sub-organization to report on.",
+     "name": "organizationSlug",
+     "option": "organization-slug",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Only usage attributed to this key.",
+     "name": "apiKeyId",
+     "option": "api-key-id",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": 50,
+     "description": "Page size.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "`nextCursor` from the previous page.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "usage.get",
+   "success": {
+    "200": [
+     "application/json",
+     "text/csv"
+    ]
+   },
+   "summary": "Query compute and agent usage",
+   "tag": "Usage"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "usage refresh",
+   "description": "Starts the usage refresh once for each named person, as the portal's refresh button does, then answers 202. Poll `getUsage` and watch `asOf`. You can name yourself; you can name another member when your organization shares within itself or you are its service account. Anyone else (another organization, a different spelling of an address) is 403 `forbidden`, naming them, before anything starts. Addresses are matched exactly. Another refresh from the same account still running is 429. A start that fails is 503 and retryable, since a refresh is safe to repeat. A deployment without the refresh fu…",
+   "headers": [],
+   "method": "POST",
+   "operationId": "refreshUsage",
+   "path": "/usage/refresh",
+   "pathParams": [],
+   "query": [],
+   "sdk": "usage.refresh",
+   "success": {
+    "202": [
+     "application/json"
+    ]
+   },
+   "summary": "Request a fresh usage calculation",
+   "tag": "Usage"
+  },
+  {
+   "body": null,
+   "cli": "tools list",
+   "description": "The built-in tools your account may run, in the catalog's display order rather than newest first. Visibility rules live in this endpoint, not in clients: a tool a flag, a block or licensing hides from you isn't listed. Your organization's custom tools aren't listed here yet (`custom=true` is 400); see `listCustomTools`.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listTools",
+   "path": "/tools",
+   "pathParams": [],
+   "query": [
+    {
+     "description": "Free text, matched in any case within the name, display name and description.",
+     "name": "search",
+     "option": "search",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "A value from `getToolFacets`, matched in any case.",
+     "name": "modality",
+     "option": "modality",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "A value from `getToolFacets`, matched in any case.",
+     "name": "function",
+     "option": "function",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Only your organization's custom tools.",
+     "name": "custom",
+     "option": "custom",
+     "required": false,
+     "type": "boolean"
+    },
+    {
+     "description": "`true`: only tools that train a model.",
+     "name": "finetune",
+     "option": "finetune",
+     "required": false,
+     "type": "boolean"
+    },
+    {
+     "default": false,
+     "description": "Only tools that run as a pipeline behind the scenes, such as BinderScout.",
+     "name": "pipelineTools",
+     "option": "pipeline-tools",
+     "required": false,
+     "type": "boolean"
+    },
+    {
+     "default": 50,
+     "description": "Page size.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "`nextCursor` from the previous page.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "tools.list",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Find tools",
+   "tag": "Tools"
+  },
+  {
+   "body": null,
+   "cli": "tools facets",
+   "description": "Modalities and functions, lower-cased, each with the number of tools you can see, so a count matches what `listTools` returns for it. Most tools first, then by name. No labels or descriptions.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getToolFacets",
+   "path": "/tools/facets",
+   "pathParams": [],
+   "query": [],
+   "sdk": "tools.facets",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List the modalities and functions you can filter tools by",
+   "tag": "Tools"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "tools recommend",
+   "description": "Ranks tools for a structure-prediction or co-folding task from benchmark evidence, narrowed to the tools you can see: tools you can't see are left out and never named, and when that leaves none the answer abstains. A synchronous call, bounded to finish inside the gateway's 30 seconds: a request that takes more than 25 seconds is 503 and retryable (most take 12 to 18 seconds). Behind the `model-router` flag, and refused for an unclaimed agent account: both are 403 `forbidden`. At most two requests per account run at once on each server; more is 429. A deployment without the recommendation serv…",
+   "headers": [],
+   "method": "POST",
+   "operationId": "recommendTools",
+   "path": "/tools/recommend",
+   "pathParams": [],
+   "query": [],
+   "sdk": "tools.recommend",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Recommend tools for a task described in words",
+   "tag": "Tools"
+  },
+  {
+   "body": null,
+   "cli": "tools get",
+   "description": "A built-in tool as `listTools` shows it to you. A tool hidden from you answers exactly as an unknown name does, 404 `tool_not_found`, and so does a custom tool's name for now.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getTool",
+   "path": "/tools/{tool}",
+   "pathParams": [
+    {
+     "description": "The tool's exact, case-sensitive `name`, such as `alphafold`.",
+     "name": "tool"
+    }
+   ],
+   "query": [],
+   "sdk": "tools.get",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get a tool",
+   "tag": "Tools"
+  },
+  {
+   "body": null,
+   "cli": "tools schema",
+   "description": "Built-in tools only for now: any other name, or a tool hidden from you, is 404 `tool_not_found`. Settings behind a flag that's off for you are left out, and so are settings that depend on one left out; settings limited to some organizations or surfaces are kept and annotated.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getToolSchema",
+   "path": "/tools/{tool}/schema",
+   "pathParams": [
+    {
+     "description": "The tool's exact, case-sensitive `name`, such as `alphafold`.",
+     "name": "tool"
+    }
+   ],
+   "query": [
+    {
+     "description": "A custom tool version.",
+     "name": "version",
+     "option": "version",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "tools.schema",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get a tool's settings schema and an example",
+   "tag": "Tools"
+  },
+  {
+   "body": null,
+   "cli": "jobs list",
+   "description": "Returns summaries without `settings`. Each item has a `kind`: `job`, `batch` or `pipeline`. The default list is what you started: single jobs, batches and pipeline runs, but not the jobs inside a batch or a run. `batchId=` lists a batch's jobs and `pipelineRunId=` a run's. Pipeline runs are listed only for a caller in an organization, and benchmark runs never.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listJobs",
+   "path": "/jobs",
+   "pathParams": [],
+   "query": [
+    {
+     "description": "Exact name of a job, batch or pipeline run (a run by its own name).",
+     "name": "name",
+     "option": "name",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Only this kind.",
+     "enum": [
+      "job",
+      "batch",
+      "pipeline"
+     ],
+     "name": "kind",
+     "option": "kind",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Comma-separated and URL-encoded, e.g. `In%20Queue,Running` or `Stopped,Failed`.",
+     "enum": [
+      "In Queue",
+      "Running",
+      "Complete",
+      "Stopped",
+      "Failed"
+     ],
+     "items": "string",
+     "name": "status",
+     "option": "status",
+     "required": false,
+     "type": "array"
+    },
+    {
+     "description": "Exact tool name.",
+     "name": "tool",
+     "option": "tool",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "The jobs in this batch, nested sub-batches included, instead of the default list.",
+     "name": "batchId",
+     "option": "batch-id",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "The jobs this pipeline run's steps launched (a `run_` id), instead of the default list.",
+     "name": "pipelineRunId",
+     "option": "pipeline-run-id",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Case-insensitive text anywhere in an item's `name` or `displayName`, matched as typed, spaces included.",
+     "name": "search",
+     "option": "search",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Only what was submitted through this channel.",
+     "enum": [
+      "api",
+      "sdk",
+      "cli",
+      "mcp",
+      "agent",
+      "campaign-agent",
+      "web"
+     ],
+     "name": "source",
+     "option": "source",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": "desc",
+     "description": "`desc` (the default) lists newest first; `asc` oldest first.",
+     "enum": [
+      "desc",
+      "asc"
+     ],
+     "name": "order",
+     "option": "order",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Not built yet, so any value is 400.",
+     "name": "projectId",
+     "option": "project-id",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Only jobs submitted with this key.",
+     "name": "apiKeyId",
+     "option": "api-key-id",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": "mine",
+     "description": "`mine` is what you own.",
+     "enum": [
+      "mine",
+      "org"
+     ],
+     "name": "scope",
+     "option": "scope",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Another member's email.",
+     "name": "createdBy",
+     "option": "created-by",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Not built yet, so any value is 400.",
+     "name": "createdAfter",
+     "option": "created-after",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Not built yet, so any value is 400.",
+     "name": "createdBefore",
+     "option": "created-before",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": 50,
+     "description": "Page size.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "`nextCursor` from the previous page.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "jobs.list",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List your jobs, batches and pipeline runs, newest first",
+   "tag": "Jobs"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "jobs submit",
+   "description": "`kind` says what to create, the same word responses use: `job` (the default) with `settings` as an object, or `batch` with `settings` as an array (one object per job) or `source` to read the rows from an uploaded FASTA, CSV or JSONL file; `sharedSettings` apply to every row. A batch is never inferred from the shape of `settings`: a list of `settings` without `kind` is 422 at `/settings`. SDK, CLI and MCP always send `kind`. Use a batch for more than one input, not a loop of this call.",
+   "headers": [
+    "Idempotency-Key"
+   ],
+   "method": "POST",
+   "operationId": "submitJob",
+   "path": "/jobs",
+   "pathParams": [],
+   "query": [],
+   "sdk": "jobs.submit",
+   "success": {
+    "201": [
+     "application/json"
+    ],
+    "202": [
+     "application/json"
+    ]
+   },
+   "summary": "Submit a job or a batch",
+   "tag": "Jobs"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "jobs estimate",
+   "description": "Takes the same body as `submitJob`, for a job or a batch, and returns the runtime per job, the weighted hours and the job count that today's estimator computes for the submit budget gate, fan-out included. A batch, inline or from a `source` file (read now, as on submit), is priced from its first 500 rows and scaled to its full row count, with a note saying so; more than 30,000 rows is 422 `out_of_range`. Settings that can't be priced, such as a numeric field that isn't a finite number, are 422 `invalid_type` at `/settings`. With `lowPriority: true`, `weightedHours` is the low-priority price,…",
+   "headers": [],
+   "method": "POST",
+   "operationId": "estimateJob",
+   "path": "/jobs/estimate",
+   "pathParams": [],
+   "query": [],
+   "sdk": "jobs.estimate",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Estimate a job's runtime and cost without running it",
+   "tag": "Jobs"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "jobs search",
+   "description": "For polling or fetching a set of jobs, batches and pipeline runs. Use this instead of many `getJob` calls. Up to 200 `ids` and 200 `names`. An id is looked up as `getJob` looks it up (`job_`, `batch_` or `run_`), and a name as `listJobs?name=` does: the newest job, batch or run with that name, jobs inside a batch included. Items come back ids first, then names, each item once however many values found it. Values with no match are in `notFound`.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "searchJobs",
+   "path": "/jobs/search",
+   "pathParams": [],
+   "query": [],
+   "sdk": "jobs.search",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Look up many jobs by name or id in one call",
+   "tag": "Jobs"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "jobs validate",
+   "description": "Takes the same body as `submitJob` (a batch only inline) and runs every check `submitJob` runs, read-only: settings, tool access and licence (including a stale `toolLifetimeEtag`), the name, the project (an unknown `projectId` is a failed `project` check with an `invalid_option` error at `/projectId`), budgets and quotas. If this says `valid: true`, `submitJob` can only refuse for a reason that changed in between, or because its `Idempotency-Key` was already used with a different body, which this doesn't see. Spends nothing and writes nothing.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "validateJob",
+   "path": "/jobs/validate",
+   "pathParams": [],
+   "query": [],
+   "sdk": "jobs.validate",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Check a job without running it",
+   "tag": "Jobs"
+  },
+  {
+   "body": null,
+   "cli": "jobs get",
+   "description": "Takes a `job_`, `batch_` or `run_` id and answers with that item; `kind` says which. A job comes with `settings`; a batch with its `counts`; a pipeline run with `counts` of its steps and `jobCounts` of the jobs they launched, read at most 60 seconds ago (its steps and molecules are under `/pipelines/runs/{runId}`). A job a run's step launched is readable here too, though only `pipelineRunId=` lists it. A single-tool run's `run_` id answers its job, the item the list shows for it (`kind` `job`, with its `job_` id). Anything you can't read is the same 404 as an id that doesn't exist: someone el…",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getJob",
+   "path": "/jobs/{jobId}",
+   "pathParams": [
+    {
+     "description": "A `job_`, `batch_` or `run_` id.",
+     "name": "jobId"
+    }
+   ],
+   "query": [],
+   "sdk": "jobs.get",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get a job, a batch or a pipeline run",
+   "tag": "Jobs"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "jobs update",
+   "description": "Takes a `job_` or `batch_` id; a `run_` id is 404. `name` never changes after submission. `displayName` is the editable label; null or blank clears it. `projectId` files the job under a project, and null takes it out; a field you leave out is unchanged. A batch's jobs follow the batch, so `projectId` on a job inside a batch is 422 `not_supported`. A project that isn't available to you is 422 `invalid_option` at `/projectId`. An organization with projects turned off can't assign one, but can clear one. Where the organization requires a project, only one of its own projects is accepted, and nul…",
+   "headers": [],
+   "method": "PATCH",
+   "operationId": "updateJob",
+   "path": "/jobs/{jobId}",
+   "pathParams": [
+    {
+     "description": "A `job_`, `batch_` or `run_` id.",
+     "name": "jobId"
+    }
+   ],
+   "query": [],
+   "sdk": "jobs.update",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Change a job's or a batch's display name or project",
+   "tag": "Jobs"
+  },
+  {
+   "body": null,
+   "cli": "jobs delete",
+   "description": "Takes a `job_` or `batch_` id; a `run_` id is 404. This is the app's Delete button: the job, or a batch with every job in it, is marked deleted and reads as 404 everywhere from then on, so deleting it again is 404 too. Its outputs stay in storage. A tool run that is still running is stopped first; if stopping its jobs isn't confirmed, the answer is 502 `upstream_unavailable` and nothing is deleted yet, so delete again.",
+   "headers": [],
+   "method": "DELETE",
+   "operationId": "deleteJob",
+   "path": "/jobs/{jobId}",
+   "pathParams": [
+    {
+     "description": "A `job_`, `batch_` or `run_` id.",
+     "name": "jobId"
+    }
+   ],
+   "query": [],
+   "sdk": "jobs.delete",
+   "success": {
+    "204": []
+   },
+   "summary": "Delete a job or a batch",
+   "tag": "Jobs"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": false
+   },
+   "cli": "jobs cancel",
+   "description": "Takes a `job_`, `batch_` or `run_` id. A batch stops every unfinished job in it; a run stops its unfinished steps, through the same cancel as `cancelPipelineRun`. A single-tool run's `run_` id stops that run and answers its job, as `getJob` does. Safe to repeat: canceling something already `Stopped` with `stopReason.kind` `canceled` returns it (a batch or a run is swept again for anything still running). Anything else that has finished (`Complete`, `Stopped` or `Failed`) is 409 `job_already_finished`. Also stops any child work it started.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "cancelJob",
+   "path": "/jobs/{jobId}/cancel",
+   "pathParams": [
+    {
+     "description": "A `job_`, `batch_` or `run_` id.",
+     "name": "jobId"
+    }
+   ],
+   "query": [],
+   "sdk": "jobs.cancel",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Stop an unfinished job, batch or pipeline run and keep its outputs",
+   "tag": "Jobs"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": false
+   },
+   "cli": "jobs rerun",
+   "description": "Puts a finished job back in the queue as the same job, as the app's Rerun does: the same id, tool, settings and project, and its earlier outputs are overwritten as it runs. Takes a `job_` or `batch_` id; a `run_` id is 404. Answers 200 with the job back `In Queue`; poll it with `getJob` as usual.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "rerunJob",
+   "path": "/jobs/{jobId}/rerun",
+   "pathParams": [
+    {
+     "description": "A `job_`, `batch_` or `run_` id.",
+     "name": "jobId"
+    }
+   ],
+   "query": [],
+   "sdk": "jobs.rerun",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Run a finished job, or a finished batch's jobs, again in place",
+   "tag": "Jobs"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": false
+   },
+   "cli": "jobs results",
+   "description": "Takes a `job_` or `batch_` id; a `run_` id is 404 (use `archivePipelineRun`). Serves the stored archive the job's worker wrote, the one today's `POST /result` serves. 200 means ready, with a link that expires in 1 hour, its expiry, the size and the real `fileCount`, read from the zip itself. `truncated` is false, since a stored archive is never cut short. 202 means still preparing: the job or batch is still running, by the status `getJob` shows (a batch's is its jobs'; a single-tool pipeline run's job is its run's), or a `Complete` batch's archive is being rebuilt. Call again after `retryAfte…",
+   "headers": [],
+   "method": "POST",
+   "operationId": "archiveJob",
+   "path": "/jobs/{jobId}/archive",
+   "pathParams": [
+    {
+     "description": "A `job_`, `batch_` or `run_` id.",
+     "name": "jobId"
+    }
+   ],
+   "query": [],
+   "sdk": "jobs.archive",
+   "success": {
+    "200": [
+     "application/json"
+    ],
+    "202": [
+     "application/json"
+    ]
+   },
+   "summary": "Get a zip of a job's or a batch's outputs",
+   "tag": "Job Outputs"
+  },
+  {
+   "body": null,
+   "cli": "jobs files",
+   "description": "Takes a `job_` or `batch_` id; a `run_` id is 404. Available while the job runs, in path order, every file type included. A batch's own folder holds its combined results; each job's files are under that job's id. With `includeDownloadUrls=true`, one call gives every link on the page, so there is no need for one call per file. Links expire in 1 hour. A page reads at most 5,000 stored files, so with a `glob` that matches few of them a page can be short while `nextCursor` says there's more.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listJobFiles",
+   "path": "/jobs/{jobId}/files",
+   "pathParams": [
+    {
+     "description": "A `job_`, `batch_` or `run_` id.",
+     "name": "jobId"
+    }
+   ],
+   "query": [
+    {
+     "description": "Only paths under this prefix, e.g. `predictions/`.",
+     "name": "prefix",
+     "option": "prefix",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Only paths matching this glob, e.g. `*.pdb`, with the MCP `listJobFiles` tool's matching (the whole path, case-sensitive, and `*` also matches `/`).",
+     "name": "glob",
+     "option": "glob",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": false,
+     "description": "",
+     "name": "includeDownloadUrls",
+     "option": "include-download-urls",
+     "required": false,
+     "type": "boolean"
+    },
+    {
+     "default": 50,
+     "description": "Page size.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "`nextCursor` from the previous page.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "jobs.listFiles",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List the files a job or a batch produced",
+   "tag": "Job Outputs"
+  },
+  {
+   "body": null,
+   "cli": "jobs download",
+   "description": "Takes a `job_` or `batch_` id and a `path` from `listJobFiles`; a `run_` id is 404, and so is a path with no file. A `path` that could leave the job's folder (a leading `/`, a backslash, a control character or an empty, `.` or `..` segment) is 422. `inline` content is gzip-encoded when the client accepts gzip, as every response is.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getJobFile",
+   "path": "/jobs/{jobId}/files/content",
+   "pathParams": [
+    {
+     "description": "A `job_`, `batch_` or `run_` id.",
+     "name": "jobId"
+    }
+   ],
+   "query": [
+    {
+     "description": "The file's `path`, e.g. `predictions/model_1.pdb`.",
+     "name": "path",
+     "option": "path",
+     "required": true,
+     "type": "string"
+    },
+    {
+     "default": "url",
+     "description": "`url`: 200 with `DownloadLink` as JSON.",
+     "enum": [
+      "url",
+      "redirect",
+      "inline"
+     ],
+     "name": "delivery",
+     "option": "delivery",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "jobs.getFile",
+   "success": {
+    "200": [
+     "application/json",
+     "application/octet-stream"
+    ]
+   },
+   "summary": "Download one file a job or a batch produced",
+   "tag": "Job Outputs"
+  },
+  {
+   "body": null,
+   "cli": "jobs logs",
+   "description": "Takes a `job_` id only; a `batch_` or `run_` id is 404. Returns the most recent output first, up to `maxBytes`, starting at a line (or else at a character). Follow `nextCursor` to page back through older output; the pages put back together are the log byte for byte. A window is at least 4 bytes, one whole UTF-8 character, so `maxBytes` of 1 to 3 reads 4. A job with no log yet answers 200 with empty `content`. A cursor is bound to the job's current attempt: once the job is re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again without one.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getJobLogs",
+   "path": "/jobs/{jobId}/logs",
+   "pathParams": [
+    {
+     "description": "A `job_`, `batch_` or `run_` id.",
+     "name": "jobId"
+    }
+   ],
+   "query": [
+    {
+     "default": 65536,
+     "description": "",
+     "name": "maxBytes",
+     "option": "max-bytes",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "`nextCursor` from the previous page.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "jobs.logs",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Read a job's logs",
+   "tag": "Job Outputs"
+  },
+  {
+   "body": null,
+   "cli": "files list",
+   "description": "Every filter is applied by the server. Each item's `type` is `file` or `folder`. Paths are literal and relative to your workspace; job output folders are folders like any other.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listFiles",
+   "path": "/files",
+   "pathParams": [],
+   "query": [
+    {
+     "description": "List inside this folder, e.g. `targets` (a trailing `/` is fine).",
+     "name": "folder",
+     "option": "folder",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": false,
+     "description": "Include subfolders' files and leave out folder items.",
+     "name": "recursive",
+     "option": "recursive",
+     "required": false,
+     "type": "boolean"
+    },
+    {
+     "description": "Comma-separated, e.g. `pdb,cif`.",
+     "items": "string",
+     "name": "extension",
+     "option": "extension",
+     "required": false,
+     "type": "array"
+    },
+    {
+     "description": "A substring of the file's or folder's own name (not its whole path), ignoring case.",
+     "name": "search",
+     "option": "search",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": 50,
+     "description": "Page size.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "`nextCursor` from the previous page.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "files.list",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List workspace files and folders",
+   "tag": "Files"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "files upload",
+   "description": "The only way to upload.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "uploadFile",
+   "path": "/files",
+   "pathParams": [],
+   "query": [],
+   "sdk": "files.upload",
+   "success": {
+    "201": [
+     "application/json"
+    ]
+   },
+   "summary": "Start a file upload, or upload a small file directly",
+   "tag": "Files"
+  },
+  {
+   "body": null,
+   "cli": "files delete",
+   "description": "Send exactly one of `path` or `folder`. Sending neither or both answers 422, and nothing is deleted. Names are literal: `folder` may be a job's output folder, by its folder name. A path or folder that doesn't exist is 404. The root can't be deleted (422). A folder of more than 10,000 files is 422 `folder_too_large`, refused before anything is touched. A file's sharing and links end before it is deleted, so a file uploaded again at that path is never reachable through an old share. If files keep arriving in a folder after three passes, the answer is 409 `folder_changed`. A private export is th…",
+   "headers": [],
+   "method": "DELETE",
+   "operationId": "deleteFile",
+   "path": "/files",
+   "pathParams": [],
+   "query": [
+    {
+     "description": "One file's exact `path`, e.g. `targets/1abc.pdb`.",
+     "name": "path",
+     "option": "path",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "A folder's `path`, e.g. `targets` (a trailing `/` is fine).",
+     "name": "folder",
+     "option": "folder",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "files.delete",
+   "success": {
+    "204": []
+   },
+   "summary": "Delete a file or a whole folder",
+   "tag": "Files"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "files upload",
+   "description": "Send every part the upload was started with (1 to N, each once, with the ETag its PUT returned), and the parts must add up to its `sizeBytes`; otherwise it is 422 at `/parts` and nothing is stored. An `uploadId` that isn't one of your uploads, or an upload that was aborted, is 404. A retry after a completion whose answer was lost answers 200 with the stored file. Abandoned uploads are cleaned up by storage after a few days.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "completeFileUpload",
+   "path": "/files/complete",
+   "pathParams": [],
+   "query": [],
+   "sdk": "files.upload",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Finish a multipart upload",
+   "tag": "Files"
+  },
+  {
+   "body": null,
+   "cli": "files download",
+   "description": "Any file in your workspace by its exact path, hidden ones included. A private export is the same 404 as a missing file.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getFile",
+   "path": "/files/content",
+   "pathParams": [],
+   "query": [
+    {
+     "description": "The file's `path`, e.g. `predictions/model_1.pdb`.",
+     "name": "path",
+     "option": "path",
+     "required": true,
+     "type": "string"
+    },
+    {
+     "default": "url",
+     "description": "`url`: 200 with `DownloadLink` as JSON.",
+     "enum": [
+      "url",
+      "redirect",
+      "inline"
+     ],
+     "name": "delivery",
+     "option": "delivery",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "files.get",
+   "success": {
+    "200": [
+     "application/json",
+     "application/octet-stream"
+    ]
+   },
+   "summary": "Download a workspace file",
+   "tag": "Files"
+  },
+  {
+   "body": null,
+   "cli": "files stats",
+   "description": "Counts the files directly in `folder`, not its subfolders: what a listing of it without `recursive` shows. At the root that's your top-level uploads, read from the file catalog, the number today's MCP `getFileStats` gives; it follows storage by a few seconds. A file with no extension, or a suffix over 32 characters, counts under `\"\"`. A folder holding more than 250,000 files and folders (at the root, more than 250,000 uploads), or files with more than 1,000 distinct extensions, is 422 `folder_too_large`. A folder that doesn't exist counts zero.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getFileStats",
+   "path": "/files/stats",
+   "pathParams": [],
+   "query": [
+    {
+     "description": "Count the files directly in this folder, e.g. `targets`.",
+     "name": "folder",
+     "option": "folder",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "files.stats",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Count workspace files and bytes, by extension",
+   "tag": "Files"
+  },
+  {
+   "body": null,
+   "cli": "models list",
+   "description": "Your models and your teammates', newest first; `owner` says whose it is. Teammates' models are included when your organization shares within itself or you are its service account; otherwise only yours. A person's key never gets an organization admin's wider view. A model id held by several stored rows is listed once, as its newest row. Deleted models and models of trainers hidden from you aren't listed.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listModels",
+   "path": "/models",
+   "pathParams": [],
+   "query": [
+    {
+     "description": "Only models trained by this finetuning tool, a built-in trainer you can use or a custom tool's `org/tool`.",
+     "name": "tool",
+     "option": "tool",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": 50,
+     "description": "Page size.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "`nextCursor` from the previous page.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "models.list",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List finetuned models you can run",
+   "tag": "Models"
+  },
+  {
+   "body": null,
+   "cli": "models get",
+   "description": "A model you own, one your organization's sharing lets you read, or one shared with you by name. An unknown, deleted or unreadable model is the same 404.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getModel",
+   "path": "/models/{modelId}",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "modelId"
+    }
+   ],
+   "query": [],
+   "sdk": "models.get",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get a finetuned model",
+   "tag": "Models"
+  },
+  {
+   "body": null,
+   "cli": "projects list",
+   "description": "Your organization's projects, your own personal ones, then projects shared with you, each group by name. When your organization hides members' data from each other, only the organization projects you created or were added to. A shared project counts only while its creator's sharing still allows it, and an organization project only while you are in that organization. Archived projects are left out. When your organization's settings can't be read the answer is 503; retry.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listProjects",
+   "path": "/projects",
+   "pathParams": [],
+   "query": [
+    {
+     "default": false,
+     "description": "Also return each project's `jobCount`.",
+     "name": "includeCounts",
+     "option": "include-counts",
+     "required": false,
+     "type": "boolean"
+    },
+    {
+     "default": 50,
+     "description": "Page size.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "`nextCursor` from the previous page.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "projects.list",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List projects",
+   "tag": "Projects"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "projects create",
+   "description": "The name and description are stored trimmed. A project created without a `color` gets one from the app's palette, and a color you send is stored in upper case. A name already used in the same place (your organization, or your personal projects) is 409 `project_name_taken`.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "createProject",
+   "path": "/projects",
+   "pathParams": [],
+   "query": [],
+   "sdk": "projects.create",
+   "success": {
+    "201": [
+     "application/json"
+    ]
+   },
+   "summary": "Create a project",
+   "tag": "Projects"
+  },
+  {
+   "body": null,
+   "cli": "projects get",
+   "description": "Any project you can see, archived ones included. A project you can't see is 404, so its existence isn't disclosed.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getProject",
+   "path": "/projects/{projectId}",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "projectId"
+    }
+   ],
+   "query": [],
+   "sdk": "projects.get",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get a project",
+   "tag": "Projects"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "projects update",
+   "description": "Only the project's creator can do this. A project you can see but didn't create is 403; one you can't see is 404. Send only the fields to change. `null` clears `description`; for `name`, `color` and `isArchived` it is 422. `listProjectMembers` shows the result of `addMembers` and `removeMembers`. A member from outside who your sharing policy doesn't allow is 422 at `/addMembers/{i}` (diagnostic `not_in_org`), and 503 when that policy can't be read; nothing is written in either case. Adds that failed come back in `failedAdds`. A removal that fails answers 500 `members_not_removed`, because tha…",
+   "headers": [],
+   "method": "PATCH",
+   "operationId": "updateProject",
+   "path": "/projects/{projectId}",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "projectId"
+    }
+   ],
+   "query": [],
+   "sdk": "projects.update",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Update a project and its members",
+   "tag": "Projects"
+  },
+  {
+   "body": null,
+   "cli": "projects delete",
+   "description": "Only the project's creator can do this. A project with jobs needs one of two choices: `moveToProjectId` moves them to another project, and `confirmJobRemoval=true` leaves them in no project. With neither, the answer is 409 `project_not_empty`. If your organization requires a project on every job, leaving them in none is not allowed, so `moveToProjectId` is the only choice and anything else is 409 `project_move_required`. Only jobs the app lists count here: a project holding only deleted jobs needs no choice, and those are unfiled, or moved with the rest. `moveToProjectId` is checked only when…",
+   "headers": [],
+   "method": "DELETE",
+   "operationId": "deleteProject",
+   "path": "/projects/{projectId}",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "projectId"
+    }
+   ],
+   "query": [
+    {
+     "description": "The project to move this project's jobs to.",
+     "name": "moveToProjectId",
+     "option": "move-to-project-id",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": false,
+     "description": "True to delete the project and leave its jobs in no project.",
+     "name": "confirmJobRemoval",
+     "option": "confirm-job-removal",
+     "required": false,
+     "type": "boolean"
+    }
+   ],
+   "sdk": "projects.delete",
+   "success": {
+    "204": []
+   },
+   "summary": "Delete a project.",
+   "tag": "Projects"
+  },
+  {
+   "body": null,
+   "cli": "projects members",
+   "description": "The member rows stored for the project, as they are stored, by address. Any project you can see; one you can't see is 404. A cursor works only for the project it came from.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listProjectMembers",
+   "path": "/projects/{projectId}/members",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "projectId"
+    }
+   ],
+   "query": [
+    {
+     "default": 50,
+     "description": "Page size.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "`nextCursor` from the previous page.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "projects.listMembers",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List a project's members",
+   "tag": "Projects"
+  },
+  {
+   "body": null,
+   "cli": "projects leave",
+   "description": "Removes only you, from a personal or an organization project. 404 when you aren't a member. A removal that fails is 500 `members_not_removed`, which is retryable, because you may still have access. Access saved in an older address format is 500 `member_key_outdated`, not retryable; support removes it.",
+   "headers": [],
+   "method": "DELETE",
+   "operationId": "leaveProject",
+   "path": "/projects/{projectId}/members/me",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "projectId"
+    }
+   ],
+   "query": [],
+   "sdk": "projects.leave",
+   "success": {
+    "204": []
+   },
+   "summary": "Leave a project you were invited to",
+   "tag": "Projects"
+  },
+  {
+   "body": null,
+   "cli": "projects notes",
+   "description": "Fetch the project notes. This includes project metadata and entry data. Log notes are not included and can be fetched one entry at a time from `GET /projects/{projectId}/notes/entries/{entryId}`. The first read of a project sets its notes up, so it can be 400 `write_contended` (`retryable: true`) when another request does the same at that moment; send it again. A read-only member gets the notes as they would open, without anything being set up.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getProjectNotes",
+   "path": "/projects/{projectId}/notes",
+   "pathParams": [
+    {
+     "description": "The `id` from `GET /projects`.",
+     "name": "projectId"
+    }
+   ],
+   "query": [],
+   "sdk": "projects.notes.get",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get project notes",
+   "tag": "Project Notes"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "projects notes update",
+   "description": "Update the project's details, its lanes and its statuses. Updatable fields: tags, owner, startDate, dueDate, laneOrder `lanes` and `statuses` take operations, so removing one can say where its work goes. The project's description isn't one of them: it belongs to the project (`updateProject`), so sending it is 422. A value the notes store refuses inside `lanes` or `statuses` names the field in `detail` rather than with a pointer. A key the operation doesn't take is 422 `unknown_field`, refused before anything else. A value the notes store refuses is 400 `validation_failed`, pointing at the fie…",
+   "headers": [],
+   "method": "PATCH",
+   "operationId": "updateProjectNotes",
+   "path": "/projects/{projectId}/notes",
+   "pathParams": [
+    {
+     "description": "The `id` from `GET /projects`.",
+     "name": "projectId"
+    }
+   ],
+   "query": [],
+   "sdk": "projects.notes.update",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Update project notes",
+   "tag": "Project Notes"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "projects notes add",
+   "description": "Add an entry to the project. Resources that are included within `links` are added to the project. Unlinking a resource does not remove the resource from the project. A key the operation doesn't take is 422 `unknown_field`, refused before anything else. A value the notes store refuses is 400 `validation_failed`, pointing at the field. A stale `version` is 409 `version_conflict` with the `currentVersion` to retry with. A write that met another on the same records is 400 `write_contended` with `retryable: true`: nothing was stored, so send it again.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "createProjectNotesEntry",
+   "path": "/projects/{projectId}/notes/entries",
+   "pathParams": [
+    {
+     "description": "The `id` from `GET /projects`.",
+     "name": "projectId"
+    }
+   ],
+   "query": [],
+   "sdk": "projects.notes.createEntry",
+   "success": {
+    "201": [
+     "application/json"
+    ]
+   },
+   "summary": "Create entry",
+   "tag": "Project Notes"
+  },
+  {
+   "body": null,
+   "cli": "projects notes entry",
+   "description": "Get an entry for a project and all of its associated notes.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getProjectNotesEntry",
+   "path": "/projects/{projectId}/notes/entries/{entryId}",
+   "pathParams": [
+    {
+     "description": "The `id` from `GET /projects`.",
+     "name": "projectId"
+    },
+    {
+     "description": "An `entries[].id` from `GET /projects/{projectId}/notes`.",
+     "name": "entryId"
+    }
+   ],
+   "query": [],
+   "sdk": "projects.notes.getEntry",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get entry",
+   "tag": "Project Notes"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "projects notes edit",
+   "description": "Update an entry's fields. Resources that are included within `links` are added to the project. Unlinking a resource does not remove the resource from the project. A key the operation doesn't take is 422 `unknown_field`, refused before anything else. A value the notes store refuses is 400 `validation_failed`, pointing at the field. A stale `version` is 409 `version_conflict` with the `currentVersion` to retry with. A write that met another on the same records is 400 `write_contended` with `retryable: true`: nothing was stored, so send it again.",
+   "headers": [],
+   "method": "PATCH",
+   "operationId": "updateProjectNotesEntry",
+   "path": "/projects/{projectId}/notes/entries/{entryId}",
+   "pathParams": [
+    {
+     "description": "The `id` from `GET /projects`.",
+     "name": "projectId"
+    },
+    {
+     "description": "An `entries[].id` from `GET /projects/{projectId}/notes`.",
+     "name": "entryId"
+    }
+   ],
+   "query": [],
+   "sdk": "projects.notes.updateEntry",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Update entry",
+   "tag": "Project Notes"
+  },
+  {
+   "body": null,
+   "cli": "projects notes delete",
+   "description": "Delete an entry for a project and all of its associated notes. A missing or non-integer `version` is 422. A stale `version` is 409 `version_conflict` with the `currentVersion` to retry with. A write that met another on the same records is 400 `write_contended` with `retryable: true`: nothing was stored, so send it again.",
+   "headers": [],
+   "method": "DELETE",
+   "operationId": "deleteProjectNotesEntry",
+   "path": "/projects/{projectId}/notes/entries/{entryId}",
+   "pathParams": [
+    {
+     "description": "The `id` from `GET /projects`.",
+     "name": "projectId"
+    },
+    {
+     "description": "An `entries[].id` from `GET /projects/{projectId}/notes`.",
+     "name": "entryId"
+    }
+   ],
+   "query": [
+    {
+     "description": "The `entry.version` you read.",
+     "name": "version",
+     "option": "version",
+     "required": true,
+     "type": "integer"
+    }
+   ],
+   "sdk": "projects.notes.deleteEntry",
+   "success": {
+    "204": []
+   },
+   "summary": "Delete entry",
+   "tag": "Project Notes"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "projects notes append",
+   "description": "Create a note and append it to an entry. `Location` points at the entry, because a note has no read of its own. It takes no `version`: a note can't conflict with an edit to its entry. A key the operation doesn't take is 422 `unknown_field`, refused before anything else. A value the notes store refuses is 400 `validation_failed`, pointing at the field. A write that met another on the same records is 400 `write_contended` with `retryable: true`: nothing was stored, so send it again.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "appendProjectNotesNote",
+   "path": "/projects/{projectId}/notes/entries/{entryId}/notes",
+   "pathParams": [
+    {
+     "description": "The `id` from `GET /projects`.",
+     "name": "projectId"
+    },
+    {
+     "description": "An `entries[].id` from `GET /projects/{projectId}/notes`.",
+     "name": "entryId"
+    }
+   ],
+   "query": [],
+   "sdk": "projects.notes.appendNote",
+   "success": {
+    "201": [
+     "application/json"
+    ]
+   },
+   "summary": "Create note",
+   "tag": "Project Notes"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "projects notes edit-note",
+   "description": "Update a note. Editing sets `editedAt`; `createdAt` and the note's place in the log don't change. A key the operation doesn't take is 422 `unknown_field`, refused before anything else. A value the notes store refuses is 400 `validation_failed`, pointing at the field. A stale `version` is 409 `version_conflict` with the `currentVersion` to retry with. A write that met another on the same records is 400 `write_contended` with `retryable: true`: nothing was stored, so send it again.",
+   "headers": [],
+   "method": "PATCH",
+   "operationId": "updateProjectNotesNote",
+   "path": "/projects/{projectId}/notes/entries/{entryId}/notes/{noteId}",
+   "pathParams": [
+    {
+     "description": "The `id` from `GET /projects`.",
+     "name": "projectId"
+    },
+    {
+     "description": "An `entries[].id` from `GET /projects/{projectId}/notes`.",
+     "name": "entryId"
+    },
+    {
+     "description": "A `notes[].id` from the entry's log.",
+     "name": "noteId"
+    }
+   ],
+   "query": [],
+   "sdk": "projects.notes.updateNote",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Update note",
+   "tag": "Project Notes"
+  },
+  {
+   "body": null,
+   "cli": "projects notes delete-note",
+   "description": "Delete a note from an entry's log. An agent actor can't delete a note a person wrote (403). A missing or non-integer `version` is 422. A stale `version` is 409 `version_conflict` with the `currentVersion` to retry with. A write that met another on the same records is 400 `write_contended` with `retryable: true`: nothing was stored, so send it again.",
+   "headers": [],
+   "method": "DELETE",
+   "operationId": "deleteProjectNotesNote",
+   "path": "/projects/{projectId}/notes/entries/{entryId}/notes/{noteId}",
+   "pathParams": [
+    {
+     "description": "The `id` from `GET /projects`.",
+     "name": "projectId"
+    },
+    {
+     "description": "An `entries[].id` from `GET /projects/{projectId}/notes`.",
+     "name": "entryId"
+    },
+    {
+     "description": "A `notes[].id` from the entry's log.",
+     "name": "noteId"
+    }
+   ],
+   "query": [
+    {
+     "description": "The `note.version` you read.",
+     "name": "version",
+     "option": "version",
+     "required": true,
+     "type": "integer"
+    }
+   ],
+   "sdk": "projects.notes.deleteNote",
+   "success": {
+    "204": []
+   },
+   "summary": "Delete note",
+   "tag": "Project Notes"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "pipelines estimate",
+   "description": "Estimate the compute a run would use without creating or executing it. Uses the same settings as `submitPipeline`, and nothing is created, saved, or charged.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "estimatePipeline",
+   "path": "/pipelines/estimate",
+   "pathParams": [],
+   "query": [],
+   "sdk": "pipelines.estimate",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Estimate a pipeline run",
+   "tag": "Pipelines"
+  },
+  {
+   "body": null,
+   "cli": "pipelines runs",
+   "description": "List your pipeline runs, or with `scope=org` your organization's. A `status`, `scope` or `source` it doesn't know, or a `templateId` that isn't a template id, is 400 `validation_failed`, as on `GET /jobs`. The cursor is bound to the caller and the filters.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listPipelineRuns",
+   "path": "/pipelines/runs",
+   "pathParams": [],
+   "query": [
+    {
+     "description": "Filter by run status.",
+     "enum": [
+      "queued",
+      "running",
+      "finished",
+      "partial",
+      "stopped",
+      "failed"
+     ],
+     "name": "status",
+     "option": "status",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Filter to runs of one pipeline (by template id).",
+     "name": "templateId",
+     "option": "template-id",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Whose runs to list: `mine` (the default) or `org` for your whole organization.",
+     "enum": [
+      "mine",
+      "org"
+     ],
+     "name": "scope",
+     "option": "scope",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Filter by run source: `test` or `production`.",
+     "enum": [
+      "test",
+      "production"
+     ],
+     "name": "source",
+     "option": "source",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": 50,
+     "description": "Maximum number of runs to return in one page.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "Pagination token from the previous response's `nextCursor`.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "pipelines.listRuns",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List pipeline runs",
+   "tag": "Pipelines"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "pipelines submit",
+   "description": "Submit a pipeline run from an existing template, or from a new pipeline graph.",
+   "headers": [
+    "Idempotency-Key"
+   ],
+   "method": "POST",
+   "operationId": "submitPipeline",
+   "path": "/pipelines/runs",
+   "pathParams": [],
+   "query": [],
+   "sdk": "pipelines.submit",
+   "success": {
+    "201": [
+     "application/json"
+    ]
+   },
+   "summary": "Submit a pipeline run",
+   "tag": "Pipelines"
+  },
+  {
+   "body": null,
+   "cli": "pipelines run",
+   "description": "Query a run for its status overall and per-node, along with output results. Takes a `run_` id; a bare UUID or any other prefix is the same 404 as an unknown run.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getPipelineRun",
+   "path": "/pipelines/runs/{runId}",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "runId"
+    }
+   ],
+   "query": [],
+   "sdk": "pipelines.getRun",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get a pipeline run",
+   "tag": "Pipelines"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": false
+   },
+   "cli": "pipelines results",
+   "description": "Waits up to 25 seconds for the archive. 200 means ready, with the zip's size and the link's expiry; `fileCount` and `truncated` are null, because nothing records them for a run's zip. 202 means still preparing, so call again after `retryAfterSeconds` (10, also sent as `Retry-After`). It is also 202 while the run (or the node run you named) hasn't finished: the zip is built only once it has. An archive that could not be built is 409 `archive_failed`, retryable after `Retry-After` (90 seconds), when the results service builds again. Building the zip starts work, so an organization that can't st…",
+   "headers": [],
+   "method": "POST",
+   "operationId": "archivePipelineRun",
+   "path": "/pipelines/runs/{runId}/archive",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "runId"
+    }
+   ],
+   "query": [],
+   "sdk": "pipelines.archiveRun",
+   "success": {
+    "200": [
+     "application/json"
+    ],
+    "202": [
+     "application/json"
+    ]
+   },
+   "summary": "Get a zip of a pipeline run's outputs",
+   "tag": "Pipelines"
+  },
+  {
+   "body": null,
+   "cli": "pipelines cancel",
+   "description": "Stop a pipeline run.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "cancelPipelineRun",
+   "path": "/pipelines/runs/{runId}/cancel",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "runId"
+    }
+   ],
+   "query": [],
+   "sdk": "pipelines.cancelRun",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Stop a pipeline run",
+   "tag": "Pipelines"
+  },
+  {
+   "body": null,
+   "cli": "pipelines molecules",
+   "description": "The molecules one node run produced, with their scores.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listNodeRunMolecules",
+   "path": "/pipelines/runs/{runId}/node-runs/{nodeRunId}/molecules",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "runId"
+    },
+    {
+     "description": "",
+     "name": "nodeRunId"
+    }
+   ],
+   "query": [
+    {
+     "default": 50,
+     "description": "Molecules per page.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "Pagination token from the previous response's `nextCursor`.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "pipelines.listNodeRunMolecules",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List the molecules a node run produced",
+   "tag": "Pipelines"
+  },
+  {
+   "body": null,
+   "cli": "pipelines schema",
+   "description": "Read this before writing a `pipeline` graph. The guide's API walkthrough is written for this API. At launch it answers without a key, as today's public pipeline guide does, and requests without a key share one overall rate limit. Until launch it needs a key (401 without one) and, while v1 is behind the `api-v1` flag, a caller the flag covers.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getPipelineSchema",
+   "path": "/pipelines/schema",
+   "pathParams": [],
+   "query": [],
+   "sdk": "pipelines.schema",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get the pipeline graph schema and authoring guide",
+   "tag": "Pipelines"
+  },
+  {
+   "body": null,
+   "cli": "pipelines templates",
+   "description": "List your pipeline templates, or with `scope=org` your organization's. A `scope` it doesn't know is 400 `validation_failed`. The cursor is bound to the caller and the filters.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listPipelineTemplates",
+   "path": "/pipelines/templates",
+   "pathParams": [],
+   "query": [
+    {
+     "description": "Filter to published (`true`) or unpublished (`false`) templates.",
+     "name": "published",
+     "option": "published",
+     "required": false,
+     "type": "boolean"
+    },
+    {
+     "description": "Whose templates to list: `mine` (the default) or `org` for your whole organization.",
+     "enum": [
+      "mine",
+      "org"
+     ],
+     "name": "scope",
+     "option": "scope",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Search pipelines by name.",
+     "name": "search",
+     "option": "search",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": 50,
+     "description": "Maximum number of templates to return in one page.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "Pagination token from the previous response's `nextCursor`.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "pipelines.listTemplates",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List pipeline templates",
+   "tag": "Pipelines"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "pipelines create-template",
+   "description": "Create a pipeline template from a `pipeline` graph of inputs, tools, and filters.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "createPipelineTemplate",
+   "path": "/pipelines/templates",
+   "pathParams": [],
+   "query": [],
+   "sdk": "pipelines.createTemplate",
+   "success": {
+    "201": [
+     "application/json"
+    ]
+   },
+   "summary": "Create a pipeline template",
+   "tag": "Pipelines"
+  },
+  {
+   "body": null,
+   "cli": "pipelines template",
+   "description": "Retrieve a template by id to view its nodes and required inputs.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getPipelineTemplate",
+   "path": "/pipelines/templates/{templateId}",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "templateId"
+    }
+   ],
+   "query": [
+    {
+     "description": "A specific version to view (a `vN` handle); omit for the current version.",
+     "name": "version",
+     "option": "version",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "pipelines.getTemplate",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get a pipeline template",
+   "tag": "Pipelines"
+  },
+  {
+   "body": null,
+   "cli": "pipelines delete-template",
+   "description": "Archive a template. Its versions and existing runs remain available historically.",
+   "headers": [],
+   "method": "DELETE",
+   "operationId": "deletePipelineTemplate",
+   "path": "/pipelines/templates/{templateId}",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "templateId"
+    }
+   ],
+   "query": [],
+   "sdk": "pipelines.deleteTemplate",
+   "success": {
+    "204": []
+   },
+   "summary": "Archive a pipeline template",
+   "tag": "Pipelines"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": false
+   },
+   "cli": "pipelines duplicate-template",
+   "description": "Create a copy of a version of your existing pipeline (latest by default).",
+   "headers": [],
+   "method": "POST",
+   "operationId": "duplicatePipelineTemplate",
+   "path": "/pipelines/templates/{templateId}/duplicate",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "templateId"
+    }
+   ],
+   "query": [],
+   "sdk": "pipelines.duplicateTemplate",
+   "success": {
+    "201": [
+     "application/json"
+    ]
+   },
+   "summary": "Duplicate a pipeline template",
+   "tag": "Pipelines"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "pipelines publish-template",
+   "description": "Publish a version of your pipeline template to your organization.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "publishPipelineTemplate",
+   "path": "/pipelines/templates/{templateId}/publish",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "templateId"
+    }
+   ],
+   "query": [],
+   "sdk": "pipelines.publishTemplate",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Publish a template version",
+   "tag": "Pipelines"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": false
+   },
+   "cli": "pipelines validate-template",
+   "description": "Validate the settings and inputs of a template without creating or executing it.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "validatePipelineTemplate",
+   "path": "/pipelines/templates/{templateId}/validate",
+   "pathParams": [
+    {
+     "description": "",
+     "name": "templateId"
+    }
+   ],
+   "query": [],
+   "sdk": "pipelines.validateTemplate",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Validate a template",
+   "tag": "Pipelines"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "pipelines validate",
+   "description": "Validate the settings and inputs of a run without creating or executing it. Uses the same settings as `submitPipeline`.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "validatePipeline",
+   "path": "/pipelines/validate",
+   "pathParams": [],
+   "query": [],
+   "sdk": "pipelines.validate",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Validate a pipeline run",
+   "tag": "Pipelines"
+  },
+  {
+   "body": null,
+   "cli": "molecules list",
+   "description": "List molecules in your organization. Set `scope=org` to search your organization.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listMolecules",
+   "path": "/molecules",
+   "pathParams": [],
+   "query": [
+    {
+     "description": "Limit results to one group by ID (retrieve ID using `/molecules/groups`).",
+     "name": "groupId",
+     "option": "group-id",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Limit results to one job's input and output molecules by ID.",
+     "name": "jobId",
+     "option": "job-id",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Only groups whose owner equals this value, as the owners list returns it.",
+     "name": "owner",
+     "option": "owner",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Limit results to one pipeline step's output molecules by node run ID (retrieve ID using `/pipelines/runs/{runId}`).",
+     "name": "nodeRunId",
+     "option": "node-run-id",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Filter by molecule type, such as `protein`, `small_molecule`, or `nucleic_acid`.",
+     "enum": [
+      "protein",
+      "antibody",
+      "peptide",
+      "enzyme",
+      "small_molecule",
+      "nucleic_acid",
+      "small_molecule_binding_protein"
+     ],
+     "items": "string",
+     "name": "type",
+     "option": "type",
+     "required": false,
+     "type": "array"
+    },
+    {
+     "description": "Enter a search term to find molecule names, user-uploaded property names, or tool score names.",
+     "name": "search",
+     "option": "search",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": "default",
+     "description": "Choose what `search` matches: `sequence` searches amino acid chains by exact or subsequence match, while `sequenceMatch=exact_smiles` matches a small molecule's stored SMILES exactly.",
+     "name": "mode",
+     "option": "mode",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": "subsequence",
+     "description": "Only available with `mode=sequence`: `subsequence` matches part of an amino-acid chain; `exact` matches a whole amino-acid chain; `exact_smiles` matches a whole small-molecule chain exactly, including case.",
+     "name": "sequenceMatch",
+     "option": "sequence-match",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Maximum molecules per group across the whole result set.",
+     "name": "moleculesPerGroup",
+     "option": "molecules-per-group",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "Deprecated: the old name for `moleculesPerGroup`.",
+     "name": "examplesPerGroup",
+     "option": "examples-per-group",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "Match molecules containing this amino-acid subsequence in any chain (case-insensitive, at least 3 characters).",
+     "name": "sequence",
+     "option": "sequence",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "String in format `field:operator:value`.",
+     "items": "string",
+     "name": "filter",
+     "option": "filter",
+     "required": false,
+     "type": "array"
+    },
+    {
+     "description": "Limit results to molecules carrying this tag.",
+     "items": "string",
+     "name": "tags",
+     "option": "tags",
+     "required": false,
+     "type": "array"
+    },
+    {
+     "default": "mine",
+     "description": "`mine` (the default) shows molecules in groups you created; `org` shows everything across your organization.",
+     "name": "scope",
+     "option": "scope",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": "added",
+     "description": "Sort by `id`, `added`, `type`, `groupName`, a property, or a score such as `alphafold.ptm`.",
+     "name": "sortBy",
+     "option": "sort-by",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": "desc",
+     "description": "`asc`: ascending order.",
+     "name": "dir",
+     "option": "dir",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": 50,
+     "description": "Maximum number of items to return in one page.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "Omit for your first request.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": "full",
+     "description": "Return full molecules (default) or molecule cards.",
+     "enum": [
+      "full",
+      "card"
+     ],
+     "name": "view",
+     "option": "view",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Comma-separated list of capabilities.",
+     "name": "searchCaps",
+     "option": "search-caps",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "molecules.list",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List Molecules",
+   "tag": "Molecules"
+  },
+  {
+   "body": null,
+   "cli": "molecules groups",
+   "description": "List your molecule groups.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listMoleculeGroups",
+   "path": "/molecules/groups",
+   "pathParams": [],
+   "query": [
+    {
+     "description": "Case-insensitive substring match on the group's name.",
+     "name": "search",
+     "option": "search",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "One condition on the group's own metadata, written `field:operator:value`.",
+     "items": "string",
+     "name": "filter",
+     "option": "filter",
+     "required": false,
+     "type": "array"
+    },
+    {
+     "default": "mine",
+     "description": "`mine` (the default) shows groups you created; `org` shows every group in your organization.",
+     "name": "scope",
+     "option": "scope",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": "recent",
+     "description": "Sort by `recent` (the default, by creation date), `name`, or `size` (how many molecules the group holds).",
+     "name": "sortBy",
+     "option": "sort-by",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": "desc",
+     "description": "Sort direction, `asc` or `desc`.",
+     "name": "dir",
+     "option": "dir",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": 50,
+     "description": "Maximum number of items to return in one page.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "Pagination token from the previous response's `nextCursor`.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "molecules.listGroups",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List Groups",
+   "tag": "Molecules"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "molecules create-group",
+   "description": "Create an empty molecule group.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "createMoleculeGroup",
+   "path": "/molecules/groups",
+   "pathParams": [],
+   "query": [],
+   "sdk": "molecules.createGroup",
+   "success": {
+    "201": [
+     "application/json"
+    ]
+   },
+   "summary": "Create Group",
+   "tag": "Molecules"
+  },
+  {
+   "body": null,
+   "cli": "molecules group",
+   "description": "Fetch one group by id — its name, size, and origin.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getMoleculeGroup",
+   "path": "/molecules/groups/{groupId}",
+   "pathParams": [
+    {
+     "description": "A UUID.",
+     "name": "groupId"
+    }
+   ],
+   "query": [],
+   "sdk": "molecules.getGroup",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get Group",
+   "tag": "Molecules"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "molecules remove",
+   "description": "Remove molecules from a group.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "removeMoleculesFromGroup",
+   "path": "/molecules/groups/{groupId}/molecules/remove",
+   "pathParams": [
+    {
+     "description": "A molecule group's id, a UUID.",
+     "name": "groupId"
+    }
+   ],
+   "query": [],
+   "sdk": "molecules.removeFromGroup",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Remove Molecules",
+   "tag": "Molecules"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "molecules scores",
+   "description": "List retained seed/sample observations for explicit concrete jobs in this group.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "listMoleculeScoreObservations",
+   "path": "/molecules/groups/{groupId}/score-observations",
+   "pathParams": [
+    {
+     "description": "A UUID.",
+     "name": "groupId"
+    }
+   ],
+   "query": [],
+   "sdk": "molecules.listScoreObservations",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List Group Score Observations",
+   "tag": "Molecules"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "molecules import",
+   "description": "Import molecules from a file. Step 1 of 3.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "startMoleculeImport",
+   "path": "/molecules/imports",
+   "pathParams": [],
+   "query": [],
+   "sdk": "molecules.startImport",
+   "success": {
+    "201": [
+     "application/json"
+    ]
+   },
+   "summary": "Start a file import",
+   "tag": "Molecules"
+  },
+  {
+   "body": null,
+   "cli": "molecules import-status",
+   "description": "Poll an import's progress after upload or commit.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getMoleculeImport",
+   "path": "/molecules/imports/{importId}",
+   "pathParams": [
+    {
+     "description": "A UUID.",
+     "name": "importId"
+    }
+   ],
+   "query": [],
+   "sdk": "molecules.getImport",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Check import status",
+   "tag": "Molecules"
+  },
+  {
+   "body": null,
+   "cli": "molecules import-delete",
+   "description": "Cancel an unclaimed import and clean its source objects.",
+   "headers": [],
+   "method": "DELETE",
+   "operationId": "deleteMoleculeImport",
+   "path": "/molecules/imports/{importId}",
+   "pathParams": [
+    {
+     "description": "A UUID.",
+     "name": "importId"
+    }
+   ],
+   "query": [],
+   "sdk": "molecules.deleteImport",
+   "success": {
+    "204": []
+   },
+   "summary": "Cancel or delete an import",
+   "tag": "Molecules"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": false
+   },
+   "cli": "molecules import-commit",
+   "description": "Step 3 of 3: enqueue ingestion for the uploaded file. It answers 200 with the import `queued`, before ingestion runs; poll `getMoleculeImport` for the outcome.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "commitMoleculeImport",
+   "path": "/molecules/imports/{importId}/commit",
+   "pathParams": [
+    {
+     "description": "A UUID.",
+     "name": "importId"
+    }
+   ],
+   "query": [],
+   "sdk": "molecules.commitImport",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Commit an import",
+   "tag": "Molecules"
+  },
+  {
+   "body": null,
+   "cli": "molecules schemas",
+   "description": "List your schemas.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listMoleculeSchemas",
+   "path": "/molecules/schemas",
+   "pathParams": [],
+   "query": [
+    {
+     "default": "mine",
+     "description": "",
+     "name": "scope",
+     "option": "scope",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": 50,
+     "description": "Maximum number of items to return in one page.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "Pagination token from the previous response's `nextCursor`.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "molecules.listSchemas",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List Schemas",
+   "tag": "Molecules"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "molecules create-schema",
+   "description": "Define a reusable set of typed fields you can bind to a group.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "createMoleculeSchema",
+   "path": "/molecules/schemas",
+   "pathParams": [],
+   "query": [],
+   "sdk": "molecules.createSchema",
+   "success": {
+    "201": [
+     "application/json"
+    ]
+   },
+   "summary": "Create Schema",
+   "tag": "Molecules"
+  },
+  {
+   "body": null,
+   "cli": "molecules schema",
+   "description": "Fetch one schema by id. Where your organization hides members' data from each other, a coworker's schema answers as an unknown schema.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getMoleculeSchema",
+   "path": "/molecules/schemas/{schemaId}",
+   "pathParams": [
+    {
+     "description": "A UUID.",
+     "name": "schemaId"
+    }
+   ],
+   "query": [],
+   "sdk": "molecules.getSchema",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get Schema",
+   "tag": "Molecules"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "molecules update-schema",
+   "description": "Update a schema's name and/or fields.",
+   "headers": [],
+   "method": "PATCH",
+   "operationId": "updateMoleculeSchema",
+   "path": "/molecules/schemas/{schemaId}",
+   "pathParams": [
+    {
+     "description": "A UUID.",
+     "name": "schemaId"
+    }
+   ],
+   "query": [],
+   "sdk": "molecules.updateSchema",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Update Schema",
+   "tag": "Molecules"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "molecules search",
+   "description": "Search molecules using the same filters as `GET /molecules`, with the same names (`groupId`, `jobId`), plus `jobName`, which only this body takes. Send repeated filters as arrays. Maximum request body: 4 MB.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "searchMolecules",
+   "path": "/molecules/search",
+   "pathParams": [],
+   "query": [],
+   "sdk": "molecules.search",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Search Molecules",
+   "tag": "Molecules"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "molecules upload",
+   "description": "Queue molecules for JSON upload ingestion.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "uploadMolecules",
+   "path": "/molecules/upload",
+   "pathParams": [],
+   "query": [],
+   "sdk": "molecules.upload",
+   "success": {
+    "202": [
+     "application/json"
+    ]
+   },
+   "summary": "Upload Molecules",
+   "tag": "Molecules"
+  },
+  {
+   "body": null,
+   "cli": "molecules get",
+   "description": "Get one molecule — its chains, scores, files, provenance, and groups, all inline.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getMolecule",
+   "path": "/molecules/{moleculeId}",
+   "pathParams": [
+    {
+     "description": "A UUID.",
+     "name": "moleculeId"
+    }
+   ],
+   "query": [
+    {
+     "description": "",
+     "name": "groupId",
+     "option": "group-id",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "molecules.get",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get Molecule",
+   "tag": "Molecules"
+  },
+  {
+   "body": null,
+   "cli": "molecules delete",
+   "description": "Permanently delete a molecule. Organization admin only, and a person's API key is never an organization admin, so only a service account's key can delete.",
+   "headers": [],
+   "method": "DELETE",
+   "operationId": "deleteMolecule",
+   "path": "/molecules/{moleculeId}",
+   "pathParams": [
+    {
+     "description": "A UUID.",
+     "name": "moleculeId"
+    }
+   ],
+   "query": [],
+   "sdk": "molecules.delete",
+   "success": {
+    "204": []
+   },
+   "summary": "Delete Molecule",
+   "tag": "Molecules"
+  },
+  {
+   "body": null,
+   "cli": "molecules groups-of",
+   "description": "List every group a molecule belongs to.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listGroupsForMolecule",
+   "path": "/molecules/{moleculeId}/groups",
+   "pathParams": [
+    {
+     "description": "A UUID.",
+     "name": "moleculeId"
+    }
+   ],
+   "query": [
+    {
+     "default": 50,
+     "description": "Maximum number of items to return in one page.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "Pagination token from the previous response's `nextCursor`.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "molecules.listGroupsFor",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List Molecule Groups",
+   "tag": "Molecules"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "molecules update-metadata",
+   "description": "Update a molecule. All fields are optional and applied together. Leave one out to leave it unchanged, and send `null` to clear `source` or `fileId`.",
+   "headers": [],
+   "method": "PATCH",
+   "operationId": "updateMoleculeMetadata",
+   "path": "/molecules/{moleculeId}/metadata",
+   "pathParams": [
+    {
+     "description": "A UUID.",
+     "name": "moleculeId"
+    }
+   ],
+   "query": [],
+   "sdk": "molecules.updateMetadata",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Update Molecule Metadata",
+   "tag": "Molecules"
+  },
+  {
+   "body": null,
+   "cli": "custom-tools list",
+   "description": "List custom tools in your organization.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listCustomTools",
+   "path": "/custom-tools",
+   "pathParams": [],
+   "query": [
+    {
+     "description": "Filter by status.",
+     "enum": [
+      "Draft",
+      "Building",
+      "Deployed"
+     ],
+     "name": "status",
+     "option": "status",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Filter to published (`true`) or unpublished (`false`) tools.",
+     "name": "published",
+     "option": "published",
+     "required": false,
+     "type": "boolean"
+    },
+    {
+     "default": 50,
+     "description": "Maximum number of tools to return in one page.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "Pagination token from the previous response's `nextCursor`.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "customTools.list",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List custom tools",
+   "tag": "Custom Tools"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "custom-tools create",
+   "description": "Create a custom tool in Draft status.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "createCustomTool",
+   "path": "/custom-tools",
+   "pathParams": [],
+   "query": [],
+   "sdk": "customTools.create",
+   "success": {
+    "201": [
+     "application/json"
+    ]
+   },
+   "summary": "Create a custom tool",
+   "tag": "Custom Tools"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "custom-tools validate-config",
+   "description": "Check a `config.json` against the contract a build applies, before spending a build on it.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "validateCustomToolConfig",
+   "path": "/custom-tools/validate-config",
+   "pathParams": [],
+   "query": [],
+   "sdk": "customTools.validateConfig",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Validate a tool config",
+   "tag": "Custom Tools"
+  },
+  {
+   "body": null,
+   "cli": "custom-tools get",
+   "description": "Get a custom tool and one version.",
+   "headers": [
+    "If-Match"
+   ],
+   "method": "GET",
+   "operationId": "getCustomTool",
+   "path": "/custom-tools/{name}",
+   "pathParams": [
+    {
+     "description": "The custom tool name.",
+     "name": "name"
+    }
+   ],
+   "query": [
+    {
+     "description": "",
+     "name": "version",
+     "option": "version",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "customTools.get",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get a custom tool",
+   "tag": "Custom Tools"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "custom-tools update",
+   "description": "Update a custom tool's metadata or compute resources.",
+   "headers": [
+    "If-Match"
+   ],
+   "method": "PATCH",
+   "operationId": "updateCustomTool",
+   "path": "/custom-tools/{name}",
+   "pathParams": [
+    {
+     "description": "The custom tool name.",
+     "name": "name"
+    }
+   ],
+   "query": [],
+   "sdk": "customTools.update",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Update a custom tool",
+   "tag": "Custom Tools"
+  },
+  {
+   "body": null,
+   "cli": "custom-tools delete",
+   "description": "Delete this custom tool and release its name for reuse.",
+   "headers": [
+    "If-Match"
+   ],
+   "method": "DELETE",
+   "operationId": "deleteCustomTool",
+   "path": "/custom-tools/{name}",
+   "pathParams": [
+    {
+     "description": "The custom tool name.",
+     "name": "name"
+    }
+   ],
+   "query": [],
+   "sdk": "customTools.delete",
+   "success": {
+    "204": []
+   },
+   "summary": "Delete a custom tool",
+   "tag": "Custom Tools"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "custom-tools build",
+   "description": "Build a version from an uploaded source archive.",
+   "headers": [
+    "Idempotency-Key",
+    "If-Match"
+   ],
+   "method": "POST",
+   "operationId": "buildCustomTool",
+   "path": "/custom-tools/{name}/build",
+   "pathParams": [
+    {
+     "description": "The custom tool name.",
+     "name": "name"
+    }
+   ],
+   "query": [],
+   "sdk": "customTools.build",
+   "success": {
+    "202": [
+     "application/json"
+    ]
+   },
+   "summary": "Build a custom tool",
+   "tag": "Custom Tools"
+  },
+  {
+   "body": null,
+   "cli": "custom-tools logs",
+   "description": "List build log events for a version.",
+   "headers": [
+    "If-Match"
+   ],
+   "method": "GET",
+   "operationId": "listCustomToolBuildLogs",
+   "path": "/custom-tools/{name}/build-logs",
+   "pathParams": [
+    {
+     "description": "The custom tool name.",
+     "name": "name"
+    }
+   ],
+   "query": [
+    {
+     "description": "",
+     "name": "version",
+     "option": "version",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "description": "Pagination token from the previous response's `nextCursor`.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "customTools.buildLogs",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List build logs",
+   "tag": "Custom Tools"
+  },
+  {
+   "body": null,
+   "cli": "custom-tools cancel",
+   "description": "Request cancellation of an active build.",
+   "headers": [
+    "If-Match"
+   ],
+   "method": "POST",
+   "operationId": "cancelCustomToolBuild",
+   "path": "/custom-tools/{name}/cancel-build",
+   "pathParams": [
+    {
+     "description": "The custom tool name.",
+     "name": "name"
+    }
+   ],
+   "query": [
+    {
+     "description": "",
+     "name": "version",
+     "option": "version",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "customTools.cancelBuild",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Cancel a custom tool build",
+   "tag": "Custom Tools"
+  },
+  {
+   "body": null,
+   "cli": "custom-tools publish",
+   "description": "Publish a completed version.",
+   "headers": [
+    "If-Match"
+   ],
+   "method": "POST",
+   "operationId": "publishCustomTool",
+   "path": "/custom-tools/{name}/publish",
+   "pathParams": [
+    {
+     "description": "The custom tool name.",
+     "name": "name"
+    }
+   ],
+   "query": [
+    {
+     "description": "",
+     "name": "version",
+     "option": "version",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "customTools.publish",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Publish a custom tool version",
+   "tag": "Custom Tools"
+  },
+  {
+   "body": null,
+   "cli": "custom-tools upload",
+   "description": "Create a temporary upload for a source archive.",
+   "headers": [
+    "If-Match"
+   ],
+   "method": "POST",
+   "operationId": "createCustomToolUpload",
+   "path": "/custom-tools/{name}/uploads",
+   "pathParams": [
+    {
+     "description": "The custom tool name.",
+     "name": "name"
+    }
+   ],
+   "query": [],
+   "sdk": "customTools.createUpload",
+   "success": {
+    "201": [
+     "application/json"
+    ]
+   },
+   "summary": "Create a source upload",
+   "tag": "Custom Tools"
+  },
+  {
+   "body": null,
+   "cli": "custom-tools versions",
+   "description": "List versions of a custom tool.",
+   "headers": [
+    "If-Match"
+   ],
+   "method": "GET",
+   "operationId": "listCustomToolVersions",
+   "path": "/custom-tools/{name}/versions",
+   "pathParams": [
+    {
+     "description": "The custom tool name.",
+     "name": "name"
+    }
+   ],
+   "query": [
+    {
+     "description": "Filter by build status.",
+     "enum": [
+      "Queued",
+      "Running",
+      "Complete",
+      "Stopped"
+     ],
+     "name": "status",
+     "option": "status",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": 50,
+     "description": "Maximum number of versions to return in one page.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "Pagination token from the previous response's `nextCursor`.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "customTools.listVersions",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List custom tool versions",
+   "tag": "Custom Tools"
+  },
+  {
+   "body": null,
+   "cli": "assays targets",
+   "description": "Needs Assay Portal access: without it, 403 `wetlab_access_required`. A lab the portal doesn't offer you (Ginkgo where it isn't enabled, say) is 400 `validation_failed`. A lab's target list that can't be read is 502 `targets_unavailable`; retry shortly. The cursor is bound to `provider` and `search`.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listAssayTargets",
+   "path": "/assay-targets",
+   "pathParams": [],
+   "query": [
+    {
+     "description": "",
+     "enum": [
+      "adaptyv",
+      "aalpha",
+      "ginkgo",
+      "genscript"
+     ],
+     "name": "provider",
+     "option": "provider",
+     "required": true,
+     "type": "string"
+    },
+    {
+     "description": "Matches part of a target's id, name, UniProt id or an alias, ignoring case.",
+     "name": "search",
+     "option": "search",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": 50,
+     "description": "Page size.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "`nextCursor` from the previous page.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "assays.listTargets",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Search the targets a binding assay can measure against",
+   "tag": "Assays"
+  },
+  {
+   "body": null,
+   "cli": "assays types",
+   "description": "Any key can read the catalogue. A lab the portal doesn't offer you is left out, and naming it as `provider` is 400 `validation_failed`. `wetLabAccess` says whether you can place orders: Assay Portal access, on a credential that isn't an unclaimed agent trial. `requestAccessUrl` is where to ask for access.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listAssayTypes",
+   "path": "/assay-types",
+   "pathParams": [],
+   "query": [
+    {
+     "description": "",
+     "enum": [
+      "adaptyv",
+      "ginkgo",
+      "aalpha",
+      "genscript"
+     ],
+     "name": "provider",
+     "option": "provider",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": 50,
+     "description": "Page size.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "`nextCursor` from the previous page.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "assays.listTypes",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List the wet-lab assays you can order",
+   "tag": "Assays"
+  },
+  {
+   "body": null,
+   "cli": "assays list",
+   "description": "The orders you placed, newest first. Portal drafts and deleted orders are left out. The cursor is bound to `status`. Where assay orders aren't available on a deployment, this and the other order operations answer 503 `service_unavailable`.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "listAssays",
+   "path": "/assays",
+   "pathParams": [],
+   "query": [
+    {
+     "description": "",
+     "enum": [
+      "pending_quote",
+      "pending_approval",
+      "approved",
+      "in_progress",
+      "completed",
+      "failed",
+      "cancelling",
+      "cancelled",
+      "rejected",
+      "unknown"
+     ],
+     "name": "status",
+     "option": "status",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": "mine",
+     "description": "`mine` is your own orders.",
+     "enum": [
+      "mine",
+      "org"
+     ],
+     "name": "scope",
+     "option": "scope",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": 50,
+     "description": "Page size.",
+     "name": "limit",
+     "option": "limit",
+     "required": false,
+     "type": "integer"
+    },
+    {
+     "description": "`nextCursor` from the previous page.",
+     "name": "cursor",
+     "option": "cursor",
+     "required": false,
+     "type": "string"
+    }
+   ],
+   "sdk": "assays.list",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "List your assay orders",
+   "tag": "Assays"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "assays submit",
+   "description": "This commits real money and lab work. Confirm with the user first. Use `validateAssay` beforehand.",
+   "headers": [
+    "Idempotency-Key"
+   ],
+   "method": "POST",
+   "operationId": "submitAssay",
+   "path": "/assays",
+   "pathParams": [],
+   "query": [],
+   "sdk": "assays.submit",
+   "success": {
+    "201": [
+     "application/json"
+    ]
+   },
+   "summary": "Place an assay order",
+   "tag": "Assays"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "assays estimate",
+   "description": "No order is created and nothing is charged, but the lab is sent your sequences, and A-Alpha keeps a quote on file. The order gets the same checks as `validateAssay` first: one that fails them is 422 `validation_failed` with the same problems in `errors`, and nothing reaches the lab. No Assay Portal access is 403 `wetlab_access_required`; an unclaimed agent trial credential is 403 `forbidden`. When Ginkgo gives no price, its catalog price is used.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "estimateAssay",
+   "path": "/assays/estimate",
+   "pathParams": [],
+   "query": [],
+   "sdk": "assays.estimate",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get a price and turnaround.",
+   "tag": "Assays"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": true
+   },
+   "cli": "assays validate",
+   "description": "200 means the check ran, whatever the verdict. Only a body with no `assayType`, a field of the wrong JSON type, an unknown field, or text that isn't valid Unicode is 422, because there is nothing to check. The body is `AssayOrderCheckRequest`: every other rule of `AssayOrderRequest` (exactly one of `sequences` or `csvFile`, `modality`, the shape of each sequence) is part of the verdict. Runs the portal's own order checks, word for word: settings, sequences, a CSV file (read from your own files only), targets, residues, each lab's minimums and duplicates. Nothing is created and no lab is conta…",
+   "headers": [],
+   "method": "POST",
+   "operationId": "validateAssay",
+   "path": "/assays/validate",
+   "pathParams": [],
+   "query": [],
+   "sdk": "assays.validate",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Check an order.",
+   "tag": "Assays"
+  },
+  {
+   "body": null,
+   "cli": "assays get",
+   "description": "Your own order. Another account's order, a portal draft, a deleted order and an unknown id are all 404.",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getAssay",
+   "path": "/assays/{assayId}",
+   "pathParams": [
+    {
+     "description": "An order's `id`.",
+     "name": "assayId"
+    }
+   ],
+   "query": [],
+   "sdk": "assays.get",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get an assay order",
+   "tag": "Assays"
+  },
+  {
+   "body": {
+    "contentTypes": [
+     "application/json"
+    ],
+    "description": "",
+    "required": false
+   },
+   "cli": "assays cancel",
+   "description": "Confirm with the user first. The order's `cancellable` field says whether this will work now. Safe to repeat: an order already `cancelled` or `cancelling` answers 200 as it is. When the lab holds the order it is told: Ginkgo confirms later, so the order reads `cancelling`; A-Alpha confirms at once. An order no lab holds yet is only recorded as `cancelled`. Ginkgo orders can be cancelled only before work starts, A-Alpha orders until they finish, and Adaptyv and GenScript orders only through Tamarind support.",
+   "headers": [],
+   "method": "POST",
+   "operationId": "cancelAssay",
+   "path": "/assays/{assayId}/cancel",
+   "pathParams": [
+    {
+     "description": "An order's `id`.",
+     "name": "assayId"
+    }
+   ],
+   "query": [],
+   "sdk": "assays.cancel",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Cancel an assay order.",
+   "tag": "Assays"
+  },
+  {
+   "body": null,
+   "cli": "assays results",
+   "description": "Links to what the lab delivered; `expiresAt` says when they stop working. Results stored with Tamarind are listed whatever the order's `status` says now; otherwise nothing is ready until the order is `completed`. A completed order with nothing stored yet asks the lab once more: GenScript's report or Adaptyv's results are fetched, stored and recorded on the order. Ginkgo and A-Alpha deliver on their own, so there is nothing to ask. An Adaptyv order's own data-package links are fetched again on each read, waiting at most 5 seconds. These lab calls only read: nothing is ordered, changed or charg…",
+   "headers": [],
+   "method": "GET",
+   "operationId": "getAssayResults",
+   "path": "/assays/{assayId}/results",
+   "pathParams": [
+    {
+     "description": "An order's `id`.",
+     "name": "assayId"
+    }
+   ],
+   "query": [],
+   "sdk": "assays.results",
+   "success": {
+    "200": [
+     "application/json"
+    ]
+   },
+   "summary": "Get an order's results and download links",
+   "tag": "Assays"
+  }
+ ],
+ "source": "openapi/api-v1.yaml",
+ "tags": {
+  "API Keys": "List, rename and revoke keys, and make a service account's keys.",
+  "Assays": "Wet-lab orders with partner labs.",
+  "Batches": "Run one tool across many independent inputs.",
+  "Custom Tools": "Package your own container as a tool.",
+  "Files": "Your workspace files, used as tool inputs.",
+  "Identity": "Who the caller is, and what it can do and spend.",
+  "Job Outputs": "Files, logs and archives a job produced.",
+  "Jobs": "Run one tool on one input.",
+  "Models": "Finetuned models.",
+  "Molecules": "The Molecules Database.",
+  "Organization": "Organization details, members and contract.",
+  "Pipelines": "Declarative multi-step workflows.",
+  "Project Notes": "A project's notes board.",
+  "Projects": "Group jobs, and share them with teammates.",
+  "Service Accounts": "Non-human identities owned by an organization.",
+  "Tools": "Discover tools and their settings schemas.",
+  "Usage": "Compute and agent usage, at parity with the web usage portal."
+ }
+}

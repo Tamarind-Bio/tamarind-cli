@@ -10,8 +10,10 @@ import typer
 from ... import rest, uploads
 from ...errors import TamarindError
 from .. import output
+from ..v1 import commands as v1
+from ..v1.generic import ContractGroup
 
-app = typer.Typer(no_args_is_help=True)
+app = typer.Typer(no_args_is_help=True, cls=ContractGroup)
 
 
 def _file_name(f: object) -> str:
@@ -71,9 +73,26 @@ def list_files(
     offset: int = typer.Option(0, "--offset", help="Pagination offset."),
     metadata: bool = typer.Option(False, "--metadata", help="Include size/lastModified."),
     all_dirs: bool = typer.Option(False, "--all", help="Recurse into subdirectories."),
+    cursor: Optional[str] = typer.Option(
+        None, "--cursor", help="v1 only: the nextCursor from a previous page."
+    ),
 ) -> None:
     """List files in your workspace."""
     state = ctx.obj
+    if state.is_v1:
+        v1.files_list(
+            state,
+            types=types,
+            search=search,
+            folder=folder,
+            limit=limit,
+            offset=offset,
+            all_dirs=all_dirs,
+            cursor=cursor,
+        )
+        return
+    if cursor is not None:
+        raise typer.BadParameter("--cursor needs the v1 API (--api v1); use --offset.")
     # The /files endpoint ignores query filters and returns the whole list, so
     # fetch it unfiltered (only folder scoping is server-side) and filter locally.
     with state.rest_client() as client:
@@ -111,9 +130,19 @@ def _file_type_counts(files: list) -> dict:
 
 
 @app.command()
-def stats(ctx: typer.Context) -> None:
+def stats(
+    ctx: typer.Context,
+    folder: Optional[str] = typer.Option(
+        None, "--folder", help="v1 only: count the files directly in this folder."
+    ),
+) -> None:
     """Summarize workspace files by type (counts), like the MCP getFileStats tool."""
     state = ctx.obj
+    if state.is_v1:
+        v1.files_stats(state, folder=folder)
+        return
+    if folder is not None:
+        raise typer.BadParameter("--folder needs the v1 API (--api v1).")
     with state.rest_client() as client:
         resp = rest.get_files(client)
     files = resp.get("files") if isinstance(resp, dict) else resp
@@ -138,6 +167,9 @@ def folders(
 ) -> None:
     """List folders in your workspace."""
     state = ctx.obj
+    if state.is_v1:
+        v1.files_folders(state, limit=limit, all_folders=all_folders)
+        return
     with state.rest_client() as client:
         resp = rest.get_folders(client, limit=limit, load_all=all_folders)
     folder_list = resp.get("folders") if isinstance(resp, dict) else resp
@@ -156,6 +188,9 @@ def upload(
     state = ctx.obj
     remote = name or path.name
     output.info(f"Uploading {path} → {remote}…", state.output)
+    if state.is_v1:
+        v1.files_upload(state, path, remote)
+        return
     with state.rest_client() as client:
         # Shared with the SDK's `client.files.upload` — one presign-then-PUT code path.
         result = uploads.upload_file(client, path, remote=remote)
@@ -175,7 +210,29 @@ def delete(
         raise TamarindError("Provide a file path or --folder <name>.")
     target = path or f"folder {folder}"
     output.confirm_destructive(f"delete {target}", yes=yes, mode=state.output)
+    if state.is_v1:
+        v1.files_delete(state, path, folder)
+        return
     with state.rest_client() as client:
         resp = rest.delete_file(client, file_path=path, folder=folder)
     human = resp.get("message", resp) if isinstance(resp, dict) else resp
     output.emit(resp, state.output, human=str(human))
+
+
+@app.command()
+def download(
+    ctx: typer.Context,
+    path: str = typer.Argument(..., help="The file's path in your workspace, e.g. targets/1abc.pdb."),
+    output_path: Optional[Path] = typer.Option(
+        None, "--output", "-o", help="Where to save it (a directory or a file; default: here)."
+    ),
+    show_url: bool = typer.Option(
+        False, "--show-url", help="Print the credential-bearing link instead of downloading."
+    ),
+) -> None:
+    """Download a workspace file (v1 getFile)."""
+    state = ctx.obj
+    from ..v1 import sdk as v1_sdk
+
+    v1_sdk.require_v1(state, "files download")
+    v1.download_link(state, "getFile", path=path, dest=output_path, show_url=show_url)

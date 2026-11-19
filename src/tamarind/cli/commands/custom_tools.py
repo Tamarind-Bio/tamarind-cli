@@ -19,9 +19,10 @@ from ...custom_tools.validation import ValidationProblem, ValidationReport, vali
 from ...errors import ExitCode, TamarindError, ValidationError
 from ..inputs import effective_job_name, effective_job_type, resolve_job_input
 from .. import output
+from ..v1.generic import ContractGroup
 
 
-app = typer.Typer(no_args_is_help=True)
+app = typer.Typer(no_args_is_help=True, cls=ContractGroup)
 
 
 def _value(value: object) -> object:

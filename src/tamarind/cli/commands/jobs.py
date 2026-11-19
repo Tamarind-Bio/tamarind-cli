@@ -19,6 +19,8 @@ from ...errors import ExitCode, NotFoundError, TamarindError, ValidationError
 from .. import output
 from ..guidance import rewrite_validation_guidance
 from ..inputs import effective_job_name, effective_job_type, resolve_job_input
+from ..v1 import commands as v1
+from ..v1.generic import ContractGroup
 
 _ORG_LOOKUP_HELP = (
     "Find the job across your org's members (a name several members share, "
@@ -32,6 +34,25 @@ _LOW_PRIORITY_HELP = (
     "within 7 days stops with no charge. Refused if unavailable for this job."
 )
 _LOW_PRIORITY_NOTE = " at low priority (20% off, no completion guarantee, stops with no charge if not started within 7 days)"
+
+
+_PROJECT_HELP = "v1 only: a project for the job (an id from `tamarind projects list`)."
+_MODEL_HELP = "v1 only: run this finetuned model (`tamarind models list`); the tool must be its inference tool."
+_TOOL_VERSION_HELP = "v1 only: a custom tool version (default: the published one)."
+
+
+def _v1_extras(**values: object) -> dict:
+    """v1 request fields given as flags (``projectId``, ``modelId``...), only those set."""
+    return {key: value for key, value in values.items() if value is not None}
+
+
+def _refuse_v1_only(**flags: object) -> None:
+    """Classic has no such field: say so rather than drop the flag."""
+    given = [name for name, value in flags.items() if value not in (None, False)]
+    if given:
+        raise typer.BadParameter(
+            f"{', '.join(given)} need{'s' if len(given) == 1 else ''} the v1 API (--api v1)."
+        )
 
 
 def _gen_name(tool: str) -> str:
@@ -389,11 +410,27 @@ def register(app: typer.Typer) -> None:
         input: Optional[str] = typer.Option(None, "--input", "-i", help="Settings file (YAML/JSON), '-' for stdin, or @yaml://path."),
         set_: list[str] = typer.Option([], "--set", help="Override a setting: key=value (repeatable)."),
         name: Optional[str] = typer.Option(None, "--name", "-n", help="Job name (default: auto)."),
+        project: Optional[str] = typer.Option(None, "--project", help=_PROJECT_HELP),
+        model: Optional[str] = typer.Option(None, "--model", help=_MODEL_HELP),
+        tool_version: Optional[str] = typer.Option(None, "--tool-version", help=_TOOL_VERSION_HELP),
     ) -> None:
         """Validate a job's settings without submitting (catches errors early)."""
         state = ctx.obj
         job = resolve_job_input(input, set_)
         job_type = effective_job_type(tool, job.job_type)
+        if state.is_v1:
+            v1.validate(
+                state,
+                v1.job_body(
+                    job_type,
+                    job.settings,
+                    name=effective_job_name(name, job.job_name),
+                    low_priority=job.low_priority,
+                    extra=_v1_extras(projectId=project, modelId=model, toolVersion=tool_version),
+                ),
+            )
+            return
+        _refuse_v1_only(**{"--project": project, "--model": model, "--tool-version": tool_version})
         job_name = effective_job_name(name, job.job_name) or _gen_name(tool)
         with state.rest_client() as client:
             result = _rewrite_validation_guidance(
@@ -423,19 +460,59 @@ def register(app: typer.Typer) -> None:
         timeout: Optional[float] = typer.Option(None, "--timeout", help="With --wait, give up after N seconds."),
         download: Optional[Path] = typer.Option(None, "--download", help="With --wait, download results to this directory."),
         low_priority: bool = typer.Option(False, "--low-priority", help=_LOW_PRIORITY_HELP),
+        idempotency_key: Optional[str] = typer.Option(
+            None,
+            "--idempotency-key",
+            help="v1 only: reuse this key to retry a submit safely across runs (one is generated otherwise).",
+        ),
+        project: Optional[str] = typer.Option(None, "--project", help=_PROJECT_HELP),
+        model: Optional[str] = typer.Option(None, "--model", help=_MODEL_HELP),
+        tool_version: Optional[str] = typer.Option(None, "--tool-version", help=_TOOL_VERSION_HELP),
+        max_runtime: Optional[int] = typer.Option(
+            None, "--max-runtime", help="v1 only: stop the job after this many seconds."
+        ),
     ) -> None:
         """Submit a single job. Validates first unless --skip-validate."""
         state = ctx.obj
         job = resolve_job_input(input, set_)
         low_priority = low_priority or job.low_priority
         job_type = effective_job_type(tool, job.job_type)
-        job_name = effective_job_name(name, job.job_name) or _gen_name(tool)
         if wait:
             # A local wait-option error must never occur after creating a
             # remote, potentially billable job.
             jobs_helpers.validate_wait_options(
                 poll_interval=poll_interval, timeout=timeout
             )
+        if state.is_v1:
+            # v1's submit runs every check validate runs and answers 422 with all of
+            # them, so there is no separate validate call (--skip-validate changes nothing).
+            v1.submit(
+                state,
+                v1.job_body(
+                    job_type,
+                    job.settings,
+                    name=effective_job_name(name, job.job_name),
+                    low_priority=low_priority,
+                    max_runtime=max_runtime,
+                    extra=_v1_extras(projectId=project, modelId=model, toolVersion=tool_version),
+                ),
+                idempotency_key=idempotency_key,
+                wait=wait,
+                poll_interval=poll_interval,
+                timeout=timeout,
+                download=download,
+            )
+            return
+        _refuse_v1_only(
+            **{
+                "--idempotency-key": idempotency_key,
+                "--project": project,
+                "--model": model,
+                "--tool-version": tool_version,
+                "--max-runtime": max_runtime,
+            }
+        )
+        job_name = effective_job_name(name, job.job_name) or _gen_name(tool)
 
         with state.rest_client() as client:
             if not skip_validate:
@@ -535,6 +612,14 @@ def register(app: typer.Typer) -> None:
             help="Validate every item before submitting.",
         ),
         low_priority: bool = typer.Option(False, "--low-priority", help=_LOW_PRIORITY_HELP),
+        idempotency_key: Optional[str] = typer.Option(
+            None,
+            "--idempotency-key",
+            help="v1 only: reuse this key to retry a submit safely across runs (one is generated otherwise).",
+        ),
+        project: Optional[str] = typer.Option(None, "--project", help=_PROJECT_HELP),
+        model: Optional[str] = typer.Option(None, "--model", help=_MODEL_HELP),
+        tool_version: Optional[str] = typer.Option(None, "--tool-version", help=_TOOL_VERSION_HELP),
     ) -> None:
         """Submit many jobs as one batch (preferred over looping submit)."""
         state = ctx.obj
@@ -583,6 +668,27 @@ def register(app: typer.Typer) -> None:
             if len(set(normalized_names)) != len(normalized_names):
                 raise ValidationError("Batch jobNames must be unique.")
 
+        if state.is_v1:
+            body = v1.job_body(
+                job_type,
+                settings_list,
+                name=batch_name,
+                low_priority=low_priority,
+                kind="batch",
+                names=job_names,
+                max_runtime=max_runtime,
+                extra=_v1_extras(projectId=project, modelId=model, toolVersion=tool_version),
+            )
+            v1.batch(state, body, prevalidate=prevalidate, idempotency_key=idempotency_key)
+            return
+        _refuse_v1_only(
+            **{
+                "--idempotency-key": idempotency_key,
+                "--project": project,
+                "--model": model,
+                "--tool-version": tool_version,
+            }
+        )
         with state.rest_client() as client:
             if prevalidate:
                 _prevalidate_batch(
@@ -629,7 +735,10 @@ def register(app: typer.Typer) -> None:
             human=f"submitted batch '{batch_name}' ({len(settings_list)} jobs)" + (_LOW_PRIORITY_NOTE if low_priority else ""),
         )
 
-    @app.command()
+    # `jobs` is a group so the contract's `jobs <verb>` names sit beside today's
+    # flat commands; with no subcommand it lists, exactly as the flat `jobs` did.
+    jobs_app = typer.Typer(cls=ContractGroup, no_args_is_help=False)
+
     def jobs(
         ctx: typer.Context,
         status: Optional[str] = typer.Option(None, "--status", help="Filter by status (client-side)."),
@@ -644,9 +753,60 @@ def register(app: typer.Typer) -> None:
         organization: bool = typer.Option(False, "--organization", help="All jobs across your org."),
         include_subjobs: bool = typer.Option(False, "--include-subjobs", help="Include batch subjobs."),
         email: Optional[str] = typer.Option(None, "--email", help="Jobs for another org member."),
+        kind: Optional[str] = typer.Option(None, "--kind", help="v1 only: job, batch or pipeline."),
+        tool: Optional[str] = typer.Option(None, "--tool", help="v1 only: an exact tool name."),
+        search: Optional[str] = typer.Option(
+            None, "--search", help="v1 only: text in a name or display name (any case)."
+        ),
+        source: Optional[str] = typer.Option(
+            None, "--source", help="v1 only: api, sdk, cli, mcp, agent, campaign-agent or web."
+        ),
+        order: Optional[str] = typer.Option(None, "--order", help="v1 only: desc (newest first) or asc."),
+        pipeline_run: Optional[str] = typer.Option(
+            None, "--pipeline-run", help="v1 only: the jobs a pipeline run's steps launched (a run_ id)."
+        ),
+        name: Optional[str] = typer.Option(
+            None, "--name", help="v1 only: the one item with this exact name."
+        ),
     ) -> None:
         """List your jobs. When more remain, a 'startKey' is returned; pass it to --start-key (or use --all)."""
+        if ctx.invoked_subcommand is not None:
+            return
         state = ctx.obj
+        filters = {
+            "kind": kind,
+            "tool": tool,
+            "search": search,
+            "source": source,
+            "order": order,
+            "pipelineRunId": pipeline_run,
+            "name": name,
+        }
+        if state.is_v1:
+            v1.jobs_list(
+                state,
+                status=status,
+                batch=batch,
+                limit=limit,
+                start_key=start_key,
+                all_jobs=all_jobs,
+                organization=organization,
+                include_subjobs=include_subjobs,
+                email=email,
+                filters={k: v for k, v in filters.items() if v is not None},
+            )
+            return
+        _refuse_v1_only(
+            **{
+                "--kind": kind,
+                "--tool": tool,
+                "--search": search,
+                "--source": source,
+                "--order": order,
+                "--pipeline-run": pipeline_run,
+                "--name": name,
+            }
+        )
         with state.rest_client() as client:
             if all_jobs:
                 job_list, statuses, next_key, _pages = _fetch_all_jobs(
@@ -710,6 +870,9 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Show one job's current status and metadata."""
         state = ctx.obj
+        if state.is_v1:
+            v1.get(state, job_name, organization=organization, email=email)
+            return
         with state.rest_client() as client:
             job = jobs_helpers.fetch_job(
                 client, job_name, organization=organization, job_email=email
@@ -731,6 +894,17 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Block until a job reaches a terminal state."""
         state = ctx.obj
+        if state.is_v1:
+            jobs_helpers.validate_wait_options(poll_interval=poll_interval, timeout=timeout)
+            v1.wait(
+                state,
+                job_name,
+                poll_interval=poll_interval,
+                timeout=timeout,
+                organization=organization,
+                email=email,
+            )
+            return
         with state.rest_client() as client:
             final = jobs_helpers.wait_for_job(
                 client,
@@ -756,6 +930,9 @@ def register(app: typer.Typer) -> None:
         download: Optional[Path] = typer.Option(None, "--download", help="Download the results bundle to this directory."),
         file: Optional[str] = typer.Option(None, "--file", help="A specific file within the results."),
         pdbs_only: bool = typer.Option(False, "--pdbs-only", help="Only PDB outputs."),
+        glob: Optional[str] = typer.Option(
+            None, "--glob", help="v1 only: an archive of just the outputs matching this glob, e.g. '*.cif'."
+        ),
         show_url: bool = typer.Option(
             False,
             "--show-url",
@@ -776,6 +953,23 @@ def register(app: typer.Typer) -> None:
             )
         if download is not None and show_url:
             raise typer.BadParameter("--download and --show-url are mutually exclusive.")
+        if state.is_v1:
+            v1.results(
+                state,
+                job_name,
+                download=download,
+                file=file,
+                pdbs_only=pdbs_only,
+                glob=glob,
+                show_url=show_url,
+                wait=wait,
+                poll_interval=poll_interval,
+                timeout=timeout,
+                organization=organization,
+                email=email,
+            )
+            return
+        _refuse_v1_only(**{"--glob": glob})
         with state.rest_client() as client:
             final = None
             if wait:
@@ -832,9 +1026,19 @@ def register(app: typer.Typer) -> None:
         ctx: typer.Context,
         job_name: str = typer.Argument(..., help="Job name."),
         max_lines: int = typer.Option(500, "--max-lines", help="Tail at most this many lines."),
+        max_bytes: Optional[int] = typer.Option(
+            None, "--max-bytes", help="v1 only: read at most this many bytes of the newest output."
+        ),
+        cursor: Optional[str] = typer.Option(
+            None, "--cursor", help="v1 only: the nextCursor from a previous read, for older output."
+        ),
     ) -> None:
         """Fetch a job's run logs (served by the catalog/gateway service)."""
         state = ctx.obj
+        if state.is_v1:
+            v1.logs(state, job_name, max_lines=max_lines, max_bytes=max_bytes, cursor=cursor)
+            return
+        _refuse_v1_only(**{"--max-bytes": max_bytes, "--cursor": cursor})
         with state.catalog_client() as client:
             resp = client.get_json(f"catalog/jobs/{job_name}/logs", params={"maxLines": max_lines})
         if isinstance(resp, dict):
@@ -855,11 +1059,16 @@ def register(app: typer.Typer) -> None:
         ctx: typer.Context,
         job_name: Optional[str] = typer.Argument(None, help="Job name to cancel."),
         batch: Optional[str] = typer.Option(None, "--batch", help="Cancel an entire batch/pipeline instead."),
+        reason: Optional[str] = typer.Option(None, "--reason", help="v1 only: why, kept with the job."),
     ) -> None:
         """Cancel a running/queued job, or an entire batch."""
         state = ctx.obj
         if not job_name and not batch:
             raise TamarindError("Provide a job name or --batch <name>.")
+        if state.is_v1:
+            v1.cancel(state, job_name, batch, reason=reason)
+            return
+        _refuse_v1_only(**{"--reason": reason})
         with state.rest_client() as client:
             if batch:
                 resp = rest.cancel_batch(client, batch_name=batch)
@@ -879,7 +1088,53 @@ def register(app: typer.Typer) -> None:
         output.confirm_destructive(
             f"permanently delete job '{job_name}'", yes=yes, mode=state.output
         )
+        if state.is_v1:
+            v1.delete(state, job_name)
+            return
         with state.rest_client() as client:
             resp = rest.delete_job(client, job_name=job_name)
         safe_resp = _sanitize_job_output(resp)
         output.emit(safe_resp, state.output, human=_message(safe_resp))
+
+    jobs_app.callback(invoke_without_command=True)(jobs)
+    jobs_app.command("list")(jobs)
+    # The contract's names for today's commands (x-clients.cli); the flat names stay.
+    jobs_app.command("submit")(submit)
+    jobs_app.command("validate")(validate)
+    jobs_app.command("get")(status)
+    jobs_app.command("wait")(wait)
+    jobs_app.command("results")(results)
+    jobs_app.command("logs")(logs)
+    jobs_app.command("cancel")(cancel)
+    jobs_app.command("delete")(delete)
+
+    @jobs_app.command("download")
+    def download_file(
+        ctx: typer.Context,
+        job: str = typer.Argument(..., help="Job id (job_/batch_) or name."),
+        path: str = typer.Option(..., "--path", help="The file's path, from `tamarind jobs files`."),
+        output_path: Optional[Path] = typer.Option(
+            None, "--output", "-o", help="Where to save it (a directory or a file; default: here)."
+        ),
+        show_url: bool = typer.Option(
+            False, "--show-url", help="Print the credential-bearing link instead of downloading."
+        ),
+    ) -> None:
+        """Download one file of a job's outputs (v1 getJobFile)."""
+        state = ctx.obj
+        from ..v1 import sdk as v1_sdk
+
+        v1_sdk.require_v1(state, "jobs download")
+        with v1_sdk.make_client(state) as client:
+            job_id = v1.resolve_id(client, job)
+        v1.download_link(state, "getJobFile", job_id, path=path, dest=output_path, show_url=show_url)
+
+    app.add_typer(
+        jobs_app,
+        name="jobs",
+        help=(
+            "List your jobs. When more remain, a 'startKey' is returned; pass it to "
+            "--start-key (or use --all)."
+        ),
+    )
+
