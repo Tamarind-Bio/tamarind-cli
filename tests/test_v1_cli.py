@@ -751,3 +751,14 @@ def test_default_operation_groups_show_its_options_in_help(v1):
     assert "--metric" in text and "refresh" in text
     text = runner.invoke(app, ["projects", "notes", "--help"]).stdout
     assert "PROJECT_ID" in text and "add" in text
+
+
+def test_cancel_batch_refuses_a_job_id(v1):
+    res = runner.invoke(app, ["--json", "cancel", "--batch", "job_0f8fad5b-d9cb-469f-a165-70867728950e"])
+    assert isinstance(res.exception, UsageError) and v1.calls == []
+
+
+def test_max_lines_applies_to_json_logs_too(v1):
+    v1.answers["jobs.logs"] = {"content": "a\nb\nc\n", "nextCursor": "older", "complete": False}
+    out = _json(runner.invoke(app, ["--json", "logs", "job_0f8fad5b-d9cb-469f-a165-70867728950e", "--max-lines", "2"]))
+    assert out == {"content": "b\nc\n", "nextCursor": "older", "complete": False, "omittedLines": 1}

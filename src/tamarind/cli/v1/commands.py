@@ -105,6 +105,8 @@ def resolve_batch_or_run(client: Any, ref: str) -> str:
     """``--batch``: a batch or a pipeline run, by id or by name (today's flag takes both)."""
     ref = ref.strip()
     if _ID.match(ref):
+        if ref.startswith("job_"):
+            raise UsageError("--batch takes a batch_ or run_ id; cancel one job without --batch.")
         return ref
     # `name=` answers only the newest match, so ask per kind: a newer single job with
     # the same name must not hide the batch or run.
@@ -535,9 +537,13 @@ def logs(
     with sdk.make_client(state) as client:
         chunk = call(client, "getJobLogs", resolve_id(client, ref), maxBytes=max_bytes, cursor=cursor)
     content = chunk.get("content") or ""
-    lines = content.splitlines()
-    text = "\n".join(lines[-max_lines:]) if max_lines and len(lines) > max_lines else content
-    _emit(chunk, state.output, human=text or "(no log yet)")
+    lines = content.splitlines(keepends=True)
+    if max_lines and len(lines) > max_lines:
+        # --max-lines keeps the newest lines in both output modes; `omittedLines` says
+        # how many of this window's older lines were left out (read them without it).
+        chunk = {**chunk, "content": "".join(lines[-max_lines:]), "omittedLines": len(lines) - max_lines}
+    text = chunk.get("content") or ""
+    _emit(chunk, state.output, human=text.rstrip("\n") or "(no log yet)")
 
 
 def cancel(state: Any, ref: str | None, batch: str | None, *, reason: str | None = None) -> None:
