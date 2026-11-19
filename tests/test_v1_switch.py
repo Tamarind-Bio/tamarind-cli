@@ -112,14 +112,28 @@ def test_a_client_keeps_its_answer_and_new_clients_see_a_change_after_the_cache(
     assert not switch.Switch("k", V1).on() and asked == ["k", "k"]  # a new client asks again
 
 
-def test_an_unusable_cache_still_asks_once_per_client(tmp_path, monkeypatch):
+def test_an_unusable_cache_file_still_asks_once_per_process(tmp_path, monkeypatch):
     blocker = tmp_path / "file"
     blocker.write_text("")
     asked: list[str] = []
     monkeypatch.setattr(switch, "probe", lambda base, key, **k: (asked.append(key), True)[1])
-    one = switch.Switch("k", V1, switch.FileFlagCache(blocker))
-    assert one.on() and one.on() and one.on()
+    # One CLI command builds several clients (the rest and catalog clients, a v1 client).
+    for _ in range(3):
+        one = switch.Switch("k", V1, switch.FileFlagCache(blocker))
+        assert one.on() and one.on()
     assert asked == ["k"]
+
+
+def test_an_answer_read_from_the_cache_is_kept_for_the_clients_life(tmp_path, monkeypatch):
+    clock = [time_now := 1000.0]
+    monkeypatch.setattr(switch.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(switch, "probe", lambda *a, **k: pytest.fail("asked"))
+    switch.FileFlagCache(tmp_path).set(switch.cache_key(V1, "k"), True)
+    one = switch.Switch("k", V1, switch.FileFlagCache(tmp_path))
+    assert one.on()
+    (tmp_path / switch.CACHE_FILE).unlink()
+    clock[0] = time_now + switch.CACHE_SECONDS * 3
+    assert one.on() and one.cached() is True
 
 
 def test_the_file_cache_is_private_and_never_holds_the_key(tmp_path):

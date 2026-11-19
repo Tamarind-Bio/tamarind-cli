@@ -180,7 +180,7 @@ class Switch:
     def __init__(self, api_key: str | None, v1_base: str | None, cache: FlagCache | None = None):
         self.api_key = api_key
         self.v1_base = v1_base.rstrip("/") if v1_base else None
-        self._cache = cache if cache is not None else _PROCESS_CACHE
+        self._cache = cache
         self._lock = threading.Lock()
         self._known: bool | None = None
 
@@ -189,15 +189,30 @@ class Switch:
             return None
         return cache_key(self.v1_base, self.api_key)
 
+    def _caches(self) -> list[FlagCache]:
+        # This process's answers first, then the given cache (the CLI's file): a cache
+        # file that can't be written still means one question per process, not per client.
+        caches: list[FlagCache] = [_PROCESS_CACHE]
+        if self._cache is not None and self._cache is not _PROCESS_CACHE:
+            caches.append(self._cache)
+        return caches
+
+    def _read(self, key: str, max_age: float) -> bool | None:
+        for cache in self._caches():
+            value = cache.get(key, max_age=max_age)
+            if value is not None:
+                return value
+        return None
+
     def cached(self, *, max_age: float = CACHE_SECONDS) -> bool | None:
-        """This client's answer, or else one no older than ``max_age`` in the shared
-        cache; never the network."""
+        """This client's answer, or else one no older than ``max_age`` in the caches;
+        never the network."""
         key = self._key()
         if key is None:
             return False
         if self._known is not None:
             return self._known
-        return self._cache.get(key, max_age=max_age)
+        return self._read(key, max_age)
 
     def last_known(self) -> bool | None:
         """The last answer kept (``--help`` lists v1 commands by it), however old."""
@@ -210,12 +225,13 @@ class Switch:
         with self._lock:
             if self._known is not None:
                 return self._known
-            known = self._cache.get(key)
+            known = self._read(key, CACHE_SECONDS)
             if known is None:
                 assert self.v1_base is not None and self.api_key is not None
                 known = probe(self.v1_base, self.api_key)
-                self._cache.set(key, known)
-            # Kept for this client's life (and so an unwritable cache never means asking
-            # again on every request).
+                for cache in self._caches():
+                    cache.set(key, known)
+            # Kept for this client's life, however it was learned: a long wait never
+            # changes API halfway through.
             self._known = known
             return known
