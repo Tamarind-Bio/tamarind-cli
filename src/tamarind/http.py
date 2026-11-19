@@ -67,6 +67,8 @@ class HTTPClient:
         self._v1: Any = None
         self._v1_raw: HTTPClient | None = None
         self._router: Any = None
+        # Set on the client that sends same-path requests to v1: its errors are v1's.
+        self._answers_for_v1 = False
         headers = {
             "Accept": "application/json",
             # Brotli is still decoded transparently by httpx; we just don't want
@@ -167,16 +169,31 @@ class HTTPClient:
             return classic()
         return self._routes().serve(handler, payload, classic, timeout=timeout)
 
-    def _raw_client(self, path: str) -> "HTTPClient":
-        """Requests the v1 API serves at the same path (custom tools, pipeline runs) go
-        to its base when v1 is on for this key; the rest stay here."""
-        if not (self.api_key and _SAME_PATH_ON_V1.match(path.lstrip("/")) and self.uses_v1()):
-            return self
+    def _same_path_on_v1(self, path: str) -> bool:
+        """Whether a request the v1 API serves at the same path (custom tools, pipeline
+        runs) goes to its base: v1 is on for this key. May ask the server, once."""
+        return bool(self.api_key and _SAME_PATH_ON_V1.match(path.lstrip("/")) and self.uses_v1())
+
+    def _v1_same_path_client(self) -> "HTTPClient":
         if self._v1_raw is None:
             self._v1_raw = HTTPClient(
                 str(self._switch.v1_base), self.api_key, timeout=self._timeout, v1_base=None
             )
+            self._v1_raw._answers_for_v1 = True
         return self._v1_raw
+
+    def _raw_client(self, path: str) -> "HTTPClient":
+        """The client a raw request goes through: v1's base for the paths it serves alike
+        when v1 is on for this key, otherwise this one."""
+        return self._v1_same_path_client() if self._same_path_on_v1(path) else self
+
+    def _error(self, resp: httpx.Response, path: str) -> TamarindError:
+        error = _map_error(resp, request_path=path)
+        if not self._answers_for_v1:
+            return error
+        from ._v1 import classic
+
+        return classic.same_path_error(resp, error)
 
     # -- requests ----------------------------------------------------------
     def request(
@@ -227,7 +244,7 @@ class HTTPClient:
 
         if resp.is_success:
             return resp
-        raise _map_error(resp, request_path=path)
+        raise self._error(resp, path)
 
     async def request_async(
         self,
@@ -245,8 +262,11 @@ class HTTPClient:
         before returning. Synchronous calls keep their pooled client above.
         """
         # Asking the server whether v1 is on (once per client) is a blocking request: it
-        # runs in a thread, so it never stalls the event loop or delays a cancellation.
-        client = await asyncio.to_thread(self._raw_client, path)
+        # runs in a thread, so it never stalls the event loop or delays a cancellation. The
+        # thread only decides; the v1 client is made here, so a cancelled request whose
+        # thread finishes later leaves nothing open behind it.
+        on_v1 = await asyncio.to_thread(self._same_path_on_v1, path)
+        client = self._v1_same_path_client() if on_v1 else self
         if client is self:
             return await client._classic_request_async(
                 method, path, params=params, headers=headers, json=json, timeout=timeout
@@ -289,7 +309,7 @@ class HTTPClient:
 
         if resp.is_success:
             return resp
-        raise _map_error(resp, request_path=path)
+        raise self._error(resp, path)
 
     # With v1 on for this key, the requests v1 has a form for are answered from it and
     # rebuilt in this API's layout (tamarind._v1.classic); the rest are sent here.

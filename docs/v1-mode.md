@@ -54,7 +54,10 @@ today's exit codes (401 → 3, 404 → 4, 400/422 → 5, 429 → 6, budget or qu
 else → 1). The error is a `ProblemError` (with v1's problem document) that is also the
 classic class for its status (`AuthError`, `NotFoundError`, `ValidationError`,
 `RateLimitError`, `BudgetError`, `APIError` with `status_code`), so existing `except`
-clauses still match. A 5xx or no answer is "outcome unclear", as in classic mode, so
+clauses still match. On the requests v1 serves at the same path (custom tools, pipeline
+runs) the error is the class classic gives the same answer (`CustomToolExistsError`...),
+also a `ProblemError`; a refusal v1 codes as about the key or budget is the auth or
+budget error. A 5xx or no answer is "outcome unclear", as in classic mode, so
 `submit` and `batch` print their recovery command instead of retrying.
 
 ## What still runs on classic

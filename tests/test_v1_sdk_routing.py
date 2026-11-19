@@ -278,3 +278,64 @@ def test_an_async_request_asks_the_switch_off_the_event_loop(monkeypatch):
 
     answer, ticks = asyncio.run(run())
     assert answer == "answered" and seen and seen[0] != main and ticks >= 5
+
+
+@respx.mock
+def test_same_path_v1_refusals_keep_todays_class_and_add_the_problem(on):
+    from tamarind.errors import CustomToolNotFoundError
+
+    respx.get(f"{V1}/custom-tools/missing", params__eq={}).mock(return_value=_problem(404, "custom_tool_not_found"))
+    respx.get(f"{V1}/custom-tools/trial", params__eq={}).mock(return_value=_problem(403, "agent_trial_expired"))
+    with Tamarind(api_key="k", api_base=CLASSIC) as client:
+        with pytest.raises(CustomToolNotFoundError) as missing:
+            client.custom_tools.get("missing")
+        assert isinstance(missing.value, ProblemError)
+        assert (missing.value.code, missing.value.status, missing.value.exit_code) == ("custom_tool_not_found", 404, 4)
+        with pytest.raises(AuthError) as trial:
+            client.custom_tools.get("trial")
+        assert isinstance(trial.value, ProblemError) and trial.value.exit_code == 3
+
+
+@respx.mock
+def test_classic_refusals_stay_classic(monkeypatch):
+    from tamarind.errors import CustomToolNotFoundError
+
+    respx.get(f"{CLASSIC}custom-tools/missing", params__eq={}).mock(return_value=_problem(404, "custom_tool_not_found"))
+    with Tamarind(api_key="k", api_base=CLASSIC) as client:
+        with pytest.raises(CustomToolNotFoundError) as missing:
+            client.custom_tools.get("missing")
+    assert not isinstance(missing.value, ProblemError)
+
+
+def test_a_cancelled_async_request_leaves_no_v1_client_open(monkeypatch):
+    import asyncio
+    import threading
+
+    from tamarind._v1 import switch
+
+    release = threading.Event()
+    done = threading.Event()
+
+    def slow_probe(*args, **kwargs):
+        release.wait(1)
+        done.set()
+        return True
+
+    monkeypatch.setattr(switch, "probe", slow_probe)
+
+    async def run(client: HTTPClient) -> None:
+        task = asyncio.create_task(client.request_async("GET", "custom-tools"))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    client = HTTPClient(CLASSIC, "k")
+    asyncio.run(run(client))
+    client.close()
+    release.set()
+    assert done.wait(5)
+    import time as _time
+
+    _time.sleep(0.05)
+    assert client._v1_raw is None

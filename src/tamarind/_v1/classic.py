@@ -129,6 +129,36 @@ def classic_error(exc: TamarindError) -> TamarindError:
     return exc
 
 
+_WITH_PROBLEM: dict[type[TamarindError], type[ProblemError]] = {}
+
+
+def same_path_error(response: Any, error: TamarindError) -> TamarindError:
+    """A v1 refusal of a request sent at the same path (custom tools, pipeline runs).
+
+    ``error`` is what the classic client makes of the same answer (its class, message,
+    exit code: ``CustomToolExistsError`` and the rest), so callers see what they see
+    today. It also becomes a ``ProblemError`` carrying v1's problem document (``code``,
+    ``errors``, ``problem``). A refusal v1 marks as about the key or the budget by its
+    code is the auth or budget error, whatever its status."""
+    problem = ProblemError.from_response(response)
+    if problem.code in _AUTH_CODES or problem.code in _BUDGET_CODES:
+        if not isinstance(error, (AuthError, BudgetError)):
+            return classic_error(problem)
+    base = type(error)
+    if isinstance(error, ProblemError) or not issubclass(base, TamarindError):
+        return error
+    hybrid = _WITH_PROBLEM.get(base)
+    if hybrid is None:
+        made = type(base.__name__, (ProblemError, base), {"__module__": base.__module__, "__doc__": base.__doc__})
+        hybrid = _WITH_PROBLEM[base] = made
+    out = Exception.__new__(hybrid)
+    out.__dict__.update(problem.__dict__)
+    out.__dict__.update(error.__dict__)  # classic's detail, status_code
+    out.args = error.args
+    out.exit_code = error.exit_code
+    return out
+
+
 def _raise_classic(exc: TamarindError) -> NoReturn:
     converted = classic_error(exc)
     if converted is exc:
