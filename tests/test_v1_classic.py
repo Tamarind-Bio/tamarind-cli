@@ -750,7 +750,7 @@ def test_files_upload_goes_to_v1(env, tmp_path, monkeypatch):
     monkeypatch.setattr("tamarind.uploads.put_presigned_upload", lambda url, path, **k: Path(path).stat().st_size)
     env.v1.answers["files.upload"] = {"path": "in.fasta", "type": "file", "sizeBytes": 6}
     same_output(env, "--json", "files", "upload", str(local))
-    assert env.v1.calls[0] == ("files.upload", (local,), {"path": "in.fasta"})
+    assert env.v1.calls[0] == ("files.upload", (local,), {"path": "in.fasta", "content_type": "application/octet-stream"})
     assert [c[1] for c in classic_calls()] == ["getPresignedUploadUrl"]  # the classic run only
 
 

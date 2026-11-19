@@ -7,6 +7,7 @@ callers (and the CLI's exit codes) get consistent behaviour.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 from collections.abc import Iterator
@@ -188,9 +189,11 @@ class HTTPClient:
         json: Any | None = None,
         timeout: float | None = None,
     ) -> httpx.Response:
-        return self._raw_client(path)._classic_request(
+        client = self._raw_client(path)
+        response = client._classic_request(
             method, path, params=params, headers=headers, json=json, timeout=timeout
         )
+        return response if client is self else _from_v1(method, path, response)
 
     def _classic_request(
         self,
@@ -237,9 +240,13 @@ class HTTPClient:
         The client is scoped to the coroutine so cancellation closes its socket
         before returning. Synchronous calls keep their pooled client above.
         """
-        return await self._raw_client(path)._classic_request_async(
+        # Asking the server whether v1 is on (once per client) is a blocking request: it
+        # runs in a thread, so it never stalls the event loop or delays a cancellation.
+        client = await asyncio.to_thread(self._raw_client, path)
+        response = await client._classic_request_async(
             method, path, params=params, headers=headers, json=json, timeout=timeout
         )
+        return response if client is self else _from_v1(method, path, response)
 
     async def _classic_request_async(
         self,
@@ -314,6 +321,12 @@ class HTTPClient:
         return _parse_json(
             self._classic_request(method, path, params=params, json=json, timeout=timeout)
         )
+
+
+def _from_v1(method: str, path: str, response: httpx.Response) -> httpx.Response:
+    from ._v1 import classic
+
+    return classic.rebuild_response(method.upper(), path.split("?", 1)[0].strip("/"), response)
 
 
 def _parse_json(resp: httpx.Response) -> Any:

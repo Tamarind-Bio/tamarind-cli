@@ -64,7 +64,7 @@ def upload_file(
 
     path = Path(path)
     remote = remote or path.name
-    routed = classic.upload(client, path, remote)
+    routed = classic.upload(client, path, remote, content_type)
     if routed is not None:
         return routed
     signed = rest.upload_file_url(client, filename=remote, content_type=content_type)

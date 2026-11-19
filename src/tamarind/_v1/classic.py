@@ -623,17 +623,22 @@ def _entries(client: Router, **query: Any) -> Any:
 
 
 def get_files(client: Router, params: dict[str, Any]) -> list[str]:
-    """GET /files → listFiles: the folder's files (not folders, not zips) by path, in
-    classic's order: the five newest first, then the rest by name."""
+    """GET /files → listFiles: the folder's files (not zips) by path, in classic's order:
+    the five newest first, then the rest by name. With ``includeFolders`` the folders are
+    listed too, as ``path/``, and count as the newest (classic dates them "now"). Classic
+    reads no other option (``includeAll``, ``includeMetadata``, paging: pages/api/files.js
+    passes only the folder and includeFolders), so neither does this."""
     folder = params.get("folder") or None
-    files = [
-        e
-        for e in _entries(client, **({"folder": folder} if folder else {}))
-        if e.get("type") == "file" and not str(e.get("path", "")).endswith(".zip")
-    ]
+    with_folders = str(params.get("includeFolders")).lower() == "true"
+    entries = list(_entries(client, **({"folder": folder} if folder else {})))
+    files = [e for e in entries if e.get("type") == "file" and not str(e.get("path", "")).endswith(".zip")]
     files.sort(key=lambda e: str(e.get("modifiedAt") or ""), reverse=True)
-    rest = sorted(files[5:], key=lambda e: (str(e.get("path")).casefold(), str(e.get("path"))))
-    return [str(e.get("path")) for e in files[:5] + rest]
+    paths = [str(e.get("path")) for e in files]
+    if with_folders:
+        folders = [str(e.get("path")).rstrip("/") + "/" for e in entries if e.get("type") == "folder"]
+        paths = folders + paths
+    rest = sorted(paths[5:], key=lambda path: (path.casefold(), path))
+    return paths[:5] + rest
 
 
 def get_folders(client: Router, params: dict[str, Any]) -> dict[str, Any]:
@@ -776,13 +781,65 @@ def route(method: str, path: str) -> Route | None:
 # -- uploads ------------------------------------------------------------------------------
 
 
-def upload(http: Any, path: Path, remote: str) -> dict[str, Any] | None:
+def upload(http: Any, path: Path, remote: str, content_type: str | None = None) -> dict[str, Any] | None:
     """An upload on v1 (uploadFile, the PUTs, completeFileUpload), answered as classic's
     upload is: ``{ok, filename, bytes}``. None when v1 isn't on for this key."""
     if not http.api_key or not http.uses_v1():
         return None
     try:
-        http.v1().files.upload(path, path=remote)
+        http.v1().files.upload(path, path=remote, content_type=content_type)
     except TamarindError as exc:
         _raise_classic(exc)
     return {"ok": True, "filename": remote, "bytes": path.stat().st_size}
+
+
+# -- responses of the requests v1 serves at the same path --------------------------------
+
+_UPLOAD_SESSION = re.compile(r"^custom-tools/[^/]+/uploads$")
+_NODE_RUN_MOLECULES = re.compile(r"^pipelines/runs/[^/]+/node-runs/[^/]+/molecules$")
+
+
+def rebuild_response(method: str, path: str, response: Any) -> Any:
+    """A v1 answer to a request sent at the same path (custom tools, pipeline runs), in
+    the shape the classic contract's parsers read where v1 renamed a field:
+    createCustomToolUpload's ``id`` is classic's ``uploadId``, and listNodeRunMolecules'
+    page of ``items`` (each with ``id``) is classic's ``molecules`` (each ``complexId``).
+    Everything else is the same shape, so it is passed through."""
+    import httpx
+
+    if method == "POST" and _UPLOAD_SESSION.match(path):
+        rebuild = _upload_session
+    elif method == "GET" and _NODE_RUN_MOLECULES.match(path):
+        rebuild = _node_run_molecules
+    else:
+        return response
+    try:
+        body = response.json()
+    except ValueError:
+        return response
+    if not isinstance(body, dict):
+        return response
+    headers = {
+        k: v for k, v in response.headers.items()
+        if k.lower() not in ("content-length", "content-encoding", "transfer-encoding")
+    }
+    return httpx.Response(response.status_code, json=rebuild(body), headers=headers, request=response.request)
+
+
+def _upload_session(body: dict[str, Any]) -> dict[str, Any]:
+    if "uploadId" in body or "id" not in body:
+        return body
+    out = {k: v for k, v in body.items() if k != "id"}
+    out["uploadId"] = body["id"]
+    return out
+
+
+def _node_run_molecules(body: dict[str, Any]) -> dict[str, Any]:
+    if "molecules" in body or not isinstance(body.get("items"), list):
+        return body
+    molecules = []
+    for item in body["items"]:
+        if isinstance(item, dict) and "id" in item and "complexId" not in item:
+            item = {"complexId": item["id"], **{k: v for k, v in item.items() if k != "id"}}
+        molecules.append(item)
+    return {"molecules": molecules, "nextCursor": body.get("nextCursor")}

@@ -43,7 +43,7 @@ enabled for this account yet" (exit 2) and send nothing.
 | `files list`, `files stats`, `files folders` | listFiles |
 | `files upload` | uploadFile |
 | `files delete` | deleteFile |
-| `custom-tools …` | the same operations at the v1 base; `custom-tools test` is submitJob pinned to the version |
+| `custom-tools …` | the same operations at the v1 base; `custom-tools test` is submitJob pinned to the version; a build's upload session (v1 `id`) is read as classic's `uploadId` |
 
 In the SDK, `Tamarind().jobs`, `.files`, `.custom_tools`, `.pipelines.get_run` and the
 `tamarind.rest` functions follow the same table: the SDK and the CLI share one mapping
@@ -119,6 +119,15 @@ run doesn't appear in the website's Test history.
 
 **files delete of a missing file:** v1 answers 404 (exit 4); classic answers "File deleted
 successfully".
+
+**SDK pipeline runs:** `pipelines.get_run` reads v1's run (the same fields, plus
+`failureReason`). A node run's `molecules()` page is v1's, read as classic's: each
+molecule's `complex_id` is v1's molecule `id`, the id the `/molecules` operations take.
+
+**SDK `files.list`:** like classic, it reads only `folder` and `include_folders` (classic's
+`pages/api/files.js` ignores `include_all`, `include_metadata` and the paging options).
+With `include_folders`, folders are listed as `path/` ahead of the newest files, as
+classic dates them "now".
 
 **SDK `jobs.list` filters:** `kind`, `status`, `tool` and `search` are v1's. With v1 off,
 passing one raises "isn't enabled for this account yet"; they can't be combined with

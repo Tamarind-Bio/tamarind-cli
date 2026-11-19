@@ -437,6 +437,39 @@ def test_build_uploads_archive_and_starts_version_atomically(tmp_path: Path) -> 
 
 
 @respx.mock
+def test_with_v1_on_a_build_reads_v1s_upload_session(tmp_path: Path, monkeypatch) -> None:
+    """v1 names the upload session's id `id`; the build still sends it as `uploadId`."""
+    from conftest import turn_v1_on
+
+    monkeypatch.setenv("TAMARIND_V1_API_BASE", "https://v1.test")
+    turn_v1_on(monkeypatch)
+    _source(tmp_path)
+    digest = _archive_digest(tmp_path)
+    respx.get("https://v1.test/custom-tools/example", params__eq={}).mock(
+        return_value=httpx.Response(200, json=_tool(), headers={"ETag": '"opaque-validator"'})
+    )
+    respx.post("https://v1.test/custom-tools/example/uploads").mock(
+        return_value=httpx.Response(201, json={
+            "id": "upload-1", "uploadUrl": UPLOAD, "uploadMethod": "PUT",
+            "uploadHeaders": {"Content-Type": "application/zip"},
+            "expiresAt": "2026-08-15T00:15:00Z", "maxBytes": 1024,
+        })
+    )
+    respx.put(UPLOAD).mock(return_value=httpx.Response(200))
+    build = respx.post("https://v1.test/custom-tools/example/build").mock(
+        return_value=httpx.Response(
+            202,
+            json={"action": "reuse_image", "version": _version(source_digest=digest)},
+            headers={"ETag": '"version-etag"', "Location": f"./versions/{VERSION}"},
+        )
+    )
+    with Tamarind(api_key="key", api_base="https://app.tamarind.bio/api") as client:
+        result = client.custom_tools.get("example").build(tmp_path, idempotency_key="release-1")
+    assert json.loads(build.calls.last.request.content) == {"uploadId": "upload-1", "expectedSourceDigest": digest}
+    assert result.version.version == VERSION
+
+
+@respx.mock
 def test_build_rejects_archive_larger_than_upload_session_limit(tmp_path: Path) -> None:
     _source(tmp_path)
     respx.get(f"{BASE}custom-tools/example", params__eq={}).mock(

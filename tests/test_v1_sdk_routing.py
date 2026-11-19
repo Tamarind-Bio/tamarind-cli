@@ -188,3 +188,91 @@ def test_paginate_takes_only_v1_operations():
     with Tamarind(api_key="k", api_base=CLASSIC) as client:
         with pytest.raises(TypeError, match="v1 list operation"):
             Tamarind.paginate(client.jobs.list)
+
+
+@respx.mock
+def test_node_run_molecules_from_v1_are_read_in_classics_shape(on):
+    run = {
+        "id": "run_1", "templateId": "t1", "templateVersion": None, "name": None, "source": "production",
+        "failureReason": None, "status": "finished", "startedAt": "2026-11-19T00:00:00Z", "completedAt": None,
+        "inputs": {},
+        "nodeRuns": [{
+            "id": "nr_1", "nodeId": "dock", "label": "Dock", "nodeType": "tool", "status": "finished",
+            "startedAt": None, "completedAt": None, "outputCount": 1, "jobsTotal": 1, "jobsComplete": 1,
+            "outputGroup": None, "failureReason": None,
+        }],
+    }
+    respx.get(f"{V1}/pipelines/runs/run_1").mock(return_value=httpx.Response(200, json=run))
+    page = respx.get(f"{V1}/pipelines/runs/run_1/node-runs/nr_1/molecules").mock(
+        return_value=httpx.Response(200, json={
+            "items": [{"id": "mol_1", "name": "c1", "moleculeType": "protein", "sequence": "MK",
+                       "scores": {"dock": {"score": -8.2}}, "hasStructure": True}],
+            "nextCursor": "page-2", "inputGroupId": "grp_1", "inputGroupExact": True,
+        })
+    )
+    with Tamarind(api_key="k", api_base=CLASSIC) as client:
+        molecules = client.pipelines.get_run("run_1").node_runs[0].molecules(limit=1)
+    assert molecules.next_cursor == "page-2"
+    assert [(m.complex_id, m.name, m.has_structure) for m in molecules.items] == [("mol_1", "c1", True)]
+    assert page.calls[0].request.url.params["limit"] == "1"
+
+
+@respx.mock
+def test_uploads_send_the_callers_content_type_to_v1(on, tmp_path):
+    local = tmp_path / "a.pdb"
+    local.write_text("ATOM\n")
+    route = respx.post(f"{V1}/files").mock(
+        return_value=httpx.Response(201, json={"file": {"path": "a.pdb"}, "upload": None})
+    )
+    with Tamarind(api_key="k", api_base=CLASSIC) as client:
+        client.files.upload(local, content_type="chemical/x-pdb")
+    assert json.loads(route.calls[0].request.content)["contentType"] == "chemical/x-pdb"
+
+
+@respx.mock
+def test_files_list_with_folders_lists_them_as_classic_does(on):
+    respx.get(f"{V1}/files").mock(return_value=httpx.Response(200, json={"items": [
+        {"path": "runs", "type": "folder"},
+        {"path": "a.pdb", "type": "file", "modifiedAt": "2026-11-19T01:00:00Z"},
+        {"path": "b.zip", "type": "file", "modifiedAt": "2026-11-19T02:00:00Z"},
+    ], "nextCursor": None}))
+    with Tamarind(api_key="k", api_base=CLASSIC) as client:
+        assert client.files.list(include_folders=True) == ["runs/", "a.pdb"]
+        assert client.files.list() == ["a.pdb"]
+
+
+def test_an_async_request_asks_the_switch_off_the_event_loop(monkeypatch):
+    import asyncio
+    import threading
+    import time
+
+    from tamarind._v1 import switch
+
+    main = threading.get_ident()
+    seen: list[int] = []
+
+    def slow_probe(*args, **kwargs):
+        seen.append(threading.get_ident())
+        time.sleep(0.2)
+        return False
+
+    monkeypatch.setattr(switch, "probe", slow_probe)
+    monkeypatch.setattr(HTTPClient, "_classic_request_async", lambda self, *a, **k: asyncio.sleep(0, "answered"))
+
+    async def run() -> tuple[str, int]:
+        ticks = 0
+
+        async def tick() -> None:
+            nonlocal ticks
+            while True:
+                ticks += 1
+                await asyncio.sleep(0.01)
+
+        ticker = asyncio.create_task(tick())
+        with HTTPClient(CLASSIC, "k") as client:
+            answer = await client.request_async("GET", "custom-tools")
+        ticker.cancel()
+        return answer, ticks
+
+    answer, ticks = asyncio.run(run())
+    assert answer == "answered" and seen and seen[0] != main and ticks >= 5
