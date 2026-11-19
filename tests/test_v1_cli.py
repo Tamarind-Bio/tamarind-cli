@@ -268,6 +268,7 @@ def test_submit_sends_kind_tool_settings_and_name(v1, tmp_path):
     res = runner.invoke(app, ["--json", "submit", "esmfold", "-i", str(settings), "-n", "fold-1", "--low-priority"])
     assert _json(res)["id"] == "job_00000000-0000-0000-0000-000000000001"
     assert [c[0] for c in v1.calls] == ["jobs.submit"]  # no separate validate call on v1
+    assert v1.calls[0][2].pop("idempotency_key")  # the CLI picks one, so a retry can reuse it
     assert v1.calls[0][2] == {
         "body": {
             "kind": "job",
@@ -413,7 +414,7 @@ def test_logs_tails_lines(v1):
 
 
 def test_cancel_batch_by_name(v1):
-    v1.answers["jobs.list"] = {"items": [{"id": "batch_00000000-0000-0000-0000-000000000002"}], "nextCursor": None}
+    v1.answers["jobs.list"] = {"items": [{"id": "batch_00000000-0000-0000-0000-000000000002", "kind": "batch"}], "nextCursor": None}
     v1.answers["jobs.cancel"] = {"id": "batch_00000000-0000-0000-0000-000000000002", "status": "Stopped"}
     res = runner.invoke(app, ["--json", "cancel", "--batch", "b2"])
     assert _json(res)["status"] == "Stopped"
@@ -613,3 +614,67 @@ def test_a_pipeline_runs_archive_comes_from_archive_pipeline_run(v1, tmp_path, m
 def test_an_empty_example_is_a_runnable_example(v1):
     v1.answers["tools.schema"] = {"tool": "noargs", "version": "1", "schema": {}, "example": {}}
     assert _json(runner.invoke(app, ["--json", "schema", "noargs", "--example"])) == {"tool": "noargs", "settings": {}}
+
+
+def test_cancel_batch_takes_a_pipeline_run_name_too(v1):
+    run = "run_0f8fad5b-d9cb-469f-a165-70867728950e"
+    v1.answers["jobs.list"] = {"items": [{"id": run, "kind": "pipeline"}], "nextCursor": None}
+    v1.answers["jobs.cancel"] = {"id": run, "status": "Stopped"}
+    _json(runner.invoke(app, ["--json", "cancel", "--batch", "my-run"]))
+    assert v1.calls[0] == ("jobs.list", (), {"name": "my-run"})
+    assert v1.calls[-1][1] == (run,)
+    v1.answers["jobs.list"] = {"items": [{"id": "job_0f8fad5b-d9cb-469f-a165-70867728950e", "kind": "job"}], "nextCursor": None}
+    res = runner.invoke(app, ["--json", "cancel", "--batch", "a-single-job"])
+    assert isinstance(res.exception, NotFoundError)
+
+
+def test_an_unclear_submit_outcome_says_how_to_retry_safely(v1):
+    from tamarind.errors import APIError
+
+    v1.answers["jobs.submit"] = APIError("502 bad_gateway", status_code=502)
+    res = runner.invoke(app, ["--json", "submit", "esmfold", "--set", "sequence=M"])
+    key = v1.calls[-1][2]["idempotency_key"]
+    assert res.exception.detail["idempotencyKey"] == key
+    assert f"--idempotency-key {key}" in str(res.exception)
+    v1.answers["jobs.submit"] = APIError("422 validation_failed", status_code=422)
+    v1.answers["jobs.submit"].status = 422
+    res = runner.invoke(app, ["--json", "submit", "esmfold", "--set", "sequence=M", "--idempotency-key", "mine"])
+    assert "idempotency" not in str(res.exception)  # refused, so nothing to retry
+    assert v1.calls[-1][2]["idempotency_key"] == "mine"
+
+
+def test_values_outside_a_contract_enum_are_usage_errors(v1):
+    res = runner.invoke(app, ["--json", "usage", "--metric", "bogus"])
+    assert isinstance(res.exception, UsageError) and v1.calls == []
+    res = runner.invoke(app, ["--json", "jobs", "--status", "Running,Bogus"])
+    assert isinstance(res.exception, UsageError) and v1.calls == []
+
+
+def test_login_refuses_a_blank_key_on_v1(v1):
+    res = runner.invoke(app, ["--json", "auth", "login", "--api-key", "   "])
+    assert res.exception is not None and res.exception.exit_code == 3
+    assert v1.calls == []
+
+
+def test_submit_wait_download_shares_one_timeout(v1, tmp_path, monkeypatch):
+    from tamarind.cli.v1 import commands as v1cmds
+
+    v1.answers["jobs.submit"] = {"kind": "job", "id": "job_0f8fad5b-d9cb-469f-a165-70867728950e", "name": "n", "status": "In Queue"}
+    clock = [1000.0]
+    monkeypatch.setattr(v1cmds.time, "monotonic", lambda: clock[0])
+
+    def waited(*args, **kwargs):
+        clock[0] += 60  # the job took 60 of the 100 seconds
+        return {"id": "job_0f8fad5b-d9cb-469f-a165-70867728950e", "name": "n", "status": "Complete"}
+
+    v1.answers["jobs.wait"] = waited
+    seen = {}
+
+    def fake_archive(client, job_id, *, body, wait, timeout):
+        seen["timeout"] = timeout
+        return {"downloadUrl": "https://s3.example/x.zip"}
+
+    monkeypatch.setattr(v1cmds, "_archive", fake_archive)
+    monkeypatch.setattr("tamarind.cli.commands.jobs._download", lambda url, dest: 1)
+    runner.invoke(app, ["--json", "submit", "esmfold", "--set", "sequence=M", "--wait", "--timeout", "100", "--download", str(tmp_path)])
+    assert seen["timeout"] == 40

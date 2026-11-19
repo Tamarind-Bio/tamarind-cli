@@ -87,6 +87,18 @@ def resolve_id(
     return str(items[0]["id"])
 
 
+def resolve_batch_or_run(client: Any, ref: str) -> str:
+    """``--batch``: a batch or a pipeline run, by id or by name (today's flag takes both)."""
+    ref = ref.strip()
+    if _ID.match(ref):
+        return ref
+    page = call(client, "listJobs", name=ref)
+    items = [i for i in (page.get("items") or []) if i.get("kind") in ("batch", "pipeline")]
+    if not items:
+        raise NotFoundError(f"No batch or pipeline run named '{ref}'.", detail={"name": ref})
+    return str(items[0]["id"])
+
+
 # -- identity ----------------------------------------------------------------
 
 
@@ -101,6 +113,8 @@ def rejected_key(exc: TamarindError) -> bool:
 
 
 def key_works(state: Any, api_key: str) -> bool:
+    if not api_key.strip():
+        return False
     try:
         with sdk.make_client(state, api_key=api_key) as client:
             call(client, "getMe")
@@ -260,6 +274,10 @@ def _wait(client: Any, job_id: str, state: Any, *, poll_interval: float, timeout
     )
 
 
+def _remaining(deadline: float | None) -> float | None:
+    return None if deadline is None else max(deadline - time.monotonic(), 0.0)
+
+
 def _archive(
     client: Any, job_id: str, *, body: dict[str, Any] | None, wait: bool, timeout: float | None
 ) -> dict[str, Any]:
@@ -285,6 +303,32 @@ def _archive(
         time.sleep(retry)
 
 
+def _submit(client: Any, body: dict[str, Any], idempotency_key: str | None) -> dict[str, Any]:
+    """``submitJob`` with an Idempotency-Key the CLI knows, so an unclear outcome can be
+    retried without a second job: the key goes into the error with the command to rerun."""
+    import uuid
+
+    key = idempotency_key or str(uuid.uuid4())
+    try:
+        return call(client, "submitJob", body=body, idempotency_key=key)
+    except TamarindError as exc:
+        status = getattr(exc, "status", None)
+        if isinstance(status, int) and status < 500:
+            raise  # refused: nothing was created
+        problem = getattr(exc, "problem", None) or None
+        err = TamarindError(
+            f"{exc.message} The submit may or may not have been accepted; run the same "
+            f"command again with --idempotency-key {key} to get the same job, not a second one.",
+            detail={
+                "idempotencyKey": key,
+                "outcomeMayBeAmbiguous": True,
+                "problem": problem,
+            },
+        )
+        err.exit_code = exc.exit_code
+        raise err from exc
+
+
 def submit(
     state: Any,
     body: dict[str, Any],
@@ -299,8 +343,9 @@ def submit(
 
     from ..commands.jobs import _download
 
+    deadline = None if timeout is None else time.monotonic() + timeout
     with sdk.make_client(state) as client:
-        submitted = call(client, "submitJob", body=body, idempotency_key=idempotency_key)
+        submitted = _submit(client, body, idempotency_key)
         if not wait:
             output.emit(
                 render.redact(submitted),
@@ -313,7 +358,7 @@ def submit(
         final = _wait(client, submitted["id"], state, poll_interval=poll_interval, timeout=timeout)
         result["final"] = final
         if download and final.get("status") == "Complete":
-            link = _archive(client, final["id"], body=None, wait=True, timeout=timeout)
+            link = _archive(client, final["id"], body=None, wait=True, timeout=_remaining(deadline))
             dest = download / Path(f"{final.get('name') or final['id']}.zip").name
             written = _download(link["downloadUrl"], dest)
             result["download"] = {"path": str(dest), "bytes": written}
@@ -333,7 +378,7 @@ def batch(
                 raise ValidationError(
                     f"Batch settings invalid: {_validation_message(report)}", detail=report
                 )
-        submitted = call(client, "submitJob", body=body, idempotency_key=idempotency_key)
+        submitted = _submit(client, body, idempotency_key)
     output.emit(
         render.redact(submitted),
         state.output,
@@ -426,6 +471,7 @@ def results(
 
     if file and pdbs_only:
         raise UsageError("--file and --pdbs-only can't be combined.")
+    deadline = None if timeout is None else time.monotonic() + timeout
     with sdk.make_client(state) as client:
         job_id = resolve_id(client, ref, organization=organization, email=email)
         result: dict[str, Any] = {"id": job_id}
@@ -444,7 +490,11 @@ def results(
             # `--pdbs-only` is the archive's `glob`; the server answers 422 `not_supported`
             # until choosing files is built, and honors it from then on.
             link = _archive(
-                client, job_id, body={"glob": "*.pdb"} if pdbs_only else None, wait=wait, timeout=timeout
+                client,
+                job_id,
+                body={"glob": "*.pdb"} if pdbs_only else None,
+                wait=wait,
+                timeout=_remaining(deadline),
             )
             url = link["downloadUrl"]
             name = f"{job_id if _ID.match(ref.strip()) else ref}.zip"
@@ -471,7 +521,7 @@ def logs(
 
 def cancel(state: Any, ref: str | None, batch: str | None, *, reason: str | None = None) -> None:
     with sdk.make_client(state) as client:
-        target = resolve_id(client, batch, kind="batch") if batch else resolve_id(client, ref or "")
+        target = resolve_batch_or_run(client, batch) if batch else resolve_id(client, ref or "")
         job = call(client, "cancelJob", target, body={"reason": reason} if reason else {})
     output.emit(render.redact(job), state.output, human=status_line(job))
 

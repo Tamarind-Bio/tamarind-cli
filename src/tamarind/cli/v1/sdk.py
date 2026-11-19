@@ -36,7 +36,8 @@ def make_client(state: Any, *, api_key: str | None = None) -> Any:
     from tamarind.v1 import Tamarind as V1Client  # the v1 SDK's client
 
     cfg = state.config()
-    return V1Client(api_key=api_key or cfg.api_key, base_url=cfg.v1_api_base.rstrip("/"))
+    key = api_key if api_key is not None else cfg.api_key
+    return V1Client(api_key=key, base_url=cfg.v1_api_base.rstrip("/"))
 
 
 def wait(
@@ -94,6 +95,20 @@ def method(client: Any, sdk_name: str) -> Callable[..., Any]:
     return target
 
 
+def check_enums(op: dict[str, Any], query: dict[str, Any]) -> None:
+    """A value the contract doesn't list for a parameter is a usage error, not a traceback."""
+    for param in op["query"]:
+        allowed = param.get("enum")
+        value = query.get(param["name"])
+        if not allowed or value is None:
+            continue
+        for item in value if isinstance(value, (list, tuple)) else [value]:
+            if str(item) not in allowed:
+                raise UsageError(
+                    f"--{param['option']} {item!r} isn't one of: {', '.join(allowed)}."
+                )
+
+
 def invoke(
     client: Any,
     op: dict[str, Any],
@@ -104,6 +119,7 @@ def invoke(
     **query: Any,
 ) -> Any:
     """Call one operation through its SDK method; returns the plain answer (None for 204)."""
+    check_enums(op, query)
     kwargs: dict[str, Any] = {argument(k): v for k, v in query.items() if v is not None}
     if body is not None:
         kwargs["body"] = body
@@ -117,6 +133,7 @@ def invoke(
 def collect(client: Any, op: dict[str, Any], *path_args: str, **query: Any) -> dict[str, Any]:
     """All items of a list operation as one page, ``{items, nextCursor: null}``,
     through the SDK's auto-paging helper."""
+    check_enums(op, query)
     kwargs = {argument(k): v for k, v in query.items() if v is not None}
     items = client.paginate(method(client, op["sdk"]), *path_args, **kwargs)
     return {"items": plain(list(items)), "nextCursor": None}
