@@ -143,7 +143,10 @@ class Transport:
         merged.update(headers or {})
         repeat_safe = repeat_safe or method in _SAFE_METHODS or "Idempotency-Key" in merged
         return self._with_retries(
-            lambda: self._client.request(method, url, params=params, headers=merged, json=json),
+            # Never follow a redirect with the key, even on a caller's client that would.
+            lambda: self._client.request(
+                method, url, params=params, headers=merged, json=json, follow_redirects=False
+            ),
             repeat_safe=repeat_safe,
             api=True,
         )

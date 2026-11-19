@@ -567,3 +567,17 @@ def test_files_over_the_single_put_limit_always_go_in_parts(
     respx.post(f"{BASE}/files/complete").mock(return_value=httpx.Response(200, json={}))
     client.files.upload(b"0123456789", "m.bin")
     assert json.loads(start.calls.last.request.content)["multipart"] is True
+
+
+@respx.mock
+def test_a_callers_redirect_following_client_never_carries_the_key() -> None:
+    sdk = Tamarind(
+        "test-key", base_url=BASE, http_client=httpx.Client(follow_redirects=True), max_retries=0
+    )
+    respx.get(f"{BASE}/files/content").mock(
+        return_value=httpx.Response(302, headers={"Location": "https://storage.test/x"})
+    )
+    elsewhere = respx.get("https://storage.test/x").mock(return_value=httpx.Response(200))
+    with pytest.raises(ProblemError):
+        sdk.files.get(path="a.pdb", delivery="redirect")
+    assert elsewhere.call_count == 0
