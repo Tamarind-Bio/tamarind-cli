@@ -16,15 +16,14 @@ Check (CI)::
 
     uv run --extra dev python scripts/sync_api_v1_contract.py --check
 
-The vendored YAML is byte-identical to the producer's file. Generation runs on a
-projection of it that works around two openapi-python-client 0.28.4 limits, so
-the same input always yields the same client; see ``project_contract``.
+The vendored YAML is byte-identical to the producer's file, and the client is
+generated from it as it is: a generator warning (a skipped part of the contract)
+fails both sync and check.
 """
 
 from __future__ import annotations
 
 import argparse
-from copy import deepcopy
 import filecmp
 from hashlib import sha256
 import json
@@ -91,7 +90,7 @@ def sync(
     if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit):
         raise SystemExit("source commit must be a full lowercase Git SHA")
     _verify_committed_source(checkout, commit, path, raw)
-    projected = project_contract(load_contract(raw))
+    document = load_contract(raw)
     lock = {
         "artifactSha256": sha256(raw).hexdigest(),
         "generator": GENERATOR,
@@ -101,14 +100,14 @@ def sync(
         "sourceRepository": repository,
     }
     with TemporaryDirectory(dir=root) as directory:
-        generated = generate(root, projected, Path(directory))
+        generated = generate(root, document, Path(directory))
         (root / SPEC).write_bytes(raw)
         (root / LOCK).write_text(json.dumps(lock, indent=2, sort_keys=True) + "\n")
         target = root / TARGET
         if target.exists():
             shutil.rmtree(target)
         shutil.copytree(generated, target)
-        (root / METADATA).write_text(contract_metadata(projected))
+        (root / METADATA).write_text(contract_metadata(document))
 
 
 def check(root: Path) -> None:
@@ -122,12 +121,12 @@ def check(root: Path) -> None:
         raise SystemExit("unsupported API v1 producer")
     if sha256(raw).hexdigest() != lock["artifactSha256"]:
         raise SystemExit(f"{SPEC} does not match its provenance lock")
-    projected = project_contract(load_contract(raw))
+    document = load_contract(raw)
     with TemporaryDirectory(dir=root) as directory:
-        generated = generate(root, projected, Path(directory))
+        generated = generate(root, document, Path(directory))
         differences = _differences(generated, root / TARGET)
     metadata = root / METADATA
-    if not metadata.is_file() or metadata.read_text() != contract_metadata(projected):
+    if not metadata.is_file() or metadata.read_text() != contract_metadata(document):
         differences.append(f"changed {METADATA}")
     if differences:
         listed = "\n  ".join(differences[:20])
@@ -151,33 +150,6 @@ def operations(document: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]]
             if method in HTTP_METHODS and isinstance(operation, dict):
                 found.append((method, path, operation))
     return found
-
-
-def project_contract(document: dict[str, Any]) -> dict[str, Any]:
-    """Return the contract with two generator workarounds applied.
-
-    Neither changes the wire contract; each is a no-op once the spec no longer
-    needs it.
-
-    1. openapi-python-client refuses a ``date``-formatted header and then drops the
-       whole operation, so the optional ``Tamarind-Version`` header is generated as
-       a plain string (the server still checks the ``YYYY-MM-DD`` form).
-    2. The inline ``Batch.source`` enum would be named ``BatchSource``, which is
-       already the schema for a file-backed batch's rows; the generator then drops
-       ``Batch`` and every operation that returns it. A title gives the enum its
-       own class name.
-    """
-    projected = deepcopy(document)
-    for parameter in _header_parameters(projected):
-        schema = parameter.get("schema")
-        if isinstance(schema, dict) and schema.get("format") in {"date", "date-time"}:
-            schema.pop("format")
-    schemas = projected.get("components", {}).get("schemas", {})
-    batch_source = schemas.get("Batch", {}).get("properties", {}).get("source")
-    if isinstance(batch_source, dict) and "enum" in batch_source and "title" not in batch_source:
-        if "BatchSource" in schemas:
-            batch_source["title"] = "Channel"
-    return projected
 
 
 def contract_metadata(document: dict[str, Any]) -> str:
@@ -217,9 +189,9 @@ def _snake(name: str) -> str:
     return "".join(f"_{c.lower()}" if c.isupper() else c for c in name).lstrip("_")
 
 
-def generate(root: Path, projected: dict[str, Any], staging: Path) -> Path:
-    spec = staging / "api-v1.projected.json"
-    spec.write_text(json.dumps(projected, indent=2, sort_keys=True) + "\n")
+def generate(root: Path, document: dict[str, Any], staging: Path) -> Path:
+    spec = staging / "api-v1.json"
+    spec.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
     output = staging / "generated"
     completed = subprocess.run(
         [
@@ -248,25 +220,6 @@ def generate(root: Path, projected: dict[str, Any], staging: Path) -> Path:
     if cache.exists():
         shutil.rmtree(cache)
     return output
-
-
-def _header_parameters(document: dict[str, Any]) -> list[dict[str, Any]]:
-    found = [
-        parameter
-        for parameter in document.get("components", {}).get("parameters", {}).values()
-        if isinstance(parameter, dict) and parameter.get("in") == "header"
-    ]
-    for item in document["paths"].values():
-        candidates = list(item.get("parameters", []))
-        for method, operation in item.items():
-            if method in HTTP_METHODS and isinstance(operation, dict):
-                candidates.extend(operation.get("parameters", []))
-        found.extend(
-            parameter
-            for parameter in candidates
-            if isinstance(parameter, dict) and parameter.get("in") == "header"
-        )
-    return found
 
 
 def _differences(expected: Path, actual: Path) -> list[str]:

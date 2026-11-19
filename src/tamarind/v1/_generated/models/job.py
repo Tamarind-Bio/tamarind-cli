@@ -9,7 +9,7 @@ from attrs import field as _attrs_field
 from dateutil.parser import isoparse
 
 from ..models.job_status import JobStatus
-from ..models.job_summary_source import JobSummarySource
+from ..models.submission_channel import SubmissionChannel
 
 if TYPE_CHECKING:
     from ..models.job_settings import JobSettings
@@ -45,7 +45,9 @@ class Job:
         runtime_seconds (float | None):
         scores (JobSummaryScoresType0 | None): The tool's headline metrics, when finished. A single number the tool
             recorded reads as `{"score": <number>}`.
-        source (JobSummarySource): The channel the job was submitted through; `web` when none was recorded.
+        source (SubmissionChannel): The channel a job, batch or pipeline run was submitted through. Tamarind's SDK, CLI,
+            MCP and agents declare theirs with `X-Tamarind-Client-Channel` (see Attribution in the introduction); any other
+            API-key submit is `api`, and the app's is `web`.
         started_at (datetime.datetime | None):
         status (JobStatus): Shared by jobs, batches and pipeline runs. `Complete`, `Stopped` and `Failed` are final.
             `Failed` means it ended in an error (`stopReason.kind` `error`). `Stopped` means it was canceled, hit a limit,
@@ -84,7 +86,7 @@ class Job:
     project_id: None | str
     runtime_seconds: float | None
     scores: JobSummaryScoresType0 | None
-    source: JobSummarySource
+    source: SubmissionChannel
     started_at: datetime.datetime | None
     status: JobStatus
     status_detail: None | str
@@ -333,7 +335,7 @@ class Job:
 
         scores = _parse_scores(d.pop("scores"))
 
-        source = JobSummarySource(d.pop("source"))
+        source = SubmissionChannel(d.pop("source"))
 
         def _parse_started_at(data: object) -> datetime.datetime | None:
             if data is None:

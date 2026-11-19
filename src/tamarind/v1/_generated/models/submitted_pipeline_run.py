@@ -9,7 +9,7 @@ from attrs import field as _attrs_field
 from dateutil.parser import isoparse
 
 from ..models.job_status import JobStatus
-from ..models.pipeline_run_item_source_type_0 import PipelineRunItemSourceType0
+from ..models.submission_channel import SubmissionChannel
 
 if TYPE_CHECKING:
     from ..models.diagnostic import Diagnostic
@@ -44,8 +44,8 @@ class SubmittedPipelineRun:
             poll_after_seconds (int | None): How long to wait before checking again, 30 while `In Queue` and 15 while
                 `Running`. Null once the run is finished.
             project_id (None | str): Null for now.
-            source (None | PipelineRunItemSourceType0): The channel the run was submitted through. Null for a run that
-                recorded none, which is every run started before runs recorded it.
+            source (None | SubmissionChannel): The channel the run was submitted through. Null for a run that recorded none,
+                which is every run started before runs recorded it.
             started_at (datetime.datetime | None): The same time as `createdAt`.
             status (JobStatus): Shared by jobs, batches and pipeline runs. `Complete`, `Stopped` and `Failed` are final.
                 `Failed` means it ended in an error (`stopReason.kind` `error`). `Stopped` means it was canceled, hit a limit,
@@ -70,7 +70,7 @@ class SubmittedPipelineRun:
     pipeline: None | str
     poll_after_seconds: int | None
     project_id: None | str
-    source: None | PipelineRunItemSourceType0
+    source: None | SubmissionChannel
     started_at: datetime.datetime | None
     status: JobStatus
     stop_reason: JobStopReason | None
@@ -123,7 +123,7 @@ class SubmittedPipelineRun:
         project_id = self.project_id
 
         source: None | str
-        if isinstance(self.source, PipelineRunItemSourceType0):
+        if isinstance(self.source, SubmissionChannel):
             source = self.source.value
         else:
             source = self.source
@@ -265,18 +265,18 @@ class SubmittedPipelineRun:
 
         project_id = _parse_project_id(d.pop("projectId"))
 
-        def _parse_source(data: object) -> None | PipelineRunItemSourceType0:
+        def _parse_source(data: object) -> None | SubmissionChannel:
             if data is None:
                 return data
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                source_type_0 = PipelineRunItemSourceType0(data)
+                source_type_0 = SubmissionChannel(data)
 
                 return source_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(None | PipelineRunItemSourceType0, data)
+            return cast(None | SubmissionChannel, data)
 
         source = _parse_source(d.pop("source"))
 
