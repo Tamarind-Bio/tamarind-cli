@@ -67,7 +67,8 @@ class Transport:
         self._headers = headers
         # Signed storage URLs must never see the API key.
         # A caller's client carries their network settings (proxy, trust store), so signed
-        # uploads use it too; the API key is never one of its headers (see _put_unlogged).
+        # uploads go through its transports, but never its headers, cookies or params
+        # (see _put_unlogged).
         self._storage = http_client or httpx.Client(timeout=timeout)
 
     def close(self) -> None:
@@ -178,10 +179,18 @@ class Transport:
     def _put_unlogged(self, url: str, content: Any, headers: Mapping[str, str]) -> httpx.Response:
         """Send a PUT below ``httpx.Client``, whose INFO log line would carry the signed URL
         (a credential) into the application's logs. The transport is the one the client
-        picks for this URL, so ``HTTPS_PROXY``/``NO_PROXY`` routing still applies."""
-        request = self._storage.build_request("PUT", url, content=content, headers=dict(headers))
-        for name in ("x-api-key", "authorization"):
-            request.headers.pop(name, None)
+        picks for this URL, so ``HTTPS_PROXY``/``NO_PROXY`` routing and a caller's proxy and
+        trust settings still apply. The request itself is built fresh, not with
+        ``build_request``: a caller's client would add its default headers, cookies and
+        query params, sending their credentials to the storage host (and its params would
+        replace the URL's signature)."""
+        request = httpx.Request(
+            "PUT",
+            url,
+            content=content,
+            headers=dict(headers),
+            extensions={"timeout": self._storage.timeout.as_dict()},
+        )
         response = self._storage._transport_for_url(request.url).handle_request(request)
         try:
             response.read()
