@@ -441,3 +441,32 @@ def test_all_reports_the_last_pages_scan_state(v1, monkeypatch):
     assert [m["id"] for m in out["items"]] == ["mol_1", "mol_2"]
     assert out["waiting"] is False and out["scanProgress"] == 1.0 and out["nextCursor"] is None
     assert slept == [0.25]
+
+
+def test_download_to_a_new_directory_keeps_its_separator(v1, tmp_path, monkeypatch):
+    import os
+
+    from tamarind.cli.commands import jobs as jobs_cmds
+
+    saved: list[str] = []
+    v1.answers["files.get"] = {"url": "https://s3.example/a.pdb?X-Amz-Signature=s", "sizeBytes": 4}
+    monkeypatch.setattr(jobs_cmds, "_download", lambda url, dest: saved.append(str(dest)) or 4)
+    target = str(tmp_path / "newdir") + os.sep  # doesn't exist yet
+    _json(runner.invoke(app, ["--json", "files", "download", "dir/a.pdb", "-o", target]))
+    assert saved == [str(tmp_path / "newdir" / "a.pdb")]
+
+
+def test_all_keeps_polling_a_waiting_cursor(v1, monkeypatch):
+    import time
+
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    answers = iter(
+        [
+            {"items": [{"id": "mol_1"}], "nextCursor": "c1", "waiting": True, "retryAfterMs": 10},
+            {"items": [], "nextCursor": "c1", "waiting": True, "retryAfterMs": 10, "waitReason": "stuck"},
+            {"items": [{"id": "mol_2"}], "nextCursor": None, "waiting": False},
+        ]
+    )
+    v1.answers["molecules.list"] = lambda **kw: next(answers)
+    out = _json(runner.invoke(app, ["--json", "molecules", "list", "--all"]))
+    assert [m["id"] for m in out["items"]] == ["mol_1", "mol_2"] and out["nextCursor"] is None

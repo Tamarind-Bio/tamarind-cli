@@ -203,10 +203,10 @@ def collect(
         return page
     items = list(page.get("items") or [])
     in_query = any(q["name"] == "cursor" for q in op["query"])
-    seen: set[str] = set()
-    while page.get("nextCursor") and page["nextCursor"] not in seen:
+    # Until the cursor is null, as the SDK's paging does: a waiting page may hand back
+    # the same cursor to ask again.
+    while page.get("nextCursor"):
         cursor = page["nextCursor"]
-        seen.add(cursor)
         if page.get("waiting") and isinstance(page.get("retryAfterMs"), (int, float)):
             time.sleep(page["retryAfterMs"] / 1000)
         if in_query:

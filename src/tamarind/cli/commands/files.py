@@ -191,7 +191,7 @@ def delete(
 def download(
     ctx: typer.Context,
     path: str = typer.Argument(..., help="The file's path in your workspace, e.g. targets/1abc.pdb."),
-    output_path: Optional[Path] = typer.Option(
+    output_path: Optional[str] = typer.Option(
         None, "--output", "-o", help="Where to save it (a directory or a file; default: here)."
     ),
     show_url: bool = typer.Option(

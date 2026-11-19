@@ -7,6 +7,7 @@ selected they keep their classic code, see :mod:`.classic_routes`.)
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -78,9 +79,12 @@ def resolve_id(
 
 
 def download_link(
-    state: Any, operation_id: str, *args: str, path: str, dest: Path | None, show_url: bool
+    state: Any, operation_id: str, *args: str, path: str, dest: str | None, show_url: bool
 ) -> None:
-    """``files download`` / ``jobs download``: fetch a file's link and save it, or print it."""
+    """``files download`` / ``jobs download``: fetch a file's link and save it, or print it.
+
+    ``dest`` is the ``--output`` text as given: a trailing separator (``newdir/``) means
+    a directory even before it exists, which a ``Path`` would forget."""
     from ..commands.jobs import _download
 
     with sdk.make_client(state) as client:
@@ -88,8 +92,8 @@ def download_link(
     if show_url:
         output.emit(link, state.output, human=link["url"])  # asked for with --show-url
         return
-    target = dest or Path(".")
-    if target.is_dir() or str(target).endswith(("/", "\\")):
+    target = Path(dest or ".")
+    if target.is_dir() or (dest or "").endswith(("/", "\\", os.sep)):
         target = target / Path(path).name
     written = _download(link["url"], target)
     _emit({"path": str(target), "bytes": written}, state.output, human=str(target))

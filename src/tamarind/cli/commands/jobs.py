@@ -901,7 +901,7 @@ def download_file(
     ctx: typer.Context,
     job: str = typer.Argument(..., help="Job id (job_/batch_) or name."),
     path: str = typer.Option(..., "--path", help="The file's path, from `tamarind jobs files`."),
-    output_path: Optional[Path] = typer.Option(
+    output_path: Optional[str] = typer.Option(
         None, "--output", "-o", help="Where to save it (a directory or a file; default: here)."
     ),
     show_url: bool = typer.Option(
