@@ -11,8 +11,10 @@ from ...config import save_profile
 from ...errors import AuthError
 from ...http import HTTPClient
 from .. import output
+from ..v1 import classic_routes
+from ..v1.generic import ContractGroup
 
-app = typer.Typer(no_args_is_help=True)
+app = typer.Typer(no_args_is_help=True, cls=ContractGroup)
 
 
 def _check_key(api_base: str, api_key: str) -> bool:
@@ -23,6 +25,14 @@ def _check_key(api_base: str, api_key: str) -> bool:
             return True
         except AuthError:
             return False
+
+
+def _key_works(state, api_key: str) -> bool:
+    """Whether the API takes the key (with v1 selected, v1's getMe says)."""
+    cfg = state.config()
+    if cfg.is_v1:
+        return classic_routes.key_works(state, api_key)
+    return _check_key(cfg.api_base, api_key)
 
 
 @app.command()
@@ -43,7 +53,7 @@ def login(
     key = api_key or typer.prompt("Tamarind API key", hide_input=True)
     key = key.strip()
 
-    if not no_verify and not _check_key(cfg.api_base, key):
+    if not no_verify and not _key_works(state, key):
         raise AuthError("That API key was rejected by the API. Not saved.")
 
     save_profile(cfg.profile, api_key=key)
@@ -59,7 +69,7 @@ def status(ctx: typer.Context) -> None:
     """Show the active profile and whether its key works."""
     state = ctx.obj
     cfg = state.config()
-    verified = cfg.has_key and _check_key(cfg.api_base, cfg.api_key)
+    verified = cfg.has_key and _key_works(state, cfg.api_key)
     result = {
         "profile": cfg.profile,
         "hasKey": cfg.has_key,

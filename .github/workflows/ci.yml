@@ -51,11 +51,13 @@ jobs:
           src/tamarind/finetune
           src/tamarind/pipelines
           src/tamarind/v1
+          src/tamarind/cli/v1
           src/tamarind/http.py
           src/tamarind/errors.py
           scripts/sync_custom_tools_contract.py
           scripts/sync_pipelines_contract.py
           scripts/sync_api_v1_contract.py
+          scripts/gen_v1_cli_manifest.py
 
   package:
     name: Build release artifacts

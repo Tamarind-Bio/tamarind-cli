@@ -31,6 +31,7 @@ from .commands import catalog as catalog_cmds
 from .commands import files as files_cmds
 from .commands import jobs as jobs_cmds
 from .commands import custom_tools as custom_tools_cmds
+from .v1.generic import RootGroup
 
 
 # Typer exposes the matching Abort class across both external-Click and
@@ -47,7 +48,20 @@ Abort = typer.Abort
 _active_output_mode = OutputMode(json=not output.is_tty(), quiet=False)
 _GLOBAL_VALUE_OPTIONS = {"--api-key", "--api-base", "--catalog-base", "--profile"}
 _GLOBAL_FLAG_OPTIONS = {"--json", "--no-json", "--quiet", "-q"}
-_COMMAND_GROUPS = {"auth", "custom-tools", "files"}
+# Groups that need a subcommand (`jobs`, `tools` and `usage` run on their own).
+_COMMAND_GROUPS = {
+    "auth",
+    "custom-tools",
+    "files",
+    "keys",
+    "service-accounts",
+    "org",
+    "models",
+    "projects",
+    "pipelines",
+    "molecules",
+    "assays",
+}
 
 
 def _missing_command_message(argv: list[str]) -> str | None:
@@ -90,18 +104,40 @@ class State:
     def config(self) -> Config:
         return load_config(**self._kwargs)
 
+    @property
+    def is_v1(self) -> bool:
+        """Whether this invocation talks to the v1 API (opt-in; classic is the default)."""
+        return self.config().is_v1
+
     def rest_client(self) -> HTTPClient:
+        """Today's job API. With v1 selected, its requests go to v1 instead and the
+        answers are rebuilt in classic's layout (see :mod:`.v1.classic_routes`)."""
         cfg = self.config()
+        if cfg.is_v1:
+            from .v1.classic_routes import ClassicOverV1
+
+            return ClassicOverV1(self)  # type: ignore[return-value]
         return HTTPClient(cfg.api_base, cfg.api_key)
 
     def catalog_client(self) -> HTTPClient:
+        """The catalog (tools, schemas, facets, job logs). With v1 selected, job logs come
+        from v1; the rest stays on the catalog until v1 serves it alike."""
         cfg = self.config()
+        if cfg.is_v1:
+            from .v1.classic_routes import CatalogOverV1
+
+            return CatalogOverV1(self)  # type: ignore[return-value]
         return HTTPClient(cfg.catalog_base, cfg.api_key)
 
     def sdk_client(self) -> Tamarind:
-        """Build the shared SDK with this invocation's resolved credentials."""
+        """Build the shared SDK with this invocation's resolved credentials.
+
+        With v1 selected, its Custom Tools resource talks to the v1 base, which
+        serves the same ``/custom-tools`` operations.
+        """
         cfg = self.config()
-        return Tamarind(api_key=cfg.api_key, api_base=cfg.api_base, profile=cfg.profile)
+        base = cfg.v1_api_base if cfg.is_v1 else cfg.api_base
+        return Tamarind(api_key=cfg.api_key, api_base=base, profile=cfg.profile)
 
 
 app = typer.Typer(
@@ -114,6 +150,7 @@ app = typer.Typer(
     ),
     no_args_is_help=True,
     add_completion=False,
+    cls=RootGroup,
 )
 
 
@@ -203,14 +240,25 @@ def run() -> None:
         # come back as an integer and are forwarded unchanged.
         exit_code = app(standalone_mode=False)
     except TamarindError as exc:
+        # A v1 error carries its whole problem document (code, errors[], requestId);
+        # agents get it under `detail`, and its message already says it for humans.
+        # What a command added on its way out (submit's jobName, phase, recoveryCommand)
+        # is kept beside it.
+        problem = getattr(exc, "problem", None)
+        problem = problem if isinstance(problem, dict) and problem else None
+        added = exc.detail if isinstance(exc.detail, dict) else None
+        if problem is not None:
+            detail = {**problem, **added} if added else problem
+        else:
+            detail = exc.detail
         output.error(
             exc.message,
             _active_output_mode,
             error_type=type(exc).__name__,
             exit_code=exc.exit_code,
-            detail=exc.detail,
+            detail=detail,
         )
-        if exc.detail is not None and not _active_output_mode.json:
+        if exc.detail is not None and (problem is None or added) and not _active_output_mode.json:
             typer.echo(typer.style(str(exc.detail), dim=True), err=True)
         raise SystemExit(exc.exit_code)
     except ClickException as exc:

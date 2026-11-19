@@ -104,6 +104,42 @@ Generated endpoint code owns URL encoding and wire-model parsing. A small resour
 adapter adds strict runtime checks and composes `PipelineRun` → `NodeRun` → molecule
 pages without introducing another public vocabulary.
 
+### 5. The v1 API — source of truth: the v1 contract
+
+`openapi/api-v1.yaml` (vendored from tamarind-website) is the v1 contract. The SDK
+(`tamarind.v1`) is generated from it, one method per operation. The CLI calls v1 only
+through that SDK.
+
+v1 is opt-in (`TAMARIND_API=v1`, or `"api": "v1"` in a profile) until it launches, and
+classic stays the default. v1's base is its own setting (`TAMARIND_V1_API_BASE`, profile
+`"v1_api_base"`); classic's (`TAMARIND_API_BASE`, `--api-base`) is never sent a v1 call.
+
+**Today's commands, on v1.** With v1 selected, every command the CLI already had keeps
+its names, flags, output layout and exit codes: it runs its classic code, and its
+requests go to v1 instead. `tamarind/cli/v1/classic_routes.py` stands in for the classic
+HTTP client (and for the catalog client's job logs). It answers each classic request with
+the v1 operation behind it, and rebuilds v1's answer in the layout classic returns: job
+rows for `jobs`, `status` and `wait`, the verdict for `validate`, `submit-job` and
+`submit-batch`'s answer text, cancel's counts, the logs tail, the files listing in
+classic's order. A field v1 doesn't have is left out; [v1-mode.md](v1-mode.md) lists
+these differences.
+
+There is no fallback: what v1 refuses is raised as v1's error, with the CLI's exit codes,
+so a run with v1 selected shows what v1 does. Only the requests v1 has no form for yet go
+to classic: the catalog (`tools`, `schema`, `modalities`, `functions`), another member's
+jobs (`--organization`, `--email`), `jobs --include-subjobs`, `results --pdbs-only`, the
+logs of a batch or run, and `files delete` of a path and a folder together. With v1 selected the classic base must therefore name the
+same environment as the v1 base.
+
+**New commands come from the contract.** Each operation's `x-clients.cli` names its
+command, and `scripts/gen_v1_cli_manifest.py` writes the manifest the CLI builds them from
+(path parameters → arguments, query parameters → options, a body → `--input`/`--set`).
+They print v1's fields. Where a contract name is also a flat command today (`jobs`,
+`tools`), `tamarind jobs list` and the other contract commands run with v1 selected, and
+`tamarind jobs …` with anything else is today's command. `tests/test_v1_cli_parity.py`
+fails when the manifest is stale, when an operation has no command, or when an argument
+name doesn't match the SDK's.
+
 ## Why not a single binary that re-encodes the API?
 
 A from-scratch client in another language would re-encode the request shapes and

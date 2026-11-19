@@ -883,3 +883,33 @@ def register(app: typer.Typer) -> None:
             resp = rest.delete_job(client, job_name=job_name)
         safe_resp = _sanitize_job_output(resp)
         output.emit(safe_resp, state.output, human=_message(safe_resp))
+
+
+# v1 only: `tamarind jobs download`, one output file of a job saved to disk (v1
+# getJobFile). With v1 selected, `tamarind jobs <contract command>` reaches it and the
+# contract's other `jobs` commands (generic.RootGroup); `tamarind jobs` with anything
+# else is the listing above, unchanged.
+v1_jobs_app = typer.Typer()
+
+
+@v1_jobs_app.command("download")
+def download_file(
+    ctx: typer.Context,
+    job: str = typer.Argument(..., help="Job id (job_/batch_) or name."),
+    path: str = typer.Option(..., "--path", help="The file's path, from `tamarind jobs files`."),
+    output_path: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Where to save it (a directory or a file; default: here)."
+    ),
+    show_url: bool = typer.Option(
+        False, "--show-url", help="Print the credential-bearing link instead of downloading."
+    ),
+) -> None:
+    """Download one file of a job's outputs (v1 getJobFile)."""
+    from ..v1 import commands as v1
+    from ..v1 import sdk as v1_sdk
+
+    state = ctx.obj
+    v1_sdk.require_v1(state, "jobs download")
+    with v1_sdk.make_client(state) as client:
+        job_id = v1.resolve_id(client, job, kinds=("job", "batch"), what="jobs download")
+    v1.download_link(state, "getJobFile", job_id, path=path, dest=output_path, show_url=show_url)

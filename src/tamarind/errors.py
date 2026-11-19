@@ -49,6 +49,12 @@ class TamarindError(Exception):
         self.args = (value,)
 
 
+class UsageError(TamarindError):
+    """The command was called wrongly (bad setting or option combination)."""
+
+    exit_code = ExitCode.USAGE
+
+
 class AuthError(TamarindError):
     exit_code = ExitCode.AUTH
 

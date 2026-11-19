@@ -10,8 +10,10 @@ import typer
 from ... import rest, uploads
 from ...errors import TamarindError
 from .. import output
+from ..v1 import classic_routes
+from ..v1.generic import ContractGroup
 
-app = typer.Typer(no_args_is_help=True)
+app = typer.Typer(no_args_is_help=True, cls=ContractGroup)
 
 
 def _file_name(f: object) -> str:
@@ -156,9 +158,12 @@ def upload(
     state = ctx.obj
     remote = name or path.name
     output.info(f"Uploading {path} → {remote}…", state.output)
-    with state.rest_client() as client:
-        # Shared with the SDK's `client.files.upload` — one presign-then-PUT code path.
-        result = uploads.upload_file(client, path, remote=remote)
+    # With v1 selected the file goes up through v1, with classic's answer.
+    result = classic_routes.upload(state, path, remote) if state.is_v1 else None
+    if result is None:
+        with state.rest_client() as client:
+            # Shared with the SDK's `client.files.upload` — one presign-then-PUT code path.
+            result = uploads.upload_file(client, path, remote=remote)
     output.emit(result, state.output, human=f"uploaded {result['filename']}")
 
 
@@ -179,3 +184,23 @@ def delete(
         resp = rest.delete_file(client, file_path=path, folder=folder)
     human = resp.get("message", resp) if isinstance(resp, dict) else resp
     output.emit(resp, state.output, human=str(human))
+
+
+@app.command()
+def download(
+    ctx: typer.Context,
+    path: str = typer.Argument(..., help="The file's path in your workspace, e.g. targets/1abc.pdb."),
+    output_path: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Where to save it (a directory or a file; default: here)."
+    ),
+    show_url: bool = typer.Option(
+        False, "--show-url", help="Print the credential-bearing link instead of downloading."
+    ),
+) -> None:
+    """Download a workspace file (v1 getFile)."""
+    state = ctx.obj
+    from ..v1 import commands as v1
+    from ..v1 import sdk as v1_sdk
+
+    v1_sdk.require_v1(state, "files download")
+    v1.download_link(state, "getFile", path=path, dest=output_path, show_url=show_url)
