@@ -118,7 +118,7 @@ def sync_detailed(
     job is re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again
     without one.
 
-    Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
+    Another member's job is 404 for now; once website#7795 merges, it follows today's
     `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
     rule refuses is the same 404.
 
@@ -168,7 +168,7 @@ def sync(
     job is re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again
     without one.
 
-    Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
+    Another member's job is 404 for now; once website#7795 merges, it follows today's
     `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
     rule refuses is the same 404.
 
@@ -213,7 +213,7 @@ async def asyncio_detailed(
     job is re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again
     without one.
 
-    Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
+    Another member's job is 404 for now; once website#7795 merges, it follows today's
     `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
     rule refuses is the same 404.
 
@@ -261,7 +261,7 @@ async def asyncio(
     job is re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again
     without one.
 
-    Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
+    Another member's job is 404 for now; once website#7795 merges, it follows today's
     `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
     rule refuses is the same 404.
 

@@ -42,8 +42,9 @@ info:
       (whose own key counts) and its service account do. A member's batch (`getJob` of its
       `batch_` id, and `listJobs?batchId=`, with no `scope=org` needed) reads as today's batch read
       shows it, each of its jobs admitted on its own (website#7795).
-    - A member's job's or batch's files, logs and archive (`listJobFiles`, `getJobFile`,
-      `getJobLogs`, `archiveJob`; website#7795) follow today's `/result` rule for a key, which is
+    - A member's job's files, logs and archive, and a member's batch's files and archive
+      (`listJobFiles`, `getJobFile`, `getJobLogs`, `archiveJob`; website#7795), follow today's
+      `/result` rule for a key, which is
       stricter: on a job that records its organization, an admin's key has no admin exemption, and
       access comes from the organization sharing within itself, the job being shared with you, a
       project, or being the service account. Today's API has no key route that lists a member's
@@ -3075,7 +3076,7 @@ paths:
         job is re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again
         without one.
 
-        Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
+        Another member's job is 404 for now; once website#7795 merges, it follows today's
         `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
         rule refuses is the same 404.
       x-change: new
