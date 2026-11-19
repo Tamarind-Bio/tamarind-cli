@@ -797,20 +797,35 @@ def upload(http: Any, path: Path, remote: str, content_type: str | None = None) 
 
 _UPLOAD_SESSION = re.compile(r"^custom-tools/[^/]+/uploads$")
 _NODE_RUN_MOLECULES = re.compile(r"^pipelines/runs/[^/]+/node-runs/[^/]+/molecules$")
+_RUN = re.compile(r"^pipelines/runs/[^/]+$")
+_RUN_ID = re.compile(r"^(/?pipelines/runs/)([^/?]+)(.*)$", re.DOTALL)
+_RUN_PREFIX = "run_"
+
+
+def v1_path(path: str) -> str:
+    """A request v1 serves at the same path, as v1 takes it: classic names a pipeline run
+    by its bare id, v1 by ``run_<id>``."""
+    match = _RUN_ID.match(path)
+    if not match or match.group(2).startswith(_RUN_PREFIX):
+        return path
+    return f"{match.group(1)}{_RUN_PREFIX}{match.group(2)}{match.group(3)}"
 
 
 def rebuild_response(method: str, path: str, response: Any) -> Any:
     """A v1 answer to a request sent at the same path (custom tools, pipeline runs), in
     the shape the classic contract's parsers read where v1 renamed a field:
-    createCustomToolUpload's ``id`` is classic's ``uploadId``, and listNodeRunMolecules'
-    page of ``items`` (each with ``id``) is classic's ``molecules`` (each ``complexId``).
-    Everything else is the same shape, so it is passed through."""
+    createCustomToolUpload's ``id`` is classic's ``uploadId``, listNodeRunMolecules' page
+    of ``items`` (each with ``id``) is classic's ``molecules`` (each ``complexId``), and a
+    run's ``run_<id>`` is classic's bare id. Everything else is the same shape (v1 adds
+    ``failureReason``), so it is passed through."""
     import httpx
 
     if method == "POST" and _UPLOAD_SESSION.match(path):
         rebuild = _upload_session
     elif method == "GET" and _NODE_RUN_MOLECULES.match(path):
         rebuild = _node_run_molecules
+    elif method == "GET" and _RUN.match(path):
+        rebuild = _run
     else:
         return response
     try:
@@ -843,3 +858,10 @@ def _node_run_molecules(body: dict[str, Any]) -> dict[str, Any]:
             item = {"complexId": item["id"], **{k: v for k, v in item.items() if k != "id"}}
         molecules.append(item)
     return {"molecules": molecules, "nextCursor": body.get("nextCursor")}
+
+
+def _run(body: dict[str, Any]) -> dict[str, Any]:
+    run_id = body.get("id")
+    if isinstance(run_id, str) and run_id.startswith(_RUN_PREFIX):
+        return {**body, "id": run_id[len(_RUN_PREFIX):]}
+    return body

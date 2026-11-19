@@ -120,9 +120,11 @@ run doesn't appear in the website's Test history.
 **files delete of a missing file:** v1 answers 404 (exit 4); classic answers "File deleted
 successfully".
 
-**SDK pipeline runs:** `pipelines.get_run` reads v1's run (the same fields, plus
-`failureReason`). A node run's `molecules()` page is v1's, read as classic's: each
-molecule's `complex_id` is v1's molecule `id`, the id the `/molecules` operations take.
+**SDK pipeline runs:** `pipelines.get_run` takes classic's bare run id (sent to v1 as
+`run_<id>`) and answers with it; the run, its node runs and a node run's `molecules()`
+are read in classic's shape (v1's molecule `id` is classic's `complex_id`, the same
+value). Checked live on staging: the typed objects are equal. v1's added
+`failureReason` isn't on the typed objects.
 
 **SDK `files.list`:** like classic, it reads only `folder` and `include_folders` (classic's
 `pages/api/files.js` ignores `include_all`, `include_metadata` and the paging options).

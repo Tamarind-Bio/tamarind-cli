@@ -168,8 +168,10 @@ def test_pipeline_run_reads_go_to_the_v1_base(on):
     }
     v1 = respx.get(f"{V1}/pipelines/runs/run_1").mock(return_value=httpx.Response(200, json=run))
     with Tamarind(api_key="k", api_base=CLASSIC) as client:
-        assert client.pipelines.get_run("run_1").id == "run_1"
-    assert v1.called
+        # Classic names a run by its bare id; v1 by run_<id>. The answer keeps classic's.
+        assert client.pipelines.get_run("1").id == "1"
+        assert client.pipelines.get_run("run_1").id == "1"
+    assert v1.call_count == 2
 
 
 @respx.mock
@@ -211,7 +213,7 @@ def test_node_run_molecules_from_v1_are_read_in_classics_shape(on):
         })
     )
     with Tamarind(api_key="k", api_base=CLASSIC) as client:
-        molecules = client.pipelines.get_run("run_1").node_runs[0].molecules(limit=1)
+        molecules = client.pipelines.get_run("1").node_runs[0].molecules(limit=1)
     assert molecules.next_cursor == "page-2"
     assert [(m.complex_id, m.name, m.has_structure) for m in molecules.items] == [("mol_1", "c1", True)]
     assert page.calls[0].request.url.params["limit"] == "1"

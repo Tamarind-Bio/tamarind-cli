@@ -190,10 +190,14 @@ class HTTPClient:
         timeout: float | None = None,
     ) -> httpx.Response:
         client = self._raw_client(path)
+        if client is self:
+            return client._classic_request(
+                method, path, params=params, headers=headers, json=json, timeout=timeout
+            )
         response = client._classic_request(
-            method, path, params=params, headers=headers, json=json, timeout=timeout
+            method, _to_v1(path), params=params, headers=headers, json=json, timeout=timeout
         )
-        return response if client is self else _from_v1(method, path, response)
+        return _from_v1(method, path, response)
 
     def _classic_request(
         self,
@@ -243,10 +247,14 @@ class HTTPClient:
         # Asking the server whether v1 is on (once per client) is a blocking request: it
         # runs in a thread, so it never stalls the event loop or delays a cancellation.
         client = await asyncio.to_thread(self._raw_client, path)
+        if client is self:
+            return await client._classic_request_async(
+                method, path, params=params, headers=headers, json=json, timeout=timeout
+            )
         response = await client._classic_request_async(
-            method, path, params=params, headers=headers, json=json, timeout=timeout
+            method, _to_v1(path), params=params, headers=headers, json=json, timeout=timeout
         )
-        return response if client is self else _from_v1(method, path, response)
+        return _from_v1(method, path, response)
 
     async def _classic_request_async(
         self,
@@ -321,6 +329,12 @@ class HTTPClient:
         return _parse_json(
             self._classic_request(method, path, params=params, json=json, timeout=timeout)
         )
+
+
+def _to_v1(path: str) -> str:
+    from ._v1 import classic
+
+    return classic.v1_path(path)
 
 
 def _from_v1(method: str, path: str, response: httpx.Response) -> httpx.Response:
