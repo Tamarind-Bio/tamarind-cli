@@ -514,13 +514,19 @@ def files_list(
 
 
 def files_folders(state: Any, *, limit: int, all_folders: bool, folder: str | None = None) -> None:
-    query: dict[str, Any] = {"limit": limit}
+    """The folders of a listing. v1 lists files and folders together (at the root,
+    uploads first), so this reads pages until it has ``limit`` folders, or all of them."""
+    query: dict[str, Any] = {"limit": 200}
     if folder:
         query["folder"] = folder
+    folders: list[dict[str, Any]] = []
     with sdk.make_client(state) as client:
-        page = sdk.collect(client, op("listFiles"), **query) if all_folders else call(client, "listFiles", **query)
-    folders = [item for item in page["items"] if isinstance(item, dict) and item.get("type") == "folder"]
-    out = {"items": folders, "nextCursor": page.get("nextCursor")}
+        for item in client.paginate(sdk.method(client, op("listFiles")["sdk"]), **query):
+            if isinstance(item, dict) and item.get("type") == "folder":
+                folders.append(item)
+                if not all_folders and len(folders) >= limit:
+                    break
+    out = {"items": folders, "nextCursor": None}
     output.emit(out, state.output, human="\n".join(str(f.get("path")) for f in folders) or "(none)")
 
 

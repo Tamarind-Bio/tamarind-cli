@@ -117,6 +117,10 @@ def build(doc: dict[str, Any]) -> dict[str, Any]:
                     "required": bool(p.get("required")),
                     **contract.scalar(p.get("schema")),
                 }
+                if entry["type"] == "array":
+                    # `style: form, explode: false` is one comma-joined value; the
+                    # default (explode) repeats the key, and a value may hold commas.
+                    entry["commaJoined"] = p.get("explode") is False
                 option = re.sub(r"(?<!^)(?=[A-Z])", "-", p["name"]).lower()
                 if option in RESERVED_OPTIONS:
                     raise SystemExit(f"{op['operationId']}: query parameter {p['name']!r} clashes")

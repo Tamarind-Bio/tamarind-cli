@@ -954,6 +954,8 @@ def register(app: typer.Typer) -> None:
         if download is not None and show_url:
             raise typer.BadParameter("--download and --show-url are mutually exclusive.")
         if state.is_v1:
+            if wait:
+                jobs_helpers.validate_wait_options(poll_interval=poll_interval, timeout=timeout)
             v1.results(
                 state,
                 job_name,

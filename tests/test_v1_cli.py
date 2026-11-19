@@ -535,3 +535,48 @@ def test_a_name_that_starts_with_job_is_still_a_name(v1):
     v1.calls.clear()
     runner.invoke(app, ["--json", "status", "job_0f8fad5bd9cb469fa16570867728950e"])
     assert v1.calls == [("jobs.get", ("job_0f8fad5bd9cb469fa16570867728950e",), {})]
+
+
+def test_only_comma_joined_arrays_are_split(v1):
+    v1.answers["molecules.list"] = {"items": [], "nextCursor": None}
+    runner.invoke(app, ["--json", "molecules", "list", "--filter", "label:eq:a,b", "--filter", "x:eq:1"])
+    assert v1.calls[-1][2]["filter_"] == ["label:eq:a,b", "x:eq:1"]
+    v1.answers["files.list"] = {"items": [], "nextCursor": None}
+    v1.answers["usage.get"] = {"items": [], "nextCursor": None}
+    runner.invoke(app, ["--json", "usage", "--group-by", "tool,month"])
+    assert v1.calls[-1][2]["group_by"] == ["tool", "month"]
+
+
+def test_files_folders_reads_past_a_page_of_root_files(v1):
+    pages = iter(
+        [
+            {"items": [{"path": f"f{i}.pdb", "type": "file"} for i in range(3)], "nextCursor": "c1"},
+            {"items": [{"path": "a", "type": "folder"}, {"path": "b", "type": "folder"}], "nextCursor": "c2"},
+            {"items": [{"path": "c", "type": "folder"}], "nextCursor": None},
+        ]
+    )
+    v1.answers["files.list"] = lambda **kw: next(pages)
+    out = _json(runner.invoke(app, ["--json", "files", "folders", "--limit", "2"]))
+    assert [f["path"] for f in out["items"]] == ["a", "b"]
+    assert len(v1.calls) == 2  # stops once it has enough
+
+
+def test_results_wait_checks_its_timing_options_first(v1, tmp_path):
+    res = runner.invoke(app, ["--json", "results", "job_0f8fad5bd9cb469fa16570867728950e", "--download", str(tmp_path), "--wait", "--poll-interval", "-1"])
+    assert res.exit_code != 0
+    assert v1.calls == []
+
+
+def test_help_honors_an_explicit_profile(monkeypatch, tmp_path):
+    import sys
+
+    monkeypatch.setenv("TAMARIND_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("TAMARIND_API", raising=False)
+    monkeypatch.delenv("TAMARIND_PROFILE", raising=False)
+    (tmp_path / "config.json").write_text(
+        json.dumps({"current_profile": "default", "profiles": {"default": {}, "next": {"api": "v1"}}})
+    )
+    monkeypatch.setattr(sys, "argv", ["tamarind", "--profile", "next", "--help"])
+    assert "projects" in runner.invoke(app, ["--profile", "next", "--help"]).stdout
+    monkeypatch.setattr(sys, "argv", ["tamarind", "--help"])
+    assert "projects" not in runner.invoke(app, ["--help"]).stdout

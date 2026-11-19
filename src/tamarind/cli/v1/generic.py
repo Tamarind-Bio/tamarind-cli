@@ -61,11 +61,8 @@ def query_option(param: dict[str, Any]) -> click.Option:
         )
     kind: Any = click.INT if param["type"] == "integer" else click.STRING
     if param["type"] == "array":
-        return click.Option(
-            [option_name(param), dest],
-            multiple=True,
-            help=_help(param) + " Comma-separated or repeated.",
-        )
+        how = " Comma-separated or repeated." if param.get("commaJoined") else " Repeat for more."
+        return click.Option([option_name(param), dest], multiple=True, help=_help(param) + how)
     return click.Option(
         [option_name(param), dest], type=kind, required=param.get("required", False), help=_help(param)
     )
@@ -79,7 +76,10 @@ def query_values(op: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
         if value is None or value == ():
             continue
         if param["type"] == "array":
-            value = [part.strip() for item in value for part in str(item).split(",") if part.strip()]
+            if param.get("commaJoined"):
+                value = [part.strip() for item in value for part in str(item).split(",") if part.strip()]
+            else:
+                value = list(value)
         query[param["name"]] = value
     return query
 
@@ -220,14 +220,15 @@ def v1_selected(ctx: click.Context) -> bool:
     import sys
 
     argv = sys.argv[1:]
-    flag = None
+    given: dict[str, str] = {}
     for index, arg in enumerate(argv):
-        if arg == "--api" and index + 1 < len(argv):
-            flag = argv[index + 1]
-        elif arg.startswith("--api="):
-            flag = arg.split("=", 1)[1]
+        for option in ("--api", "--profile"):
+            if arg == option and index + 1 < len(argv):
+                given[option] = argv[index + 1]
+            elif arg.startswith(option + "="):
+                given[option] = arg.split("=", 1)[1]
     try:
-        return resolve_api(flag) == API_V1
+        return resolve_api(given.get("--api"), profile=given.get("--profile")) == API_V1
     except UsageError:
         return False
 

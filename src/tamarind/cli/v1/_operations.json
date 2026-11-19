@@ -417,6 +417,7 @@
      "type": "string"
     },
     {
+     "commaJoined": true,
      "description": "Dimensions to break down by, comma-separated or repeated.",
      "enum": [
       "tool",
@@ -739,6 +740,7 @@
      "type": "string"
     },
     {
+     "commaJoined": true,
      "description": "Comma-separated and URL-encoded, e.g. `In%20Queue,Running` or `Stopped,Failed`.",
      "enum": [
       "In Queue",
@@ -1329,6 +1331,7 @@
      "type": "boolean"
     },
     {
+     "commaJoined": true,
      "description": "Comma-separated, e.g. `pdb,cif`.",
      "items": "string",
      "name": "extension",
@@ -2664,6 +2667,7 @@
      "type": "string"
     },
     {
+     "commaJoined": false,
      "description": "Filter by molecule type, such as `protein`, `small_molecule`, or `nucleic_acid`.",
      "enum": [
       "protein",
@@ -2725,6 +2729,7 @@
      "type": "string"
     },
     {
+     "commaJoined": false,
      "description": "String in format `field:operator:value`.",
      "items": "string",
      "name": "filter",
@@ -2733,6 +2738,7 @@
      "type": "array"
     },
     {
+     "commaJoined": false,
      "description": "Limit results to molecules carrying this tag.",
      "items": "string",
      "name": "tags",
@@ -2826,6 +2832,7 @@
      "type": "string"
     },
     {
+     "commaJoined": false,
      "description": "One condition on the group's own metadata, written `field:operator:value`.",
      "items": "string",
      "name": "filter",
