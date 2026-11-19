@@ -27,7 +27,7 @@ export TAMARIND_API_BASE=https://staging.tamarind.bio/api/
 |---|---|
 | `auth status`, `auth login` (the key check) | getMe |
 | `jobs`, `jobs --batch`, `status`, `wait`, `submit --wait` | listJobs, getJob |
-| `validate`, and the check `submit` and `batch` make first | validateJob |
+| `validate`, the check `submit` makes first, `batch --prevalidate` | validateJob |
 | `submit`, `batch` | submitJob |
 | `cancel`, `cancel --batch` | cancelJob |
 | `results` (download, `--show-url`, `--file`) | archiveJob, getJobFile |
