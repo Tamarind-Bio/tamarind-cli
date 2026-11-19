@@ -667,3 +667,38 @@ def test_signed_urls_stay_out_of_httpx_logs(
     assert put.call_count == 1
     assert "HTTP Request: POST" in caplog.text  # the API call still logs
     assert "sekrit" not in caplog.text
+
+
+@respx.mock
+def test_a_problem_marked_retryable_is_retried(client: Tamarind) -> None:
+    route = respx.patch(f"{BASE}/projects/proj_1/notes").mock(
+        side_effect=[
+            httpx.Response(400, json=problem(400, "write_contended", retryable=True)),
+            httpx.Response(200, json={"version": 2}),
+        ]
+    )
+    assert client.projects.notes.update("proj_1", {"version": 1}) == {"version": 2}
+    assert route.call_count == 2
+
+
+@respx.mock
+def test_signed_uploads_follow_the_environments_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.test:3128")
+    sdk = Tamarind("k", base_url=BASE)
+    storage = sdk._transport._storage
+    chosen = storage._transport_for_url(httpx.URL("https://storage.test/put"))
+    assert chosen is not storage._transport  # the proxy mount, as for any httpx.Client
+    picked: list[str] = []
+    original = storage._transport_for_url
+    monkeypatch.setattr(
+        storage, "_transport_for_url", lambda url: picked.append(str(url)) or original(url)
+    )
+    respx.post(f"{BASE}/files").mock(
+        return_value=httpx.Response(201, json=_multipart_session([1], 8))
+    )
+    respx.put("https://storage.test/p1").mock(
+        return_value=httpx.Response(200, headers={"ETag": '"e"'})
+    )
+    respx.post(f"{BASE}/files/complete").mock(return_value=httpx.Response(200, json={}))
+    sdk.files.upload(b"abc", "m.bin", multipart=True)
+    assert picked == ["https://storage.test/p1"]

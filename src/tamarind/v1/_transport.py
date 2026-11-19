@@ -65,8 +65,7 @@ class Transport:
         self._owns_client = http_client is None
         self._headers = headers
         # Signed storage URLs must never see the API key.
-        self._storage_transport = httpx.HTTPTransport()
-        self._storage = httpx.Client(transport=self._storage_transport, timeout=timeout)
+        self._storage = httpx.Client(timeout=timeout)
 
     def close(self) -> None:
         if self._owns_client:
@@ -175,9 +174,10 @@ class Transport:
 
     def _put_unlogged(self, url: str, content: Any, headers: Mapping[str, str]) -> httpx.Response:
         """Send a PUT below ``httpx.Client``, whose INFO log line would carry the signed URL
-        (a credential) into the application's logs."""
+        (a credential) into the application's logs. The transport is the one the client
+        picks for this URL, so ``HTTPS_PROXY``/``NO_PROXY`` routing still applies."""
         request = self._storage.build_request("PUT", url, content=content, headers=dict(headers))
-        response = self._storage_transport.handle_request(request)
+        response = self._storage._transport_for_url(request.url).handle_request(request)
         try:
             response.read()
         finally:
@@ -250,7 +250,10 @@ def _retry_delay(
     if status == 429 or status == 503 or (status == 409 and retry_after is not None):
         # Refused before any work, or the server asked us to come back.
         pass
-    elif status >= 500 and (repeat_safe or error.retryable is True):
+    elif error.retryable is True:
+        # The server says a repeat can help (e.g. 400 write_contended: nothing was stored).
+        pass
+    elif status >= 500 and repeat_safe:
         pass
     else:
         return None
