@@ -271,6 +271,21 @@ class BoundOperation:
         extra_headers: Mapping[str, str] | None = None,
         **params: Any,
     ) -> Any:
+        response = self.raw(*args, body=body, extra_headers=extra_headers, **params)
+        answer = decode(response)
+        if self.operation.check is not None:
+            self.operation.check(response, answer)
+        return answer
+
+    def raw(
+        self,
+        *args: Any,
+        body: Any = UNSET,
+        extra_headers: Mapping[str, str] | None = None,
+        **params: Any,
+    ) -> httpx.Response:
+        """Send the same request and return the ``httpx.Response`` itself, for its headers
+        (``X-Next-Cursor`` on a CSV usage page, ``X-RateLimit-*``, ``Location``)."""
         path = self.operation.path
         positional_body = self.takes_body and body is UNSET
         if len(args) > len(path) + (1 if positional_body else 0):
@@ -284,17 +299,13 @@ class BoundOperation:
         overlap = set(path) & set(params)
         if overlap:
             raise TypeError(f"{self.__name__}() got {', '.join(sorted(overlap))} twice")
-        response = self._transport.call(
+        return self._transport.call(
             self.operation.endpoint,
             body=body,
             extra_headers=extra_headers,
             **dict(zip(path, args)),
             **params,
         )
-        answer = decode(response)
-        if self.operation.check is not None:
-            self.operation.check(response, answer)
-        return answer
 
 
 def _secret_shown(response: httpx.Response, answer: Any) -> None:
@@ -430,15 +441,15 @@ class Files(_Resource):
         path: str | None = None,
         *,
         content_type: str | None = None,
-        multipart: bool | None = None,
+        multipart: bool = False,
     ) -> dict[str, Any]:
         """Upload one file in a single call and return its file entry.
 
         ``source`` is a local file path, the bytes themselves, or a seekable binary
         file. ``path`` is where it goes in your workspace; it defaults to the local
         file's name. Up to 3 MiB goes inline (``contentBase64``), up to 5 GB through
-        one signed PUT, and anything larger (or ``multipart=True``) in signed parts
-        finished by ``completeFileUpload``. The bytes go straight to storage, never
+        one signed PUT, and anything larger in signed parts finished by
+        ``completeFileUpload``; ``multipart=True`` uses parts for a smaller file too. The bytes go straight to storage, never
         with your API key.
         """
         content = _Content.open(source)
@@ -450,9 +461,7 @@ class Files(_Resource):
             request: dict[str, Any] = {"path": path}
             if content_type is not None:
                 request["contentType"] = content_type
-            use_multipart = (
-                multipart if multipart is not None else content.size > SIGNED_UPLOAD_LIMIT
-            )
+            use_multipart = multipart or content.size > SIGNED_UPLOAD_LIMIT
             if not use_multipart and content.size <= INLINE_UPLOAD_LIMIT:
                 request["contentBase64"] = base64.b64encode(content.read(0, content.size)).decode()
                 return dict(decode(self._transport.call(upload_file, body=request))["file"])
@@ -659,7 +668,7 @@ class Tamarind:
         if method.pageable:
             cursor = params.pop("cursor", None)
             while True:
-                page = method(*args, cursor=cursor, **params)
+                page = _json_page(method(*args, cursor=cursor, **params))
                 yield from page.get("items") or []
                 cursor = page.get("nextCursor")
                 if not cursor:
@@ -669,7 +678,7 @@ class Tamarind:
         body = args[path] if len(args) > path else params.pop("body", None)
         request = dict(getattr(body, "to_dict", lambda: body)() or {})
         while True:
-            page = method(*args[:path], body=request, **params)
+            page = _json_page(method(*args[:path], body=request, **params))
             yield from page.get("items") or []
             cursor = page.get("nextCursor")
             if not cursor:
@@ -684,6 +693,15 @@ class Tamarind:
 
     def __exit__(self, *exc: object) -> None:
         self.close()
+
+
+def _json_page(page: Any) -> dict[str, Any]:
+    if not isinstance(page, dict):
+        raise TypeError(
+            "paginate() reads JSON pages; for a CSV page call the method's .raw() and "
+            "pass its X-Next-Cursor header as cursor="
+        )
+    return page
 
 
 class _Content:

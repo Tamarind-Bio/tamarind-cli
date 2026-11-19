@@ -306,6 +306,15 @@ def test_extra_headers_reach_the_request(client: Tamarind) -> None:
     )
     assert client.usage.get(extra_headers={"accept": "text/csv"}) == b"month,value\n"
     assert route.calls.last.request.headers.get_list("accept") == ["text/csv"]
+    route.mock(
+        return_value=httpx.Response(
+            200, text="m,v\n", headers={"content-type": "text/csv", "X-Next-Cursor": "c2"}
+        )
+    )
+    raw = client.usage.get.raw(extra_headers={"Accept": "text/csv"}, limit=1)
+    assert raw.headers["X-Next-Cursor"] == "c2" and raw.content == b"m,v\n"
+    with pytest.raises(TypeError, match="raw"):
+        list(client.paginate(client.usage.get, extra_headers={"Accept": "text/csv"}))
 
 
 @respx.mock
@@ -542,3 +551,19 @@ def test_multipart_completion_is_repeated_after_a_lost_answer(client: Tamarind) 
 def test_logs_are_not_an_item_page(client: Tamarind) -> None:
     with pytest.raises(TypeError):
         list(client.paginate(client.jobs.logs, "job_1"))
+
+
+@respx.mock
+def test_files_over_the_single_put_limit_always_go_in_parts(
+    client: Tamarind, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("tamarind.v1.client.SIGNED_UPLOAD_LIMIT", 4)
+    start = respx.post(f"{BASE}/files").mock(
+        return_value=httpx.Response(201, json=_multipart_session([1, 2, 3], 4))
+    )
+    respx.put(url__startswith="https://storage.test/").mock(
+        return_value=httpx.Response(200, headers={"ETag": '"e"'})
+    )
+    respx.post(f"{BASE}/files/complete").mock(return_value=httpx.Response(200, json={}))
+    client.files.upload(b"0123456789", "m.bin")
+    assert json.loads(start.calls.last.request.content)["multipart"] is True
