@@ -439,7 +439,7 @@ def test_tools_lists_the_whole_catalog(v1):
     v1.answers["tools.list"] = lambda **kw: next(pages)
     res = runner.invoke(app, ["--json", "tools", "--modality", "protein"])
     assert [t["name"] for t in _json(res)["items"]] == ["boltz", "esmfold"]
-    assert v1.calls[0][2] == {"modality": "protein", "cursor": None}
+    assert v1.calls[0][2] == {"modality": "protein"}
 
 
 def test_modalities_and_schema_example(v1):
@@ -618,12 +618,17 @@ def test_an_empty_example_is_a_runnable_example(v1):
 
 def test_cancel_batch_takes_a_pipeline_run_name_too(v1):
     run = "run_0f8fad5b-d9cb-469f-a165-70867728950e"
-    v1.answers["jobs.list"] = {"items": [{"id": run, "kind": "pipeline"}], "nextCursor": None}
+    batch = "batch_0f8fad5b-d9cb-469f-a165-70867728950e"
+    by_kind = {
+        "batch": [{"id": batch, "kind": "batch", "createdAt": "2026-11-01T00:00:00Z"}],
+        "pipeline": [{"id": run, "kind": "pipeline", "createdAt": "2026-11-02T00:00:00Z"}],
+    }
+    v1.answers["jobs.list"] = lambda **kw: {"items": by_kind.get(kw.get("kind"), []), "nextCursor": None}
     v1.answers["jobs.cancel"] = {"id": run, "status": "Stopped"}
     _json(runner.invoke(app, ["--json", "cancel", "--batch", "my-run"]))
-    assert v1.calls[0] == ("jobs.list", (), {"name": "my-run"})
-    assert v1.calls[-1][1] == (run,)
-    v1.answers["jobs.list"] = {"items": [{"id": "job_0f8fad5b-d9cb-469f-a165-70867728950e", "kind": "job"}], "nextCursor": None}
+    assert [c[2] for c in v1.calls[:2]] == [{"name": "my-run", "kind": "batch"}, {"name": "my-run", "kind": "pipeline"}]
+    assert v1.calls[-1][1] == (run,)  # the newer of the two
+    by_kind.clear()  # a name only a single job has
     res = runner.invoke(app, ["--json", "cancel", "--batch", "a-single-job"])
     assert isinstance(res.exception, NotFoundError)
 
@@ -722,3 +727,27 @@ def test_results_wait_download_output_is_redacted(v1, tmp_path, monkeypatch):
     monkeypatch.setattr("tamarind.cli.commands.jobs._download", lambda url, dest: 1)
     res = runner.invoke(app, ["--json", "results", job, "--wait", "--download", str(tmp_path)])
     assert signed not in res.stdout and "X-Amz-Signature" not in res.stdout
+
+
+def test_all_pages_keep_the_pages_other_fields(v1):
+    pages = iter(
+        [
+            {"items": [{"tool": "boltz"}], "nextCursor": "c1", "total": 7, "metric": "jobs", "asOf": "t"},
+            {"items": [{"tool": "esmfold"}], "nextCursor": None, "total": 7, "metric": "jobs", "asOf": "t"},
+        ]
+    )
+    v1.answers["usage.get"] = lambda **kw: next(pages)
+    out = _json(runner.invoke(app, ["--json", "usage", "--metric", "jobs", "--all"]))
+    assert out == {"items": [{"tool": "boltz"}, {"tool": "esmfold"}], "nextCursor": None, "total": 7, "metric": "jobs", "asOf": "t"}
+
+
+def test_jobs_download_of_a_pipeline_run_is_refused(v1):
+    res = runner.invoke(app, ["--json", "jobs", "download", "run_0f8fad5b-d9cb-469f-a165-70867728950e", "--path", "x.pdb"])
+    assert isinstance(res.exception, UsageError) and v1.calls == []
+
+
+def test_default_operation_groups_show_its_options_in_help(v1):
+    text = runner.invoke(app, ["usage", "--help"]).stdout
+    assert "--metric" in text and "refresh" in text
+    text = runner.invoke(app, ["projects", "notes", "--help"]).stdout
+    assert "PROJECT_ID" in text and "add" in text

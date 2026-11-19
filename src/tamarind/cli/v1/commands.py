@@ -92,16 +92,30 @@ def resolve_id(
     return str(items[0]["id"])
 
 
+def refuse_run_for_one_file(job_id: str, what: str) -> None:
+    """getJobFile reads a job's or a batch's file; a pipeline run's is a 404 there."""
+    if job_id.startswith("run_"):
+        raise UsageError(
+            f"{what} reads one job's file; a pipeline run's outputs come as one zip "
+            "(`tamarind results ID --download DIR`), or per step with `tamarind pipelines results`."
+        )
+
+
 def resolve_batch_or_run(client: Any, ref: str) -> str:
     """``--batch``: a batch or a pipeline run, by id or by name (today's flag takes both)."""
     ref = ref.strip()
     if _ID.match(ref):
         return ref
-    page = call(client, "listJobs", name=ref)
-    items = [i for i in (page.get("items") or []) if i.get("kind") in ("batch", "pipeline")]
-    if not items:
+    # `name=` answers only the newest match, so ask per kind: a newer single job with
+    # the same name must not hide the batch or run.
+    found = [
+        item
+        for kind in ("batch", "pipeline")
+        for item in (call(client, "listJobs", name=ref, kind=kind).get("items") or [])
+    ]
+    if not found:
         raise NotFoundError(f"No batch or pipeline run named '{ref}'.", detail={"name": ref})
-    return str(items[0]["id"])
+    return str(max(found, key=lambda item: str(item.get("createdAt") or ""))["id"])
 
 
 # -- identity ----------------------------------------------------------------
@@ -488,11 +502,7 @@ def results(
                 _emit(result, state.output, human=status_line(final))
                 raise typer.Exit(ExitCode.JOB_FAILED)
         if file:
-            if job_id.startswith("run_"):
-                raise UsageError(
-                    "--file reads one job's file; a pipeline run's outputs come as one zip "
-                    "(drop --file), or per step with `tamarind pipelines results`."
-                )
+            refuse_run_for_one_file(job_id, "--file")
             link = call(client, "getJobFile", job_id, path=file, delivery="url")
             url = link["url"]
             name = Path(file).name

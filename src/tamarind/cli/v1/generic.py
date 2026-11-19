@@ -308,6 +308,18 @@ class ContractGroup(TyperGroup):
             return operation_command(manifest.operation(self.default_operation), DEFAULT_COMMAND, hidden=True)
         return build(path + (cmd_name,))
 
+    def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        super().format_help(ctx, formatter)
+        if not self.default_operation:
+            return
+        # The operation this group runs with no subcommand: its arguments and options.
+        command = operation_command(manifest.operation(self.default_operation), ctx.info_name or "")
+        sub = click.Context(command, info_name=ctx.info_name, parent=ctx.parent)
+        pieces = command.collect_usage_pieces(sub)
+        formatter.write_paragraph()
+        formatter.write_text(f"With no subcommand: {ctx.command_path} {' '.join(pieces)}")
+        command.format_options(sub, formatter)
+
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
         if self.default_operation and not any(a in ("--help", "-h") for a in args[:1]):
             known = set(self.list_commands(ctx)) | set(manifest.children(self.path(ctx)))

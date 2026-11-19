@@ -1124,6 +1124,7 @@ def register(app: typer.Typer) -> None:
         v1_sdk.require_v1(state, "jobs download")
         with v1_sdk.make_client(state) as client:
             job_id = v1.resolve_id(client, job)
+        v1.refuse_run_for_one_file(job_id, "jobs download")
         v1.download_link(state, "getJobFile", job_id, path=path, dest=output_path, show_url=show_url)
 
     app.add_typer(

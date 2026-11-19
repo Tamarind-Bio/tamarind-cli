@@ -142,9 +142,15 @@ def invoke(
 
 
 def collect(client: Any, op: dict[str, Any], *path_args: str, **query: Any) -> dict[str, Any]:
-    """All items of a list operation as one page, ``{items, nextCursor: null}``,
-    through the SDK's auto-paging helper."""
-    check_values(op, query)
-    kwargs = {argument(k): v for k, v in query.items() if v is not None}
-    items = client.paginate(method(client, op["sdk"]), *path_args, **kwargs)
-    return {"items": plain(list(items)), "nextCursor": None}
+    """All items of a list operation as one page: the first page's other fields (a
+    usage page's ``total``, ``metric``, ``asOf``...) with every page's ``items`` and a
+    null ``nextCursor``. Pages after the first come through the SDK's auto-paging."""
+    first = invoke(client, op, *path_args, **query)
+    if not isinstance(first, dict):
+        return first
+    items = list(first.get("items") or [])
+    if first.get("nextCursor"):
+        kwargs = {argument(k): v for k, v in query.items() if v is not None}
+        kwargs["cursor"] = first["nextCursor"]
+        items.extend(plain(list(client.paginate(method(client, op["sdk"]), *path_args, **kwargs))))
+    return {**first, "items": items, "nextCursor": None}
