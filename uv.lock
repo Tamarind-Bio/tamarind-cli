@@ -896,6 +896,7 @@ dependencies = [
     { name = "attrs" },
     { name = "click" },
     { name = "httpx" },
+    { name = "python-dateutil" },
     { name = "pyyaml" },
     { name = "typer" },
     { name = "typing-extensions" },
@@ -908,6 +909,8 @@ dev = [
     { name = "pytest" },
     { name = "respx" },
     { name = "ruff" },
+    { name = "types-python-dateutil" },
+    { name = "types-pyyaml" },
 ]
 
 [package.metadata]
@@ -918,10 +921,13 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
     { name = "openapi-python-client", marker = "extra == 'dev'", specifier = "==0.28.4" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "python-dateutil", specifier = ">=2.8.2" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "respx", marker = "extra == 'dev'", specifier = ">=0.21" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
     { name = "typer", specifier = ">=0.12" },
+    { name = "types-python-dateutil", marker = "extra == 'dev'", specifier = ">=2.8" },
+    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "typing-extensions", specifier = ">=4.7" },
 ]
 provides-extras = ["dev"]
@@ -993,6 +999,24 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e4/51/9aed62104cea109b820bbd6c14245af756112017d309da813ef107d42e7e/typer-0.25.1.tar.gz", hash = "sha256:9616eb8853a09ffeabab1698952f33c6f29ffdbceb4eaeecf571880e8d7664cc", size = 122276, upload-time = "2026-04-30T19:32:16.964Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3f/f9/2b3ff4e56e5fa7debfaf9eb135d0da96f3e9a1d5b27222223c7296336e5f/typer-0.25.1-py3-none-any.whl", hash = "sha256:75caa44ed46a03fb2dab8808753ffacdbfea88495e74c85a28c5eefcf5f39c89", size = 58409, upload-time = "2026-04-30T19:32:18.271Z" },
+]
+
+[[package]]
+name = "types-python-dateutil"
+version = "2.9.0.20261116"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/82/ba/a19d28610031ac9608586077f71a21add4c80639cf01e5920d5f9bc207c9/types_python_dateutil-2.9.0.20261116.tar.gz", hash = "sha256:4213748a3f699431a83edf71969de9caa79d0846a5e8785c8a49072ff1968613", size = 17879, upload-time = "2026-11-16T08:43:02.721Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/70/fc/5644ed0d6ad3712e17d30762c32ccbf6014230c46c58eb324f1d3f6ecebf/types_python_dateutil-2.9.0.20261116-py3-none-any.whl", hash = "sha256:62e7c65849170a4847539573153d34f4007777dd62651ec8849ec8f08e8922a2", size = 18513, upload-time = "2026-11-16T08:43:01.246Z" },
+]
+
+[[package]]
+name = "types-pyyaml"
+version = "6.0.12.20261113"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/4d/8b/ba599d956693dbc98e170f32097128bdea0a17f9d42b0b490fa749c12b1a/types_pyyaml-6.0.12.20261113.tar.gz", hash = "sha256:0828be2580fd94151182364f4d0158e4de62fdbeeb8d4296f7f7d2b6c22bb640", size = 19017, upload-time = "2026-11-13T08:51:21.488Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fd/2e/36fc0941a40ef066dbc8abac41bbbefb41389f547c779aef832aea6b873d/types_pyyaml-6.0.12.20261113-py3-none-any.whl", hash = "sha256:3600749e613748afdc4327f0b17c3296cf880cdbc7335f320007abd9dd815f67", size = 21321, upload-time = "2026-11-13T08:51:20.417Z" },
 ]
 
 [[package]]
