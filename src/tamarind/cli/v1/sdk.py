@@ -11,6 +11,7 @@ from __future__ import annotations
 import builtins
 import keyword
 import re
+import time
 import uuid
 from typing import Any, Callable
 
@@ -188,20 +189,29 @@ def retry_hint(exc: TamarindError, op: dict[str, Any], key: str) -> TamarindErro
 def collect(
     client: Any, op: dict[str, Any], *path_args: str, body: Any = None, **query: Any
 ) -> dict[str, Any]:
-    """All items of a list operation as one page: the first page's other fields (a
-    usage page's ``total``, ``metric``, ``asOf``...) with every page's ``items`` and a
-    null ``nextCursor``. Pages after the first come through the SDK's auto-paging,
-    with the cursor in the query or, for an operation that pages through its body
-    (``molecules search``), in the body."""
-    first = invoke(client, op, *path_args, body=body, **query)
-    if not isinstance(first, dict):
-        return first
-    items = list(first.get("items") or [])
-    if first.get("nextCursor"):
-        kwargs: dict[str, Any] = {argument(k): v for k, v in query.items() if v is not None}
-        if any(q["name"] == "cursor" for q in op["query"]):
-            kwargs["cursor"] = first["nextCursor"]
+    """All items of a list operation as one page, with a null ``nextCursor``.
+
+    The other fields come from the LAST page: totals (a usage page's ``total``,
+    ``metric``, ``asOf``) are the same on every page, and a molecules scan's state
+    (``waiting``, ``scanProgress``...) is only current there. The cursor goes in the
+    query or, for an operation that pages through its body (``molecules search``), in
+    the body; a page still being prepared (``waiting``) is waited for as the SDK's
+    own paging does (``retryAfterMs``).
+    """
+    page = invoke(client, op, *path_args, body=body, **query)
+    if not isinstance(page, dict):
+        return page
+    items = list(page.get("items") or [])
+    in_query = any(q["name"] == "cursor" for q in op["query"])
+    seen: set[str] = set()
+    while page.get("nextCursor") and page["nextCursor"] not in seen:
+        cursor = page["nextCursor"]
+        seen.add(cursor)
+        if page.get("waiting") and isinstance(page.get("retryAfterMs"), (int, float)):
+            time.sleep(page["retryAfterMs"] / 1000)
+        if in_query:
+            page = invoke(client, op, *path_args, body=body, **{**query, "cursor": cursor})
         else:
-            kwargs["body"] = {**(body or {}), "cursor": first["nextCursor"]}
-        items.extend(plain(list(client.paginate(method(client, op["sdk"]), *path_args, **kwargs))))
-    return {**first, "items": items, "nextCursor": None}
+            page = invoke(client, op, *path_args, body={**(body or {}), "cursor": cursor}, **query)
+        items.extend(page.get("items") or [])
+    return {**page, "items": items, "nextCursor": None}

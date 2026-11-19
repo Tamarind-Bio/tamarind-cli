@@ -425,3 +425,19 @@ def test_all_only_on_operations_that_answer_pages(v1):
     assert "--all" in runner.invoke(app, ["molecules", "search", "--help"]).stdout
     # a log chunk has a cursor but isn't a page of items
     assert "--all" not in runner.invoke(app, ["jobs", "logs", "--help"]).stdout
+
+
+def test_all_reports_the_last_pages_scan_state(v1, monkeypatch):
+    import time
+
+    slept: list[float] = []
+    monkeypatch.setattr(time, "sleep", slept.append)
+    pages = {
+        None: {"items": [{"id": "mol_1"}], "nextCursor": "c1", "waiting": True, "retryAfterMs": 250, "scanProgress": 0.4},
+        "c1": {"items": [{"id": "mol_2"}], "nextCursor": None, "waiting": False, "retryAfterMs": None, "scanProgress": 1.0},
+    }
+    v1.answers["molecules.list"] = lambda **kw: pages[kw.get("cursor")]
+    out = _json(runner.invoke(app, ["--json", "molecules", "list", "--all"]))
+    assert [m["id"] for m in out["items"]] == ["mol_1", "mol_2"]
+    assert out["waiting"] is False and out["scanProgress"] == 1.0 and out["nextCursor"] is None
+    assert slept == [0.25]
