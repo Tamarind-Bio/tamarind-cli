@@ -84,7 +84,7 @@ class Transport:
         """Build one request with ``endpoint._get_kwargs`` and send it.
 
         ``repeat_safe`` marks a request the contract says can be repeated (it is also
-        implied by GET and by an ``Idempotency-Key``). A failure raised after retries
+        implied by GET and by an operation that takes an ``Idempotency-Key``). A failure raised after retries
         carries ``idempotency_key``, so a caller can repeat the same intent safely.
         """
         build = endpoint._get_kwargs
@@ -115,6 +115,9 @@ class Transport:
                 params[name] = ",".join(str(item) for item in params[name])
         headers = httpx.Headers(request.get("headers") or {})
         headers.update(extra_headers or {})
+        # Repeatable when the contract says so: an operation that takes an Idempotency-Key
+        # (a header added through extra_headers doesn't count), or one marked repeat-safe.
+        repeat_safe = repeat_safe or "idempotency_key" in hints
         try:
             return self.send(
                 request["method"].upper(),
@@ -141,7 +144,7 @@ class Transport:
     ) -> httpx.Response:
         merged = httpx.Headers(self._headers)
         merged.update(headers or {})
-        repeat_safe = repeat_safe or method in _SAFE_METHODS or "Idempotency-Key" in merged
+        repeat_safe = repeat_safe or method in _SAFE_METHODS
         return self._with_retries(
             # Never follow a redirect with the key, even on a caller's client that would.
             lambda: self._client.request(

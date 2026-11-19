@@ -581,3 +581,39 @@ def test_a_callers_redirect_following_client_never_carries_the_key() -> None:
     with pytest.raises(ProblemError):
         sdk.files.get(path="a.pdb", delivery="redirect")
     assert elsewhere.call_count == 0
+
+
+@respx.mock
+def test_contract_repeatable_posts_are_retried(client: Tamarind) -> None:
+    cancel = respx.post(f"{BASE}/jobs/job_1/cancel").mock(
+        side_effect=[httpx.ReadTimeout("lost"), httpx.Response(200, json={"status": "Stopped"})]
+    )
+    assert client.jobs.cancel("job_1") == {"status": "Stopped"}
+    assert cancel.call_count == 2
+    validate = respx.post(f"{BASE}/jobs/validate").mock(
+        side_effect=[httpx.Response(502, text="bad"), httpx.Response(200, json={"valid": True})]
+    )
+    assert client.jobs.validate({"tool": "t", "settings": {}}) == {"valid": True}
+    assert validate.call_count == 2
+
+
+@respx.mock
+def test_a_callers_idempotency_header_does_not_make_a_delete_repeatable(client: Tamarind) -> None:
+    route = respx.delete(f"{BASE}/files").mock(return_value=httpx.Response(502, text="bad"))
+    with pytest.raises(ProblemError):
+        client.files.delete(path="a.pdb", extra_headers={"Idempotency-Key": "k"})
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_paginate_waits_out_a_page_still_being_prepared(client: Tamarind) -> None:
+    respx.post(f"{BASE}/molecules/search").mock(
+        side_effect=[
+            httpx.Response(
+                200, json={"items": [], "nextCursor": "c1", "waiting": True, "retryAfterMs": 1500}
+            ),
+            httpx.Response(200, json={"items": ["m"], "nextCursor": None}),
+        ]
+    )
+    assert list(client.paginate(client.molecules.search, {"searchCaps": "x"})) == ["m"]
+    assert client.sleeps == [1.5]  # type: ignore[attr-defined]

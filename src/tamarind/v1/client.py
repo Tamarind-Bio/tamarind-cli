@@ -198,10 +198,14 @@ class Operation:
         endpoint: types.ModuleType,
         *path: str,
         check: Callable[[httpx.Response, Any], None] | None = None,
+        repeat_safe: bool = False,
     ):
         self.endpoint = endpoint
         self.path = path
         self.check = check
+        # The contract makes this POST repeatable (a query, or a cancel that is safe to
+        # repeat), so it is retried after an ambiguous failure like a GET.
+        self.repeat_safe = repeat_safe
         self.__doc__ = _doc(endpoint)
 
     def __set_name__(self, owner: type, name: str) -> None:
@@ -303,6 +307,7 @@ class BoundOperation:
             self.operation.endpoint,
             body=body,
             extra_headers=extra_headers,
+            repeat_safe=self.operation.repeat_safe,
             **dict(zip(path, args)),
             **params,
         )
@@ -360,7 +365,7 @@ class Usage(_Resource):
 class Tools(_Resource):
     list = Operation(list_tools)
     facets = Operation(get_tool_facets)
-    recommend = Operation(recommend_tools)
+    recommend = Operation(recommend_tools, repeat_safe=True)
     get = Operation(get_tool, "tool")
     schema = Operation(get_tool_schema, "tool")
 
@@ -370,13 +375,13 @@ class Jobs(_Resource):
 
     list = Operation(list_jobs)
     submit = Operation(submit_job)
-    estimate = Operation(estimate_job)
-    search = Operation(search_jobs)
-    validate = Operation(validate_job)
+    estimate = Operation(estimate_job, repeat_safe=True)
+    search = Operation(search_jobs, repeat_safe=True)
+    validate = Operation(validate_job, repeat_safe=True)
     get = Operation(get_job, "job_id")
     update = Operation(update_job, "job_id")
     delete = Operation(delete_job, "job_id")
-    cancel = Operation(cancel_job, "job_id")
+    cancel = Operation(cancel_job, "job_id", repeat_safe=True)
     rerun = Operation(rerun_job, "job_id")
     archive = Operation(archive_job, "job_id")
     list_files = Operation(list_job_files, "job_id")
@@ -545,12 +550,12 @@ class Projects(_Resource):
 
 
 class Pipelines(_Resource):
-    estimate = Operation(estimate_pipeline)
+    estimate = Operation(estimate_pipeline, repeat_safe=True)
     list_runs = Operation(list_pipeline_runs)
     submit = Operation(submit_pipeline)
     get_run = Operation(get_pipeline_run, "run_id")
     archive_run = Operation(archive_pipeline_run, "run_id")
-    cancel_run = Operation(cancel_pipeline_run, "run_id")
+    cancel_run = Operation(cancel_pipeline_run, "run_id", repeat_safe=True)
     list_node_run_molecules = Operation(list_node_run_molecules, "run_id", "node_run_id")
     schema = Operation(get_pipeline_schema)
     list_templates = Operation(list_pipeline_templates)
@@ -559,8 +564,8 @@ class Pipelines(_Resource):
     delete_template = Operation(delete_pipeline_template, "template_id")
     duplicate_template = Operation(duplicate_pipeline_template, "template_id")
     publish_template = Operation(publish_pipeline_template, "template_id")
-    validate_template = Operation(validate_pipeline_template, "template_id")
-    validate = Operation(validate_pipeline)
+    validate_template = Operation(validate_pipeline_template, "template_id", repeat_safe=True)
+    validate = Operation(validate_pipeline, repeat_safe=True)
 
 
 class Molecules(_Resource):
@@ -569,7 +574,9 @@ class Molecules(_Resource):
     create_group = Operation(create_molecule_group)
     get_group = Operation(get_molecule_group, "group_id")
     remove_from_group = Operation(remove_molecules_from_group, "group_id")
-    list_score_observations = Operation(list_molecule_score_observations, "group_id")
+    list_score_observations = Operation(
+        list_molecule_score_observations, "group_id", repeat_safe=True
+    )
     start_import = Operation(start_molecule_import)
     get_import = Operation(get_molecule_import, "import_id")
     delete_import = Operation(delete_molecule_import, "import_id")
@@ -578,7 +585,7 @@ class Molecules(_Resource):
     create_schema = Operation(create_molecule_schema)
     get_schema = Operation(get_molecule_schema, "schema_id")
     update_schema = Operation(update_molecule_schema, "schema_id")
-    search = Operation(search_molecules)
+    search = Operation(search_molecules, repeat_safe=True)
     upload = Operation(upload_molecules)
     get = Operation(get_molecule, "molecule_id")
     delete = Operation(delete_molecule, "molecule_id")
@@ -589,7 +596,7 @@ class Molecules(_Resource):
 class CustomTools(_Resource):
     list = Operation(list_custom_tools)
     create = Operation(create_custom_tool)
-    validate_config = Operation(validate_custom_tool_config)
+    validate_config = Operation(validate_custom_tool_config, repeat_safe=True)
     delete = Operation(delete_custom_tool, "name")
     get = Operation(get_custom_tool, "name")
     update = Operation(update_custom_tool, "name")
@@ -606,10 +613,10 @@ class Assays(_Resource):
     list_types = Operation(list_assay_types)
     list = Operation(list_assays)
     submit = Operation(submit_assay)
-    estimate = Operation(estimate_assay)
-    validate = Operation(validate_assay)
+    estimate = Operation(estimate_assay, repeat_safe=True)
+    validate = Operation(validate_assay, repeat_safe=True)
     get = Operation(get_assay, "assay_id")
-    cancel = Operation(cancel_assay, "assay_id")
+    cancel = Operation(cancel_assay, "assay_id", repeat_safe=True)
     results = Operation(get_assay_results, "assay_id")
 
 
@@ -673,6 +680,7 @@ class Tamarind:
                 cursor = page.get("nextCursor")
                 if not cursor:
                     return
+                _pause_if_waiting(method, page)
         # The cursor is a body field (molecules.search, molecules.list_score_observations).
         path = len(method.operation.path)
         body = args[path] if len(args) > path else params.pop("body", None)
@@ -683,6 +691,7 @@ class Tamarind:
             cursor = page.get("nextCursor")
             if not cursor:
                 return
+            _pause_if_waiting(method, page)
             request = {**request, "cursor": cursor}
 
     def close(self) -> None:
@@ -693,6 +702,12 @@ class Tamarind:
 
     def __exit__(self, *exc: object) -> None:
         self.close()
+
+
+def _pause_if_waiting(method: BoundOperation, page: dict[str, Any]) -> None:
+    """A page still being prepared (``waiting``) says how long to wait for the next one."""
+    if page.get("waiting") and isinstance(page.get("retryAfterMs"), (int, float)):
+        method._transport._sleep(page["retryAfterMs"] / 1000)
 
 
 def _json_page(page: Any) -> dict[str, Any]:
