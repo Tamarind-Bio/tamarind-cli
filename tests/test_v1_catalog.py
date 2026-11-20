@@ -50,6 +50,23 @@ def pages(**kw: Any) -> dict[str, Any]:
 # -- catalog/tools ------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("on", [False, True])
+def test_what_goes_to_the_catalog_anyway_never_asks_the_server(monkeypatch, on):
+    """The held tool set, and a custom-tool listing whatever the switch, go to the catalog
+    without the v1 probe (GET /me), as on main."""
+    from tamarind._v1 import switch
+
+    monkeypatch.setattr(on_v1, "TOOL_SET_ON_V1", on)
+    monkeypatch.setattr(switch, "probe", lambda *a, **k: pytest.fail("asked"))
+    monkeypatch.setattr(HTTPClient, "_classic_json", lambda self, method, path, **k: {"path": path})
+    with HTTPClient("https://mcp.tamarind.bio", "k") as client:
+        assert catalog.list_tools(client, custom=True) == {"path": "catalog/tools"}
+        if not on:
+            assert catalog.list_tools(client, search="fold") == {"path": "catalog/tools"}
+            assert catalog.list_modalities(client) == {"path": "catalog/modalities"}
+            assert catalog.list_functions(client) == {"path": "catalog/functions"}
+
+
 def test_the_tool_set_is_held_on_the_catalog_by_default(env):
     """Until the tool set is decided (v1 lists the app's tools and counts its facets from
     them), the list, modalities and functions stay on the catalog; schemas are v1's."""

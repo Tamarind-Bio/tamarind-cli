@@ -165,7 +165,7 @@ class HTTPClient:
         from ._v1 import catalog as catalog_on_v1
         from ._v1 import classic as on_v1
 
-        handler = on_v1.route(method, path.strip("/")) or catalog_on_v1.route(method, path.strip("/"))
+        handler = on_v1.route(method, path.strip("/")) or catalog_on_v1.route(method, path.strip("/"), payload)
         if handler is None or not self.api_key or not self.uses_v1():
             return classic()
         return self._routes().serve(handler, payload, classic, timeout=timeout)

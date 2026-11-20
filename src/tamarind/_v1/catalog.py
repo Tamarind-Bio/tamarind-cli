@@ -363,14 +363,17 @@ _LISTINGS = {
 }
 
 
-def route(method: str, path: str) -> Route | None:
+def route(method: str, path: str, params: Any = None) -> Route | None:
     """The handler for a catalog request v1 answers; None for the rest (job logs, which
-    :func:`tamarind._v1.classic.route` answers, and anything else)."""
+    :func:`tamarind._v1.classic.route` answers, and anything else). A request that goes to
+    the catalog anyway (the held tool set, a custom-tool listing) has none, so it never
+    asks the server whether v1 is on."""
     if method != "GET":
         return None
     listing = _LISTINGS.get(path)
     if listing is not None:
-        return listing, ()
+        custom = isinstance(params, dict) and str(params.get("custom")).lower() == "true"
+        return (listing, ()) if TOOL_SET_ON_V1 and not custom else None
     match = _SCHEMA.match(path)
     if match:
         return tool_schema, (match.group("tool"),)
