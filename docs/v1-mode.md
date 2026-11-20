@@ -134,6 +134,12 @@ value). Checked live on staging: the typed objects are equal. v1's added
 With `include_folders`, folders are listed as `path/` ahead of the newest files, as
 classic dates them "now".
 
+**SDK `rest.upload_file_url`** (classic's `POST /getPresignedUploadUrl`): v1's uploadFile
+without content, which signs the same object in the same account bucket. The answer is
+`{uploadUrl, key}`: v1 has no `headUrl` or `bucket`. `Content-Type` is always sent and so
+always signed, as classic signs it. A path v1 won't take (a leading `/`, `..`, `//`) is
+its 422; a path it won't store at is 422 `invalid_option`, where classic answers 403.
+
 **SDK `jobs.list` filters:** `kind`, `status`, `tool` and `search` are v1's. With v1 off,
 passing one raises "isn't enabled for this account yet"; they can't be combined with
 `organization`, `job_email`, `include_subjobs` or `job_name`.

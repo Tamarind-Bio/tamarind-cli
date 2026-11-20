@@ -184,8 +184,15 @@ def upload_file_url(
 
     PUT the file bytes directly to ``uploadUrl`` with a matching ``Content-Type``
     header (the presigned signature covers the content type). This uploads
-    straight to S3, bypassing the API's request-body size limit.
+    straight to S3, bypassing the API's request-body size limit. With v1 on for the
+    key, the link is v1's (uploadFile) and the answer is ``{uploadUrl, key}``: v1 has
+    no ``headUrl`` or ``bucket``.
     """
+    from ._v1 import signed_upload
+
+    routed = signed_upload.upload_url(client, filename, content_type)
+    if routed is not None:
+        return routed
     return client.post_json(
         "getPresignedUploadUrl", json={"filename": filename, "contentType": content_type}
     )
