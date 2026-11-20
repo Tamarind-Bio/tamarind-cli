@@ -64,10 +64,10 @@ budget error. A 5xx or no answer is "outcome unclear", as in classic mode, so
 
 These have no v1 form yet, so they stay on classic even with v1 on:
 
-- the tool list: `tools` (`Tamarind().tools.list`, `tamarind.catalog.list_tools`), held
-  on the catalog until the tool set is decided (see "The catalog" below), and
-  `tools --custom` in any case (v1's listTools holds built-in tools only). `schema`,
-  `modalities` and `functions` are v1's;
+- the tool set: `tools`, `modalities` and `functions` (`Tamarind().tools.list/modalities/
+  functions`, `tamarind.catalog`), held on the catalog until the tool set is decided (see
+  "The catalog" below), and `tools --custom` in any case (v1's listTools holds built-in
+  tools only). `schema` is v1's;
 - another member's jobs: `--organization`, `--email` (until website#7795);
 - `jobs --include-subjobs`;
 - `results --pdbs-only` (until v1 serves `bestStructures`);
@@ -138,16 +138,17 @@ classic dates them "now".
 passing one raises "isn't enabled for this account yet"; they can't be combined with
 `organization`, `job_email`, `include_subjobs` or `job_name`.
 
-**The catalog** (`tamarind._v1.catalog`). `modalities`, `functions` and `schema` (and in
-the SDK `Tamarind().tools.modalities/functions/schema/example` and `tamarind.catalog`)
-are answered from v1 and rebuilt in the catalog's layout: getToolFacets for the facets,
-getToolSchema with getTool for a schema. The tool list (`catalog/tools`) has the same
-mapping (every page of listTools, with the catalog's own filters, sort, facet lists,
-unrecognized-filter note and hints applied), but it stays on the catalog while
-`LIST_ON_V1` is off, as it is today. Diffed on staging for one account, every tool,
-against the staging MCP's catalog:
-- `modalities` and `functions`: the same values, labels and descriptions. `toolCount`
-  counts v1's tool list.
+**The catalog** (`tamarind._v1.catalog`). `schema` (and in the SDK
+`Tamarind().tools.schema/example` and `tamarind.catalog.get_schema`) is answered from v1,
+getToolSchema with getTool, rebuilt in the catalog's layout. The tool set has the same
+kind of mapping (the list from every page of listTools, with the catalog's own filters,
+sort, facet lists, unrecognized-filter note and hints applied; `modalities` and
+`functions` from getToolFacets), but `tools`, `modalities` and `functions` stay on the
+catalog while `TOOL_SET_ON_V1` is off, as it is today. Diffed on staging for one
+account, every tool, against the staging MCP's catalog:
+- `modalities` and `functions` on v1 (held): the same values, labels and descriptions;
+  `toolCount` differs for 7 of 9 modalities and 26 of 35 functions, from the list below
+  and from v1 assigning some categories differently.
 - The tool list on v1 (held): v1's list is the app's (website#7796), 429 tools where the
   catalog lists 456. Only the catalog lists `abgpt`, the `rosetta-*` tools, the
   `*-inference` model tools, `bbmerge`, `pilot-sbdd` and `t2pmhc`; only v1 lists
@@ -157,8 +158,10 @@ against the staging MCP's catalog:
   the schema of every listed tool but `abgpt`, which this account can't run.
 - `schema`: the same envelope, display name, description, categories, tags, hint and
   output types. `outputs` is v1's output contract (with the catalog's `byTaskNote`), the
-  catalog's for 446 of 455 tools; the other 9 differ in `produces` by the app's rules
-  (website#7807). `exampleJobNote` is the catalog's text for the example.
+  catalog's for 446 of 455 tools. Pending a tools fix, 9 differ in `produces`:
+  `autodock-vina`, `diffdock`, `gnina`, `matcha`, `smina` and `surfdock` add `sdf`;
+  `flowdock` drops `sdf`; `fastsolv` and `unimol2` list none. `exampleJobNote` is the
+  catalog's text for the example.
 - `schema` parameters are v1's JSON Schema rebuilt as the catalog's list: `name`, `type`,
   `displayName`, `descr`, `default`, `required`, `options`, `lowerBound`/`upperBound` and
   `example`. Left out, with no v1 form: `constraints`, `constraintsText`, `conditionals`,

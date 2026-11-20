@@ -7,8 +7,10 @@ answered from v1 and rebuilt in the catalog's layout:
 - ``catalog/tools`` from every page of ``listTools``, filtered, sorted and summarized the
   way the catalog does it (``getAvailableTools`` in the MCP server), so its filters,
   facet lists and hints behave as before. ``custom=true`` stays on the catalog: v1 lists
-  built-in tools only. Held on the catalog for now by :data:`LIST_ON_V1` (see there).
+  built-in tools only.
 - ``catalog/modalities`` and ``catalog/functions`` from ``getToolFacets``.
+- These three (the tool set) are held on the catalog for now by :data:`TOOL_SET_ON_V1`
+  (see there); schemas are v1's.
 - ``catalog/tools/{tool}/schema`` from ``getToolSchema`` (and ``getTool`` for the
   display name and facets). v1's JSON Schema is rebuilt as the catalog's parameter
   list, as far as v1 carries it: each setting's name, type, display name, description,
@@ -30,11 +32,13 @@ from ..errors import NotFoundError, TamarindError
 from .classic import OnClassic, Route, Router, plain
 from .errors import ProblemError
 
-# Whether the tool list (``catalog/tools``) is answered by v1. Off: it stays on the catalog,
-# while modalities, functions and schemas are v1's. v1 lists the app's tools (429 for a
-# staging account, where the MCP catalog lists 456), and the user-facing tool list
-# doesn't change until that's decided. Turning it on is this one line.
-LIST_ON_V1 = False
+# Whether the tool set (the list, ``catalog/tools``, and its facets, ``catalog/modalities``
+# and ``catalog/functions``) is answered by v1. Off: they stay on the catalog, while
+# schemas are v1's. v1 lists the app's tools (429 for a staging account, where the MCP
+# catalog lists 456) and assigns some categories differently, so its facet counts differ
+# too; the user-facing tool set doesn't change until that's decided. Turning it on is
+# this one line.
+TOOL_SET_ON_V1 = False
 
 PAGE = 200
 # What the catalog cuts a narrowed listing's descriptions to (`_simplify_tool`).
@@ -130,8 +134,8 @@ def list_tools(client: Router, params: dict[str, Any]) -> dict[str, Any]:
     modality or function matched in any case, ``search`` in the name, display name or
     description, sorted by name. The facet lists, and which filter values are
     unrecognized, come from the whole list, before narrowing."""
-    if not LIST_ON_V1 or str(params.get("custom")).lower() == "true":
-        raise OnClassic  # held (LIST_ON_V1); v1's listTools holds built-in tools only (custom=true is 400)
+    if not TOOL_SET_ON_V1 or str(params.get("custom")).lower() == "true":
+        raise OnClassic  # held (TOOL_SET_ON_V1); v1's listTools holds built-in tools only (custom=true is 400)
     modality = params.get("modality") or params.get("category") or None
     function = params.get("function") or params.get("tag") or None
     search = params.get("search") or None
@@ -184,7 +188,10 @@ def list_tools(client: Router, params: dict[str, Any]) -> dict[str, Any]:
 
 def _facet_listing(client: Router, axis: str) -> list[dict[str, Any]]:
     """One axis of getToolFacets as the catalog lists it: ``{value, label, toolCount,
-    description?}``, most tools first, then by value."""
+    description?}``, most tools first, then by value. Held with the list
+    (:data:`TOOL_SET_ON_V1`)."""
+    if not TOOL_SET_ON_V1:
+        raise OnClassic  # the facets count the tool set, held on the catalog
     facets = plain(client.v1().tools.facets()) or {}
     entries = []
     for facet in facets.get(axis) or []:
