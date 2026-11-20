@@ -34,20 +34,27 @@ enabled for this account yet" (exit 2) and send nothing.
 |---|---|
 | `auth status`, `auth login` (the key check) | listJobs (classic's check, one job) |
 | `jobs`, `jobs --batch`, `status`, `wait`, `submit --wait` | listJobs, getJob |
+| `jobs --organization`, and `--email M` on `jobs`, `jobs --batch`, `status`, `wait`, `results` | listJobs with `scope=org` (and `createdBy=M`), getJob; another member's batch is listed by its id |
 | `validate`, the check `submit` makes first, `batch --prevalidate` | validateJob |
 | `submit`, `batch` | submitJob |
 | `cancel`, `cancel --batch` | cancelJob |
 | `results` (download, `--show-url`, `--file`) | archiveJob (archivePipelineRun for a run), getJobFile |
+| `results --pdbs-only` | archiveJob with `bestStructures` |
 | `delete` | deleteJob |
 | `logs` | getJobLogs |
-| `files list`, `files stats`, `files folders` | listFiles |
+| `files list`, `files stats` | listFiles |
+| `files folders` | listFiles with `type=folder` |
 | `files upload` | uploadFile |
-| `files delete` | deleteFile |
+| `files delete` | deleteFile (`PATH --folder F` deletes the folder, as classic does) |
 | `custom-tools …` | the same operations at the v1 base; `custom-tools test` is submitJob pinned to the version; a build's upload session (v1 `id`) is read as classic's `uploadId` |
 
 In the SDK, `Tamarind().jobs`, `.files`, `.custom_tools`, `.pipelines.get_run` and the
 `tamarind.rest` functions follow the same table: the SDK and the CLI share one mapping
-(`tamarind._v1.classic`).
+(`tamarind._v1.classic`). The SDK's `jobs.cancel(job_id=...)` (classic's cancel by row
+`Id`) is cancelJob of `job_<Id>`, else of the batch `batch_<Id>`.
+
+`scope=org` and `createdBy` call classic's own organization and member readers, so who
+can see whose jobs, and which jobs, is classic's rule.
 
 There is no fallback to classic. When v1 refuses a request, the CLI shows v1's error with
 today's exit codes (401 → 3, 404 → 4, 400/422 → 5, 429 → 6, budget or quota → 8, anything
@@ -68,13 +75,20 @@ These have no v1 form yet, so they stay on classic even with v1 on:
   `tamarind.catalog` and `Tamarind().tools.list/schema/modalities/functions/example`.
   Pending: once website#7796 and #7807 land (catalog visibility and fields), they move to
   v1, with v1's schema mapped back to today's parameter list;
-- another member's jobs: `--organization`, `--email` (until website#7795);
-- `jobs --include-subjobs`;
-- `results --pdbs-only` (until v1 serves `bestStructures`);
+- `status`, `wait` and `results NAME --organization` without `--email`: an
+  organization-wide lookup by name. Classic answers every member's job of that name, and
+  the CLI refuses a name several members share; v1's organization lookup answers only the
+  newest match, so it would pick one silently. (`wait` keeps the owner its first poll
+  finds, so its later polls, and the `results` download, go to v1.)
+- `jobs --batch B --organization`: classic lists every member's batch named B; v1 can't
+  combine a batch with `scope=org`, and its name lookup finds only the newest batch;
+- `jobs --include-subjobs` (v1 lists one batch's jobs, never mixed into the list);
 - `logs` of a batch or a pipeline run (v1 reads one job's log);
 - `results RUN --file PATH`, one file of a pipeline run (v1's file read takes a job or a batch);
+- `results RUN --pdbs-only` (a run's archive has no `bestStructures`);
 - `delete NAME` when only a pipeline run has that name (v1 deletes jobs and batches);
-- `files delete PATH --folder F` (a path and a folder together).
+- in the SDK, `rest.upload_file_url` (classic's presigned upload URL; v1 uploads are
+  sessions, and `files upload` already uses them).
 
 ## Differences from classic mode
 
@@ -89,6 +103,10 @@ Found by running each command on staging in both modes and diffing the output.
 - `jobs --batch` lists the batch's jobs in v1's order, which can differ from classic's.
 - `status` of an unknown job gives the same message and exit code, without classic's
   problem detail.
+- `--organization` and `--email` lists show a job that was dispatched again once, as its
+  current attempt; classic lists each attempt. Their rows carry `User`, as classic's do.
+  A member whose jobs you can't see gives classic's message and exit code (3), where v1
+  itself answers 403.
 
 **validate:**
 - An invalid report has no `missing_fields`. Classic lists the schema of each missing
@@ -110,7 +128,16 @@ null, because v1 pages back with a cursor rather than byte offsets.
 case, by code point, where classic uses JavaScript's `localeCompare`. Names that differ
 only in punctuation can swap places (`1IEP.pdb` and `1iep_imatinib_pose.pdb`).
 
-**files folders:** no `labels` (classic's map of folder to job name) and no `nextCursor`.
+**results --pdbs-only:**
+- For a batch with no stored `-pdbs.zip`, classic builds the zip and sends it as its
+  answer, which today's CLI can't read as a link, so the command fails in classic mode;
+  v1 builds it and the CLI downloads it. Without `--wait` the CLI waits up to 10 minutes
+  for v1's build (v1's own deadline is 8).
+- For a batch that hasn't finished, classic zips the jobs complete so far; v1 says the
+  batch isn't complete (exit 5).
+
+**SDK `jobs.cancel(job_id=...)`** of a pipeline run's row: classic answers 400 ("stopped
+through the pipeline run API"); v1 answers not found (exit 4).
 
 **results --wait of a batch:** v1 can call a batch Complete before its archive is built.
 Under `--wait` the CLI asks again after v1's `retryAfterSeconds` until the archive is ready
@@ -120,8 +147,9 @@ prepared.
 **custom-tools test** (and the SDK's `CustomTool.test`): v1 has no test marker, so the
 run doesn't appear in the website's Test history.
 
-**files delete of a missing file:** v1 answers 404 (exit 4); classic answers "File deleted
-successfully".
+**files delete of a missing file or folder** (also `PATH --folder F`, which deletes the
+folder): v1 answers 404 (exit 4); classic answers "File deleted successfully" or "Folder
+deleted successfully".
 
 **SDK pipeline runs:** `pipelines.get_run` takes classic's bare run id (sent to v1 as
 `run_<id>`) and answers with it; the run, its node runs and a node run's `molecules()`
@@ -135,8 +163,9 @@ With `include_folders`, folders are listed as `path/` ahead of the newest files,
 classic dates them "now".
 
 **SDK `jobs.list` filters:** `kind`, `status`, `tool` and `search` are v1's. With v1 off,
-passing one raises "isn't enabled for this account yet"; they can't be combined with
-`organization`, `job_email`, `include_subjobs` or `job_name`.
+passing one raises "isn't enabled for this account yet". They combine with `organization`
+and `job_email` (v1 itself refuses `search` and `kind="pipeline"` with an organization's
+list), but not with `include_subjobs`, `job_name`, or `organization` with `batch`.
 
 **Job rows, three more** (from review, not yet changed): a v1 `Failed` job shows `Failed`
 where classic says `Stopped`; `stopReason` is kept only for a low-priority job; a pipeline

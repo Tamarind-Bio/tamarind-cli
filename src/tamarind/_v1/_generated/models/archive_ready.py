@@ -22,7 +22,8 @@ class ArchiveReady:
         size_bytes (int): The zip's size.
         status (Literal['ready']):
         truncated (bool | None): True when the archive hit a size or file-count limit and is missing files. A job's or a
-            batch's archive is the stored one and never cut short, so it is false. Null when nothing records it, as for a
+            batch's archive is the stored one and never cut short, so it is false; the exception, once website#7802 merges,
+            is a batch's `bestStructures` zip past 500 structures or 2 GiB of them. Null when nothing records it, as for a
             pipeline run's archive.
     """
 
