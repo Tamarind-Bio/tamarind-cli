@@ -83,7 +83,31 @@ def env(monkeypatch, tmp_path):
                 monkeypatch.delenv("TAMARIND_API", raising=False)
             return runner.invoke(app, list(args))
 
-    return Env
+    yield Env
+    _assert_real_signatures(recorder.calls)
+
+
+def _assert_real_signatures(calls: list[tuple[str, tuple, dict]]) -> None:
+    """Every call the router made fits the generated v1 operation it names, as the real
+    client would check (the recorder takes any keyword)."""
+    import inspect
+
+    from tamarind._v1.client import BoundOperation, Tamarind as V1
+
+    real = V1("k", base_url="https://v1.test")
+    try:
+        for name, args, kwargs in calls:
+            target: Any = real
+            for part in name.split("."):
+                target = getattr(target, part)
+            if not isinstance(target, BoundOperation):
+                continue
+            accepted = set(inspect.signature(target.operation.endpoint._get_kwargs).parameters)
+            unknown = set(kwargs) - accepted - {"body", "extra_headers"}
+            assert not unknown, f"{name} got {sorted(unknown)}, which the contract doesn't take"
+            assert len(args) <= len(target.operation.path) + (1 if target.takes_body else 0), f"{name}{args}"
+    finally:
+        real.close()
 
 
 def same_output(env, *args: str) -> Any:
@@ -682,10 +706,10 @@ def test_logs_of_an_unknown_job_are_not_found(env):
     assert isinstance(res.exception, NotFoundError)
 
 
-def test_the_catalog_stays_on_the_catalog(env):
+def test_the_custom_tool_catalog_stays_on_the_catalog(env):
     FakeClassic.answers["catalog/tools"] = {"tools": [], "totalTools": 0}
-    res = env.run("v1", "--json", "tools")
-    assert res.exit_code == 0 and env.v1.calls == []
+    res = env.run("v1", "--json", "tools", "--custom")
+    assert res.exit_code == 0 and env.v1.calls == [] and classic_calls()[0][1] == "catalog/tools"
 
 
 # -- files ------------------------------------------------------------------------------

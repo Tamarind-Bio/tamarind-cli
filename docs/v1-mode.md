@@ -43,11 +43,12 @@ enabled for this account yet" (exit 2) and send nothing.
 | `files list`, `files stats`, `files folders` | listFiles |
 | `files upload` | uploadFile |
 | `files delete` | deleteFile |
+| `tools`, `modalities`, `functions`, `schema` | listTools (every page), getToolFacets, getToolSchema and getTool, rebuilt in the catalog's layout (`tamarind._v1.catalog`) |
 | `custom-tools …` | the same operations at the v1 base; `custom-tools test` is submitJob pinned to the version; a build's upload session (v1 `id`) is read as classic's `uploadId` |
 
-In the SDK, `Tamarind().jobs`, `.files`, `.custom_tools`, `.pipelines.get_run` and the
-`tamarind.rest` functions follow the same table: the SDK and the CLI share one mapping
-(`tamarind._v1.classic`).
+In the SDK, `Tamarind().jobs`, `.files`, `.tools`, `.custom_tools`, `.pipelines.get_run`
+and the `tamarind.rest` and `tamarind.catalog` functions follow the same table: the SDK and
+the CLI share one mapping (`tamarind._v1.classic` and `tamarind._v1.catalog`).
 
 There is no fallback to classic. When v1 refuses a request, the CLI shows v1's error with
 today's exit codes (401 → 3, 404 → 4, 400/422 → 5, 429 → 6, budget or quota → 8, anything
@@ -64,10 +65,8 @@ budget error. A 5xx or no answer is "outcome unclear", as in classic mode, so
 
 These have no v1 form yet, so they stay on classic even with v1 on:
 
-- the catalog: `tools`, `schema`, `modalities`, `functions`, and in the SDK
-  `tamarind.catalog` and `Tamarind().tools.list/schema/modalities/functions/example`.
-  Pending: once website#7796 and #7807 land (catalog visibility and fields), they move to
-  v1, with v1's schema mapped back to today's parameter list;
+- `tools --custom` (`Tamarind().tools.list(custom=True)`): v1's listTools holds built-in
+  tools only (`custom=true` is 400);
 - another member's jobs: `--organization`, `--email` (until website#7795);
 - `jobs --include-subjobs`;
 - `results --pdbs-only` (until v1 serves `bestStructures`);
@@ -137,6 +136,34 @@ classic dates them "now".
 **SDK `jobs.list` filters:** `kind`, `status`, `tool` and `search` are v1's. With v1 off,
 passing one raises "isn't enabled for this account yet"; they can't be combined with
 `organization`, `job_email`, `include_subjobs` or `job_name`.
+
+**The catalog** (`tools`, `modalities`, `functions`, `schema`; `tamarind.catalog` and
+`Tamarind().tools` in the SDK). Diffed on staging for one account, every tool, against
+the staging MCP's catalog:
+- The tool list is v1's, the app's list (website#7796), not the MCP catalog's: 429 tools
+  where the catalog lists 456. Only the catalog lists `abgpt`, the `rosetta-*` tools, the
+  `*-inference` model tools, `bbmerge`, `pilot-sbdd` and `t2pmhc`; only v1 lists
+  `odesign-antibody`, `protein-scoring` and `virtual-screening`. Facet `toolCount`s follow
+  the list. Otherwise the listing is the catalog's: the same envelope, filters, order,
+  hints and fields for every tool both list, except `outputTypes`, which follows the app's
+  ligand rule (`boltz`: `pdb`, where the catalog says `pdb`, `sdf`).
+- `modalities` and `functions`: the same values, labels and descriptions.
+- `schema`: the same envelope, display name, description, categories, tags, hint and
+  output types. `outputs` is v1's output contract, the catalog's for 446 of 455 tools; the
+  other 9 differ in `produces` by the app's rules (website#7807).
+- `schema` parameters are v1's JSON Schema rebuilt as the catalog's list, as far as v1
+  carries it: `name`, `type`, `displayName`, `descr`, `default`, `required`, `options`,
+  `lowerBound`/`upperBound` and `example`. The catalog's other setting keys
+  (`constraints`, `constraintsText`, `conditionals`, `tasks`, `showWithRequired`,
+  `extension`, `list`...) have no v1 form. `descr` is v1's description, which also states
+  the constraints (equal to the catalog's in 42% of settings). `required` is v1's
+  (including settings a branch requires); a required setting with a default isn't
+  required on v1, which fills it in (87% equal). The names are v1's: about 150 settings
+  are named differently from the catalog's, and v1 refuses the catalog's old names.
+- `schema --example` (`Tamarind().tools.example`) is v1's `example`, built for one task
+  branch: the same settings as before for 389 of 426 tools.
+- A tool hidden from the assistant (`Hide: agent`: `odesign-antibody`, `protein-scoring`,
+  `virtual-screening`) has a schema on v1, where the catalog refuses it.
 
 **Job rows, three more** (from review, not yet changed): a v1 `Failed` job shows `Failed`
 where classic says `Stopped`; `stopReason` is kept only for a low-priority job; a pipeline
