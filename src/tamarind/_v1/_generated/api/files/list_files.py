@@ -5,6 +5,7 @@ import httpx
 
 from ...client import AuthenticatedClient, Client
 from ...models.file_entry_page import FileEntryPage
+from ...models.list_files_type import ListFilesType
 from ...models.problem import Problem
 from ...types import UNSET, Response, Unset
 
@@ -14,6 +15,7 @@ def _get_kwargs(
     folder: str | Unset = UNSET,
     recursive: bool | Unset = False,
     extension: list[str] | Unset = UNSET,
+    type_: ListFilesType | Unset = UNSET,
     search: str | Unset = UNSET,
     limit: int | Unset = 50,
     cursor: str | Unset = UNSET,
@@ -34,6 +36,12 @@ def _get_kwargs(
         json_extension = extension
 
     params["extension"] = json_extension
+
+    json_type_: str | Unset = UNSET
+    if not isinstance(type_, Unset):
+        json_type_ = type_.value
+
+    params["type"] = json_type_
 
     params["search"] = search
 
@@ -118,6 +126,7 @@ def sync_detailed(
     folder: str | Unset = UNSET,
     recursive: bool | Unset = False,
     extension: list[str] | Unset = UNSET,
+    type_: ListFilesType | Unset = UNSET,
     search: str | Unset = UNSET,
     limit: int | Unset = 50,
     cursor: str | Unset = UNSET,
@@ -140,12 +149,14 @@ def sync_detailed(
     Hidden files aren't listed or counted, as the app hides them: `.part` files, generated
     `result-*.zip` archives at the root, zips inside folders, and the top-level `msas-*` and
     `.git*` folders. You can still read or delete one by its exact path. Private export caches
-    aren't listed and answer 404.
+    answer 404 and nothing inside one is listed. Where the app lists it, the `_extract_features`
+    folder that holds them is listed by name (website#7801, not merged yet).
 
     Args:
         folder (str | Unset):
         recursive (bool | Unset):  Default: False.
         extension (list[str] | Unset):
+        type_ (ListFilesType | Unset):
         search (str | Unset):
         limit (int | Unset):  Default: 50.
         cursor (str | Unset):
@@ -163,6 +174,7 @@ def sync_detailed(
         folder=folder,
         recursive=recursive,
         extension=extension,
+        type_=type_,
         search=search,
         limit=limit,
         cursor=cursor,
@@ -182,6 +194,7 @@ def sync(
     folder: str | Unset = UNSET,
     recursive: bool | Unset = False,
     extension: list[str] | Unset = UNSET,
+    type_: ListFilesType | Unset = UNSET,
     search: str | Unset = UNSET,
     limit: int | Unset = 50,
     cursor: str | Unset = UNSET,
@@ -204,12 +217,14 @@ def sync(
     Hidden files aren't listed or counted, as the app hides them: `.part` files, generated
     `result-*.zip` archives at the root, zips inside folders, and the top-level `msas-*` and
     `.git*` folders. You can still read or delete one by its exact path. Private export caches
-    aren't listed and answer 404.
+    answer 404 and nothing inside one is listed. Where the app lists it, the `_extract_features`
+    folder that holds them is listed by name (website#7801, not merged yet).
 
     Args:
         folder (str | Unset):
         recursive (bool | Unset):  Default: False.
         extension (list[str] | Unset):
+        type_ (ListFilesType | Unset):
         search (str | Unset):
         limit (int | Unset):  Default: 50.
         cursor (str | Unset):
@@ -228,6 +243,7 @@ def sync(
         folder=folder,
         recursive=recursive,
         extension=extension,
+        type_=type_,
         search=search,
         limit=limit,
         cursor=cursor,
@@ -241,6 +257,7 @@ async def asyncio_detailed(
     folder: str | Unset = UNSET,
     recursive: bool | Unset = False,
     extension: list[str] | Unset = UNSET,
+    type_: ListFilesType | Unset = UNSET,
     search: str | Unset = UNSET,
     limit: int | Unset = 50,
     cursor: str | Unset = UNSET,
@@ -263,12 +280,14 @@ async def asyncio_detailed(
     Hidden files aren't listed or counted, as the app hides them: `.part` files, generated
     `result-*.zip` archives at the root, zips inside folders, and the top-level `msas-*` and
     `.git*` folders. You can still read or delete one by its exact path. Private export caches
-    aren't listed and answer 404.
+    answer 404 and nothing inside one is listed. Where the app lists it, the `_extract_features`
+    folder that holds them is listed by name (website#7801, not merged yet).
 
     Args:
         folder (str | Unset):
         recursive (bool | Unset):  Default: False.
         extension (list[str] | Unset):
+        type_ (ListFilesType | Unset):
         search (str | Unset):
         limit (int | Unset):  Default: 50.
         cursor (str | Unset):
@@ -286,6 +305,7 @@ async def asyncio_detailed(
         folder=folder,
         recursive=recursive,
         extension=extension,
+        type_=type_,
         search=search,
         limit=limit,
         cursor=cursor,
@@ -303,6 +323,7 @@ async def asyncio(
     folder: str | Unset = UNSET,
     recursive: bool | Unset = False,
     extension: list[str] | Unset = UNSET,
+    type_: ListFilesType | Unset = UNSET,
     search: str | Unset = UNSET,
     limit: int | Unset = 50,
     cursor: str | Unset = UNSET,
@@ -325,12 +346,14 @@ async def asyncio(
     Hidden files aren't listed or counted, as the app hides them: `.part` files, generated
     `result-*.zip` archives at the root, zips inside folders, and the top-level `msas-*` and
     `.git*` folders. You can still read or delete one by its exact path. Private export caches
-    aren't listed and answer 404.
+    answer 404 and nothing inside one is listed. Where the app lists it, the `_extract_features`
+    folder that holds them is listed by name (website#7801, not merged yet).
 
     Args:
         folder (str | Unset):
         recursive (bool | Unset):  Default: False.
         extension (list[str] | Unset):
+        type_ (ListFilesType | Unset):
         search (str | Unset):
         limit (int | Unset):  Default: 50.
         cursor (str | Unset):
@@ -350,6 +373,7 @@ async def asyncio(
             folder=folder,
             recursive=recursive,
             extension=extension,
+            type_=type_,
             search=search,
             limit=limit,
             cursor=cursor,
