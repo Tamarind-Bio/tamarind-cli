@@ -45,7 +45,7 @@ enabled for this account yet" (exit 2) and send nothing.
 | `files list`, `files stats` | listFiles |
 | `files folders` | listFiles with `type=folder` |
 | `files upload` | uploadFile |
-| `files delete` | deleteFile (`PATH --folder F` sends both, which v1 refuses) |
+| `files delete` | deleteFile (`PATH --folder F` deletes the folder, as classic does) |
 | `custom-tools …` | the same operations at the v1 base; `custom-tools test` is submitJob pinned to the version; a build's upload session (v1 `id`) is read as classic's `uploadId` |
 
 In the SDK, `Tamarind().jobs`, `.files`, `.custom_tools`, `.pipelines.get_run` and the
@@ -136,10 +136,6 @@ only in punctuation can swap places (`1IEP.pdb` and `1iep_imatinib_pose.pdb`).
 - For a batch that hasn't finished, classic zips the jobs complete so far; v1 says the
   batch isn't complete (exit 5).
 
-**files delete PATH --folder F:** classic deletes the folder F and ignores PATH, though
-the confirmation names PATH; v1 refuses a path and a folder together (exit 5) and deletes
-nothing.
-
 **SDK `jobs.cancel(job_id=...)`** of a pipeline run's row: classic answers 400 ("stopped
 through the pipeline run API"); v1 answers not found (exit 4).
 
@@ -151,8 +147,9 @@ prepared.
 **custom-tools test** (and the SDK's `CustomTool.test`): v1 has no test marker, so the
 run doesn't appear in the website's Test history.
 
-**files delete of a missing file:** v1 answers 404 (exit 4); classic answers "File deleted
-successfully".
+**files delete of a missing file or folder** (also `PATH --folder F`, which deletes the
+folder): v1 answers 404 (exit 4); classic answers "File deleted successfully" or "Folder
+deleted successfully".
 
 **SDK pipeline runs:** `pipelines.get_run` takes classic's bare run id (sent to v1 as
 `run_<id>`) and answers with it; the run, its node runs and a node run's `molecules()`
@@ -166,8 +163,9 @@ With `include_folders`, folders are listed as `path/` ahead of the newest files,
 classic dates them "now".
 
 **SDK `jobs.list` filters:** `kind`, `status`, `tool` and `search` are v1's. With v1 off,
-passing one raises "isn't enabled for this account yet"; they can't be combined with
-`organization`, `job_email`, `include_subjobs` or `job_name`.
+passing one raises "isn't enabled for this account yet". They combine with `organization`
+and `job_email` (v1 itself refuses `search` and `kind="pipeline"` with an organization's
+list), but not with `include_subjobs`, `job_name`, or `organization` with `batch`.
 
 **Job rows, three more** (from review, not yet changed): a v1 `Failed` job shows `Failed`
 where classic says `Stopped`; `stopReason` is kept only for a low-priority job; a pipeline

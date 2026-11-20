@@ -252,6 +252,23 @@ def test_a_member_whose_jobs_you_cant_see_reads_as_classic_answers_it(env):
         assert isinstance(res.exception, AuthError) and res.exception.exit_code == 3 and "Unauthorized to access jobs for this user" in str(res.exception)
 
 
+def test_v1_filters_combine_with_the_organization_or_a_member(env):
+    from tamarind import rest
+
+    env.v1.answers["jobs.list"] = _page()
+    with HTTPClient("https://app.tamarind.bio/api", "test-key") as client:
+        rest.get_jobs(client, organization=True, kind="batch", status=["Running"], limit=3)
+        rest.get_jobs(client, job_email=PEER, tool="boltz")
+        for refused in (dict(include_subjobs=True), dict(organization=True, batch="b1"), dict(job_name="n1")):
+            with pytest.raises(ValidationError, match="can't be combined"):
+                rest.get_jobs(client, kind="batch", **refused)
+    assert env.v1.calls == [
+        ("jobs.list", (), {"limit": 3, "kind": "batch", "status": ["Running"], "scope": "org"}),
+        ("jobs.list", (), {"tool": "boltz", "scope": "org", "created_by": PEER}),
+    ]
+    assert classic_calls() == []
+
+
 def test_jobs_of_a_members_batch_are_listed_by_its_id(env):
     env.v1.answers["jobs.list"] = lambda **kw: _found("batch", BATCH) if kw.get("name") else _page(V1_PEER_JOB)
     out = json.loads(env.run("v1", "--json", "jobs", "--batch", "b1", "--email", PEER, "--limit", "2").stdout)
@@ -929,13 +946,12 @@ def test_files_delete_goes_to_v1(env, args, message, call):
     assert env.v1.calls == [("files.delete", (), call)]
 
 
-def test_files_delete_of_a_file_and_a_folder_is_v1s_refusal(env):
-    # Classic deletes the folder and ignores the path; v1 takes one of the two, and
-    # refuses both with nothing deleted.
-    env.v1.answers["files.delete"] = problem(422, "validation_failed")
-    res = env.run("v1", "--json", "files", "delete", "a.pdb", "--folder", "runs", "--yes")
-    assert isinstance(res.exception, ValidationError) and res.exception.exit_code == 5 and classic_calls() == []
-    assert env.v1.calls == [("files.delete", (), {"path": "a.pdb", "folder": "runs"})]
+def test_files_delete_of_a_file_and_a_folder_deletes_the_folder_as_classic_does(env):
+    # Classic deletes the folder and ignores the path; v1 takes one of the two.
+    FakeClassic.answers["delete-file"] = {"message": "Folder deleted successfully"}
+    env.v1.answers["files.delete"] = None
+    same_output(env, "--json", "files", "delete", "a.pdb", "--folder", "runs", "--yes")
+    assert env.v1.calls == [("files.delete", (), {"folder": "runs"})]
 
 
 def test_files_upload_goes_to_v1(env, tmp_path, monkeypatch):

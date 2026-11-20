@@ -154,8 +154,10 @@ def test_jobs_list_v1_filters_reach_list_jobs(on):
         assert (params["kind"], params["status"], params["tool"], params["limit"]) == (
             "batch", "Running,In Queue", "boltz", "3",
         )
-        with pytest.raises(ValidationError, match="can't be combined"):
-            client.jobs.list(kind="batch", organization=True)
+        client.jobs.list(kind="batch", organization=True)
+        assert (route.calls[-1].request.url.params["kind"], route.calls[-1].request.url.params["scope"]) == (
+            "batch", "org",
+        )
         with pytest.raises(ValidationError, match="can't be combined"):
             client.jobs.list(kind="batch", job_name="n1")
 

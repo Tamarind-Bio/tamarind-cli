@@ -338,17 +338,17 @@ def get_jobs(client: Router, params: dict[str, Any]) -> dict[str, Any]:
     member = params.get("jobEmail")
     organization = member is None and bool(params.get("organization"))
     name, batch = params.get("jobName"), params.get("batch")
-    if filters and (member is not None or params.get("organization") or params.get("includeSubjobs")):
-        raise ValidationError(
-            f"{', '.join(filters)} can't be combined with organization, job_email or include_subjobs yet."
-        )
     if params.get("includeSubjobs"):
+        if filters:
+            raise ValidationError(f"{', '.join(filters)} can't be combined with include_subjobs yet.")
         raise OnClassic  # v1 has no list with a batch's jobs mixed in
     if name and filters:
         raise ValidationError(f"{', '.join(filters)} can't be combined with job_name.")
     if organization and (name or batch):
         # Classic answers every member's job (or batch) of that name, so a name several
         # members share can be refused; v1's organization lookup answers only the newest.
+        if filters:
+            raise ValidationError(f"{', '.join(filters)} can't be combined with organization and batch yet.")
         raise OnClassic
     peer = member is not None or organization
     with _member_refusal_as_classic():
@@ -821,12 +821,9 @@ def _number(value: Any) -> float | None:
 
 def delete_file(client: Router, params: dict[str, Any]) -> dict[str, str]:
     """DELETE /delete-file → deleteFile; classic answers ``{message}``. Given a path and a
-    folder, classic deletes the folder and ignores the path; v1 takes exactly one, so it
-    is sent both and refuses (422), deleting nothing."""
+    folder, classic deletes the folder and ignores the path, so only the folder is sent
+    (v1 takes exactly one)."""
     path, folder = params.get("filePath"), params.get("folder")
-    if path and folder:
-        client.v1().files.delete(path=path, folder=folder)
-        return {"message": "Folder deleted successfully"}
     if folder:
         client.v1().files.delete(folder=folder)
         return {"message": "Folder deleted successfully"}
