@@ -200,13 +200,74 @@ def test_jobs_of_an_unknown_batch_is_an_empty_list(env):
     assert out == {"jobs": [], "count": 0, "statuses": {"Complete": 0, "In Queue": 0, "Running": 0, "Stopped": 0}}
 
 
-@pytest.mark.parametrize("args", [["jobs", "--organization"], ["jobs", "--email", "p@example.com"], ["jobs", "--include-subjobs"], ["status", "n1", "--organization"]])
+@pytest.mark.parametrize(
+    "args", [["jobs", "--include-subjobs"], ["status", "n1", "--organization"], ["jobs", "--batch", "b1", "--organization"]]
+)
 def test_reads_v1_has_no_form_for_yet_go_to_classic(env, args):
+    # An organization-wide name or batch: classic answers every member's match (so a name
+    # several members share is refused); v1's organization lookup answers only the newest.
     FakeClassic.answers["jobs"] = lambda params: (
         {"JobName": "n1", "JobStatus": "Complete", "User": "p@example.com"} if params.get("jobName") else {"jobs": [], "statuses": {}}
     )
     res = env.run("v1", "--json", *args)
     assert res.exit_code == 0 and env.v1.calls == [] and classic_calls()
+
+
+PEER = "p@example.com"
+PEER_ROW = {k: v for k, v in CLASSIC_ROW.items() if k != "Settings"} | {"User": PEER}
+V1_PEER_JOB = {k: v for k, v in V1_JOB.items() if k != "settings"} | {"createdBy": PEER}
+
+
+@pytest.mark.parametrize(
+    "args, scope",
+    [
+        (["--organization"], {"scope": "org"}),
+        (["--email", PEER], {"scope": "org", "created_by": PEER}),
+        (["--organization", "--email", PEER], {"scope": "org", "created_by": PEER}),  # classic: the email wins
+    ],
+)
+def test_jobs_of_the_organization_or_a_member_are_v1s_scope_org(env, args, scope):
+    FakeClassic.answers["jobs"] = {"jobs": [PEER_ROW], "startKey": "next", "statuses": STATUSES_ONE}
+    env.v1.answers["jobs.list"] = _page(V1_PEER_JOB, cursor="next")
+    same_output(env, "--json", "jobs", "--limit", "5", *args)
+    same_output(env, "--no-json", "jobs", "--limit", "5", *args)
+    assert env.v1.calls[-1] == ("jobs.list", (), {"limit": 5, **scope})
+
+
+def test_status_of_a_members_job_is_their_job_in_classics_row(env):
+    FakeClassic.answers["jobs"] = {**CLASSIC_ROW, "User": PEER, "statuses": STATUSES_ONE}
+    env.v1.answers["jobs.list"] = _found(createdBy=PEER)
+    env.v1.answers["jobs.get"] = {**V1_JOB, "createdBy": PEER}
+    same_output(env, "--json", "status", "n1", "--email", PEER)
+    assert env.v1.calls[:2] == [
+        ("jobs.list", (), {"name": "n1", "scope": "org", "created_by": PEER}), ("jobs.get", (JOB,), {})
+    ]
+
+
+def test_a_member_whose_jobs_you_cant_see_reads_as_classic_answers_it(env):
+    FakeClassic.answers["jobs"] = AuthError("Unauthorized: Unauthorized to access jobs for this user")
+    env.v1.answers["jobs.list"] = problem(403, "forbidden")
+    for args in (["jobs", "--email", PEER], ["status", "n1", "--email", PEER]):
+        res = same_output(env, "--json", *args)
+        assert isinstance(res.exception, AuthError) and res.exception.exit_code == 3 and "Unauthorized to access jobs for this user" in str(res.exception)
+
+
+def test_jobs_of_a_members_batch_are_listed_by_its_id(env):
+    env.v1.answers["jobs.list"] = lambda **kw: _found("batch", BATCH) if kw.get("name") else _page(V1_PEER_JOB)
+    out = json.loads(env.run("v1", "--json", "jobs", "--batch", "b1", "--email", PEER, "--limit", "2").stdout)
+    assert env.v1.calls == [
+        ("jobs.list", (), {"name": "b1", "kind": "batch", "scope": "org", "created_by": PEER}),
+        ("jobs.list", (), {"limit": 2, "batch_id": BATCH}),
+    ]
+    assert out["jobs"][0]["User"] == PEER and out["jobs"][0]["Batch"] == "n1"
+
+
+@pytest.mark.parametrize("batch_found", [False, True])
+def test_a_members_batch_with_nothing_to_show_is_classics_not_found(env, batch_found):
+    FakeClassic.answers["jobs"] = NotFoundError("Jobs in batch nope not found")
+    env.v1.answers["jobs.list"] = lambda **kw: _found("batch", BATCH) if kw.get("name") and batch_found else _page()
+    res = same_output(env, "--json", "jobs", "--batch", "nope", "--email", PEER)
+    assert isinstance(res.exception, NotFoundError) and res.exception.exit_code == 4
 
 
 # -- validate, submit, batch --------------------------------------------------------------
@@ -408,6 +469,45 @@ def test_cancel_a_batch_counts_what_was_live(env, args, cascaded):
     assert out.get("cascaded", False) is cascaded
 
 
+def _sdk_client() -> HTTPClient:
+    return HTTPClient("https://app.tamarind.bio/api", "test-key")
+
+
+def test_cancel_by_row_id_is_v1s_cancel_of_job_id(env):
+    from tamarind import rest
+
+    env.v1.answers["jobs.cancel"] = {**V1_JOB, "status": "Stopped", "createdBy": "a@b"}
+    with _sdk_client() as client:
+        out = rest.cancel_job(client, job_id=JOB[4:], job_name="ignored")  # classic: the id wins
+    assert env.v1.calls == [("jobs.cancel", (JOB,), {"body": {}})] and classic_calls() == []
+    assert out["jobId"] == JOB[4:] and out["cancelledJobs"][0]["JobName"] == "n1" and out["status"] == "Stopped"
+
+
+def test_cancel_by_a_batch_rows_id_cancels_the_batch(env):
+    from tamarind import rest
+
+    def cancel(item_id: str, **kw: Any) -> Any:
+        if item_id == JOB:
+            raise problem(404, "not_found")
+        return {"kind": "batch", "id": BATCH, "status": "Stopped"}
+
+    env.v1.answers["jobs.cancel"] = cancel
+    env.v1.answers["jobs.get"] = {"kind": "batch", "id": BATCH, "name": "b1", "status": "Running", "counts": {"total": 2, "running": 2}}
+    with _sdk_client() as client:
+        out = rest.cancel_job(client, job_id=JOB[4:])
+    assert out["message"] == 'Cancelled 3 jobs in batch "b1"' and out["cascaded"] is True
+    assert [c[:2] for c in env.v1.calls] == [("jobs.cancel", (JOB,)), ("jobs.get", (BATCH,)), ("jobs.cancel", (BATCH,))]
+
+
+def test_cancel_by_an_unknown_row_id_is_classics_not_found(env):
+    from tamarind import rest
+
+    env.v1.answers["jobs.cancel"] = problem(404, "not_found")
+    env.v1.answers["jobs.get"] = problem(404, "not_found")
+    with _sdk_client() as client, pytest.raises(NotFoundError, match='Job with Id "abc" not found'):
+        rest.cancel_job(client, job_id="abc")
+
+
 def test_cancel_batch_of_an_unknown_name_is_classics_not_found(env):
     env.v1.answers["jobs.list"] = _page()
     res = env.run("v1", "--json", "cancel", "--batch", "nope")
@@ -436,12 +536,81 @@ def test_results_file_comes_from_get_job_file(env, tmp_path, monkeypatch):
     assert env.v1.calls[-1] == ("jobs.get_file", (JOB,), {"path": "out/a.pdb", "delivery": "url"})
 
 
-@pytest.mark.parametrize("args", [["--pdbs-only"], ["--email", "peer@example.com"]])
-def test_results_v1_has_no_form_for_yet_go_to_classic(env, args):
+def test_results_of_a_members_job_come_from_their_archive(env):
     FakeClassic.answers["result"] = SIGNED
-    FakeClassic.answers["jobs"] = {"JobName": "n1", "JobStatus": "Complete", "User": "peer@example.com"}
-    res = env.run("v1", "--json", "results", "n1", "--show-url", *args)
-    assert res.exit_code == 0 and env.v1.calls == [] and ("POST", "result") in [c[:2] for c in classic_calls()]
+    FakeClassic.answers["jobs"] = {**CLASSIC_ROW, "User": PEER, "statuses": STATUSES_ONE}
+    env.v1.answers["jobs.list"] = _found(createdBy=PEER)
+    env.v1.answers["jobs.get"] = {**V1_JOB, "createdBy": PEER}
+    env.v1.answers["jobs.archive"] = {"status": "ready", "downloadUrl": SIGNED}
+    same_output(env, "--json", "results", "n1", "--show-url", "--email", PEER)
+    # The owner is read from the job's row, as classic's /result needs it; the lookup is kept.
+    assert [c for c in env.v1.calls if c[0] == "jobs.list"] == [
+        ("jobs.list", (), {"name": "n1", "scope": "org", "created_by": PEER})
+    ]
+    assert env.v1.calls[-1] == ("jobs.archive", (JOB,), {"body": {}})
+    assert ("POST", "result", {"jobName": "n1", "jobEmail": PEER}) in classic_calls()
+
+
+def test_results_file_of_a_members_job_comes_from_get_job_file(env):
+    env.v1.answers["jobs.list"] = _found(createdBy=PEER)
+    env.v1.answers["jobs.get"] = {**V1_JOB, "createdBy": PEER}
+    env.v1.answers["jobs.get_file"] = {"url": SIGNED}
+    out = json.loads(env.run("v1", "--json", "results", "n1", "--file", "a.pdb", "--show-url", "--email", PEER).stdout)
+    assert out["url"] == SIGNED and env.v1.calls[-1] == ("jobs.get_file", (JOB,), {"path": "a.pdb", "delivery": "url"})
+
+
+@pytest.mark.parametrize("kind, item_id", [("job", JOB), ("batch", BATCH)])
+def test_results_pdbs_only_are_v1s_best_structures(env, kind, item_id):
+    FakeClassic.answers["result"] = SIGNED
+    env.v1.answers["jobs.list"] = _found(kind, item_id)
+    env.v1.answers["jobs.archive"] = {"status": "ready", "downloadUrl": SIGNED}
+    same_output(env, "--json", "results", "n1", "--show-url", "--pdbs-only")
+    assert env.v1.calls[-1] == ("jobs.archive", (item_id,), {"body": {"bestStructures": True}})
+
+
+def test_results_pdbs_only_of_a_job_with_none_reads_as_classic_words_it(env):
+    FakeClassic.answers["result"] = ValidationError(classic.NO_BEST_STRUCTURES)
+    env.v1.answers["jobs.list"] = _found()
+    refusal = problem(422, "validation_failed")
+    refusal.errors = [{"pointer": "/bestStructures", "code": "not_supported", "detail": "no stored zip"}]
+    env.v1.answers["jobs.archive"] = refusal
+    res = same_output(env, "--json", "results", "n1", "--show-url", "--pdbs-only")
+    assert isinstance(res.exception, ValidationError) and res.exception.exit_code == 5 and classic.NO_BEST_STRUCTURES in str(res.exception)
+
+
+def test_results_pdbs_only_waits_for_v1_to_build_a_batchs_zip(env, sleeps):
+    # Classic's answer is the zip it builds while you wait; v1 builds it in the background.
+    env.v1.answers["jobs.list"] = _found("batch", BATCH)
+    env.v1.answers["jobs.get"] = {"kind": "batch", "id": BATCH, "status": "Complete"}
+    answers = iter([{"status": "preparing", "retryAfterSeconds": 10}, {"status": "ready", "downloadUrl": SIGNED}])
+    env.v1.answers["jobs.archive"] = lambda *a, **k: next(answers)
+    out = json.loads(env.run("v1", "--json", "results", "n1", "--show-url", "--pdbs-only").stdout)
+    assert out["url"] == SIGNED and sleeps == [10.0]
+
+
+def test_results_pdbs_only_stops_waiting_for_a_build_after_its_limit(env, monkeypatch):
+    now, slept = [0.0], []
+
+    def sleep(seconds: float) -> None:
+        slept.append(seconds)
+        now[0] += seconds
+
+    monkeypatch.setattr(classic.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(classic.time, "sleep", sleep)
+    env.v1.answers["jobs.list"] = _found("batch", BATCH)
+    env.v1.answers["jobs.get"] = {"kind": "batch", "id": BATCH, "status": "Complete"}
+    env.v1.answers["jobs.archive"] = {"status": "preparing", "retryAfterSeconds": 10}
+    monkeypatch.setattr(classic, "BEST_BUILD_SECONDS", 25.0)
+    res = env.run("v1", "--json", "results", "n1", "--show-url", "--pdbs-only")
+    assert type(res.exception) is TamarindError and "weren't ready after 25 s" in str(res.exception) and slept == [10.0, 10.0]
+
+
+def test_results_pdbs_only_of_a_pipeline_run_stays_on_classic(env):
+    FakeClassic.answers["result"] = SIGNED
+    env.v1.answers["jobs.list"] = _found("pipeline", "run_1")
+    res = env.run("v1", "--json", "results", "n1", "--show-url", "--pdbs-only")
+    assert res.exit_code == 0 and ("POST", "result") in [c[:2] for c in classic_calls()]
+    assert "jobs.archive" not in [c[0] for c in env.v1.calls]
 
 
 @pytest.mark.parametrize(
@@ -715,12 +884,35 @@ def test_files_list_in_a_folder(env):
     assert out["files"] == ["runs/x.pdb"] and env.v1.calls[-1][2]["folder"] == "runs"
 
 
-def test_files_folders_are_v1s_folder_entries(env):
-    env.v1.answers["files.list"] = _page(*ENTRIES, {"path": "more", "type": "folder"})
-    out = json.loads(env.run("v1", "--json", "files", "folders", "--limit", "1").stdout)
-    assert out == {"folders": ["runs"], "hasMore": True}
-    out = json.loads(env.run("v1", "--json", "files", "folders", "--all").stdout)
-    assert out == {"folders": ["runs", "more"], "hasMore": False}
+def test_files_folders_are_v1s_folder_page(env):
+    FakeClassic.answers["getFolders"] = {
+        "folders": ["runs", "0f8fad5b"], "labels": {"0f8fad5b": "n1"}, "hasMore": True, "nextCursor": "c2",
+    }
+    env.v1.answers["files.list"] = _page(
+        {"path": "runs", "type": "folder", "jobName": None},
+        {"path": "0f8fad5b", "type": "folder", "jobName": "n1"},
+        cursor="c2",
+    )
+    same_output(env, "--json", "files", "folders", "--limit", "2")
+    same_output(env, "--no-json", "files", "folders", "--limit", "2")
+    assert env.v1.calls[-1] == ("files.list", (), {"type_": "folder", "limit": 2})
+
+
+def test_files_folders_of_a_last_page_have_no_labels_or_cursor(env):
+    env.v1.answers["files.list"] = _page({"path": "n1", "type": "folder", "jobName": "n1"})
+    out = json.loads(env.run("v1", "--json", "files", "folders").stdout)
+    assert out == {"folders": ["n1"], "hasMore": False, "nextCursor": None}
+    assert env.v1.calls[-1] == ("files.list", (), {"type_": "folder", "limit": 50})
+
+
+@pytest.mark.parametrize(
+    "args, message",
+    [(["--all"], "Use cursor pagination"), (["--limit", "101"], "limit must be an integer between 1 and 100")],
+)
+def test_files_folders_refuse_what_classic_refuses(env, args, message):
+    FakeClassic.answers["getFolders"] = ValidationError(message)
+    res = same_output(env, "--json", "files", "folders", *args)
+    assert isinstance(res.exception, ValidationError) and res.exception.exit_code == 5 and message in str(res.exception) and env.v1.calls == []
 
 
 @pytest.mark.parametrize(
@@ -737,10 +929,13 @@ def test_files_delete_goes_to_v1(env, args, message, call):
     assert env.v1.calls == [("files.delete", (), call)]
 
 
-def test_files_delete_of_a_file_and_a_folder_is_classics_to_decide(env):
-    FakeClassic.answers["delete-file"] = {"message": "Folder deleted successfully"}
-    same_output(env, "--json", "files", "delete", "a.pdb", "--folder", "runs", "--yes")
-    assert env.v1.calls == []
+def test_files_delete_of_a_file_and_a_folder_is_v1s_refusal(env):
+    # Classic deletes the folder and ignores the path; v1 takes one of the two, and
+    # refuses both with nothing deleted.
+    env.v1.answers["files.delete"] = problem(422, "validation_failed")
+    res = env.run("v1", "--json", "files", "delete", "a.pdb", "--folder", "runs", "--yes")
+    assert isinstance(res.exception, ValidationError) and res.exception.exit_code == 5 and classic_calls() == []
+    assert env.v1.calls == [("files.delete", (), {"path": "a.pdb", "folder": "runs"})]
 
 
 def test_files_upload_goes_to_v1(env, tmp_path, monkeypatch):
