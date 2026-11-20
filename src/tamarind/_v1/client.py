@@ -445,6 +445,18 @@ class Files(_Resource):
     get = Operation(get_file)
     stats = Operation(get_file_stats)
 
+    def sign_upload(
+        self, path: str, *, content_type: str | None = None, size_bytes: int = 0
+    ) -> dict[str, Any]:
+        """Ask for one signed PUT link to ``path`` (uploadFile without the content) and
+        return v1's answer, ``{"file", "upload"}``. Nothing is stored until the bytes are
+        PUT to ``upload["url"]`` with ``upload["headers"]``. ``size_bytes`` is echoed back
+        in ``file`` and isn't part of the signature; ``content_type`` is, when sent."""
+        request: dict[str, Any] = {"path": path, "sizeBytes": size_bytes}
+        if content_type is not None:
+            request["contentType"] = content_type
+        return dict(decode(self._transport.call(upload_file, body=request)))
+
     def upload(
         self,
         source: str | os.PathLike[str] | bytes | IO[bytes],

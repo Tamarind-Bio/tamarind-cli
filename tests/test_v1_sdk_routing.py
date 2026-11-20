@@ -342,3 +342,62 @@ def test_a_cancelled_async_request_leaves_no_v1_client_open(monkeypatch):
 
     _time.sleep(0.05)
     assert client._v1_raw is None
+
+
+# -- rest.upload_file_url: classic's presigned link, from v1's uploadFile ------------------
+
+SIGNED_PUT = "https://bucket.s3.amazonaws.com/u%40x.com/in/a.pdb?X-Amz-Signature=abc"
+
+
+@respx.mock
+def test_upload_file_url_is_v1s_signed_link_in_classics_fields(on):
+    signed = respx.post(f"{V1}/files").mock(
+        return_value=httpx.Response(201, json={
+            "file": {"path": "in/a.pdb", "type": "file", "sizeBytes": 0, "modifiedAt": None},
+            "upload": {"method": "PUT", "url": SIGNED_PUT, "headers": {"Content-Type": "chemical/x-pdb"}, "expiresAt": "2026-11-20T02:00:00Z"},
+        })
+    )
+    respx.get(f"{V1}/me").mock(return_value=httpx.Response(200, json={"user": {"email": "u@x.com", "name": None, "isServiceAccount": False}}))
+    classic = respx.post(f"{CLASSIC}getPresignedUploadUrl")
+    with HTTPClient(CLASSIC, "k") as client:
+        answer = rest.upload_file_url(client, filename="in/a.pdb", content_type="chemical/x-pdb")
+    # The same object classic signs ({email}/{path}); v1 has no headUrl or bucket.
+    assert answer == {"uploadUrl": SIGNED_PUT, "key": "u@x.com/in/a.pdb"}
+    assert json.loads(signed.calls[0].request.content) == {"path": "in/a.pdb", "sizeBytes": 0, "contentType": "chemical/x-pdb"}
+    assert not classic.called
+
+
+@respx.mock
+def test_upload_file_url_always_signs_the_default_content_type(on):
+    signed = respx.post(f"{V1}/files").mock(
+        return_value=httpx.Response(201, json={"file": {"path": "a.bin"}, "upload": {"url": SIGNED_PUT, "headers": {}}})
+    )
+    respx.get(f"{V1}/me").mock(return_value=httpx.Response(200, json={"user": {"email": "u@x.com"}}))
+    with HTTPClient(CLASSIC, "k") as client:
+        rest.upload_file_url(client, filename="a.bin")
+    # Classic always signs Content-Type; v1 signs it only when sent, so it is always sent.
+    assert json.loads(signed.calls[0].request.content)["contentType"] == "application/octet-stream"
+
+
+@respx.mock
+def test_upload_file_url_with_v1_off_is_classics():
+    classic = respx.post(f"{CLASSIC}getPresignedUploadUrl").mock(
+        return_value=httpx.Response(200, json={"uploadUrl": SIGNED_PUT, "headUrl": "h", "key": "u@x.com/a.bin", "bucket": "b"})
+    )
+    v1 = respx.route(host="api.tamarind.bio")
+    with HTTPClient(CLASSIC, "k") as client:
+        answer = rest.upload_file_url(client, filename="a.bin")
+    assert answer == {"uploadUrl": SIGNED_PUT, "headUrl": "h", "key": "u@x.com/a.bin", "bucket": "b"}
+    assert json.loads(classic.calls[0].request.content) == {"filename": "a.bin", "contentType": "application/octet-stream"}
+    assert not v1.called
+
+
+@respx.mock
+def test_upload_file_url_a_path_v1_refuses_is_its_error(on):
+    respx.post(f"{V1}/files").mock(return_value=_problem(422, "validation_failed"))
+    classic = respx.post(f"{CLASSIC}getPresignedUploadUrl")
+    with HTTPClient(CLASSIC, "k") as client:
+        with pytest.raises(ValidationError) as caught:
+            rest.upload_file_url(client, filename="/lead.txt")
+    assert isinstance(caught.value, ProblemError) and caught.value.code == "validation_failed"
+    assert not classic.called
