@@ -126,11 +126,12 @@ layouts; a field v1 doesn't have is left out, and [v1-mode.md](v1-mode.md) lists
 differences.
 
 There is no fallback: what v1 refuses is raised as v1's error (also the classic class for
-its status), with the CLI's exit codes. The catalog (`tools`, `schema`, `modalities`,
-`functions`) is answered from v1's tool routes the same way (`tamarind/_v1/catalog.py`).
-Only the requests v1 has no form for yet go to classic: `tools --custom`, another member's
-jobs (`--organization`, `--email`), `jobs --include-subjobs`, `results --pdbs-only`, the
-logs of a batch or run, and `files delete` of a path and a folder together.
+its status), with the CLI's exit codes. The catalog's `schema`, `modalities` and
+`functions` are answered from v1's tool routes the same way (`tamarind/_v1/catalog.py`);
+the tool list has the same mapping, held on the catalog for now (`LIST_ON_V1`). Only the
+requests v1 has no form for yet go to classic: `tools --custom`, another member's jobs
+(`--organization`, `--email`), `jobs --include-subjobs`, `results --pdbs-only`, the logs
+of a batch or run, and `files delete` of a path and a folder together.
 
 **v1-only operations** join the same client (`tamarind/_v1/public.py`): new resources
 (`client.projects`, `client.molecules`, `client.assays`...) and new methods on today's

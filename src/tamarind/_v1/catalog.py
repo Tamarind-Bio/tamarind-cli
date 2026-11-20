@@ -7,7 +7,7 @@ answered from v1 and rebuilt in the catalog's layout:
 - ``catalog/tools`` from every page of ``listTools``, filtered, sorted and summarized the
   way the catalog does it (``getAvailableTools`` in the MCP server), so its filters,
   facet lists and hints behave as before. ``custom=true`` stays on the catalog: v1 lists
-  built-in tools only.
+  built-in tools only. Held on the catalog for now by :data:`LIST_ON_V1` (see there).
 - ``catalog/modalities`` and ``catalog/functions`` from ``getToolFacets``.
 - ``catalog/tools/{tool}/schema`` from ``getToolSchema`` (and ``getTool`` for the
   display name and facets). v1's JSON Schema is rebuilt as the catalog's parameter
@@ -17,18 +17,24 @@ answered from v1 and rebuilt in the catalog's layout:
   form; v1 folds the constraints into the description and the conditions into
   ``allOf``. ``exampleJob`` is v1's ``example``, built for one task branch.
 
-The tool list is v1's, so it is the app's list (website#7796): tools the app doesn't
-list for the caller aren't listed, and facet counts follow. docs/v1-mode.md has the
-differences.
+v1's tool list is the app's (website#7796): tools the app doesn't list for the caller
+aren't listed, and facet counts follow. docs/v1-mode.md has the differences.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from ..errors import NotFoundError, TamarindError
-from .classic import OnClassic, Router, plain
+from .classic import OnClassic, Route, Router, plain
 from .errors import ProblemError
+
+# Whether the tool list (``catalog/tools``) is answered by v1. Off: it stays on the catalog,
+# while modalities, functions and schemas are v1's. v1 lists the app's tools (429 for a
+# staging account, where the MCP catalog lists 456), and the user-facing tool list
+# doesn't change until that's decided. Turning it on is this one line.
+LIST_ON_V1 = False
 
 PAGE = 200
 # What the catalog cuts a narrowed listing's descriptions to (`_simplify_tool`).
@@ -124,8 +130,8 @@ def list_tools(client: Router, params: dict[str, Any]) -> dict[str, Any]:
     modality or function matched in any case, ``search`` in the name, display name or
     description, sorted by name. The facet lists, and which filter values are
     unrecognized, come from the whole list, before narrowing."""
-    if str(params.get("custom")).lower() == "true":
-        raise OnClassic  # v1's listTools holds built-in tools only (custom=true is 400)
+    if not LIST_ON_V1 or str(params.get("custom")).lower() == "true":
+        raise OnClassic  # held (LIST_ON_V1); v1's listTools holds built-in tools only (custom=true is 400)
     modality = params.get("modality") or params.get("category") or None
     function = params.get("function") or params.get("tag") or None
     search = params.get("search") or None
@@ -338,3 +344,27 @@ def tool_schema(client: Router, tool: str, params: dict[str, Any]) -> dict[str, 
         out["exampleJob"] = {"jobName": f"{tool}-example", "type": tool, "settings": dict(example)}
         out["exampleJobNote"] = _example_note(any(types.get(name) in FILE_TYPES for name in example))
     return out
+
+
+# -- the routes ---------------------------------------------------------------------------
+
+_SCHEMA = re.compile(r"^catalog/tools/(?P<tool>[^/]+)/schema$")
+_LISTINGS = {
+    "catalog/tools": list_tools,
+    "catalog/modalities": list_modalities,
+    "catalog/functions": list_functions,
+}
+
+
+def route(method: str, path: str) -> Route | None:
+    """The handler for a catalog request v1 answers; None for the rest (job logs, which
+    :func:`tamarind._v1.classic.route` answers, and anything else)."""
+    if method != "GET":
+        return None
+    listing = _LISTINGS.get(path)
+    if listing is not None:
+        return listing, ()
+    match = _SCHEMA.match(path)
+    if match:
+        return tool_schema, (match.group("tool"),)
+    return None

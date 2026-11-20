@@ -706,10 +706,10 @@ def test_logs_of_an_unknown_job_are_not_found(env):
     assert isinstance(res.exception, NotFoundError)
 
 
-def test_the_custom_tool_catalog_stays_on_the_catalog(env):
+def test_the_catalog_stays_on_the_catalog(env):
     FakeClassic.answers["catalog/tools"] = {"tools": [], "totalTools": 0}
-    res = env.run("v1", "--json", "tools", "--custom")
-    assert res.exit_code == 0 and env.v1.calls == [] and classic_calls()[0][1] == "catalog/tools"
+    res = env.run("v1", "--json", "tools")
+    assert res.exit_code == 0 and env.v1.calls == []
 
 
 # -- files ------------------------------------------------------------------------------

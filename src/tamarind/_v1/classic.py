@@ -10,10 +10,9 @@ left out; docs/v1-mode.md lists those differences.
 There is no fallback. What v1 refuses is raised as v1's error, a ``ProblemError``
 that is also the classic error class for its status (``NotFoundError`` for a 404...),
 so existing ``except`` clauses still match. The few requests v1 has no form for yet
-go to classic on purpose (:class:`OnClassic`): the custom-tool catalog listing, another
-member's jobs (``organization`` / ``jobEmail``), a list with ``includeSubjobs``,
-``pdbsOnly`` results, and the logs of anything but a single job. The catalog's routes
-are answered in :mod:`tamarind._v1.catalog`.
+go to classic on purpose (:class:`OnClassic`): the catalog, another member's jobs
+(``organization`` / ``jobEmail``), a list with ``includeSubjobs``, ``pdbsOnly``
+results, and the logs of anything but a single job.
 
 A v1 failure with no answer, a 5xx or a 409 ``idempotency_in_progress`` is raised the
 way the classic client raises one, so callers' "outcome may be ambiguous" handling
@@ -798,31 +797,14 @@ _ROUTES: dict[tuple[str, str], Handler] = {
 }
 
 
-_SCHEMA = re.compile(r"^catalog/tools/(?P<tool>[^/]+)/schema$")
-
-
 def route(method: str, path: str) -> Route | None:
     """The handler for a classic request v1 has a form for; None for the rest."""
     handler = _ROUTES.get((method, path))
     if handler is not None:
         return handler, ()
-    if method != "GET" or not path.startswith("catalog/"):
-        return None
     match = _LOGS.match(path)
-    if match:
+    if method == "GET" and match:
         return job_logs, (match.group("name"),)
-    from . import catalog
-
-    listing = {
-        "catalog/tools": catalog.list_tools,
-        "catalog/modalities": catalog.list_modalities,
-        "catalog/functions": catalog.list_functions,
-    }.get(path)
-    if listing is not None:
-        return listing, ()
-    match = _SCHEMA.match(path)
-    if match:
-        return catalog.tool_schema, (match.group("tool"),)
     return None
 
 
