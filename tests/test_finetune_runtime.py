@@ -481,3 +481,16 @@ def test_a_step_saved_again_is_scored_on_its_new_metrics(tmp_path: Path) -> None
     _save(2, 0.5)
     _save(3, 0.4)
     assert _left(tmp_path) == ["step-00000002", "step-00000003"]
+
+
+def test_an_unrecorded_checkpoint_never_prunes_a_recorded_one(tmp_path: Path) -> None:
+    """A record that cannot be written is invisible to registration, so it must not count as best."""
+    _declare_objective()
+    _save(1, 0.9)
+    cyclic: dict = {"val/spearman": 1.0}
+    cyclic["self"] = cyclic
+    folder = tm.checkpoint(step=2, metrics=cyclic)
+    (folder / "weights.pt").write_text("2")
+    _save(3, 0.5)
+    _save(4, 0.4)
+    assert "step-00000001" in _left(tmp_path)

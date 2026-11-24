@@ -160,18 +160,21 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
-def _append_line(path: Path, record: Mapping[str, Any]) -> None:
+def _append_line(path: Path, record: Mapping[str, Any]) -> bool:
+    """Append one JSON line; True when it was written. Never raises."""
     try:
         line = json.dumps(_json_safe(record), separators=(",", ":")) + "\n"
     except Exception as exc:  # noqa: BLE001 - a cyclic or exotic value must not end a training run
         print(f"[tamarind] could not serialize a record for {path}: {exc}", file=sys.stderr)
-        return
+        return False
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(line)
     except OSError as exc:
         print(f"[tamarind] could not write {path}: {exc}", file=sys.stderr)
+        return False
+    return True
 
 
 def metrics_file() -> Path:
@@ -387,8 +390,10 @@ def checkpoint(
     except Exception as exc:  # noqa: BLE001
         print(f"[tamarind] could not record the checkpoint: {exc}", file=sys.stderr)
         return target
-    _append_line(records, record)
-    if managed:
+    recorded = _append_line(records, record)
+    # Pruning only follows what the platform will see: a checkpoint whose record was not written
+    # cannot be chosen at registration, so it must not count as the best and push a recorded one out.
+    if managed and recorded:
         try:
             objective = _objective()
             if enroll and _inside_root(target):
