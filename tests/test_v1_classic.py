@@ -1013,12 +1013,6 @@ def test_logs_of_a_job_a_newer_run_shares_the_name_of_are_the_jobs(env):
     assert json.loads(res.stdout)["log"] == LOG and env.v1.calls[-1] == ("jobs.logs", (JOB,), {"max_bytes": 256 * 1024})
 
 
-def test_the_catalog_stays_on_the_catalog(env):
-    FakeClassic.answers["catalog/tools"] = {"tools": [], "totalTools": 0}
-    res = env.run("v1", "--json", "tools")
-    assert res.exit_code == 0 and env.v1.calls == []
-
-
 # -- files ------------------------------------------------------------------------------
 
 

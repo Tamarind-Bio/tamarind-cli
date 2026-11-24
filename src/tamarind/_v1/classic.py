@@ -9,10 +9,10 @@ left out; docs/v1-mode.md lists those differences.
 
 There is no fallback. What v1 refuses is raised as v1's error, a ``ProblemError``
 that is also the classic error class for its status (``NotFoundError`` for a 404...),
-so existing ``except`` clauses still match. The few requests v1 has no form for yet
-go to classic on purpose (:class:`OnClassic`): the catalog, and an organization's
-lookup of a name with ``includeSubjobs`` (classic's organization name read then admits
-a batch's own jobs; v1's ``allMatches`` doesn't take ``includeSubjobs``).
+so existing ``except`` clauses still match. A request v1 has no form for yet goes to
+classic on purpose (:class:`OnClassic`): today, an organization's lookup of a name with
+``includeSubjobs`` (classic's organization name read then admits a batch's own jobs;
+v1's ``allMatches`` doesn't take ``includeSubjobs``).
 
 A v1 failure with no answer, a 5xx or a 409 ``idempotency_in_progress`` is raised the
 way the classic client raises one, so callers' "outcome may be ambiguous" handling

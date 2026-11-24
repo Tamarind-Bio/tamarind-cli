@@ -35,61 +35,66 @@ V1_TOOLS = [
 ]
 
 
-@pytest.fixture
-def tool_set_on_v1(monkeypatch):
-    """The tool set's switch (the list and its facets), turned on: it is held on the
-    catalog by default."""
-    monkeypatch.setattr(on_v1, "TOOL_SET_ON_V1", True)
+V1_CUSTOM = [
+    tool("my-scorer", displayName="My scorer", modalities=[], functions=["utilities"], custom=True, finetune=True),
+    tool("my-folder", modalities=["Protein"], functions=["embeddings"], custom=True, outputTypes=["pdb"]),
+]
 
 
 def pages(**kw: Any) -> dict[str, Any]:
-    """listTools in two pages, the way v1 pages it."""
+    """listTools in two pages, the way v1 pages it: the agent view, or the custom tools."""
+    if kw.get("custom"):
+        return {"items": V1_CUSTOM, "nextCursor": None}
+    assert kw.get("view") == "agent"
     return {"items": V1_TOOLS[:2], "nextCursor": "c2"} if not kw.get("cursor") else {"items": V1_TOOLS[2:], "nextCursor": None}
 
 
 # -- catalog/tools ------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("on", [False, True])
-def test_what_goes_to_the_catalog_anyway_never_asks_the_server(monkeypatch, on):
-    """The held tool set, and a custom-tool listing whatever the switch, go to the catalog
-    without the v1 probe (GET /me), as on main."""
+def test_with_the_switch_off_the_tool_set_never_asks_the_server(monkeypatch):
+    """With :data:`TOOL_SET_ON_V1` off, the tool set (custom tools too) goes to the catalog
+    without the v1 probe (GET /me)."""
     from tamarind._v1 import switch
 
-    monkeypatch.setattr(on_v1, "TOOL_SET_ON_V1", on)
+    monkeypatch.setattr(on_v1, "TOOL_SET_ON_V1", False)
     monkeypatch.setattr(switch, "probe", lambda *a, **k: pytest.fail("asked"))
     monkeypatch.setattr(HTTPClient, "_classic_json", lambda self, method, path, **k: {"path": path})
     with HTTPClient("https://mcp.tamarind.bio", "k") as client:
         assert catalog.list_tools(client, custom=True) == {"path": "catalog/tools"}
-        if not on:
-            assert catalog.list_tools(client, search="fold") == {"path": "catalog/tools"}
-            assert catalog.list_modalities(client) == {"path": "catalog/modalities"}
-            assert catalog.list_functions(client) == {"path": "catalog/functions"}
+        assert catalog.list_tools(client, search="fold") == {"path": "catalog/tools"}
+        assert catalog.list_modalities(client) == {"path": "catalog/modalities"}
+        assert catalog.list_functions(client) == {"path": "catalog/functions"}
 
 
-def test_the_tool_set_is_held_on_the_catalog_by_default(env):
-    """Until the tool set is decided (v1 lists the app's tools and counts its facets from
-    them), the list, modalities and functions stay on the catalog; schemas are v1's."""
-    assert on_v1.TOOL_SET_ON_V1 is False
+def test_with_the_switch_off_the_tool_set_is_the_catalogs(env, monkeypatch):
+    """The switch sends the list, custom tools, modalities and functions back to the
+    catalog; schemas stay v1's. It is on."""
+    assert on_v1.TOOL_SET_ON_V1 is True
+    monkeypatch.setattr(on_v1, "TOOL_SET_ON_V1", False)
     for path in ("catalog/tools", "catalog/modalities", "catalog/functions"):
         FakeClassic.answers[path] = {}
     env.v1.answers["tools.schema"] = SCHEMA
     env.v1.answers["tools.get"] = TOOL_FACTS
     with HTTPClient("https://mcp.tamarind.bio", "test-key") as client:
         catalog.list_tools(client, search="fold")
+        catalog.list_tools(client, custom=True)
         catalog.list_modalities(client)
         catalog.list_functions(client)
         catalog.get_schema(client, "boltz")
-    assert [c[1] for c in classic_calls()] == ["catalog/tools", "catalog/modalities", "catalog/functions"]
+    assert [c[1] for c in classic_calls()] == ["catalog/tools", "catalog/tools", "catalog/modalities", "catalog/functions"]
     assert [c[0] for c in env.v1.calls] == ["tools.schema", "tools.get"]
 
 
-def test_the_full_listing_is_every_page_summarized_and_sorted_by_name(env, tool_set_on_v1):
+def test_the_full_listing_is_every_page_of_the_agent_view_summarized_and_sorted_by_name(env):
     env.v1.answers["tools.list"] = pages
     with HTTPClient("https://mcp.tamarind.bio", "test-key") as client:
         out = catalog.list_tools(client)
     assert classic_calls() == []
-    assert env.v1.calls == [("tools.list", (), {"cursor": None, "limit": 200}), ("tools.list", (), {"cursor": "c2", "limit": 200})]
+    assert env.v1.calls == [
+        ("tools.list", (), {"cursor": None, "limit": 200, "view": "agent"}),
+        ("tools.list", (), {"cursor": "c2", "limit": 200, "view": "agent"}),
+    ]
     assert out == {
         "totalTools": 3,
         "filters": {"modality": None, "function": None, "search": None},
@@ -106,7 +111,7 @@ def test_the_full_listing_is_every_page_summarized_and_sorted_by_name(env, tool_
     }
 
 
-def test_a_narrowed_listing_carries_tags_and_cut_descriptions(env, tool_set_on_v1):
+def test_a_narrowed_listing_carries_tags_and_cut_descriptions(env):
     env.v1.answers["tools.list"] = pages
     with HTTPClient("https://mcp.tamarind.bio", "test-key") as client:
         out = catalog.list_tools(client, modality="SMALL-molecule")  # matched in any case
@@ -123,7 +128,7 @@ def test_a_narrowed_listing_carries_tags_and_cut_descriptions(env, tool_set_on_v
     assert all("modality" not in c[2] for c in env.v1.calls)
 
 
-def test_search_matches_name_display_name_or_description(env, tool_set_on_v1):
+def test_search_matches_name_display_name_or_description(env):
     env.v1.answers["tools.list"] = pages
     with HTTPClient("https://mcp.tamarind.bio", "test-key") as client:
         assert [t["name"] for t in catalog.list_tools(client, search="admet")["tools"]] == ["admet"]
@@ -133,7 +138,7 @@ def test_search_matches_name_display_name_or_description(env, tool_set_on_v1):
     assert len(out["tools"][0]["description"]) == on_v1.DESCRIPTION_CHARS
 
 
-def test_an_unrecognized_filter_value_is_named(env, tool_set_on_v1):
+def test_an_unrecognized_filter_value_is_named(env):
     env.v1.answers["tools.list"] = pages
     with HTTPClient("https://mcp.tamarind.bio", "test-key") as client:
         out = catalog.list_tools(client, function="structure prediction")
@@ -145,14 +150,51 @@ def test_an_unrecognized_filter_value_is_named(env, tool_set_on_v1):
     )
 
 
-def test_the_custom_tool_listing_stays_on_the_catalog(env, tool_set_on_v1):
-    FakeClassic.answers["catalog/tools"] = {"tools": [], "totalTools": 0}
+def test_the_custom_tool_listing_is_v1s_custom_tools_in_the_catalogs_layout(env):
+    env.v1.answers["tools.list"] = pages
     with HTTPClient("https://mcp.tamarind.bio", "test-key") as client:
-        catalog.list_tools(client, custom=True)
-    assert env.v1.calls == [] and classic_calls() == [("GET", "catalog/tools", {"modality": None, "function": None, "search": None, "custom": "true"})]
+        out = catalog.list_tools(client, custom=True)
+    assert classic_calls() == []
+    assert env.v1.calls == [("tools.list", (), {"cursor": None, "limit": 200, "custom": True})]
+    assert out == {
+        "totalTools": 2,
+        "filters": {"modality": None, "function": None, "search": None, "custom": True},
+        "descriptionsOmitted": True,
+        "availableCategories": ["Protein"],
+        "availableTags": ["embeddings", "utilities"],
+        "tools": [
+            {"name": "my-folder", "displayName": "My-Folder", "categories": ["Protein"], "outputTypes": ["pdb"]},
+            # v1's `finetune` on a custom tool is the catalog's `trainable`
+            {"name": "my-scorer", "displayName": "My scorer", "categories": [], "trainable": True},
+        ],
+        "hint": on_v1.CUSTOM_HINT,
+    }
 
 
-def test_tools_prints_the_same_with_either_api(env, tool_set_on_v1):
+def test_a_narrowed_custom_listing_names_no_unrecognized_filter(env):
+    """As the catalog's custom listing: tags and descriptions once narrowed, the short
+    hint, and no unrecognized-filter note."""
+    env.v1.answers["tools.list"] = pages
+    with HTTPClient("https://mcp.tamarind.bio", "test-key") as client:
+        out = catalog.list_tools(client, custom=True, function="UTILITIES")
+        unknown = catalog.list_tools(client, custom=True, modality="antibody")
+    assert out["tools"] == [{
+        "name": "my-scorer", "displayName": "My scorer", "categories": [], "trainable": True,
+        "tags": ["utilities"], "description": "my-scorer does things",
+    }]
+    assert out["descriptionsOmitted"] is False and out["hint"] == on_v1.CUSTOM_HINT
+    assert unknown["tools"] == [] and "unrecognizedFilters" not in unknown and unknown["hint"] == on_v1.CUSTOM_HINT
+
+
+def test_tools_custom_prints_the_same_with_either_api(env):
+    env.v1.answers["tools.list"] = pages
+    with HTTPClient("https://mcp.tamarind.bio", "test-key") as client:
+        FakeClassic.answers["catalog/tools"] = catalog.list_tools(client, custom=True)
+    same_output(env, "--json", "tools", "--custom")
+    same_output(env, "--no-json", "tools", "--custom")
+
+
+def test_tools_prints_the_same_with_either_api(env):
     env.v1.answers["tools.list"] = pages
     with HTTPClient("https://mcp.tamarind.bio", "test-key") as client:
         FakeClassic.answers["catalog/tools"] = catalog.list_tools(client)
@@ -172,7 +214,7 @@ FACETS = {
 }
 
 
-def test_modalities_and_functions_are_v1s_facets_in_the_catalogs_layout(env, tool_set_on_v1):
+def test_modalities_and_functions_are_v1s_facets_in_the_catalogs_layout(env):
     env.v1.answers["tools.facets"] = FACETS
     with HTTPClient("https://mcp.tamarind.bio", "test-key") as client:
         modalities = catalog.list_modalities(client)
@@ -192,9 +234,10 @@ def test_modalities_and_functions_are_v1s_facets_in_the_catalogs_layout(env, too
         "hint": on_v1.FUNCTIONS_HINT,
     }
     assert classic_calls() == []
+    assert env.v1.calls == [("tools.facets", (), {"view": "agent"})] * 2
 
 
-def test_modalities_print_the_same_with_either_api(env, tool_set_on_v1):
+def test_modalities_print_the_same_with_either_api(env):
     env.v1.answers["tools.facets"] = FACETS
     with HTTPClient("https://mcp.tamarind.bio", "test-key") as client:
         FakeClassic.answers["catalog/modalities"] = catalog.list_modalities(client)
@@ -343,7 +386,7 @@ def test_schema_prints_the_same_with_either_api(env):
     assert json.loads(res.stdout) == {"type": "boltz", "settings": {"sequence": "MK", "addLigands": False}}
 
 
-def test_the_sdks_tools_follow_the_switch(env, tool_set_on_v1):
+def test_the_sdks_tools_follow_the_switch(env):
     from tamarind import Tamarind
 
     env.v1.answers["tools.list"] = pages

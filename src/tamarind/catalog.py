@@ -8,6 +8,10 @@ These routes return exactly the JSON the MCP's discovery tools return
 (``getAvailableTools``, ``listModalities``, ``listTags``, ``getJobSchema``),
 because both are served by the same shared implementation. So whatever a tool
 looks like in the MCP, it looks identical here.
+
+With v1 on for the key, the same functions are answered by v1's tool routes and
+rebuilt in this layout (:mod:`tamarind._v1.catalog`); docs/v1-mode.md lists where
+that differs.
 """
 
 from __future__ import annotations

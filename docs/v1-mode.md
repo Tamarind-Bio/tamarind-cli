@@ -48,10 +48,14 @@ enabled for this account yet" (exit 2) and send nothing.
 | `files upload` | uploadFile |
 | `files delete` | deleteFile (`PATH --folder F` deletes the folder, as classic does) |
 | `custom-tools …` | the same operations at the v1 base; `custom-tools test` is submitJob pinned to the version; a build's upload session (v1 `id`) is read as classic's `uploadId` |
+| `tools`, `modalities`, `functions` | listTools with `view=agent`, getToolFacets with `view=agent` |
+| `tools --custom` | listTools with `custom=true` |
+| `schema`, `schema --example` | getToolSchema, getTool |
 
-In the SDK, `Tamarind().jobs`, `.files`, `.custom_tools`, `.pipelines.get_run` and the
-`tamarind.rest` functions follow the same table: the SDK and the CLI share one mapping
-(`tamarind._v1.classic`). The SDK's `jobs.cancel(job_id=...)` (classic's cancel by row
+In the SDK, `Tamarind().jobs`, `.files`, `.custom_tools`, `.tools`, `.pipelines.get_run`,
+`tamarind.catalog` and the `tamarind.rest` functions follow the same table: the SDK and
+the CLI share one mapping (`tamarind._v1.classic`, and `tamarind._v1.catalog` for the
+catalog). The SDK's `jobs.cancel(job_id=...)` (classic's cancel by row
 `Id`) is cancelJob of `job_<Id>`, else of the batch `batch_<Id>`.
 
 `scope=org` and `createdBy` call classic's own organization and member readers, so who
@@ -81,10 +85,6 @@ budget error. A 5xx or no answer is "outcome unclear", as in classic mode, so
 
 These have no v1 form yet, so they stay on classic even with v1 on:
 
-- the tool set: `tools`, `modalities` and `functions` (`Tamarind().tools.list/modalities/
-  functions`, `tamarind.catalog`), held on the catalog until the tool set is decided (see
-  "The catalog" below), and `tools --custom` in any case (v1's listTools holds built-in
-  tools only). `schema` is v1's;
 - in the SDK, `include_subjobs` with `organization` and `job_name`: classic's organization
   name read then admits a batch's own jobs, and v1's `allMatches` doesn't take
   `includeSubjobs`. (A name read of your own jobs or one member's never reads
@@ -181,24 +181,24 @@ and `job_email`, with `include_subjobs` and with `batch` (v1 itself refuses `sea
 `kind="pipeline"` with these), but not with `job_name`. A filtered batch that matches
 nothing is an empty page, not classic's "Jobs in batch B not found".
 
-**The catalog** (`tamarind._v1.catalog`). `schema` (and in the SDK
-`Tamarind().tools.schema/example` and `tamarind.catalog.get_schema`) is answered from v1,
-getToolSchema with getTool, rebuilt in the catalog's layout. The tool set has the same
-kind of mapping (the list from every page of listTools, with the catalog's own filters,
-sort, facet lists, unrecognized-filter note and hints applied; `modalities` and
-`functions` from getToolFacets), but `tools`, `modalities` and `functions` stay on the
-catalog while `TOOL_SET_ON_V1` is off, as it is today. Diffed on staging for one
-account, every tool, against the staging MCP's catalog:
-- `modalities` and `functions` on v1 (held): the same values, labels and descriptions;
-  `toolCount` differs for 7 of 9 modalities and 26 of 35 functions, from the list below
-  and from v1 assigning some categories differently.
-- The tool list on v1 (held): v1's list is the app's (website#7796), 429 tools where the
-  catalog lists 456. Only the catalog lists `abgpt`, the `rosetta-*` tools, the
-  `*-inference` model tools, `bbmerge`, `pilot-sbdd` and `t2pmhc`; only v1 lists
-  `odesign-antibody`, `protein-scoring` and `virtual-screening`. For the tools both list:
-  the same envelope, filters, order, hints and fields, except `outputTypes`, which follows
-  the app's ligand rule (`boltz`: `pdb`, where the catalog says `pdb`, `sdf`). v1 answers
-  the schema of every listed tool but `abgpt`, which this account can't run.
+**The catalog** (`tamarind._v1.catalog`). `tools`, `modalities`, `functions` and `schema`
+(in the SDK `tamarind.catalog` and `Tamarind().tools`) are answered from v1 and rebuilt
+in the catalog's layout. The list is every page of listTools in the agent view
+(`view=agent`, the tools the MCP's getAvailableTools lists), with the catalog's own
+filters, sort, facet lists, unrecognized-filter note and hints applied; `tools --custom`
+is listTools with `custom=true`; `modalities` and `functions` are getToolFacets in the
+agent view; `schema` is getToolSchema with getTool. Turning `TOOL_SET_ON_V1` off (it is
+on) sends the list, the custom list and the facets back to the catalog. Diffed on staging
+for one account, every tool, against the staging MCP's catalog:
+- `tools`: 479 tools where the catalog lists 480. v1 leaves out `abgpt`, which this
+  account's organization policy refuses (the catalog lists it and its submit refuses it).
+  For the rest: the same envelope, filters, order, hints and fields.
+- `modalities` and `functions`: the same values, labels and descriptions. `toolCount` is
+  one lower for the two modalities and two functions that count `abgpt`.
+- `tools --custom`: the same 51 tools and fields, listed by name, where the catalog lists
+  them in the order they were deployed. A tool that trains models is `trainable`, as
+  before; v1 doesn't say whether it also runs the models it trains, so `servesModels` is
+  left out.
 - `schema`: the same envelope, display name, description, categories, tags, hint and
   output types. `outputs` is v1's output contract (with the catalog's `byTaskNote`), the
   catalog's for 446 of 455 tools. Pending a tools fix, 9 differ in `produces`:
