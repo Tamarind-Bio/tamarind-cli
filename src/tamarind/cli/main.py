@@ -123,8 +123,9 @@ class State:
         return self._http(self.config().api_base)
 
     def catalog_client(self) -> HTTPClient:
-        """The catalog (tools, schemas, facets, job logs). With v1 on, job logs come from
-        v1; the rest stays on the catalog until v1 serves it alike."""
+        """The catalog (tools, schemas, facets, job logs). With v1 on for this key, schemas
+        and job logs come from v1; the tool list and its facets stay on the catalog for now
+        (see :mod:`tamarind._v1.catalog`)."""
         return self._http(self.config().catalog_base)
 
     def sdk_client(self) -> Tamarind:

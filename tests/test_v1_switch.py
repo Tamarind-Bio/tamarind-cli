@@ -181,7 +181,8 @@ def test_a_request_v1_has_no_form_for_never_asks(monkeypatch):
     monkeypatch.setattr(switch, "probe", lambda *a, **k: pytest.fail("asked"))
     monkeypatch.setattr(HTTPClient, "_classic_json", lambda self, method, path, **k: {"path": path})
     with HTTPClient("https://mcp.tamarind.bio", "k") as client:
-        assert client.get_json("catalog/tools") == {"path": "catalog/tools"}
+        assert client.get_json("catalog/unknown") == {"path": "catalog/unknown"}
+        assert client.get_json("catalog/tools/org/name/schema") == {"path": "catalog/tools/org/name/schema"}
         assert client.get_json("getPresignedUploadUrl") == {"path": "getPresignedUploadUrl"}
 
 

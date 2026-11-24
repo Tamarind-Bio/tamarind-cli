@@ -71,10 +71,10 @@ budget error. A 5xx or no answer is "outcome unclear", as in classic mode, so
 
 These have no v1 form yet, so they stay on classic even with v1 on:
 
-- the catalog: `tools`, `schema`, `modalities`, `functions`, and in the SDK
-  `tamarind.catalog` and `Tamarind().tools.list/schema/modalities/functions/example`.
-  Pending: once website#7796 and #7807 land (catalog visibility and fields), they move to
-  v1, with v1's schema mapped back to today's parameter list;
+- the tool set: `tools`, `modalities` and `functions` (`Tamarind().tools.list/modalities/
+  functions`, `tamarind.catalog`), held on the catalog until the tool set is decided (see
+  "The catalog" below), and `tools --custom` in any case (v1's listTools holds built-in
+  tools only). `schema` is v1's;
 - `status`, `wait` and `results NAME --organization` without `--email`: an
   organization-wide lookup by name. Classic answers every member's job of that name, and
   the CLI refuses a name several members share; v1's organization lookup answers only the
@@ -86,9 +86,7 @@ These have no v1 form yet, so they stay on classic even with v1 on:
 - `logs` of a batch or a pipeline run (v1 reads one job's log);
 - `results RUN --file PATH`, one file of a pipeline run (v1's file read takes a job or a batch);
 - `results RUN --pdbs-only` (a run's archive has no `bestStructures`);
-- `delete NAME` when only a pipeline run has that name (v1 deletes jobs and batches);
-- in the SDK, `rest.upload_file_url` (classic's presigned upload URL; v1 uploads are
-  sessions, and `files upload` already uses them).
+- `delete NAME` when only a pipeline run has that name (v1 deletes jobs and batches).
 
 ## Differences from classic mode
 
@@ -172,6 +170,44 @@ its 422; a path it won't store at is 422 `invalid_option`, where classic answers
 passing one raises "isn't enabled for this account yet". They combine with `organization`
 and `job_email` (v1 itself refuses `search` and `kind="pipeline"` with an organization's
 list), but not with `include_subjobs`, `job_name`, or `organization` with `batch`.
+
+**The catalog** (`tamarind._v1.catalog`). `schema` (and in the SDK
+`Tamarind().tools.schema/example` and `tamarind.catalog.get_schema`) is answered from v1,
+getToolSchema with getTool, rebuilt in the catalog's layout. The tool set has the same
+kind of mapping (the list from every page of listTools, with the catalog's own filters,
+sort, facet lists, unrecognized-filter note and hints applied; `modalities` and
+`functions` from getToolFacets), but `tools`, `modalities` and `functions` stay on the
+catalog while `TOOL_SET_ON_V1` is off, as it is today. Diffed on staging for one
+account, every tool, against the staging MCP's catalog:
+- `modalities` and `functions` on v1 (held): the same values, labels and descriptions;
+  `toolCount` differs for 7 of 9 modalities and 26 of 35 functions, from the list below
+  and from v1 assigning some categories differently.
+- The tool list on v1 (held): v1's list is the app's (website#7796), 429 tools where the
+  catalog lists 456. Only the catalog lists `abgpt`, the `rosetta-*` tools, the
+  `*-inference` model tools, `bbmerge`, `pilot-sbdd` and `t2pmhc`; only v1 lists
+  `odesign-antibody`, `protein-scoring` and `virtual-screening`. For the tools both list:
+  the same envelope, filters, order, hints and fields, except `outputTypes`, which follows
+  the app's ligand rule (`boltz`: `pdb`, where the catalog says `pdb`, `sdf`). v1 answers
+  the schema of every listed tool but `abgpt`, which this account can't run.
+- `schema`: the same envelope, display name, description, categories, tags, hint and
+  output types. `outputs` is v1's output contract (with the catalog's `byTaskNote`), the
+  catalog's for 446 of 455 tools. Pending a tools fix, 9 differ in `produces`:
+  `autodock-vina`, `diffdock`, `gnina`, `matcha`, `smina` and `surfdock` add `sdf`;
+  `flowdock` drops `sdf`; `fastsolv` and `unimol2` list none. `exampleJobNote` is the
+  catalog's text for the example.
+- `schema` parameters are v1's JSON Schema rebuilt as the catalog's list: `name`, `type`,
+  `displayName`, `descr`, `default`, `required`, `options`, `lowerBound`/`upperBound` and
+  `example`. Left out, with no v1 form: `constraints`, `constraintsText`, `conditionals`,
+  `tasks` and the catalog's other UI keys (`showWithRequired`, `extension`, `list`,
+  `optionsDescr`, `requiredWhen`...). `descr` is v1's description, which also states the
+  constraints (the catalog's text for 42% of settings). `required` is v1's, with what a
+  branch requires; a required setting with a default isn't required on v1, which fills it
+  in (87% the same). The names are v1's: about 150 settings are named differently from the
+  catalog's, and with v1 on, submits take v1's names.
+- `schema --example` (`Tamarind().tools.example`) is v1's `example`, built for one task
+  branch: the same settings as before for 389 of 426 tools.
+- A tool hidden from the assistant (`Hide: agent`: `odesign-antibody`, `protein-scoring`,
+  `virtual-screening`) has a schema on v1, where the catalog refuses it.
 
 **Job rows, three more** (from review, not yet changed): a v1 `Failed` job shows `Failed`
 where classic says `Stopped`; `stopReason` is kept only for a low-priority job; a pipeline
