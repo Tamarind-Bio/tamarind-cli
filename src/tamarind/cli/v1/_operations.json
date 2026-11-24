@@ -1453,6 +1453,17 @@
      "type": "array"
     },
     {
+     "description": "Only files (`file`) or only folders (`folder`).",
+     "enum": [
+      "file",
+      "folder"
+     ],
+     "name": "type",
+     "option": "type",
+     "required": false,
+     "type": "string"
+    },
+    {
      "description": "A substring of the file's or folder's own name (not its whole path), ignoring case.",
      "name": "search",
      "option": "search",
@@ -2458,7 +2469,7 @@
    },
    "cli": "pipelines results",
    "confirmFirst": false,
-   "description": "Waits up to 25 seconds for the archive. 200 means ready, with the zip's size and the link's expiry; `fileCount` and `truncated` are null, because nothing records them for a run's zip. 202 means still preparing, so call again after `retryAfterSeconds` (10, also sent as `Retry-After`). It is also 202 while the run (or the node run you named) hasn't finished: the zip is built only once it has. An archive that could not be built is 409 `archive_failed`, retryable after `Retry-After` (90 seconds), when the results service builds again. Building the zip starts work, so an organization that can't st…",
+   "description": "Waits up to 25 seconds for the archive. 200 means ready, with the zip's size and the link's expiry; `fileCount` and `truncated` are null, because nothing records them for a run's zip. 202 means still preparing, so call again after `retryAfterSeconds` (10, also sent as `Retry-After`). It is also 202 while the run (or the node run you named) hasn't finished: the zip is built only once it has. An archive that could not be built is 409 `archive_failed`, retryable after `Retry-After` (90 seconds), when the results service builds again. Building the zip starts work, so for now an organization that…",
    "headers": [],
    "links": true,
    "method": "POST",

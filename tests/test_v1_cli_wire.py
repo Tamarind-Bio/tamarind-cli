@@ -121,3 +121,32 @@ def test_auth_login_refuses_a_rejected_key(wire):
     res = runner.invoke(app, ["--json", "auth", "login", "--api-key", "nope"])
     assert res.exception is not None and res.exception.exit_code == 3
     assert seen[-1].url.path == "/jobs" and seen[-1].headers["x-api-key"] == "nope"
+
+
+def test_a_members_jobs_ask_for_scope_org_and_created_by(wire):
+    seen, routes = wire
+    routes[("GET", "/jobs")] = (200, {"items": [], "nextCursor": None})
+    res = runner.invoke(app, ["--json", "jobs", "--email", "p@example.com", "--limit", "3"])
+    assert res.exit_code == 0, res.output
+    params = seen[-1].url.params
+    assert (params["scope"], params["createdBy"], params["limit"]) == ("org", "p@example.com", "3")
+
+
+def test_files_folders_ask_for_type_folder(wire):
+    seen, routes = wire
+    routes[("GET", "/files")] = (200, {"items": [{"path": "runs", "type": "folder", "jobName": None}], "nextCursor": None})
+    res = runner.invoke(app, ["--json", "files", "folders", "--limit", "4"])
+    assert res.exit_code == 0, res.output
+    assert (seen[-1].url.params["type"], seen[-1].url.params["limit"]) == ("folder", "4")
+    assert json.loads(res.stdout) == {"folders": ["runs"], "hasMore": False, "nextCursor": None}
+
+
+def test_results_pdbs_only_send_best_structures(wire, tmp_path):
+    seen, routes = wire
+    job = "job_00000000-0000-0000-0000-000000000001"
+    routes[("GET", "/jobs")] = (200, {"items": [{"kind": "job", "id": job, "name": "n", "status": "Complete"}], "nextCursor": None})
+    routes[("POST", f"/jobs/{job}/archive")] = (200, {"status": "ready", "downloadUrl": "https://s3.test/n-pdbs.zip"})
+    res = runner.invoke(app, ["--json", "results", "n", "--show-url", "--pdbs-only"])
+    assert res.exit_code == 0, res.output
+    assert json.loads(seen[-1].content) == {"bestStructures": True}
+    assert json.loads(res.stdout)["url"] == "https://s3.test/n-pdbs.zip"

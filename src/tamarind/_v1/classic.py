@@ -10,9 +10,10 @@ left out; docs/v1-mode.md lists those differences.
 There is no fallback. What v1 refuses is raised as v1's error, a ``ProblemError``
 that is also the classic error class for its status (``NotFoundError`` for a 404...),
 so existing ``except`` clauses still match. The few requests v1 has no form for yet
-go to classic on purpose (:class:`OnClassic`): the catalog, another member's jobs
-(``organization`` / ``jobEmail``), a list with ``includeSubjobs``, ``pdbsOnly``
-results, and the logs of anything but a single job.
+go to classic on purpose (:class:`OnClassic`): the catalog, an organization-wide
+lookup by name or batch (v1 answers only the newest match, classic every member's),
+a list with ``includeSubjobs``, and what v1 takes only a job or batch for (the logs of
+a batch or run, one file of a run, deleting a run, a run's ``pdbsOnly``).
 
 A v1 failure with no answer, a 5xx or a 409 ``idempotency_in_progress`` is raised the
 way the classic client raises one, so callers' "outcome may be ambiguous" handling
@@ -219,17 +220,22 @@ class Router:
 
     # -- lookups -----------------------------------------------------------
 
-    def find(self, name: Any, kinds: tuple[str, ...] = ()) -> dict[str, Any] | None:
-        """The caller's own job, batch or run named ``name`` (classic looks names up among
-        the caller's own jobs), of one of ``kinds`` if given; None when there is none.
-        Remembered for this client's life, so a wait doesn't look it up on every poll."""
+    def find(
+        self, name: Any, kinds: tuple[str, ...] = (), *, member: str | None = None
+    ) -> dict[str, Any] | None:
+        """The job, batch or run named ``name``, of one of ``kinds`` if given; None when
+        there is none. Classic looks names up among the caller's own jobs, or among one
+        member's with ``jobEmail`` (``member``: v1's ``scope=org&createdBy``, the same
+        reader). Remembered for this client's life, so a wait doesn't look it up on every
+        poll."""
         if not isinstance(name, str) or not name:
             return None
-        key = (name, kinds)
+        key = (name, kinds + ((f"member:{member}",) if member is not None else ()))
         if key not in self._items:
             found: list[dict[str, Any]] = []
+            scope = _member_scope(member)
             for kind in kinds or (None,):
-                query = {"name": name, **({"kind": kind} if kind else {})}
+                query = {"name": name, **({"kind": kind} if kind else {}), **scope}
                 page = plain(self.v1().jobs.list(**query))
                 found.extend((page or {}).get("items") or [])
             if not found:
@@ -255,11 +261,12 @@ def stamp(value: Any) -> str | None:
     return re.split(r"[.Z+]", text, maxsplit=1)[0] if len(text) >= 19 else text
 
 
-def job_row(item: dict[str, Any], *, batch_name: str | None = None) -> dict[str, Any]:
+def job_row(item: dict[str, Any], *, batch_name: str | None = None, user: bool = False) -> dict[str, Any]:
     """A v1 job, batch or run as classic's job row (``legacy_jobs.summary``'s fields, in
-    its order). v1 has no ``TamarindSchemaVersion``, ``StorageFolder``, ``User`` or a
-    batch's ``resultUrl``, so those are left out; ``Settings`` is there when v1 sent the
-    settings (a single job's read, not a list)."""
+    its order). v1 has no ``TamarindSchemaVersion``, ``StorageFolder`` or a batch's
+    ``resultUrl``, so those are left out; ``Settings`` is there when v1 sent the settings
+    (a single job's read, not a list). ``User`` (v1's ``createdBy``) is there with
+    ``user``, as classic adds it to an organization's or a member's rows."""
     kind = item.get("kind")
     row: dict[str, Any] = {
         "JobName": item.get("name"),
@@ -281,6 +288,8 @@ def job_row(item: dict[str, Any], *, batch_name: str | None = None) -> dict[str,
         row["Batch"] = batch_name
     if isinstance(item.get("weightedHours"), (int, float)):
         row["WeightedHours"] = round(item["weightedHours"], 2)
+    if user and item.get("createdBy"):
+        row["User"] = item["createdBy"]
     if kind == "batch":
         row["batchStatus"] = item.get("status")
     if item.get("lowPriority"):
@@ -300,39 +309,77 @@ def statuses(rows: list[dict[str, Any]]) -> dict[str, int]:
 # listJobs filters only v1 has (rest.get_jobs checks v1 is on before sending them).
 _V1_JOB_FILTERS = ("kind", "status", "tool", "search")
 
+# Classic's answer when a member's jobs aren't the caller's to see (a 400 its client reads
+# as an auth error, exit 3); v1 answers 403 `forbidden`.
+_MEMBER_REFUSED = "Unauthorized to access jobs for this user"
+
+
+def _member_scope(member: str | None) -> dict[str, Any]:
+    """v1's query for one member's jobs: classic's ``jobEmail``."""
+    return {} if member is None else {"scope": "org", "created_by": member}
+
+
+@contextmanager
+def _member_refusal_as_classic() -> Iterator[None]:
+    try:
+        yield
+    except ProblemError as exc:
+        if exc.status == 403 and exc.code == "forbidden":
+            raise AuthError(f"Unauthorized: {_MEMBER_REFUSED}") from exc
+        raise
+
 
 def get_jobs(client: Router, params: dict[str, Any]) -> dict[str, Any]:
-    """GET /jobs: one job by name (getJob), or a page (listJobs)."""
+    """GET /jobs: one job by name (getJob), or a page (listJobs). ``jobEmail`` reads one
+    member's jobs and ``organization`` the organization's: v1's ``scope=org`` (with
+    ``createdBy``), which calls classic's own readers, so who and what is shown are
+    classic's. Their rows carry ``User``, as classic's do."""
     filters = {key: params[key] for key in _V1_JOB_FILTERS if params.get(key) is not None}
-    if params.get("organization") or params.get("jobEmail") or params.get("includeSubjobs"):
+    member = params.get("jobEmail")
+    organization = member is None and bool(params.get("organization"))
+    name, batch = params.get("jobName"), params.get("batch")
+    if params.get("includeSubjobs"):
         if filters:
-            raise ValidationError(
-                f"{', '.join(filters)} can't be combined with organization, job_email or include_subjobs yet."
-            )
-        raise OnClassic  # another member's jobs (website#7795); subjobs mixed into the list
-    name = params.get("jobName")
+            raise ValidationError(f"{', '.join(filters)} can't be combined with include_subjobs yet.")
+        raise OnClassic  # v1 has no list with a batch's jobs mixed in
     if name and filters:
         raise ValidationError(f"{', '.join(filters)} can't be combined with job_name.")
-    if name:
-        found = client.find(name)
-        if found is None:
-            raise NotFoundError(f"Job {name} not found")
-        job = plain(client.v1().jobs.get(found["id"]))
-        batch = client.name_of(job["batchId"]) if job.get("batchId") else None
-        row = job_row(job, batch_name=batch)
-        return {**row, "statuses": statuses([row])}
-    query: dict[str, Any] = {"limit": params.get("limit"), **filters}
-    if params.get("startKey"):
-        query["cursor"] = params["startKey"]
-    batch_name = None
-    if params.get("batch"):
-        parent = client.find(params["batch"], kinds=("batch", "pipeline"))
-        if parent is None:
-            return {"jobs": [], "statuses": statuses([])}
-        key = "pipeline_run_id" if parent.get("kind") == "pipeline" else "batch_id"
-        query[key], batch_name = parent["id"], parent.get("name")
-    page = plain(client.v1().jobs.list(**{k: v for k, v in query.items() if v is not None}))
-    rows = [job_row(item, batch_name=batch_name) for item in page.get("items") or []]
+    if organization and (name or batch):
+        # Classic answers every member's job (or batch) of that name, so a name several
+        # members share can be refused; v1's organization lookup answers only the newest.
+        if filters:
+            raise ValidationError(f"{', '.join(filters)} can't be combined with organization and batch yet.")
+        raise OnClassic
+    peer = member is not None or organization
+    with _member_refusal_as_classic():
+        if name:
+            found = client.find(name, member=member)
+            if found is None:
+                raise NotFoundError(f"Job {name} not found")
+            job = plain(client.v1().jobs.get(found["id"]))
+            batch_name = client.name_of(job["batchId"]) if job.get("batchId") else None
+            row = job_row(job, batch_name=batch_name, user=peer)
+            return {**row, "statuses": statuses([row])}
+        query: dict[str, Any] = {"limit": params.get("limit"), **filters}
+        if params.get("startKey"):
+            query["cursor"] = params["startKey"]
+        batch_name = None
+        if batch:
+            # A member's batch is found among their jobs, then listed by its id with no scope:
+            # v1 admits each of its jobs on its own, as classic's batch read does.
+            parent = client.find(batch, kinds=("batch",) if member is not None else ("batch", "pipeline"), member=member)
+            if parent is None:
+                if member is not None:
+                    raise NotFoundError(f"Jobs in batch {batch} not found")
+                return {"jobs": [], "statuses": statuses([])}
+            key = "pipeline_run_id" if parent.get("kind") == "pipeline" else "batch_id"
+            query[key], batch_name = parent["id"], parent.get("name")
+        else:
+            query.update(_member_scope(member) if member is not None else {"scope": "org"} if organization else {})
+        page = plain(client.v1().jobs.list(**{k: v for k, v in query.items() if v is not None}))
+    rows = [job_row(item, batch_name=batch_name, user=peer) for item in page.get("items") or []]
+    if member is not None and batch and not rows and not page.get("nextCursor") and not params.get("startKey"):
+        raise NotFoundError(f"Jobs in batch {batch} not found")  # classic's miss for a member's batch
     out: dict[str, Any] = {"jobs": rows}
     if page.get("nextCursor"):
         out["startKey"] = page["nextCursor"]
@@ -478,7 +525,7 @@ def _cancel_many(client: Router, item: dict[str, Any], *, cascaded: bool) -> dic
     live = int(counts.get("inQueue") or 0) + int(counts.get("running") or 0)
     parent_live = before.get("status") not in FINAL
     after = plain(client.v1().jobs.cancel(item["id"], body={}))
-    name = item.get("name")
+    name = item.get("name") or before.get("name")
     cancelled = live + (1 if parent_live else 0)
     out: dict[str, Any] = {
         "success": True,
@@ -499,17 +546,7 @@ def _cancel_many(client: Router, item: dict[str, Any], *, cascaded: bool) -> dic
     return out
 
 
-def cancel_job(client: Router, body: dict[str, Any]) -> dict[str, Any]:
-    """POST /cancelJob → cancelJob; a batch or run name cancels all of it, as classic does."""
-    name = body.get("jobName")
-    if not name:
-        raise OnClassic  # by row id: v1 takes its own ids
-    item = client.find(name)
-    if item is None:
-        raise NotFoundError(f"Job {name} not found")
-    if item.get("kind") != "job":
-        return _cancel_many(client, item, cascaded=True)
-    job = plain(client.v1().jobs.cancel(item["id"], body={}))
+def _cancelled(item: dict[str, Any], job: dict[str, Any], name: Any) -> dict[str, Any]:
     return {
         "success": True,
         "message": "Job cancelled successfully",
@@ -525,6 +562,44 @@ def cancel_job(client: Router, body: dict[str, Any]) -> dict[str, Any]:
         ],
         "status": job.get("status") or "Stopped",
     }
+
+
+def _cancel_by_id(client: Router, row_id: str) -> dict[str, Any]:
+    """Classic's cancel by row ``Id`` (any row: a job, or a batch, which cascades): v1's
+    ``job_<Id>``, else ``batch_<Id>``. The job is cancelled without being read first, so
+    a member's job the caller may cancel but not list (shared with them, in an
+    organization that hides jobs) is cancelled as classic cancels it."""
+    v1 = client.v1()
+    try:
+        job = plain(v1.jobs.cancel(f"job_{row_id}", body={}))
+    except ProblemError as exc:
+        if exc.status != 404:
+            raise
+    else:
+        return _cancelled({"id": f"job_{row_id}"}, job, job.get("name"))
+    try:
+        return _cancel_many(client, {"id": f"batch_{row_id}"}, cascaded=True)
+    except ProblemError as exc:
+        if exc.status != 404:
+            raise
+        raise NotFoundError(f'Job with Id "{row_id}" not found') from exc
+
+
+def cancel_job(client: Router, body: dict[str, Any]) -> dict[str, Any]:
+    """POST /cancelJob → cancelJob; a batch or run name cancels all of it, as classic does.
+    A ``jobId`` is used before a ``jobName``, as classic uses it."""
+    if body.get("jobId"):
+        return _cancel_by_id(client, str(body["jobId"]))
+    name = body.get("jobName")
+    if not name:
+        raise OnClassic  # neither: classic's own 400
+    item = client.find(name)
+    if item is None:
+        raise NotFoundError(f"Job {name} not found")
+    if item.get("kind") != "job":
+        return _cancel_many(client, item, cascaded=True)
+    job = plain(client.v1().jobs.cancel(item["id"], body={}))
+    return _cancelled(item, job, name)
 
 
 def cancel_batch(client: Router, body: dict[str, Any]) -> dict[str, Any]:
@@ -552,58 +627,92 @@ def _retry_after(exc: Exception, default: float) -> float:
         return default
 
 
-def _archive(client: Router, item: dict[str, Any]) -> dict[str, Any]:
+def _archive(client: Router, item: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
     v1 = client.v1()
     if item.get("kind") == "pipeline":
         return plain(v1.pipelines.archive_run(item["id"], body={}))
-    return plain(v1.jobs.archive(item["id"], body={}))
+    return plain(v1.jobs.archive(item["id"], body=request))
+
+
+# Classic's 400 for `pdbsOnly` on a job (or a design batch) with no stored `-pdbs.zip`.
+NO_BEST_STRUCTURES = (
+    "pdbsOnly flag is only available for batch jobs, please remove it to retrieve individual job results"
+)
+# How long `pdbsOnly` waits, without --wait, for v1 to build a batch's best structures:
+# classic's answer is the zip it builds while you wait, and v1's build stops at 8 minutes.
+BEST_BUILD_SECONDS = 600.0
+
+
+def _no_best_structures(exc: TamarindError) -> bool:
+    return any(
+        isinstance(error, dict) and error.get("pointer") == "/bestStructures" and error.get("code") == "not_supported"
+        for error in getattr(exc, "errors", None) or []
+    )
 
 
 def result(client: Router, body: dict[str, Any]) -> str:
     """POST /result → archiveJob (archivePipelineRun for a run, getJobFile for
     ``fileName``); classic answers the signed link. v1's archive is the stored
     ``result-<folder>.zip`` classic serves, so the bytes are the same (the link itself is
-    v1's, signed for the global endpoint).
+    v1's, signed for the global endpoint). ``jobEmail`` names the member whose job it is
+    (v1 judges their job by classic's results rule), and ``pdbsOnly`` asks for its best
+    structures (``bestStructures``): a stored ``-pdbs.zip``, or for a batch one v1 builds.
 
     v1 can call a batch Complete before its archive is built, where classic's wait covers
     the build. So inside ``HTTPClient.results_wait`` (the CLI's ``--wait``) a Complete item
     whose archive is still preparing is asked again after ``retryAfterSeconds``, until it
-    is ready or the wait's deadline passes."""
-    if body.get("jobEmail") is not None or body.get("pdbsOnly"):
-        raise OnClassic  # another member's job (website#7795); best structures (not on v1 yet)
+    is ready or the wait's deadline passes. A ``pdbsOnly`` build is always waited for (up
+    to BEST_BUILD_SECONDS without ``--wait``), as classic's answer is the zip it builds."""
     name = body.get("jobName")
-    item = client.find(name)
+    best = bool(body.get("pdbsOnly"))
+    with _member_refusal_as_classic():
+        item = client.find(name, member=body.get("jobEmail"))
     if item is None:
         raise NotFoundError(f"Job {name} not found")
     file_name = body.get("fileName")
-    if file_name:
+    if file_name:  # classic reads the file, whatever pdbsOnly says
         if item.get("kind") == "pipeline":
             raise OnClassic  # getJobFile takes a job or a batch; one file of a run has no v1 form
         link = plain(client.v1().jobs.get_file(item["id"], path=file_name, delivery="url"))
         return str(link.get("url"))
+    if best and item.get("kind") == "pipeline":
+        raise OnClassic  # archivePipelineRun has no bestStructures
+    request = {"bestStructures": True} if best else {}
     wait, deadline = client.results_deadline
+    patient = wait or best
+    if best and not wait:
+        deadline = time.monotonic() + BEST_BUILD_SECONDS
+
+    def overdue(detail: Any = None) -> TamarindError:
+        if wait:
+            return JobTimeoutError(f"The results archive of {name} wasn't ready when --timeout passed.", detail=detail)
+        return TamarindError(
+            f"The best structures of {name} weren't ready after {BEST_BUILD_SECONDS:g} s; try again later.",
+            detail=detail,
+        )
+
     def remaining() -> float | None:
-        """What's left of --timeout under --wait (each request is bounded by it); None if unbounded."""
-        if not wait or deadline is None:
+        """What's left of the wait (each request is bounded by it); None if unbounded."""
+        if not patient or deadline is None:
             return None
         left = deadline - time.monotonic()
         if left <= 0:
-            raise JobTimeoutError(f"The results archive of {name} wasn't ready when --timeout passed.")
+            raise overdue()
         return left
 
     def pause(delay: float, detail: Any) -> None:
         if deadline is not None and time.monotonic() + delay > deadline:
-            raise JobTimeoutError(
-                f"The results archive of {name} wasn't ready when --timeout passed.", detail=detail
-            )
+            raise overdue(detail)
         time.sleep(delay)
 
     rebuilds = 0
     while True:
         try:
             with client._bounded(remaining()):
-                answer = _archive(client, item)
+                answer = _archive(client, item, request)
         except TamarindError as exc:
+            if best and _no_best_structures(exc):
+                raise ValidationError(NO_BEST_STRUCTURES) from exc
             code = getattr(exc, "code", None)
             if code == "archive_failed" and item.get("kind") == "pipeline" and wait and rebuilds < 3:
                 # archivePipelineRun's archive_failed is retryable: the results service builds
@@ -625,7 +734,7 @@ def result(client: Router, body: dict[str, Any]) -> str:
         if current.get("status") != "Complete":
             raise _not_complete(name, current)
         delay = max(float(answer.get("retryAfterSeconds") or 5), 1.0)
-        if not wait:
+        if not patient:
             raise TamarindError(
                 f"The results archive is still being prepared; try again in {delay:g} s.", detail=answer
             )
@@ -672,25 +781,49 @@ def get_files(client: Router, params: dict[str, Any]) -> list[str]:
 
 
 def get_folders(client: Router, params: dict[str, Any]) -> dict[str, Any]:
-    """GET /getFolders → listFiles' folder entries at the root."""
-    limit = None if params.get("loadAll") else int(params.get("limit") or 20)
-    folders: list[str] = []
-    more = False
-    for entry in _entries(client):
-        if entry.get("type") != "folder":
-            continue
-        if limit is not None and len(folders) >= limit:
-            more = True
-            break
-        folders.append(str(entry.get("path")))
-    return {"folders": folders, "hasMore": more}
+    """GET /getFolders → listFiles ``type=folder``: one page of your top-level folders by
+    name, as classic's ``listFolders`` reads them, with ``labels`` (a job folder's job
+    name, where it differs from the folder's), ``hasMore`` and ``nextCursor``. Classic
+    refuses ``loadAll`` and an ``offset`` ("Use cursor pagination") and a ``limit``
+    outside 1 to 100; so does this, before asking v1."""
+    if str(params.get("loadAll")).lower() == "true" or _number(params.get("offset") or 0) != 0:
+        raise ValidationError("Use cursor pagination")
+    limit = _number(params.get("limit") or 20)
+    if not (isinstance(limit, float) and limit.is_integer() and 1 <= limit <= 100):
+        raise ValidationError("limit must be an integer between 1 and 100")
+    query: dict[str, Any] = {"type_": "folder", "limit": int(limit)}
+    if params.get("cursor"):
+        query["cursor"] = params["cursor"]
+    page = plain(client.v1().files.list(**query)) or {}
+    entries = [e for e in page.get("items") or [] if isinstance(e, dict) and e.get("type") == "folder"]
+    folders = [str(e.get("path")) for e in entries]
+    labels = {
+        str(e["path"]): e["jobName"]
+        for e in entries
+        if isinstance(e.get("jobName"), str) and e["jobName"] and e["jobName"] != e.get("path")
+    }
+    cursor = page.get("nextCursor")
+    out: dict[str, Any] = {"folders": folders}
+    if labels:
+        out["labels"] = labels
+    out.update({"hasMore": bool(cursor), "nextCursor": cursor})
+    return out
+
+
+def _number(value: Any) -> float | None:
+    """JavaScript's ``Number(value)`` for the query values classic reads (None for NaN)."""
+    try:
+        number = float(str(value).strip() or 0)
+    except ValueError:
+        return None
+    return None if number != number else number
 
 
 def delete_file(client: Router, params: dict[str, Any]) -> dict[str, str]:
-    """DELETE /delete-file → deleteFile; classic answers ``{message}``."""
+    """DELETE /delete-file → deleteFile; classic answers ``{message}``. Given a path and a
+    folder, classic deletes the folder and ignores the path, so only the folder is sent
+    (v1 takes exactly one)."""
     path, folder = params.get("filePath"), params.get("folder")
-    if path and folder:
-        raise OnClassic  # v1 takes exactly one; classic decides, as it does today
     if folder:
         client.v1().files.delete(folder=folder)
         return {"message": "Folder deleted successfully"}
