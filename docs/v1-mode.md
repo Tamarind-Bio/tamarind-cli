@@ -178,7 +178,8 @@ its 422; a path it won't store at is 422 `invalid_option`, where classic answers
 **SDK `jobs.list` filters:** `kind`, `status`, `tool` and `search` are v1's. With v1 off,
 passing one raises "isn't enabled for this account yet". They combine with `organization`
 and `job_email`, with `include_subjobs` and with `batch` (v1 itself refuses `search` and
-`kind="pipeline"` with these), but not with `job_name`.
+`kind="pipeline"` with these), but not with `job_name`. A filtered batch that matches
+nothing is an empty page, not classic's "Jobs in batch B not found".
 
 **Job rows, three more** (from review, not yet changed): a v1 `Failed` job shows `Failed`
 where classic says `Stopped`; `stopReason` is kept only for a low-priority job; a pipeline

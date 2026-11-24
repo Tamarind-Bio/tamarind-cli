@@ -207,6 +207,17 @@ def test_a_batch_with_nothing_to_show_is_classics_not_found(env, who):
     assert res.exception.exit_code == 4 and len(env.v1.calls) == 1
 
 
+def test_a_filtered_batch_that_matches_nothing_is_an_empty_page(env):
+    # The filters are v1's (classic has none), so an empty filtered page isn't classic's miss.
+    from tamarind import rest
+
+    env.v1.answers["jobs.list"] = _page()
+    with HTTPClient("https://app.tamarind.bio/api", "test-key") as client:
+        out = rest.get_jobs(client, batch="b1", status="Running")
+    assert out == {"jobs": [], "statuses": {"Complete": 0, "In Queue": 0, "Running": 0, "Stopped": 0}}
+    assert env.v1.calls == [("jobs.list", (), {"status": "Running", "batch_name": "b1"})]
+
+
 @pytest.mark.parametrize(
     "who, scope",
     [([], {}), (["--email", "p@example.com"], {"scope": "org", "created_by": "p@example.com"}), (["--organization"], {"scope": "org"})],
