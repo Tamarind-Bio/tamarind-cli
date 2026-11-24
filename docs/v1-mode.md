@@ -33,15 +33,16 @@ enabled for this account yet" (exit 2) and send nothing.
 | Command | v1 operation |
 |---|---|
 | `auth status`, `auth login` (the key check) | listJobs (classic's check, one job) |
-| `jobs`, `jobs --batch`, `status`, `wait`, `submit --wait` | listJobs, getJob |
-| `jobs --organization`, and `--email M` on `jobs`, `jobs --batch`, `status`, `wait`, `results` | listJobs with `scope=org` (and `createdBy=M`), getJob; another member's batch is listed by its id |
+| `jobs`, `status`, `wait`, `submit --wait` | listJobs, getJob |
+| `jobs --batch B`, `jobs --include-subjobs` | listJobs with `batchName=B`, or `includeSubjobs` |
+| `jobs --organization`, `status`, `wait` and `results NAME --organization`, and `--email M` on `jobs`, `status`, `wait`, `results` | listJobs with `scope=org` (and `createdBy=M`; an organization's name with `allMatches`), getJob |
 | `validate`, the check `submit` makes first, `batch --prevalidate` | validateJob |
 | `submit`, `batch` | submitJob |
 | `cancel`, `cancel --batch` | cancelJob |
 | `results` (download, `--show-url`, `--file`) | archiveJob (archivePipelineRun for a run), getJobFile |
 | `results --pdbs-only` | archiveJob with `bestStructures` |
-| `delete` | deleteJob |
-| `logs` | getJobLogs |
+| `delete` | deleteJob (a run's `run_` id when only a pipeline run has the name) |
+| `logs` | getJobLogs (a job's or a batch's) |
 | `files list`, `files stats` | listFiles |
 | `files folders` | listFiles with `type=folder` |
 | `files upload` | uploadFile |
@@ -54,7 +55,16 @@ In the SDK, `Tamarind().jobs`, `.files`, `.custom_tools`, `.pipelines.get_run` a
 `Id`) is cancelJob of `job_<Id>`, else of the batch `batch_<Id>`.
 
 `scope=org` and `createdBy` call classic's own organization and member readers, so who
-can see whose jobs, and which jobs, is classic's rule.
+can see whose jobs, and which jobs, is classic's rule. So do `batchName`, `includeSubjobs`
+and `allMatches`: they are classic's batch read, its `includeSubjobs` list and its
+organization lookup of a name (every member's match, so the CLI still refuses a name
+several members share).
+
+A pipeline run's file or best structures (`results RUN --file PATH`, `--pdbs-only`) and its
+`logs` get classic's answer without asking either API: classic reads a run's jobs row,
+whose status is `Wrapper`, so it says "Job RUN is not complete. Status: Wrapper" (exit 5),
+"File output.log not found" for `--file output.log` (exit 4), and for `logs` "Job 'RUN'
+not found or you don't have access to it" (exit 4).
 
 There is no fallback to classic. When v1 refuses a request, the CLI shows v1's error with
 today's exit codes (401 → 3, 404 → 4, 400/422 → 5, 429 → 6, budget or quota → 8, anything
@@ -75,20 +85,11 @@ These have no v1 form yet, so they stay on classic even with v1 on:
   `tamarind.catalog` and `Tamarind().tools.list/schema/modalities/functions/example`.
   Pending: once website#7796 and #7807 land (catalog visibility and fields), they move to
   v1, with v1's schema mapped back to today's parameter list;
-- `status`, `wait` and `results NAME --organization` without `--email`: an
-  organization-wide lookup by name. Classic answers every member's job of that name, and
-  the CLI refuses a name several members share; v1's organization lookup answers only the
-  newest match, so it would pick one silently. (`wait` keeps the owner its first poll
-  finds, so its later polls, and the `results` download, go to v1.)
-- `jobs --batch B --organization`: classic lists every member's batch named B; v1 can't
-  combine a batch with `scope=org`, and its name lookup finds only the newest batch;
-- `jobs --include-subjobs` (v1 lists one batch's jobs, never mixed into the list);
-- `logs` of a batch or a pipeline run (v1 reads one job's log);
-- `results RUN --file PATH`, one file of a pipeline run (v1's file read takes a job or a batch);
-- `results RUN --pdbs-only` (a run's archive has no `bestStructures`);
-- `delete NAME` when only a pipeline run has that name (v1 deletes jobs and batches);
-- in the SDK, `rest.upload_file_url` (classic's presigned upload URL; v1 uploads are
-  sessions, and `files upload` already uses them).
+- `jobs --batch B --organization --include-subjobs`, and in the SDK `include_subjobs` with
+  `organization` and `job_name` or `batch`: classic's organization read of a name or a
+  batch then admits a batch's own jobs, and v1 takes `includeSubjobs` with neither. (For
+  your own jobs or one member's, classic's name and batch reads never read
+  `includeSubjobs`, so there it is left out and the read goes to v1.)
 
 ## Differences from classic mode
 
@@ -122,7 +123,13 @@ job" (the batch itself) where classic says "Cancelled 3 jobs".
 different query parameters, for the same file.
 
 **logs:** no `s3Path`. For a log longer than 256 KB, `totalLines` and the byte offsets are
-null, because v1 pages back with a cursor rather than byte offsets.
+null, because v1 pages back with a cursor rather than byte offsets. A log v1 has nothing
+of is classic's "No log file found for job 'X'." (with its `hint`); that includes a
+0-byte `output.log`, which classic reads as an empty log.
+
+**results RUN** (the whole run, no `--file` or `--pdbs-only`): v1's archivePipelineRun,
+the run's results. Classic refuses it, as it refuses every `/result` of a run ("Job RUN
+is not complete. Status: Wrapper").
 
 **files list:** the same files. After the five newest, the rest are sorted by name ignoring
 case, by code point, where classic uses JavaScript's `localeCompare`. Names that differ
@@ -170,8 +177,8 @@ its 422; a path it won't store at is 422 `invalid_option`, where classic answers
 
 **SDK `jobs.list` filters:** `kind`, `status`, `tool` and `search` are v1's. With v1 off,
 passing one raises "isn't enabled for this account yet". They combine with `organization`
-and `job_email` (v1 itself refuses `search` and `kind="pipeline"` with an organization's
-list), but not with `include_subjobs`, `job_name`, or `organization` with `batch`.
+and `job_email`, with `include_subjobs` and with `batch` (v1 itself refuses `search` and
+`kind="pipeline"` with these), but not with `job_name`.
 
 **Job rows, three more** (from review, not yet changed): a v1 `Failed` job shows `Failed`
 where classic says `Stopped`; `stopReason` is kept only for a low-priority job; a pipeline

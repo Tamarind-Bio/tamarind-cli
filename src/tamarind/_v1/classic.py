@@ -10,10 +10,9 @@ left out; docs/v1-mode.md lists those differences.
 There is no fallback. What v1 refuses is raised as v1's error, a ``ProblemError``
 that is also the classic error class for its status (``NotFoundError`` for a 404...),
 so existing ``except`` clauses still match. The few requests v1 has no form for yet
-go to classic on purpose (:class:`OnClassic`): the catalog, an organization-wide
-lookup by name or batch (v1 answers only the newest match, classic every member's),
-a list with ``includeSubjobs``, and what v1 takes only a job or batch for (the logs of
-a batch or run, one file of a run, deleting a run, a run's ``pdbsOnly``).
+go to classic on purpose (:class:`OnClassic`): the catalog, and an organization's
+read of a name or batch with ``includeSubjobs`` (classic's organization read then
+admits a batch's own jobs; v1 takes ``includeSubjobs`` with neither).
 
 A v1 failure with no answer, a 5xx or a 409 ``idempotency_in_progress`` is raised the
 way the classic client raises one, so callers' "outcome may be ambiguous" handling
@@ -319,6 +318,32 @@ def _member_scope(member: str | None) -> dict[str, Any]:
     return {} if member is None else {"scope": "org", "created_by": member}
 
 
+def _batch_name(client: Router, item: dict[str, Any]) -> str | None:
+    """The name of the batch a job is in (classic's row ``Batch``); None for a job in none."""
+    return client.name_of(item["batchId"]) if item.get("batchId") else None
+
+
+def _detailed_row(client: Router, item: dict[str, Any], *, user: bool) -> dict[str, Any]:
+    """A job, batch or run found by name, read whole (getJob: its settings), as classic's
+    row for a name."""
+    job = plain(client.v1().jobs.get(item["id"]))
+    return job_row(job, batch_name=_batch_name(client, job), user=user)
+
+
+def _organization_name(client: Router, name: str) -> dict[str, Any]:
+    """Classic's organization lookup of a name: every member's match, newest first, so
+    the CLI can refuse a name several members share. One match is its row; more are
+    classic's index-keyed map (``{"0": row, "1": row, "statuses": ...}``)."""
+    page = plain(client.v1().jobs.list(name=name, scope="org", all_matches=True))
+    found = [item for item in page.get("items") or [] if isinstance(item, dict)]
+    if not found:
+        raise NotFoundError(f"Job {name} not found")
+    rows = [_detailed_row(client, item, user=True) for item in found]
+    if len(rows) == 1:
+        return {**rows[0], "statuses": statuses(rows)}
+    return {**{str(index): row for index, row in enumerate(rows)}, "statuses": statuses(rows)}
+
+
 @contextmanager
 def _member_refusal_as_classic() -> Iterator[None]:
     try:
@@ -333,53 +358,45 @@ def get_jobs(client: Router, params: dict[str, Any]) -> dict[str, Any]:
     """GET /jobs: one job by name (getJob), or a page (listJobs). ``jobEmail`` reads one
     member's jobs and ``organization`` the organization's: v1's ``scope=org`` (with
     ``createdBy``), which calls classic's own readers, so who and what is shown are
-    classic's. Their rows carry ``User``, as classic's do."""
+    classic's. Their rows carry ``User``, as classic's do. ``batch`` (v1's ``batchName``)
+    and ``includeSubjobs`` are classic's own reads too, and an organization's lookup of
+    a name answers every member's match (``allMatches``), as classic does."""
     filters = {key: params[key] for key in _V1_JOB_FILTERS if params.get(key) is not None}
     member = params.get("jobEmail")
     organization = member is None and bool(params.get("organization"))
     name, batch = params.get("jobName"), params.get("batch")
-    if params.get("includeSubjobs"):
-        if filters:
-            raise ValidationError(f"{', '.join(filters)} can't be combined with include_subjobs yet.")
-        raise OnClassic  # v1 has no list with a batch's jobs mixed in
+    subjobs = bool(params.get("includeSubjobs"))
     if name and filters:
         raise ValidationError(f"{', '.join(filters)} can't be combined with job_name.")
-    if organization and (name or batch):
-        # Classic answers every member's job (or batch) of that name, so a name several
-        # members share can be refused; v1's organization lookup answers only the newest.
+    if organization and subjobs and (name or batch):
+        # Classic's organization read of a name or batch then admits a batch's own jobs;
+        # v1 takes includeSubjobs with neither. (A name or batch read of your own jobs or
+        # a member's never reads includeSubjobs, so there it is left out.)
         if filters:
-            raise ValidationError(f"{', '.join(filters)} can't be combined with organization and batch yet.")
+            raise ValidationError(f"{', '.join(filters)} can't be combined with organization, batch and include_subjobs yet.")
         raise OnClassic
     peer = member is not None or organization
+    scope = _member_scope(member) if member is not None else {"scope": "org"} if organization else {}
     with _member_refusal_as_classic():
         if name:
+            if organization:
+                return _organization_name(client, name)
             found = client.find(name, member=member)
             if found is None:
                 raise NotFoundError(f"Job {name} not found")
-            job = plain(client.v1().jobs.get(found["id"]))
-            batch_name = client.name_of(job["batchId"]) if job.get("batchId") else None
-            row = job_row(job, batch_name=batch_name, user=peer)
+            row = _detailed_row(client, found, user=peer)
             return {**row, "statuses": statuses([row])}
-        query: dict[str, Any] = {"limit": params.get("limit"), **filters}
+        query: dict[str, Any] = {"limit": params.get("limit"), **filters, **scope}
         if params.get("startKey"):
             query["cursor"] = params["startKey"]
-        batch_name = None
         if batch:
-            # A member's batch is found among their jobs, then listed by its id with no scope:
-            # v1 admits each of its jobs on its own, as classic's batch read does.
-            parent = client.find(batch, kinds=("batch",) if member is not None else ("batch", "pipeline"), member=member)
-            if parent is None:
-                if member is not None:
-                    raise NotFoundError(f"Jobs in batch {batch} not found")
-                return {"jobs": [], "statuses": statuses([])}
-            key = "pipeline_run_id" if parent.get("kind") == "pipeline" else "batch_id"
-            query[key], batch_name = parent["id"], parent.get("name")
-        else:
-            query.update(_member_scope(member) if member is not None else {"scope": "org"} if organization else {})
+            query["batch_name"] = batch
+        elif subjobs:
+            query["include_subjobs"] = True
         page = plain(client.v1().jobs.list(**{k: v for k, v in query.items() if v is not None}))
-    rows = [job_row(item, batch_name=batch_name, user=peer) for item in page.get("items") or []]
-    if member is not None and batch and not rows and not page.get("nextCursor") and not params.get("startKey"):
-        raise NotFoundError(f"Jobs in batch {batch} not found")  # classic's miss for a member's batch
+        rows = [job_row(item, batch_name=batch or _batch_name(client, item), user=peer) for item in page.get("items") or []]
+    if batch and not rows and not page.get("nextCursor") and not params.get("startKey"):
+        raise NotFoundError(f"Jobs in batch {batch} not found")  # classic's miss: only a first page can be one
     out: dict[str, Any] = {"jobs": rows}
     if page.get("nextCursor"):
         out["startKey"] = page["nextCursor"]
@@ -670,13 +687,16 @@ def result(client: Router, body: dict[str, Any]) -> str:
     if item is None:
         raise NotFoundError(f"Job {name} not found")
     file_name = body.get("fileName")
+    if item.get("kind") == "pipeline" and (file_name or best):
+        # Classic reads a run's jobs row, whose JobStatus is "Wrapper", so it refuses as not
+        # complete; output.log skips that check and isn't in the row's folder. v1 has no file
+        # or best structures of a run (getJobFile takes a job or a batch).
+        if file_name == "output.log":
+            raise NotFoundError("File output.log not found")
+        raise ValidationError(f"Job {name} is not complete. Status: Wrapper")
     if file_name:  # classic reads the file, whatever pdbsOnly says
-        if item.get("kind") == "pipeline":
-            raise OnClassic  # getJobFile takes a job or a batch; one file of a run has no v1 form
         link = plain(client.v1().jobs.get_file(item["id"], path=file_name, delivery="url"))
         return str(link.get("url"))
-    if best and item.get("kind") == "pipeline":
-        raise OnClassic  # archivePipelineRun has no bestStructures
     request = {"bestStructures": True} if best else {}
     wait, deadline = client.results_deadline
     patient = wait or best
@@ -742,12 +762,12 @@ def result(client: Router, body: dict[str, Any]) -> str:
 
 
 def delete_job(client: Router, body: dict[str, Any]) -> str:
-    """DELETE /delete-job → deleteJob; classic answers ``<name> deleted``."""
+    """DELETE /delete-job → deleteJob; classic answers ``<name> deleted``. A job or batch of
+    that name comes first; a name only a pipeline run has deletes the run's jobs row
+    (deleteJob of its ``run_`` id), as classic does."""
     name = body.get("jobName")
-    item = client.find(name, kinds=("job", "batch"))  # deleteJob takes a job or a batch
+    item = client.find(name, kinds=("job", "batch")) or client.find(name, kinds=("pipeline",))
     if item is None:
-        if client.find(name) is not None:
-            raise OnClassic  # only a pipeline run has this name: v1 has no delete for one
         raise NotFoundError(f"{name} does not exist")
     client.v1().jobs.delete(item["id"])
     return f"{name} deleted"
@@ -856,19 +876,27 @@ LOG_PAGE_BYTES = 256 * 1024
 
 
 def job_logs(client: Router, name: str, params: dict[str, Any]) -> dict[str, Any]:
-    """The catalog's job logs → getJobLogs, cut the way classic cuts them: the log split
-    on newlines (so a final newline ends in an empty line), the last ``maxLines`` of those,
-    and their byte offsets. v1 sends the newest output first, so the page always ends at
-    the end of the log; when v1 has older output the log's size isn't known, and the
-    offsets are null."""
+    """The catalog's job logs → getJobLogs of the job or batch (a batch's own
+    ``output.log``, the file classic reads for its name), cut the way classic cuts them:
+    the log split on newlines (so a final newline ends in an empty line), the last
+    ``maxLines`` of those, and their byte offsets. v1 sends the newest output first, so the
+    page always ends at the end of the log; when v1 has older output the log's size isn't
+    known, and the offsets are null.
+
+    Classic's access check reads the name as ``GET /jobs?jobName=`` does, which never
+    answers a pipeline run, so a run (or no match) is classic's "not found or you don't
+    have access". A log v1 has nothing of is classic's "No log file found"."""
     item = client.find(name)
-    if item is None:
-        return {"error": f"Job {name} not found"}
-    if item.get("kind") != "job":
-        raise OnClassic  # v1 reads one job's log; classic decides for a batch or run
+    if item is None or item.get("kind") == "pipeline":
+        return {"error": f"Job '{name}' not found or you don't have access to it"}
     chunk = plain(client.v1().jobs.logs(item["id"], max_bytes=LOG_PAGE_BYTES))
     raw = str(chunk.get("content") or "").encode()
     whole = not chunk.get("nextCursor")
+    if not raw and whole:
+        return {
+            "error": f"No log file found for job '{name}'.",
+            "hint": "The job may not have started yet, or it produced no output.log",
+        }
     lines = raw.split(b"\n")
     max_lines = int(params.get("maxLines", 500))
     kept = lines[-max_lines:] if max_lines > 0 else []

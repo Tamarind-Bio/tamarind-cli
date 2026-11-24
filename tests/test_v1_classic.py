@@ -188,29 +188,53 @@ def test_jobs_lists_v1s_page_in_classics_layout(env):
     assert env.v1.calls[-1] == ("jobs.list", (), {"limit": 5})
 
 
-def test_jobs_start_key_is_the_v1_cursor_and_batch_its_id(env):
-    env.v1.answers["jobs.list"] = lambda **kw: _found("batch", BATCH) if kw.get("name") else _page()
-    env.run("v1", "--json", "jobs", "--start-key", "c1", "--batch", "b1", "--limit", "2")
-    assert env.v1.calls[-1] == ("jobs.list", (), {"limit": 2, "cursor": "c1", "batch_id": BATCH})
-
-
-def test_jobs_of_an_unknown_batch_is_an_empty_list(env):
+def test_jobs_start_key_is_the_v1_cursor_and_batch_its_name(env):
+    # A later page that has nothing left is the tail of a real batch, not a miss.
     env.v1.answers["jobs.list"] = _page()
-    out = json.loads(env.run("v1", "--json", "jobs", "--batch", "nope").stdout)
-    assert out == {"jobs": [], "count": 0, "statuses": {"Complete": 0, "In Queue": 0, "Running": 0, "Stopped": 0}}
+    res = env.run("v1", "--json", "jobs", "--start-key", "c1", "--batch", "b1", "--limit", "2")
+    assert res.exit_code == 0, res.output
+    assert env.v1.calls == [("jobs.list", (), {"limit": 2, "cursor": "c1", "batch_name": "b1"})]
+
+
+@pytest.mark.parametrize("who", [[], ["--email", "p@example.com"], ["--organization"]])
+def test_a_batch_with_nothing_to_show_is_classics_not_found(env, who):
+    # Classic's batch read answers 400 "not found" for an empty first page, whoever's batch it is.
+    FakeClassic.answers["jobs"] = NotFoundError("Jobs in batch nope not found")
+    env.v1.answers["jobs.list"] = _page()
+    classic = env.run("classic", "--json", "jobs", "--batch", "nope", *who)
+    res = env.run("v1", "--json", "jobs", "--batch", "nope", *who)
+    assert (type(res.exception), str(res.exception)) == (type(classic.exception), str(classic.exception))
+    assert res.exception.exit_code == 4 and len(env.v1.calls) == 1
 
 
 @pytest.mark.parametrize(
-    "args", [["jobs", "--include-subjobs"], ["status", "n1", "--organization"], ["jobs", "--batch", "b1", "--organization"]]
+    "who, scope",
+    [([], {}), (["--email", "p@example.com"], {"scope": "org", "created_by": "p@example.com"}), (["--organization"], {"scope": "org"})],
 )
-def test_reads_v1_has_no_form_for_yet_go_to_classic(env, args):
-    # An organization-wide name or batch: classic answers every member's match (so a name
-    # several members share is refused); v1's organization lookup answers only the newest.
+def test_include_subjobs_is_classics_list_with_each_jobs_batch(env, who, scope):
+    child = {**V1_JOB, "id": "job_2", "name": "b1-1", "batchId": BATCH}
+    env.v1.answers["jobs.list"] = _page({k: v for k, v in V1_JOB.items() if k != "settings"}, child, cursor="c2")
+    env.v1.answers["jobs.get"] = {"kind": "batch", "id": BATCH, "name": "b1"}
+    res = env.run("v1", "--json", "jobs", "--include-subjobs", "--limit", "2", *who)
+    out = json.loads(res.stdout)
+    assert env.v1.calls == [("jobs.list", (), {"limit": 2, "include_subjobs": True, **scope}), ("jobs.get", (BATCH,), {})]
+    assert [row.get("Batch") for row in out["jobs"]] == [None, "b1"] and out["startKey"] == "c2"
+    assert classic_calls() == []
+
+
+def test_an_organizations_name_or_batch_with_subjobs_goes_to_classic(env):
+    # Classic's organization read of a name or a batch admits a batch's own jobs with
+    # includeSubjobs; v1 takes includeSubjobs with neither.
+    from tamarind import rest
+
     FakeClassic.answers["jobs"] = lambda params: (
-        {"JobName": "n1", "JobStatus": "Complete", "User": "p@example.com"} if params.get("jobName") else {"jobs": [], "statuses": {}}
+        {"JobName": "n1", "JobStatus": "Complete", "User": PEER} if params.get("jobName") else {"jobs": [], "statuses": {}}
     )
-    res = env.run("v1", "--json", *args)
-    assert res.exit_code == 0 and env.v1.calls == [] and classic_calls()
+    res = env.run("v1", "--json", "jobs", "--batch", "b1", "--organization", "--include-subjobs")
+    assert res.exit_code == 0, res.output
+    with HTTPClient("https://app.tamarind.bio/api", "test-key") as client:
+        rest.get_jobs(client, job_name="n1", organization=True, include_subjobs=True)
+    assert env.v1.calls == [] and [c[:2] for c in classic_calls()] == [("GET", "jobs")] * 2
 
 
 PEER = "p@example.com"
@@ -255,36 +279,69 @@ def test_a_member_whose_jobs_you_cant_see_reads_as_classic_answers_it(env):
 def test_v1_filters_combine_with_the_organization_or_a_member(env):
     from tamarind import rest
 
-    env.v1.answers["jobs.list"] = _page()
+    env.v1.answers["jobs.list"] = _page(V1_PEER_JOB)
     with HTTPClient("https://app.tamarind.bio/api", "test-key") as client:
         rest.get_jobs(client, organization=True, kind="batch", status=["Running"], limit=3)
         rest.get_jobs(client, job_email=PEER, tool="boltz")
-        for refused in (dict(include_subjobs=True), dict(organization=True, batch="b1"), dict(job_name="n1")):
+        rest.get_jobs(client, include_subjobs=True, kind="job")
+        rest.get_jobs(client, organization=True, batch="b1", status="Running")
+        for refused in (dict(organization=True, batch="b1", include_subjobs=True), dict(job_name="n1")):
             with pytest.raises(ValidationError, match="can't be combined"):
                 rest.get_jobs(client, kind="batch", **refused)
     assert env.v1.calls == [
         ("jobs.list", (), {"limit": 3, "kind": "batch", "status": ["Running"], "scope": "org"}),
         ("jobs.list", (), {"tool": "boltz", "scope": "org", "created_by": PEER}),
+        ("jobs.list", (), {"kind": "job", "include_subjobs": True}),
+        ("jobs.list", (), {"status": "Running", "scope": "org", "batch_name": "b1"}),
     ]
     assert classic_calls() == []
 
 
-def test_jobs_of_a_members_batch_are_listed_by_its_id(env):
-    env.v1.answers["jobs.list"] = lambda **kw: _found("batch", BATCH) if kw.get("name") else _page(V1_PEER_JOB)
-    out = json.loads(env.run("v1", "--json", "jobs", "--batch", "b1", "--email", PEER, "--limit", "2").stdout)
+@pytest.mark.parametrize("who, scope", [(["--email", PEER], {"created_by": PEER}), (["--organization"], {})])
+def test_jobs_of_a_members_or_the_organizations_batch_are_classics_batch_read(env, who, scope):
+    env.v1.answers["jobs.list"] = _page(V1_PEER_JOB)
+    out = json.loads(env.run("v1", "--json", "jobs", "--batch", "b1", *who, "--limit", "2").stdout)
+    assert env.v1.calls == [("jobs.list", (), {"limit": 2, "scope": "org", **scope, "batch_name": "b1"})]
+    assert out["jobs"][0]["User"] == PEER and out["jobs"][0]["Batch"] == "b1"
+    assert classic_calls() == []
+
+
+def test_an_organizations_name_with_one_match_is_its_row(env):
+    FakeClassic.answers["jobs"] = {**CLASSIC_ROW, "User": PEER, "statuses": STATUSES_ONE}
+    env.v1.answers["jobs.list"] = _found(createdBy=PEER)
+    env.v1.answers["jobs.get"] = {**V1_JOB, "createdBy": PEER}
+    same_output(env, "--json", "status", "n1", "--organization")
     assert env.v1.calls == [
-        ("jobs.list", (), {"name": "b1", "kind": "batch", "scope": "org", "created_by": PEER}),
-        ("jobs.list", (), {"limit": 2, "batch_id": BATCH}),
+        ("jobs.list", (), {"name": "n1", "scope": "org", "all_matches": True}),
+        ("jobs.get", (JOB,), {}),
     ]
-    assert out["jobs"][0]["User"] == PEER and out["jobs"][0]["Batch"] == "n1"
 
 
-@pytest.mark.parametrize("batch_found", [False, True])
-def test_a_members_batch_with_nothing_to_show_is_classics_not_found(env, batch_found):
-    FakeClassic.answers["jobs"] = NotFoundError("Jobs in batch nope not found")
-    env.v1.answers["jobs.list"] = lambda **kw: _found("batch", BATCH) if kw.get("name") and batch_found else _page()
-    res = same_output(env, "--json", "jobs", "--batch", "nope", "--email", PEER)
-    assert isinstance(res.exception, NotFoundError) and res.exception.exit_code == 4
+def test_an_organizations_name_several_members_share_is_refused_as_classic(env):
+    other = "q@example.com"
+    FakeClassic.answers["jobs"] = {
+        "0": {**CLASSIC_ROW, "User": PEER}, "1": {**CLASSIC_ROW, "User": other}, "statuses": {**STATUSES_ONE, "Complete": 2},
+    }
+    env.v1.answers["jobs.list"] = _page(
+        {"id": JOB, "kind": "job", "name": "n1", "createdBy": PEER}, {"id": "job_2", "kind": "job", "name": "n1", "createdBy": other}
+    )
+    env.v1.answers["jobs.get"] = lambda job_id: {**V1_JOB, "id": job_id, "createdBy": PEER if job_id == JOB else other}
+    for args in (["status", "n1", "--organization"], ["results", "n1", "--organization", "--show-url"]):
+        classic = env.run("classic", "--json", *args)
+        FakeClassic.calls = []
+        res = env.run("v1", "--json", *args)
+        assert (type(res.exception), str(res.exception)) == (type(classic.exception), str(classic.exception))
+        assert "2 org members" in str(res.exception) and res.exception.exit_code == 5
+        assert classic_calls() == []
+
+
+def test_an_organizations_name_with_no_match_is_classics_not_found(env):
+    FakeClassic.answers["jobs"] = NotFoundError("Job n1 not found")
+    env.v1.answers["jobs.list"] = _page()
+    classic = env.run("classic", "--json", "status", "n1", "--organization")
+    res = env.run("v1", "--json", "status", "n1", "--organization")
+    assert (type(res.exception), str(res.exception)) == (type(classic.exception), str(classic.exception))
+    assert res.exception.exit_code == 4
 
 
 # -- validate, submit, batch --------------------------------------------------------------
@@ -622,12 +679,26 @@ def test_results_pdbs_only_stops_waiting_for_a_build_after_its_limit(env, monkey
     assert type(res.exception) is TamarindError and "weren't ready after 25 s" in str(res.exception) and slept == [10.0, 10.0]
 
 
-def test_results_pdbs_only_of_a_pipeline_run_stays_on_classic(env):
-    FakeClassic.answers["result"] = SIGNED
-    env.v1.answers["jobs.list"] = _found("pipeline", "run_1")
-    res = env.run("v1", "--json", "results", "n1", "--show-url", "--pdbs-only")
-    assert res.exit_code == 0 and ("POST", "result") in [c[:2] for c in classic_calls()]
-    assert "jobs.archive" not in [c[0] for c in env.v1.calls]
+@pytest.mark.parametrize(
+    "args, error",
+    [
+        # Classic reads the run's jobs row, whose JobStatus is "Wrapper"; output.log skips
+        # that check and isn't in the row's folder.
+        (["--file", "out/a.pdb"], ValidationError("Job n1 is not complete. Status: Wrapper")),
+        (["--pdbs-only"], ValidationError("Job n1 is not complete. Status: Wrapper")),
+        (["--file", "output.log"], NotFoundError("File output.log not found")),
+        (["--file", "output.log", "--pdbs-only"], NotFoundError("File output.log not found")),
+    ],
+)
+def test_a_runs_file_or_best_structures_is_classics_refusal(env, args, error):
+    FakeClassic.answers["result"] = error
+    env.v1.answers["jobs.list"] = _found("pipeline", "run_1", status="Complete")
+    classic = env.run("classic", "--json", "results", "n1", "--show-url", *args)
+    FakeClassic.calls = []
+    res = env.run("v1", "--json", "results", "n1", "--show-url", *args)
+    assert (type(res.exception), str(res.exception)) == (type(classic.exception), str(classic.exception))
+    assert res.exception.exit_code == classic.exception.exit_code
+    assert classic_calls() == [] and [c[0] for c in env.v1.calls] == ["jobs.list"]
 
 
 @pytest.mark.parametrize(
@@ -770,22 +841,13 @@ def test_results_without_wait_reports_a_runs_failed_archive(env, sleeps):
     assert isinstance(res.exception, ProblemError) and sleeps == []
 
 
-def test_results_file_of_a_pipeline_run_stays_on_classic(env):
-    FakeClassic.answers["result"] = SIGNED
-    env.v1.answers["jobs.list"] = _found("pipeline", RUN, status="Complete")
-    res = env.run("v1", "--json", "results", "n1", "--file", "out/a.pdb", "--show-url")
-    assert res.exit_code == 0, res.output
-    assert ("POST", "result") in [c[:2] for c in classic_calls()]
-    assert "jobs.get_file" not in [c[0] for c in env.v1.calls]
-
-
 def _by_kind(**pages: dict[str, Any]):
     return lambda **query: pages.get(query.get("kind") or "any", _page())
 
 
 def test_delete_resolves_a_name_among_jobs_and_batches(env):
     newer_run = {"id": RUN, "kind": "pipeline", "name": "n1", "createdAt": "2026-11-19T06:00:00Z"}
-    env.v1.answers["jobs.list"] = _by_kind(job=_found(), any=_page(newer_run))
+    env.v1.answers["jobs.list"] = _by_kind(job=_found(), pipeline=_page(newer_run))
     env.v1.answers["jobs.delete"] = None
     res = env.run("v1", "--json", "delete", "n1", "--yes")
     assert res.exit_code == 0, res.output
@@ -793,13 +855,13 @@ def test_delete_resolves_a_name_among_jobs_and_batches(env):
     assert [c[2].get("kind") for c in env.v1.calls if c[0] == "jobs.list"] == ["job", "batch"]
 
 
-def test_delete_of_a_name_only_a_run_has_stays_on_classic(env):
+def test_delete_of_a_name_only_a_run_has_deletes_the_runs_row(env):
     FakeClassic.answers["delete-job"] = "n1 deleted"
-    env.v1.answers["jobs.list"] = _by_kind(any=_found("pipeline", RUN))
-    res = env.run("v1", "--json", "delete", "n1", "--yes")
-    assert res.exit_code == 0, res.output
-    assert ("DELETE", "delete-job") in [c[:2] for c in classic_calls()]
-    assert "jobs.delete" not in [c[0] for c in env.v1.calls]
+    env.v1.answers["jobs.list"] = _by_kind(pipeline=_found("pipeline", RUN))
+    env.v1.answers["jobs.delete"] = None
+    same_output(env, "--json", "delete", "n1", "--yes")
+    assert [c[2].get("kind") for c in env.v1.calls if c[0] == "jobs.list"] == ["job", "batch", "pipeline"]
+    assert ("jobs.delete", (RUN,), {}) in env.v1.calls
 
 
 def test_delete_job_goes_to_v1(env):
@@ -862,10 +924,40 @@ def test_a_log_with_older_output_has_no_offsets(env):
     assert [out[k] for k in ("totalLines", "totalBytes", "startByte", "endByte", "olderBeforeByte")] == [None] * 5
 
 
-def test_logs_of_an_unknown_job_are_not_found(env):
-    env.v1.answers["jobs.list"] = _page()
-    res = env.run("v1", "--json", "logs", "nope")
-    assert isinstance(res.exception, NotFoundError)
+def test_logs_of_a_batch_are_its_own_log(env):
+    FakeClassic.answers["catalog/jobs/n1/logs"] = CLASSIC_TAILS["500"]
+    env.v1.answers["jobs.list"] = _found("batch", BATCH)
+    env.v1.answers["jobs.logs"] = {"content": LOG, "nextCursor": None, "complete": True}
+    same_output(env, "--json", "logs", "n1", "--max-lines", "500")
+    assert env.v1.calls[-1] == ("jobs.logs", (BATCH,), {"max_bytes": 256 * 1024})
+    assert [c for c in classic_calls() if c[1] != "catalog/jobs/n1/logs"] == []
+
+
+NO_LOG = {"error": "No log file found for job 'n1'.", "hint": "The job may not have started yet, or it produced no output.log"}
+
+
+@pytest.mark.parametrize("kind, item_id", [("job", JOB), ("batch", BATCH)])
+def test_a_log_v1_has_nothing_of_is_classics_no_log_file(env, kind, item_id):
+    FakeClassic.answers["catalog/jobs/n1/logs"] = NO_LOG
+    env.v1.answers["jobs.list"] = _found(kind, item_id)
+    env.v1.answers["jobs.logs"] = {"content": "", "nextCursor": None, "complete": False}
+    classic = env.run("classic", "--json", "logs", "n1")
+    res = env.run("v1", "--json", "logs", "n1")
+    assert (type(res.exception), str(res.exception)) == (type(classic.exception), str(classic.exception))
+    assert res.exception.exit_code == classic.exception.exit_code == 1  # not "not found": the logs command's plain error
+    with HTTPClient("https://app.tamarind.bio/api", "test-key") as client:
+        assert client.get_json("catalog/jobs/n1/logs", params={"maxLines": 500}) == NO_LOG
+
+
+@pytest.mark.parametrize("page", [_page(), _found("pipeline", "run_1")])
+def test_logs_of_a_run_or_an_unknown_name_are_classics_not_found(env, page):
+    # Classic's access check reads the name as GET /jobs?jobName= does, which never answers a run.
+    FakeClassic.answers["catalog/jobs/n1/logs"] = {"error": "Job 'n1' not found or you don't have access to it"}
+    env.v1.answers["jobs.list"] = page
+    classic = env.run("classic", "--json", "logs", "n1")
+    res = env.run("v1", "--json", "logs", "n1")
+    assert (type(res.exception), str(res.exception)) == (type(classic.exception), str(classic.exception))
+    assert res.exception.exit_code == 4 and [c[0] for c in env.v1.calls] == ["jobs.list"]
 
 
 def test_the_catalog_stays_on_the_catalog(env):
