@@ -184,7 +184,9 @@ def metrics_file() -> Path:
 def log(metrics: Mapping[str, Any], step: int | None = None, **more: Any) -> None:
     """Record metrics at a step: ``tm.log({"train/loss": loss}, step=step)``.
 
-    Appends one JSON line per call. Non-finite numbers become null. Never raises.
+    Appends one JSON line per call. Non-finite numbers become null. Never raises. Without ``step``
+    the line is the run's summary (final test scores, say): the platform lists it beside the curves
+    rather than plotting it as a point.
     """
     try:
         record: dict[str, Any] = {}

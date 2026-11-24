@@ -67,7 +67,7 @@ file and line.
 | Call | Does |
 |---|---|
 | `tm.hyperparameters()` | The chosen values, typed. On the platform, from the run's file; locally, the declared defaults with environment-variable overrides (`epochs=3 python train.py`) |
-| `tm.log({...}, step=n)` | Appends a JSON line to the run's metrics file. Never raises; non-finite numbers become null |
+| `tm.log({...}, step=n)` | Appends a JSON line to the run's metrics file. Never raises; non-finite numbers become null. Without `step` (final test scores, logged once at the end) the line is the run's summary: the app lists it under final metrics, not as a point on a curve |
 | `tm.checkpoint(path=None, step=, metrics=)` | Returns a new directory to save this checkpoint into (`checkpoints/step-00000412`) and records its step and metrics. See Checkpoints |
 | `tm.evaluate(predictions, truths)` | Calls your `@tm.evaluator` |
 | `tm.artifact_dir()` / `tm.run_dir()` | Where the model and the run's outputs go (`/app/out/...` on the platform, `./tamarind_run/...` locally) |
