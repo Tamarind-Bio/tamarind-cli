@@ -166,12 +166,54 @@ def normalize_objective(value: Any) -> dict[str, str] | None:
     raise FinetuneSpecError('objective must be ("<metric>", "max"|"min") or a metric name')
 
 
+PLOT_TYPES = ("curve", "distribution", "scatter")
+MAX_PLOTS = 12
+
+
+def normalize_plots(plots: Any, hyperparameters: Mapping[str, Any]) -> list[dict[str, str]]:
+    """The plots a tool's Runs tab and run page open with, checked as the platform checks them.
+
+    Each is ``{"type": "curve" | "distribution" | "scatter", "metric": <logged metric>}``; a scatter
+    also names ``"x"``, one of the tool's hyperparameters. At most 12.
+    """
+    if not isinstance(plots, (list, tuple)):
+        raise FinetuneSpecError('plots must be a list of {"type": ..., "metric": ...} dicts')
+    if len(plots) > MAX_PLOTS:
+        raise FinetuneSpecError(f"at most {MAX_PLOTS} plots")
+    out: list[dict[str, str]] = []
+    for i, plot in enumerate(plots):
+        if not isinstance(plot, Mapping):
+            raise FinetuneSpecError(f"plots[{i}] must be a dict")
+        unknown = set(plot) - {"type", "metric", "x"}
+        if unknown:
+            raise FinetuneSpecError(f"plots[{i}]: unknown keys {sorted(unknown)}")
+        plot_type = plot.get("type")
+        if plot_type not in PLOT_TYPES:
+            raise FinetuneSpecError(f"plots[{i}].type must be one of {list(PLOT_TYPES)}")
+        metric = plot.get("metric")
+        if not isinstance(metric, str) or not metric:
+            raise FinetuneSpecError(f"plots[{i}].metric must name a logged metric")
+        entry = {"type": plot_type, "metric": metric}
+        if plot_type == "scatter":
+            x = plot.get("x")
+            if not isinstance(x, str) or x not in hyperparameters:
+                raise FinetuneSpecError(
+                    f"plots[{i}].x must name one of the hyperparameters {sorted(hyperparameters)}"
+                )
+            entry["x"] = x
+        elif plot.get("x") is not None:
+            raise FinetuneSpecError(f"plots[{i}].x: only a scatter plot takes an x")
+        out.append(entry)
+    return out
+
+
 def training_run_block(
     *,
     timeout_hours: float | None = None,
     hyperparameters: Mapping[str, Any] | None = None,
     objective: Any = None,
     artifact: str | None = None,
+    plots: Any = None,
 ) -> dict[str, Any]:
     """The `finetune` keys a @training_run contributes, minus the entrypoint the caller adds."""
     block: dict[str, Any] = {"hyperparameters": normalize_hyperparameters(hyperparameters)}
@@ -184,6 +226,8 @@ def training_run_block(
         block["objective"] = normalized_objective
     if artifact is not None:
         block["artifact"] = normalize_artifact(artifact)
+    if plots is not None:
+        block["plots"] = normalize_plots(plots, block["hyperparameters"])
     return block
 
 

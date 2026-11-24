@@ -99,6 +99,45 @@ model.save(tm.checkpoint(step=step, metrics=metrics))
 
 Training past the best checkpoint is normal: you only know a checkpoint was the best once later ones fail to beat it. The latest checkpoint is kept for resuming or training longer.
 
+## Watching runs
+
+Every run of your tool shows up in the app under **Finetuning › Runs**, grouped by training tool.
+
+- **While a run trains:** its `metrics.jsonl` and `checkpoints.jsonl` are uploaded about every
+  30 seconds, so its curves update live on the Runs tab and on the run's own page.
+- **When a run ends:** its best checkpoint is registered as a model, labelled with the metrics
+  logged at that checkpoint.
+- **Comparing runs:** runs are compared at their best checkpoint. A distribution shows a
+  metric's spread across runs, and a scatter shows a hyperparameter against a metric.
+
+The run with the best score is marked **suggested to publish**. Publishing a model, which makes
+it available to your organization, is still up to you, from the model's page. You might pick a
+different run after further evaluation.
+
+### Plots
+
+Pass `plots` to choose the plots your tool's runs open with:
+
+```python
+@tm.training_run(
+    hyperparameters={"lr": tm.Float(1e-4), "rank": tm.Int(16)},
+    objective=("val/spearman", "max"),
+    plots=[
+        {"type": "curve", "metric": "val/spearman"},                # over the run's steps
+        {"type": "distribution", "metric": "val/spearman"},         # best-checkpoint values across runs
+        {"type": "scatter", "metric": "val/spearman", "x": "lr"},   # a hyperparameter against the metric
+    ],
+)
+```
+
+The rules:
+- **At most 12 plots.**
+- **`metric`** is a name you log with `tm.log`.
+- **A scatter's `x`** must be one of your hyperparameters.
+
+Without `plots`, a tool opens with the objective's curve and distribution, plus a scatter on the
+first hyperparameter. Each viewer can still add, remove and reorder plots for themselves.
+
 ## Prediction mode
 
 A trained model is served by the `@tm.predictor` class, in the same image and through the same
@@ -189,6 +228,7 @@ the build naming both, rather than one silently winning:
     "rank": {"type": "int", "default": 8, "options": [4, 8, 16, 32]}
   },
   "objective": {"metric": "val/spearman", "mode": "max"},
+  "plots": [{"type": "distribution", "metric": "val/spearman"}],
   "artifact": "checkpoints/best",
   "predictor": {"class": "model.py:BindingModel", "gpuType": "L4", ...},
   "evaluator": "train.py:score"
