@@ -118,8 +118,7 @@ def sync_detailed(
 ) -> Response[Problem | ResultsPreparing | ResultsReady]:
     """Get a zip of a pipeline run's outputs
 
-     Until the rename from `/archive` merges (decision 75, not yet), the server answers at
-    `POST /pipelines/runs/{runId}/archive`. Waits up to 25 seconds for the zip. 200 means ready,
+     Waits up to 25 seconds for the zip. 200 means ready,
     with the zip's size and the link's expiry; `fileCount` and `truncated` are null, because
     nothing records them for a run's zip.
     202 means still preparing, so call again after `retryAfterSeconds` (10, also sent as
@@ -165,8 +164,7 @@ def sync(
 ) -> Problem | ResultsPreparing | ResultsReady | None:
     """Get a zip of a pipeline run's outputs
 
-     Until the rename from `/archive` merges (decision 75, not yet), the server answers at
-    `POST /pipelines/runs/{runId}/archive`. Waits up to 25 seconds for the zip. 200 means ready,
+     Waits up to 25 seconds for the zip. 200 means ready,
     with the zip's size and the link's expiry; `fileCount` and `truncated` are null, because
     nothing records them for a run's zip.
     202 means still preparing, so call again after `retryAfterSeconds` (10, also sent as
@@ -207,8 +205,7 @@ async def asyncio_detailed(
 ) -> Response[Problem | ResultsPreparing | ResultsReady]:
     """Get a zip of a pipeline run's outputs
 
-     Until the rename from `/archive` merges (decision 75, not yet), the server answers at
-    `POST /pipelines/runs/{runId}/archive`. Waits up to 25 seconds for the zip. 200 means ready,
+     Waits up to 25 seconds for the zip. 200 means ready,
     with the zip's size and the link's expiry; `fileCount` and `truncated` are null, because
     nothing records them for a run's zip.
     202 means still preparing, so call again after `retryAfterSeconds` (10, also sent as
@@ -252,8 +249,7 @@ async def asyncio(
 ) -> Problem | ResultsPreparing | ResultsReady | None:
     """Get a zip of a pipeline run's outputs
 
-     Until the rename from `/archive` merges (decision 75, not yet), the server answers at
-    `POST /pipelines/runs/{runId}/archive`. Waits up to 25 seconds for the zip. 200 means ready,
+     Waits up to 25 seconds for the zip. 200 means ready,
     with the zip's size and the link's expiry; `fileCount` and `truncated` are null, because
     nothing records them for a run's zip.
     202 means still preparing, so call again after `retryAfterSeconds` (10, also sent as
