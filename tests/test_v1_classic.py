@@ -220,15 +220,43 @@ def test_jobs_start_key_is_the_v1_cursor_and_batch_its_name(env):
     assert env.v1.calls == [("jobs.list", (), {"limit": 2, "cursor": "c1", "batch_name": "b1"})]
 
 
-@pytest.mark.parametrize("who", [[], ["--email", "p@example.com"], ["--organization"]])
-def test_a_batch_with_nothing_to_show_is_classics_not_found(env, who):
+@pytest.mark.parametrize(
+    "who, lookups", [([], 1), (["--email", "p@example.com"], 1), (["--organization"], 0)]
+)
+def test_a_batch_with_nothing_to_show_is_classics_not_found(env, who, lookups):
     # Classic's batch read answers 400 "not found" for an empty first page, whoever's batch it is.
     FakeClassic.answers["jobs"] = NotFoundError("Jobs in batch nope not found")
     env.v1.answers["jobs.list"] = _page()
     classic = env.run("classic", "--json", "jobs", "--batch", "nope", *who)
     res = env.run("v1", "--json", "jobs", "--batch", "nope", *who)
     assert (type(res.exception), str(res.exception)) == (type(classic.exception), str(classic.exception))
-    assert res.exception.exit_code == 4 and len(env.v1.calls) == 1
+    assert res.exception.exit_code == 4
+    # Yours or a member's: the batch itself is looked up (there is none); the organization's: classic's read as is.
+    assert [c[2].get("kind") for c in env.v1.calls] == [None] + ["batch"] * lookups
+
+
+@pytest.mark.parametrize(
+    "who, scope", [([], {}), (["--email", "p@example.com"], {"scope": "org", "created_by": "p@example.com"})]
+)
+def test_a_batch_whose_jobs_v1_hasnt_made_yet_is_an_empty_list(env, who, scope):
+    # v1 makes a batch's jobs after it answers the submit (classic writes them first), so right
+    # after `batch`, or once it is cancelled before they were made, the batch has none: an empty list.
+    env.v1.answers["jobs.list"] = lambda **kw: _found("batch", BATCH) if kw.get("kind") == "batch" else _page()
+    res = env.run("v1", "--json", "jobs", "--batch", "n1", *who)
+    assert res.exit_code == 0, res.output
+    assert json.loads(res.stdout) == {"jobs": [], "count": 0, "statuses": {"Complete": 0, "In Queue": 0, "Running": 0, "Stopped": 0}}
+    assert env.v1.calls == [
+        ("jobs.list", (), {"limit": 50, "batch_name": "n1", **scope}),
+        ("jobs.list", (), {"name": "n1", "kind": "batch", **scope}),
+    ]
+
+
+def test_an_organizations_batch_with_nothing_to_show_stays_classics_not_found(env):
+    # Classic's organization batch read drops a batch's jobs, so empty there is its answer, batch or not.
+    env.v1.answers["jobs.list"] = lambda **kw: _found("batch", BATCH) if kw.get("kind") == "batch" else _page()
+    res = env.run("v1", "--json", "jobs", "--batch", "n1", "--organization")
+    assert isinstance(res.exception, NotFoundError) and res.exception.exit_code == 4
+    assert env.v1.calls == [("jobs.list", (), {"limit": 50, "scope": "org", "batch_name": "n1"})]
 
 
 def test_a_filtered_batch_that_matches_nothing_is_an_empty_page(env):

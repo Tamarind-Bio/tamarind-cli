@@ -115,6 +115,12 @@ Found by running each command on staging in both modes and diffing the output.
 - v1 refuses the 99 old setting names that classic still accepts. Its 422 names the
   current setting to use.
 
+**jobs --batch right after batch:** v1 makes a batch's jobs after it answers the submit,
+so until they exist the list is empty, and it stays empty for a batch cancelled before they
+were made. Classic writes them before it answers, so it lists them at once. A name that
+isn't one of your batches (or the member's, with `--email`) is classic's "Jobs in batch B
+not found" (exit 4).
+
 **cancel --batch:** the counts come from v1's batch counts just before the cancel. Right
 after `batch`, v1 may not have created the batch's jobs yet. It then says "Cancelled 1
 job" (the batch itself) where classic says "Cancelled 3 jobs".
