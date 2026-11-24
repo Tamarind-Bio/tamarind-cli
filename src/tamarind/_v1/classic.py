@@ -678,6 +678,7 @@ def result(client: Router, body: dict[str, Any]) -> str:
     v1's, signed for the global endpoint). ``jobEmail`` names the member whose job it is
     (v1 judges their job by classic's results rule), and ``pdbsOnly`` asks for its best
     structures (``bestStructures``): a stored ``-pdbs.zip``, or for a batch one v1 builds.
+    The SDK's ``paths`` or ``glob`` (v1 only) pick files of a job's or a batch's zip.
 
     v1 can call a batch Complete before its archive is built, where classic's wait covers
     the build. So inside ``HTTPClient.results_wait`` (the CLI's ``--wait``) a Complete item
@@ -691,6 +692,9 @@ def result(client: Router, body: dict[str, Any]) -> str:
     if item is None:
         raise NotFoundError(f"Job {name} not found")
     file_name = body.get("fileName")
+    chosen = {key: body[key] for key in ("paths", "glob") if body.get(key) is not None}
+    if item.get("kind") == "pipeline" and chosen:
+        raise ValidationError(f"{name} is a pipeline run; paths and glob take a job or a batch.")
     if item.get("kind") == "pipeline" and (file_name or best):
         # Classic reads a run's jobs row, whose JobStatus is "Wrapper", so it refuses as not
         # complete; output.log skips that check and isn't in the row's folder. v1 has no file
@@ -701,7 +705,7 @@ def result(client: Router, body: dict[str, Any]) -> str:
     if file_name:  # classic reads the file, whatever pdbsOnly says
         link = plain(client.v1().jobs.get_file(item["id"], path=file_name, delivery="url"))
         return str(link.get("url"))
-    request = {"bestStructures": True} if best else {}
+    request = {"bestStructures": True} if best else chosen
     wait, deadline = client.results_deadline
     patient = wait or best
     if best and not wait:

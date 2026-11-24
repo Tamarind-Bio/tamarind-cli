@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 from . import catalog, rest, uploads
 from ._v1.public import v1_method
+from .errors import UsageError
 from .http import HTTPClient
 from .jobs import fetch_job, resolve_owner, wait_for_job
 
@@ -31,7 +32,6 @@ class Jobs:
     search = v1_method("jobs")
     update = v1_method("jobs")
     rerun = v1_method("jobs")
-    archive = v1_method("jobs", "results")  # v1's getJobResults; `results` is today's download
     list_files = v1_method("jobs")
     get_file = v1_method("jobs")
     logs = v1_method("jobs")
@@ -103,15 +103,28 @@ class Jobs:
     def results(
         self, name: str, *, job_email: str | None = None, file_name: str | None = None,
         pdbs_only: bool | None = None, organization: bool = False,
+        paths: list[str] | None = None, glob: str | None = None,
     ) -> Any:
         """Get a presigned result URL (POST /result).
 
         ``organization`` finds the owner across your org's members first.
+
+        v1 only: ``paths`` (paths inside the results zip) or ``glob`` (``"*.pdb"``, matching
+        the whole path) gets a zip of just those files (getJobResults). Send one or the
+        other, without ``file_name`` or ``pdbs_only``. When v1 isn't on for the key they
+        raise ``V1NotEnabledError`` and send nothing.
         """
+        if paths is not None or glob is not None:
+            if paths is not None and glob is not None:
+                raise UsageError("results() takes paths or glob, not both.")
+            if file_name is not None or pdbs_only:
+                raise UsageError("results() takes paths or glob without file_name or pdbs_only.")
+            self._http.require_v1("Tamarind().jobs.results(paths=..., glob=...)")
         if organization and job_email is None:
             job_email = resolve_owner(self._http, name, organization=True)
         return rest.get_result(
             self._http, job_name=name, job_email=job_email, file_name=file_name, pdbs_only=pdbs_only,
+            paths=paths, glob=glob,
         )
 
     def cancel(self, *, name: str | None = None, job_id: str | None = None) -> dict:

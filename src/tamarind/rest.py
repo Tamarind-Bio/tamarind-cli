@@ -165,8 +165,12 @@ def get_result(
     job_email: str | None = None,
     file_name: str | None = None,
     pdbs_only: bool | None = None,
+    paths: list[str] | None = None,
+    glob: str | None = None,
 ) -> Any:
-    """POST /result — returns an S3 presigned URL (string) for the result bundle."""
+    """POST /result — returns an S3 presigned URL (string) for the result bundle.
+
+    ``paths`` and ``glob`` are v1's (getJobResults); only the v1 route reads them."""
     body: dict[str, Any] = {"jobName": job_name}
     if job_email is not None:
         body["jobEmail"] = job_email
@@ -174,6 +178,10 @@ def get_result(
         body["fileName"] = file_name
     if pdbs_only is not None:
         body["pdbsOnly"] = pdbs_only
+    if paths is not None:
+        body["paths"] = list(paths)
+    if glob is not None:
+        body["glob"] = glob
     return client.post_json("result", json=body)
 
 

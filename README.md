@@ -100,6 +100,9 @@ with Tamarind() as client:
         print(node_run.label, page.items)
 ```
 
+`client.jobs.results(name)` returns a signed link to a job's results zip. With v1 on for
+the key, `paths=[...]` or `glob="*.pdb"` gets a zip of just those files.
+
 The Custom Tools resource checks archive-local
 safety, packages a folder, uploads it directly to object storage, and submits the
 digest-checked build request. The server
