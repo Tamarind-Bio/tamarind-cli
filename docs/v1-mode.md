@@ -27,7 +27,7 @@ overrides the v1 base for tests; `TAMARIND_API=classic` turns v1 off.
 Operations only v1 has (`tamarind projects`, `client.projects`, `client.jobs.get`...)
 run only when v1 is on for the key; otherwise they say "uses the v1 API, which isn't
 enabled for this account yet" (exit 2) and send nothing. So do the SDK's
-`client.jobs.results(name, paths=[...])` and `glob="*.pdb"`. They pick files out of a job's
+`client.jobs.results(name, paths=[...])` and `glob="*.pdb"` (also on `tamarind.rest.get_result`). They pick files out of a job's
 or a batch's results zip (getJobResults' `paths` and `glob`). Send one or the other, not
 with `file_name` or `pdbs_only`. Without them, `results()` is today's. A run's zip is
 `client.pipelines.run_results(run_id)`.

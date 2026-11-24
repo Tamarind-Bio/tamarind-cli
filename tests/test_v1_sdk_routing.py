@@ -175,6 +175,16 @@ def test_a_runs_results_zip_is_run_results(on):
     assert route.calls[0].request.content == b""
 
 
+@pytest.mark.parametrize("choice", [{"paths": ["a.pdb"]}, {"glob": "*.pdb"}])
+@respx.mock
+def test_rest_get_result_with_paths_or_glob_needs_v1(choice):
+    everything = respx.route()
+    with HTTPClient(CLASSIC, "k") as client:
+        with pytest.raises(V1NotEnabledError, match="isn't enabled for this account yet"):
+            rest.get_result(client, job_name="n1", **choice)
+    assert not everything.called
+
+
 def test_no_public_results_method_is_named_archive():
     with Tamarind(api_key="k", api_base=CLASSIC) as client:
         assert [name for name in dir(client.jobs) + dir(client.pipelines) if "archive" in name] == []

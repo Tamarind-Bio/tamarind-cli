@@ -18,7 +18,6 @@ from typing import Any, Callable
 
 from . import catalog, rest, uploads
 from ._v1.public import v1_method
-from .errors import UsageError
 from .http import HTTPClient
 from .jobs import fetch_job, resolve_owner, wait_for_job
 
@@ -114,12 +113,8 @@ class Jobs:
         other, without ``file_name`` or ``pdbs_only``. When v1 isn't on for the key they
         raise ``V1NotEnabledError`` and send nothing.
         """
-        if paths is not None or glob is not None:
-            if paths is not None and glob is not None:
-                raise UsageError("results() takes paths or glob, not both.")
-            if file_name is not None or pdbs_only:
-                raise UsageError("results() takes paths or glob without file_name or pdbs_only.")
-            self._http.require_v1("Tamarind().jobs.results(paths=..., glob=...)")
+        # Before the owner lookup, so nothing is sent when they're refused.
+        rest.check_result_choice(self._http, file_name=file_name, pdbs_only=pdbs_only, paths=paths, glob=glob)
         if organization and job_email is None:
             job_email = resolve_owner(self._http, name, organization=True)
         return rest.get_result(
