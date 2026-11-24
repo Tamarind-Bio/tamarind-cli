@@ -20,6 +20,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import tempfile
 import time
 from typing import Any, Mapping
 
@@ -350,11 +351,19 @@ def checkpoint(
     try:
         if managed:
             target = _default_checkpoint_dir(step)
-            # Only a directory this SDK creates (or created earlier in this run) is ever deleted:
-            # not a symlink planted at the name, and not one left by an earlier process.
-            enroll = not target.is_symlink() and (
-                not target.exists() or any(p == target for p, _ in _managed)
-            )
+            if _checkpoint_root().is_symlink() or target.is_symlink():
+                # Never hand back a destination that leads outside the run: save into a fresh
+                # directory of the run instead, never enrolled for deletion.
+                print(
+                    f"[tamarind] {target} or its parent is a symlink; saving this checkpoint elsewhere in the run",
+                    file=sys.stderr,
+                )
+                target = Path(tempfile.mkdtemp(prefix="checkpoint-", dir=run_dir()))
+                enroll = False
+            else:
+                # Only a directory this SDK creates (or created earlier in this run) is ever
+                # deleted: not one left by an earlier process.
+                enroll = not target.exists() or any(p == target for p, _ in _managed)
         else:
             target = Path(path)  # type: ignore[arg-type]
             if not target.is_absolute():

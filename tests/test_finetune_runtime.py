@@ -412,11 +412,28 @@ def test_a_symlink_at_a_checkpoint_name_is_never_followed_or_deleted(tmp_path: P
     root = tmp_path / "tamarind_run" / "checkpoints"
     root.mkdir(parents=True)
     (root / "step-00000001").symlink_to(outside)
-    tm.checkpoint(step=1)
+    first = tm.checkpoint(step=1)
+    assert (
+        first.resolve().parent == (tmp_path / "tamarind_run").resolve()
+    )  # not the symlink's target
+    assert first.name.startswith("checkpoint-")
     for step in (2, 3, 4):
         _save(step, None)
     assert (outside / "keep.txt").is_file()
     assert (root / "step-00000001").is_symlink()
+
+
+def test_a_symlinked_checkpoint_root_is_never_written_through(tmp_path: Path) -> None:
+    _declare_objective(None)
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    run = tmp_path / "tamarind_run"
+    run.mkdir()
+    (run / "checkpoints").symlink_to(outside)
+    target = tm.checkpoint(step=1)
+    assert outside not in target.resolve().parents
+    assert target.resolve().parent == run.resolve()
+    assert list(outside.iterdir()) == []
 
 
 def test_a_directory_left_by_an_earlier_process_is_not_deleted(tmp_path: Path) -> None:
