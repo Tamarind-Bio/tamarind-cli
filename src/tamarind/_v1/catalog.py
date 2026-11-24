@@ -4,13 +4,15 @@
 ``functions`` and ``schema``) read four catalog routes. With v1 on for the key they are
 answered from v1 and rebuilt in the catalog's layout:
 
-- ``catalog/tools`` from every page of ``listTools``, filtered, sorted and summarized the
-  way the catalog does it (``getAvailableTools`` in the MCP server), so its filters,
-  facet lists and hints behave as before. ``custom=true`` stays on the catalog: v1 lists
-  built-in tools only.
-- ``catalog/modalities`` and ``catalog/functions`` from ``getToolFacets``.
-- These three (the tool set) are held on the catalog for now by :data:`TOOL_SET_ON_V1`
-  (see there); schemas are v1's.
+- ``catalog/tools`` from every page of ``listTools`` in the agent view (``view=agent``,
+  the tools the MCP's ``getAvailableTools`` lists), filtered, sorted and summarized the
+  way the catalog does it, so its filters, facet lists and hints behave as before.
+  ``custom=true`` is every page of ``listTools(custom=true)``, the organization's
+  custom tools, in the catalog's custom-listing layout.
+- ``catalog/modalities`` and ``catalog/functions`` from ``getToolFacets`` in the agent
+  view.
+- Turning :data:`TOOL_SET_ON_V1` off sends these three (the tool set) back to the
+  catalog.
 - ``catalog/tools/{tool}/schema`` from ``getToolSchema`` (and ``getTool`` for the
   display name and facets). v1's JSON Schema is rebuilt as the catalog's parameter
   list, as far as v1 carries it: each setting's name, type, display name, description,
@@ -19,8 +21,8 @@ answered from v1 and rebuilt in the catalog's layout:
   form; v1 folds the constraints into the description and the conditions into
   ``allOf``. ``exampleJob`` is v1's ``example``, built for one task branch.
 
-v1's tool list is the app's (website#7796): tools the app doesn't list for the caller
-aren't listed, and facet counts follow. docs/v1-mode.md has the differences.
+v1 leaves out a tool the caller's organization policy refuses (the catalog lists it, and
+its submit refuses it), and facet counts follow. docs/v1-mode.md has the differences.
 """
 
 from __future__ import annotations
@@ -32,13 +34,13 @@ from ..errors import NotFoundError, TamarindError
 from .classic import OnClassic, Route, Router, plain
 from .errors import ProblemError
 
-# Whether the tool set (the list, ``catalog/tools``, and its facets, ``catalog/modalities``
-# and ``catalog/functions``) is answered by v1. Off: they stay on the catalog, while
-# schemas are v1's. v1 lists the app's tools (429 for a staging account, where the MCP
-# catalog lists 456) and assigns some categories differently, so its facet counts differ
-# too; the user-facing tool set doesn't change until that's decided. Turning it on is
-# this one line.
-TOOL_SET_ON_V1 = False
+# Whether the tool set (the list, ``catalog/tools`` with or without ``custom=true``, and its
+# facets, ``catalog/modalities`` and ``catalog/functions``) is answered by v1. Off, they go
+# to the catalog, while schemas stay v1's.
+TOOL_SET_ON_V1 = True
+# listTools' and getToolFacets' agent view (website#7854): the tools the MCP's
+# getAvailableTools lists, where v1's default view is the app's.
+AGENT_VIEW = "agent"
 
 PAGE = 200
 # What the catalog cuts a narrowed listing's descriptions to (`_simplify_tool`).
@@ -70,6 +72,10 @@ FUNCTIONS_HINT = (
 SCHEMA_HINT = (
     "For file parameters, you can use s3Path values from listJobFiles() to chain jobs without "
     "downloading/uploading"
+)
+CUSTOM_HINT = (
+    "Use getJobSchema(jobType='<name>') for a tool's description + parameters; pass the exact "
+    "lowercase `name`."
 )
 NOT_FOUND_HINT = "Use getAvailableTools() or getAvailableTools(custom=true) to see all available tools"
 # What the catalog adds to `outputs` when a tool's outputs depend on its task (`_tool_outputs`).
@@ -109,13 +115,16 @@ def _example_note(has_file: bool) -> str:
 # -- catalog/tools ----------------------------------------------------------------------
 
 
-def _every_tool(client: Router) -> list[dict[str, Any]]:
+def _every_tool(client: Router, *, custom: bool) -> list[dict[str, Any]]:
     v1 = client.v1()
-    return [plain(tool) for tool in v1.paginate(v1.tools.list, limit=PAGE)]
+    query: dict[str, Any] = {"custom": True} if custom else {"view": AGENT_VIEW}
+    return [plain(tool) for tool in v1.paginate(v1.tools.list, limit=PAGE, **query)]
 
 
-def _summary(tool: dict[str, Any], *, full: bool) -> dict[str, Any]:
-    """A listing's tool, as the catalog's ``_simplify_tool`` writes it."""
+def _summary(tool: dict[str, Any], *, full: bool, custom: bool) -> dict[str, Any]:
+    """A listing's tool, as the catalog's ``_simplify_tool`` writes it. A custom tool v1
+    says trains models (said only to an organization with custom finetuning, as the
+    catalog says it) is ``trainable``; v1 has no ``servesModels``."""
     out: dict[str, Any] = {
         "name": tool.get("name"),
         "displayName": tool.get("displayName") or tool.get("name"),
@@ -123,6 +132,8 @@ def _summary(tool: dict[str, Any], *, full: bool) -> dict[str, Any]:
     }
     if tool.get("outputTypes"):
         out["outputTypes"] = list(tool["outputTypes"])
+    if custom and tool.get("finetune") is True:
+        out["trainable"] = True
     if full:
         out["tags"] = list(tool.get("functions") or [])
         out["description"] = str(tool.get("description") or "")[:DESCRIPTION_CHARS]
@@ -133,20 +144,23 @@ def list_tools(client: Router, params: dict[str, Any]) -> dict[str, Any]:
     """GET catalog/tools → every page of listTools, narrowed as the catalog narrows: a
     modality or function matched in any case, ``search`` in the name, display name or
     description, sorted by name. The facet lists, and which filter values are
-    unrecognized, come from the whole list, before narrowing."""
-    if not TOOL_SET_ON_V1 or str(params.get("custom")).lower() == "true":
-        raise OnClassic  # held (TOOL_SET_ON_V1); v1's listTools holds built-in tools only (custom=true is 400)
+    unrecognized, come from the whole list, before narrowing. ``custom=true`` lists the
+    organization's custom tools the way the catalog does: its filters echo ``custom``,
+    its hint is the short one and it names no unrecognized filter."""
+    if not TOOL_SET_ON_V1:
+        raise OnClassic
+    custom = str(params.get("custom")).lower() == "true"
     modality = params.get("modality") or params.get("category") or None
     function = params.get("function") or params.get("tag") or None
     search = params.get("search") or None
-    tools = _every_tool(client)
+    tools = _every_tool(client, custom=custom)
 
     modalities = {str(m) for tool in tools for m in tool.get("modalities") or []}
     functions = {str(f) for tool in tools for f in tool.get("functions") or []}
     unrecognized: dict[str, str] = {}
-    if modality and modality.lower() not in {m.lower() for m in modalities}:
+    if not custom and modality and modality.lower() not in {m.lower() for m in modalities}:
         unrecognized["modality"] = modality
-    if function and function.lower() not in {f.lower() for f in functions}:
+    if not custom and function and function.lower() not in {f.lower() for f in functions}:
         unrecognized["function"] = function
 
     if modality:
@@ -162,16 +176,19 @@ def list_tools(client: Router, params: dict[str, Any]) -> dict[str, Any]:
     tools.sort(key=lambda t: str(t.get("name") or ""))
 
     narrowed = bool(search or modality or function)
-    hint = LIST_HINT + ("" if narrowed else FULL_LIST_HINT)
+    hint = CUSTOM_HINT if custom else LIST_HINT + ("" if narrowed else FULL_LIST_HINT)
     if unrecognized:
         hint += (
             f" NOTE: unrecognized filter value(s) {unrecognized} — these are not valid; call "
             "listModalities()/listTags() for valid values."
         )
-    summaries = [_summary(t, full=narrowed) for t in tools]
+    summaries = [_summary(t, full=narrowed, custom=custom) for t in tools]
+    filters: dict[str, Any] = {"modality": modality, "function": function, "search": search}
+    if custom:
+        filters["custom"] = True
     out: dict[str, Any] = {
         "totalTools": len(summaries),
-        "filters": {"modality": modality, "function": function, "search": search},
+        "filters": filters,
         "descriptionsOmitted": not narrowed,
         "availableCategories": sorted(modalities),
         "availableTags": sorted(functions),
@@ -187,12 +204,12 @@ def list_tools(client: Router, params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _facet_listing(client: Router, axis: str) -> list[dict[str, Any]]:
-    """One axis of getToolFacets as the catalog lists it: ``{value, label, toolCount,
-    description?}``, most tools first, then by value. Held with the list
-    (:data:`TOOL_SET_ON_V1`)."""
+    """One axis of getToolFacets (the agent view, the tools the list holds) as the catalog
+    lists it: ``{value, label, toolCount, description?}``, most tools first, then by
+    value. On the catalog with the list when :data:`TOOL_SET_ON_V1` is off."""
     if not TOOL_SET_ON_V1:
-        raise OnClassic  # the facets count the tool set, held on the catalog
-    facets = plain(client.v1().tools.facets()) or {}
+        raise OnClassic
+    facets = plain(client.v1().tools.facets(view=AGENT_VIEW)) or {}
     entries = []
     for facet in facets.get(axis) or []:
         value = facet.get("name")
@@ -363,17 +380,16 @@ _LISTINGS = {
 }
 
 
-def route(method: str, path: str, params: Any = None) -> Route | None:
+def route(method: str, path: str) -> Route | None:
     """The handler for a catalog request v1 answers; None for the rest (job logs, which
-    :func:`tamarind._v1.classic.route` answers, and anything else). A request that goes to
-    the catalog anyway (the held tool set, a custom-tool listing) has none, so it never
-    asks the server whether v1 is on."""
+    :func:`tamarind._v1.classic.route` answers, and anything else). With
+    :data:`TOOL_SET_ON_V1` off the tool set has none, so it never asks the server whether
+    v1 is on."""
     if method != "GET":
         return None
     listing = _LISTINGS.get(path)
     if listing is not None:
-        custom = isinstance(params, dict) and str(params.get("custom")).lower() == "true"
-        return (listing, ()) if TOOL_SET_ON_V1 and not custom else None
+        return (listing, ()) if TOOL_SET_ON_V1 else None
     match = _SCHEMA.match(path)
     if match:
         return tool_schema, (match.group("tool"),)
