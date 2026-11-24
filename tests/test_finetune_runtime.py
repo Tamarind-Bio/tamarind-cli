@@ -24,6 +24,9 @@ def _clean(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(runtime, "_managed", [])
+    monkeypatch.setattr(runtime, "_next_index", 0)
+    monkeypatch.delenv(runtime.ENV_OBJECTIVE, raising=False)
     yield
     decorators.reset_registry()
 
@@ -130,7 +133,8 @@ def test_artifact_dir_follows_the_platform_for_a_hand_written_block(
     monkeypatch.setenv(runtime.ENV_ARTIFACT_DIR, str(run / "checkpoints" / "best"))
     assert tm.artifact_dir() == run / "checkpoints" / "best"
     assert tm.artifact_dir().is_dir()
-    assert tm.checkpoint(step=1) == run / "checkpoints" / "best"
+    # A checkpoint gets its own directory, not the artifact dir (registration picks among them).
+    assert tm.checkpoint(step=1) == run / "checkpoints" / "step-00000001"
     # The platform's pin wins over a decorator default that disagrees.
     _declare()
     assert tm.artifact_dir() == run / "checkpoints" / "best"
@@ -146,9 +150,8 @@ def test_log_never_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
 def test_checkpoint_records_path_step_and_metrics(tmp_path: Path) -> None:
     _declare()
     target = tm.checkpoint(step=3, metrics={"val/loss": 0.2})
-    assert target == tmp_path / "tamarind_run" / "ckpt"
+    assert target == tmp_path / "tamarind_run" / "checkpoints" / "step-00000003"
     assert target.is_dir()
-    assert tm.artifact_dir() == target
     other = tm.checkpoint("epoch_2", step=2)
     assert other == tmp_path / "tamarind_run" / "epoch_2"
     records = [
@@ -308,3 +311,227 @@ def test_an_unreadable_file_also_falls_back_and_a_good_file_still_wins(
     good.write_text(json.dumps({"epochs": 3}))
     monkeypatch.setenv(runtime.ENV_HYPERPARAMETERS, str(good))
     assert runtime.hyperparameters()["epochs"] == 3  # a delivered file still wins over the env var
+
+
+# ---- each checkpoint its own directory; the SDK keeps the best and the latest ----
+
+
+def _declare_objective(objective=("val/spearman", "max")):
+    @tm.training_run(objective=objective)
+    def main():
+        return None
+
+    return main
+
+
+def _save(step, score, metric="val/spearman"):
+    folder = tm.checkpoint(step=step, metrics={metric: score} if score is not None else None)
+    (folder / "weights.pt").write_text(str(step))
+    return folder
+
+
+def _left(tmp_path: Path) -> list[str]:
+    root = tmp_path / "tamarind_run" / "checkpoints"
+    return sorted(p.name for p in root.iterdir()) if root.exists() else []
+
+
+def test_the_best_the_previous_and_the_latest_are_kept(tmp_path: Path) -> None:
+    _declare_objective()
+    for step, score in ((1, 0.3), (2, 0.8), (3, 0.6), (4, 0.5)):
+        _save(step, score)
+    # 2 is the best, 4 the latest, 3 the previous one (kept until the next checkpoint starts).
+    assert _left(tmp_path) == ["step-00000002", "step-00000003", "step-00000004"]
+    _save(5, 0.4)
+    assert _left(tmp_path) == ["step-00000002", "step-00000004", "step-00000005"]
+    records = (tmp_path / "tamarind_run" / "checkpoints.jsonl").read_text().splitlines()
+    assert len(records) == 5  # the record of every checkpoint stays
+
+
+def test_a_new_best_replaces_the_old_one(tmp_path: Path) -> None:
+    _declare_objective()
+    for step, score in ((1, 0.3), (2, 0.8), (3, 0.9), (4, 0.1)):
+        _save(step, score)
+    assert _left(tmp_path) == ["step-00000003", "step-00000004"]  # 3 is best and previous
+
+
+def test_a_min_objective_keeps_the_lowest(tmp_path: Path) -> None:
+    _declare_objective(("val/loss", "min"))
+    for step, score in ((1, 0.5), (2, 0.2), (3, 0.4), (4, 0.3)):
+        _save(step, score, metric="val/loss")
+    assert _left(tmp_path) == ["step-00000002", "step-00000003", "step-00000004"]
+
+
+def test_without_an_objective_the_previous_and_the_latest_are_kept(tmp_path: Path) -> None:
+    _declare_objective(None)
+    for step in (1, 2, 3):
+        _save(step, 0.5)
+    assert _left(tmp_path) == ["step-00000002", "step-00000003"]
+
+
+def test_a_checkpoint_without_the_objective_metric_is_never_the_best(tmp_path: Path) -> None:
+    _declare_objective()
+    _save(1, 0.7)
+    for step in (2, 3, 4):
+        _save(step, None)
+    assert _left(tmp_path) == ["step-00000001", "step-00000003", "step-00000004"]
+
+
+def test_a_failed_save_leaves_the_previous_checkpoint(tmp_path: Path) -> None:
+    """checkpoint() runs before the save: if the save then fails, the last complete one survives."""
+    _declare_objective(None)
+    _save(1, None)
+    tm.checkpoint(step=2)  # the script dies here, before writing into step 2
+    assert (tmp_path / "tamarind_run" / "checkpoints" / "step-00000001" / "weights.pt").is_file()
+
+
+def test_the_platforms_objective_works_without_a_decorator(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A hand-written finetune block has no decorator; the platform exports its objective."""
+    monkeypatch.setenv(runtime.ENV_OBJECTIVE, '{"metric": "val/spearman", "mode": "max"}')
+    for step, score in ((1, 0.9), (2, 0.1), (3, 0.2), (4, 0.3)):
+        _save(step, score)
+    assert "step-00000001" in _left(tmp_path)
+
+
+def test_an_unreadable_objective_export_falls_back_to_the_decorator(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv(runtime.ENV_OBJECTIVE, "not json")
+    _declare_objective()
+    for step, score in ((1, 0.9), (2, 0.1), (3, 0.2), (4, 0.3)):
+        _save(step, score)
+    assert "step-00000001" in _left(tmp_path)
+
+
+def test_a_symlink_at_a_checkpoint_name_is_never_followed_or_deleted(tmp_path: Path) -> None:
+    _declare_objective(None)
+    outside = tmp_path / "precious"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("x")
+    root = tmp_path / "tamarind_run" / "checkpoints"
+    root.mkdir(parents=True)
+    (root / "step-00000001").symlink_to(outside)
+    first = tm.checkpoint(step=1)
+    assert (
+        first.resolve().parent == (tmp_path / "tamarind_run").resolve()
+    )  # not the symlink's target
+    assert first.name.startswith("checkpoint-")
+    for step in (2, 3, 4):
+        _save(step, None)
+    assert (outside / "keep.txt").is_file()
+    assert (root / "step-00000001").is_symlink()
+
+
+def test_a_symlinked_checkpoint_root_is_never_written_through(tmp_path: Path) -> None:
+    _declare_objective(None)
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    run = tmp_path / "tamarind_run"
+    run.mkdir()
+    (run / "checkpoints").symlink_to(outside)
+    target = tm.checkpoint(step=1)
+    assert outside not in target.resolve().parents
+    assert target.resolve().parent == run.resolve()
+    assert list(outside.iterdir()) == []
+
+
+def test_a_directory_left_by_an_earlier_process_is_not_deleted(tmp_path: Path) -> None:
+    _declare_objective(None)
+    earlier = tmp_path / "tamarind_run" / "checkpoints" / "step-00000001"
+    earlier.mkdir(parents=True)
+    (earlier / "w").write_text("x")
+    fresh = tm.checkpoint(step=1)  # same name, but this process did not create it
+    assert fresh != earlier
+    assert fresh.parent == earlier.parent
+    assert fresh.name.startswith("step-00000001-")
+    assert list(fresh.iterdir()) == []  # nothing of the earlier run's mixed in
+    for step in (2, 3, 4):
+        _save(step, None)
+    assert (earlier / "w").is_file()
+
+
+def test_a_directory_the_script_names_is_never_deleted(tmp_path: Path) -> None:
+    _declare_objective()
+    mine = tm.checkpoint("my_ckpt", step=1, metrics={"val/spearman": 0.9})
+    (mine / "w").write_text("x")
+    for step, score in ((2, 0.5), (3, 0.6), (4, 0.7)):
+        _save(step, score)
+    assert mine.is_dir()
+    assert _left(tmp_path) == ["step-00000003", "step-00000004"]
+
+
+def test_checkpoints_without_a_step_are_numbered(tmp_path: Path) -> None:
+    _declare_objective(None)
+    first = tm.checkpoint()
+    second = tm.checkpoint()
+    third = tm.checkpoint()
+    assert [first.name, second.name, third.name] == ["ckpt-0000", "ckpt-0001", "ckpt-0002"]
+    assert not first.exists()
+
+
+def test_saving_one_step_twice_reuses_its_directory(tmp_path: Path) -> None:
+    _declare_objective()
+    _save(1, 0.9)
+    again = _save(1, 0.9)
+    assert again.is_dir()
+    assert _left(tmp_path) == ["step-00000001"]
+
+
+def test_a_step_saved_again_is_scored_on_its_new_metrics(tmp_path: Path) -> None:
+    _declare_objective()
+    _save(1, 0.9)
+    _save(1, 0.1)  # the same directory, now holding a worse model
+    _save(2, 0.5)
+    _save(3, 0.4)
+    assert _left(tmp_path) == ["step-00000002", "step-00000003"]
+
+
+def test_an_unrecorded_checkpoint_never_prunes_a_recorded_one(tmp_path: Path) -> None:
+    """A record that cannot be written is invisible to registration, so it must not count as best."""
+    _declare_objective()
+    _save(1, 0.9)
+    cyclic: dict = {"val/spearman": 1.0}
+    cyclic["self"] = cyclic
+    folder = tm.checkpoint(step=2, metrics=cyclic)
+    (folder / "weights.pt").write_text("2")
+    _save(3, 0.5)
+    _save(4, 0.4)
+    assert "step-00000001" in _left(tmp_path)
+
+
+def test_a_caught_failed_save_does_not_push_out_the_last_good_checkpoint(tmp_path: Path) -> None:
+    """The script catches a failed save and carries on: the empty directory is neither the
+    previous nor the best checkpoint, so the last one with weights survives."""
+    _declare_objective(None)
+    _save(1, None)
+    tm.checkpoint(step=2)  # model.save() raised; the loop caught it and went on
+    tm.checkpoint(step=3)  # this save fails too
+    assert (tmp_path / "tamarind_run" / "checkpoints" / "step-00000001" / "weights.pt").is_file()
+
+
+def test_an_empty_directory_is_never_the_best(tmp_path: Path) -> None:
+    _declare_objective()
+    _save(1, 0.5)
+    tm.checkpoint(step=2, metrics={"val/spearman": 0.99})  # recorded, never saved into
+    _save(3, 0.4)
+    _save(4, 0.3)
+    assert "step-00000001" in _left(tmp_path)
+
+
+def test_a_directory_that_could_not_be_created_is_not_enrolled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _declare_objective()
+    _save(1, 0.5)
+    real_mkdir = Path.mkdir
+
+    def failing_mkdir(self, *args, **kwargs):
+        if self.name == "step-00000002":
+            raise OSError("no space left on device")
+        return real_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", failing_mkdir)
+    tm.checkpoint(step=2, metrics={"val/spearman": 0.99})
+    monkeypatch.setattr(Path, "mkdir", real_mkdir)
+    assert all(path.name != "step-00000002" for path, _ in runtime._managed)

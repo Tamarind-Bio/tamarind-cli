@@ -50,7 +50,7 @@ if __name__ == "__main__":
 
 | Decorator | On | What the platform does with it |
 |---|---|---|
-| `@tm.training_run` | the function to invoke | Schedules the run with `gpu`/`memory`/`cpu`, caps it at `timeout_hours`, offers each hyperparameter as a submit setting and a sweep axis, ranks runs by `objective`, registers `artifact` as the model |
+| `@tm.training_run` | the function to invoke | Schedules the run with `gpu`/`memory`/`cpu`, caps it at `timeout_hours`, offers each hyperparameter as a submit setting and a sweep axis, registers the best checkpoint by `objective` as the model (or the `artifact` directory when the run saved no checkpoints) |
 | `@tm.predictor` | a class with `load()` and `predict()` | Serves the artifact as a tool with the declared `inputs` and `outputs`; `embed()` is optional |
 | `@tm.evaluator` | `score(predictions, truths)` | The same scoring for validation during training and for benchmarks |
 | `@tm.splitter` | `split(dataset)` | A custom train/validation split |
@@ -68,7 +68,7 @@ file and line.
 |---|---|
 | `tm.hyperparameters()` | The chosen values, typed. On the platform, from the run's file; locally, the declared defaults with environment-variable overrides (`epochs=3 python train.py`) |
 | `tm.log({...}, step=n)` | Appends a JSON line to the run's metrics file. Never raises; non-finite numbers become null |
-| `tm.checkpoint(path=None, step=, metrics=)` | Returns the directory to save into (the artifact dir by default) and records the step and metrics, so the platform can pick the best checkpoint |
+| `tm.checkpoint(path=None, step=, metrics=)` | Returns a new directory to save this checkpoint into (`checkpoints/step-00000412`) and records its step and metrics. See Checkpoints |
 | `tm.evaluate(predictions, truths)` | Calls your `@tm.evaluator` |
 | `tm.artifact_dir()` / `tm.run_dir()` | Where the model and the run's outputs go (`/app/out/...` on the platform, `./tamarind_run/...` locally) |
 | `tm.is_platform()` | True inside a Tamarind run |
@@ -79,6 +79,26 @@ The platform sets `TAMARIND_RUN_DIR`, `TAMARIND_HYPERPARAMETERS` (a JSON file),
 which `tm.artifact_dir()` returns, so a hand-written block works without decorators). Off the platform the SDK only writes local files, so the same script
 runs on a laptop unchanged.
 
+## Checkpoints
+
+Save the model through `tm.checkpoint` each time you validate, passing the metrics you scored it on:
+
+```python
+metrics = {"val/spearman": rho}
+tm.log(metrics, step=step)
+model.save(tm.checkpoint(step=step, metrics=metrics))
+```
+
+- Each call returns a new directory, `checkpoints/step-00000412` under the run (`checkpoints/ckpt-0003` without a `step`). Save that checkpoint's weights into it.
+- The SDK deletes its earlier checkpoint directories as the run goes, keeping the best so far by the `objective` (scored on the `metrics` you passed), the previous one, and the new one. The previous one stays until the next checkpoint starts, so a save that fails part-way never leaves the run without a complete checkpoint. With no `objective`, the previous and the latest are kept. The record of every checkpoint stays in `checkpoints.jsonl`.
+- The objective comes from `@tm.training_run`, or on the platform from `TAMARIND_OBJECTIVE`, which it sets from the tool's `finetune` block, so a hand-written block works the same.
+- Only directories the SDK created in this run are ever deleted. A checkpoint name that is a symlink, or a directory left by an earlier run (a second local run, a restarted job), is never written into or deleted: the checkpoint gets a fresh directory beside it.
+- When the run ends, the platform registers the best checkpoint as the model. Its `metrics` and `bestStep` are the values logged at that checkpoint's step, so the model is labelled with the numbers of the weights it holds. With no `objective`, or no checkpoint that recorded its metric, the latest checkpoint is the model.
+- A run that saved no checkpoints registers the `artifact` directory (`tm.artifact_dir()`), as before.
+- A `path` you pass (`tm.checkpoint("epoch_3", ...)`) is used as given and never deleted; it is still a candidate for the model.
+
+Training past the best checkpoint is normal: you only know a checkpoint was the best once later ones fail to beat it. The latest checkpoint is kept for resuming or training longer.
+
 ## Prediction mode
 
 A trained model is served by the `@tm.predictor` class, in the same image and through the same
@@ -88,7 +108,7 @@ model's weights into the container and starts the script in prediction mode:
 | The platform sets | Meaning |
 |---|---|
 | `TAMARIND_MODE=predict` | this run serves a model; `tm.is_predicting()` is true |
-| `TAMARIND_WEIGHTS_DIR` | the directory holding the trained artifact, exactly as `tm.artifact_dir()` left it |
+| `TAMARIND_WEIGHTS_DIR` | the directory holding the registered model: the chosen checkpoint, or the artifact directory, exactly as the run left it |
 | `TAMARIND_PREDICTOR` | the `<file>.py:<Class>` of your predictor, from the tool's `finetune` block |
 | `TAMARIND_INPUTS_FILE` | the job's inputs as a JSON object, each declared input by name (a file input as its path) |
 | `TAMARIND_PREDICTIONS_FILE` | where the predictions CSV goes (`/app/out/predictions.csv`) |

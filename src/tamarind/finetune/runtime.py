@@ -18,7 +18,9 @@ import json
 import math
 import os
 from pathlib import Path
+import shutil
 import sys
+import tempfile
 import time
 from typing import Any, Mapping
 
@@ -158,18 +160,21 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
-def _append_line(path: Path, record: Mapping[str, Any]) -> None:
+def _append_line(path: Path, record: Mapping[str, Any]) -> bool:
+    """Append one JSON line; True when it was written. Never raises."""
     try:
         line = json.dumps(_json_safe(record), separators=(",", ":")) + "\n"
     except Exception as exc:  # noqa: BLE001 - a cyclic or exotic value must not end a training run
         print(f"[tamarind] could not serialize a record for {path}: {exc}", file=sys.stderr)
-        return
+        return False
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(line)
     except OSError as exc:
         print(f"[tamarind] could not write {path}: {exc}", file=sys.stderr)
+        return False
+    return True
 
 
 def metrics_file() -> Path:
@@ -217,30 +222,184 @@ def artifact_dir() -> Path:
     return path
 
 
+#: Where ``tm.checkpoint()`` puts each checkpoint it names itself, under the run dir.
+CHECKPOINTS_DIRNAME = "checkpoints"
+#: The training run's objective as JSON, exported by the platform for every training run, so a
+#: hand-written ``finetune`` block (no decorator to read it from) keeps the right checkpoints too.
+ENV_OBJECTIVE = "TAMARIND_OBJECTIVE"
+
+# The checkpoint directories this process created itself (no `path` given), oldest first, with
+# their objective score: the only directories the SDK ever deletes.
+_managed: list[tuple[Path, float | None]] = []
+_next_index = 0
+
+
+def _objective() -> tuple[str, str] | None:
+    """``(metric, "max"|"min")``: the platform's export first, else the decorator's, else None."""
+    objective: Any = None
+    raw = os.environ.get(ENV_OBJECTIVE)
+    if raw:
+        try:
+            objective = json.loads(raw)
+        except ValueError:
+            print(f"[tamarind] ignoring an unreadable {ENV_OBJECTIVE}", file=sys.stderr)
+    if not isinstance(objective, Mapping):
+        record = registered("training_run")
+        objective = ((record or {}).get("block") or {}).get("objective")
+    if not isinstance(objective, Mapping) or not isinstance(objective.get("metric"), str):
+        return None
+    return objective["metric"], "min" if objective.get("mode") == "min" else "max"
+
+
+def _score(metrics: Mapping[str, Any] | None, objective: tuple[str, str] | None) -> float | None:
+    if objective is None or not metrics:
+        return None
+    value = metrics.get(objective[0])
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _checkpoint_root() -> Path:
+    return run_dir() / CHECKPOINTS_DIRNAME
+
+
+def _default_checkpoint_dir(step: int | None) -> Path:
+    """``checkpoints/step-00000412`` for a step, else the next free ``checkpoints/ckpt-0003``."""
+    global _next_index
+    root = _checkpoint_root()
+    if isinstance(step, int) and not isinstance(step, bool) and step >= 0:
+        return root / f"step-{step:08d}"
+    while (root / f"ckpt-{_next_index:04d}").exists() or (
+        root / f"ckpt-{_next_index:04d}"
+    ).is_symlink():
+        _next_index += 1
+    path = root / f"ckpt-{_next_index:04d}"
+    _next_index += 1
+    return path
+
+
+def _inside_root(path: Path) -> bool:
+    """A real directory directly under the run's checkpoint root, reached through no symlink."""
+    root = _checkpoint_root()
+    if root.is_symlink() or path.is_symlink() or path.parent != root:
+        return False
+    return path.resolve().parent == root.resolve()
+
+
+def _holds_a_file(path: Path) -> bool:
+    """True when ``path`` is a real directory with at least one regular file under it (no symlinks)."""
+    try:
+        if path.is_symlink() or not path.is_dir():
+            return False
+        for root, dirs, files in os.walk(path):
+            dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(root, d))]
+            for name in files:
+                full = os.path.join(root, name)
+                if not os.path.islink(full) and os.path.isfile(full):
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _prune(new: Path, objective: tuple[str, str] | None) -> None:
+    """Delete the SDK's own earlier checkpoint directories, keeping three.
+
+    Kept: the best of the earlier checkpoints that hold a file, by the objective (scored on the
+    metrics each one recorded), the previous such one, and the new one. The previous one stays because this call runs
+    BEFORE the script saves into ``new``: if that save fails, the run still has its last complete
+    checkpoint. With no objective, no earlier checkpoint is "best". A directory the script named
+    itself (``path=``) is never in this list, so never touched. Never raises.
+    """
+    global _managed
+    earlier = [(path, score) for path, score in _managed if path != new]
+    # Only a directory holding a file counts as a checkpoint, as at registration: a save that failed
+    # (and that the script caught) or a directory that was never created must not stand in for the
+    # previous or the best one and push out a directory that holds real weights.
+    complete = [(path, score) for path, score in earlier if _holds_a_file(path)]
+    keep = {new}
+    if complete:
+        keep.add(complete[-1][0])
+        scored = [(path, score) for path, score in complete if score is not None]
+        if objective is not None and scored:
+            pick = min if objective[1] == "min" else max
+            keep.add(pick(scored, key=lambda item: item[1])[0])
+    remaining = []
+    for path, score in earlier:
+        if path in keep:
+            remaining.append((path, score))
+            continue
+        if not _inside_root(path):
+            print(
+                f"[tamarind] not removing {path}: not a directory under {_checkpoint_root()}",
+                file=sys.stderr,
+            )
+            continue
+        try:
+            shutil.rmtree(path)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            print(f"[tamarind] could not remove old checkpoint {path}: {exc}", file=sys.stderr)
+            remaining.append((path, score))
+    _managed = remaining
+
+
 def checkpoint(
     path: str | os.PathLike[str] | None = None,
     *,
     step: int | None = None,
     metrics: Mapping[str, Any] | None = None,
 ) -> Path:
-    """Record that a checkpoint was saved, tying it to its step and metrics.
+    """Start a checkpoint: returns the directory to save the model into, and records it.
 
-    Returns the directory to save into (``path``, or the artifact dir). The platform uses the
-    records to pick the best checkpoint by the declared objective.
+        model.save(tm.checkpoint(step=step, metrics={"val/spearman": rho}))
+
+    With no ``path`` each checkpoint gets its own directory (``checkpoints/step-00000412``), and
+    the SDK deletes its earlier ones except the best so far by the training run's ``objective``
+    (scored on the ``metrics`` passed here) and the previous one, which stays until the next
+    checkpoint starts in case this save fails. The platform registers the best recorded checkpoint
+    as the model, with the metrics logged at its step; with no objective, the latest one. A
+    ``path`` you pass is used as given and never deleted.
     """
+    global _managed
     # Never raises: a directory that cannot be created is reported, and the path is still
     # returned so the script's own save shows the real error where it happens.
+    managed = path is None
     try:
-        target = Path(path) if path is not None else artifact_dir()
-        if path is not None and not target.is_absolute():
-            target = run_dir() / target
-        target = target.resolve()
+        if managed:
+            target = _default_checkpoint_dir(step)
+            if _checkpoint_root().is_symlink() or target.is_symlink():
+                # Never hand back a destination that leads outside the run: save into a fresh
+                # directory of the run instead, never enrolled for deletion.
+                print(
+                    f"[tamarind] {target} or its parent is a symlink; saving this checkpoint elsewhere in the run",
+                    file=sys.stderr,
+                )
+                target = Path(tempfile.mkdtemp(prefix="checkpoint-", dir=run_dir()))
+                enroll = False
+            elif target.exists() and not any(p == target for p, _ in _managed):
+                # Left by an earlier process (a second local run, a restarted job): saving into it
+                # would mix its files with the new weights, and it is not ours to delete. Use a
+                # fresh directory beside it, which this run owns.
+                target = Path(tempfile.mkdtemp(prefix=f"{target.name}-", dir=_checkpoint_root()))
+                enroll = True
+            else:
+                enroll = True
+        else:
+            target = Path(path)  # type: ignore[arg-type]
+            if not target.is_absolute():
+                target = run_dir() / target
+            target = target.resolve()
+            enroll = False
     except Exception as exc:  # noqa: BLE001 - checkpoint recording must never end a training run
         print(f"[tamarind] could not resolve the checkpoint directory: {exc}", file=sys.stderr)
-        target = (
-            Path(path) if path is not None else Path(os.environ.get(ENV_ARTIFACT_DIR) or "model")
-        )
-        return target
+        return Path(path) if path is not None else Path(CHECKPOINTS_DIRNAME)
     try:
         target.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -255,7 +414,18 @@ def checkpoint(
     except Exception as exc:  # noqa: BLE001
         print(f"[tamarind] could not record the checkpoint: {exc}", file=sys.stderr)
         return target
-    _append_line(records, record)
+    recorded = _append_line(records, record)
+    # Pruning only follows what the platform will see: a checkpoint whose record was not written
+    # cannot be chosen at registration, so it must not count as the best and push a recorded one out.
+    if managed and recorded:
+        try:
+            objective = _objective()
+            if enroll and target.is_dir() and _inside_root(target):
+                _prune(target, objective)
+                _managed = [(p, sc) for p, sc in _managed if p != target]
+                _managed.append((target, _score(metrics, objective)))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[tamarind] could not tidy old checkpoints: {exc}", file=sys.stderr)
     return target
 
 

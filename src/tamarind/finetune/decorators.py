@@ -69,9 +69,10 @@ def training_run(
 
     `gpu`, `memory` and `cpu` set the tool's resources (config.json `gpuType`, `memory`, `cpu`).
     `hyperparameters` become submit-form settings and the sweep axes; the script reads the
-    chosen values with `tm.hyperparameters()`. `objective` names the logged metric that ranks runs and
-    picks the best checkpoint. `artifact` is the directory under the run's output that holds
-    the trained model (default "model").
+    chosen values with `tm.hyperparameters()`. `objective` names the metric, and whether higher
+    ("max") or lower ("min") is better, that picks which `tm.checkpoint` becomes the model.
+    `artifact` is the directory under the run's output registered as the model when the run
+    saved no checkpoints (default "model").
     """
     block = _spec.training_run_block(
         timeout_hours=timeout_hours,
