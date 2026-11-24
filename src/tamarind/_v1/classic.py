@@ -393,10 +393,14 @@ def get_jobs(client: Router, params: dict[str, Any]) -> dict[str, Any]:
             query["include_subjobs"] = True
         page = plain(client.v1().jobs.list(**{k: v for k, v in query.items() if v is not None}))
         rows = [job_row(item, batch_name=batch or _batch_name(client, item), user=peer) for item in page.get("items") or []]
-    if batch and not filters and not rows and not page.get("nextCursor") and not params.get("startKey"):
-        # Classic's miss: only an unfiltered first page can be one. (Classic has no kind, status or
-        # tool filters, so a filtered batch that matches nothing is v1's empty page.)
-        raise NotFoundError(f"Jobs in batch {batch} not found")
+        if batch and not filters and not rows and not page.get("nextCursor") and not params.get("startKey"):
+            # Classic's miss: only an unfiltered first page can be one. (Classic has no kind, status or
+            # tool filters, so a filtered batch that matches nothing is v1's empty page.) But v1 makes a
+            # batch's jobs after it answers the submit, where classic writes them first: so a batch of
+            # yours or a member's that exists and has no jobs yet (or never will, cancelled first) is an
+            # empty page. The organization's batch read is classic's as is: it drops a batch's jobs.
+            if organization or client.find(batch, kinds=("batch",), member=member) is None:
+                raise NotFoundError(f"Jobs in batch {batch} not found")
     out: dict[str, Any] = {"jobs": rows}
     if page.get("nextCursor"):
         out["startKey"] = page["nextCursor"]
