@@ -116,10 +116,9 @@ def sync_detailed(
 ) -> Response[Problem | ResultsPreparing | ResultsReady]:
     r"""Get a zip of a job's or a batch's outputs
 
-     Takes a `job_` or `batch_` id; a `run_` id is 404 (use `getPipelineRunResults`). Until the
-    rename from `/archive` merges (decision 75, not yet), the server answers at
-    `POST /jobs/{jobId}/archive`. Serves the stored zip the job's worker wrote, the one today's
-    `POST /result` serves. 200 means ready, with a link that expires in 1 hour, its expiry, the
+     Takes a `job_` or `batch_` id; a `run_` id is 404 (use `getPipelineRunResults`). Serves the
+    stored zip the job's worker wrote, the one today's `POST /result` serves. 200 means ready, with a
+    link that expires in 1 hour, its expiry, the
     size and the real `fileCount`, read from the zip itself. `truncated` is false, since a stored
     zip is never cut short. 202 means
     still preparing: the job or batch is still running, by the status `getJob` shows (a batch's is
@@ -193,10 +192,9 @@ def sync(
 ) -> Problem | ResultsPreparing | ResultsReady | None:
     r"""Get a zip of a job's or a batch's outputs
 
-     Takes a `job_` or `batch_` id; a `run_` id is 404 (use `getPipelineRunResults`). Until the
-    rename from `/archive` merges (decision 75, not yet), the server answers at
-    `POST /jobs/{jobId}/archive`. Serves the stored zip the job's worker wrote, the one today's
-    `POST /result` serves. 200 means ready, with a link that expires in 1 hour, its expiry, the
+     Takes a `job_` or `batch_` id; a `run_` id is 404 (use `getPipelineRunResults`). Serves the
+    stored zip the job's worker wrote, the one today's `POST /result` serves. 200 means ready, with a
+    link that expires in 1 hour, its expiry, the
     size and the real `fileCount`, read from the zip itself. `truncated` is false, since a stored
     zip is never cut short. 202 means
     still preparing: the job or batch is still running, by the status `getJob` shows (a batch's is
@@ -265,10 +263,9 @@ async def asyncio_detailed(
 ) -> Response[Problem | ResultsPreparing | ResultsReady]:
     r"""Get a zip of a job's or a batch's outputs
 
-     Takes a `job_` or `batch_` id; a `run_` id is 404 (use `getPipelineRunResults`). Until the
-    rename from `/archive` merges (decision 75, not yet), the server answers at
-    `POST /jobs/{jobId}/archive`. Serves the stored zip the job's worker wrote, the one today's
-    `POST /result` serves. 200 means ready, with a link that expires in 1 hour, its expiry, the
+     Takes a `job_` or `batch_` id; a `run_` id is 404 (use `getPipelineRunResults`). Serves the
+    stored zip the job's worker wrote, the one today's `POST /result` serves. 200 means ready, with a
+    link that expires in 1 hour, its expiry, the
     size and the real `fileCount`, read from the zip itself. `truncated` is false, since a stored
     zip is never cut short. 202 means
     still preparing: the job or batch is still running, by the status `getJob` shows (a batch's is
@@ -340,10 +337,9 @@ async def asyncio(
 ) -> Problem | ResultsPreparing | ResultsReady | None:
     r"""Get a zip of a job's or a batch's outputs
 
-     Takes a `job_` or `batch_` id; a `run_` id is 404 (use `getPipelineRunResults`). Until the
-    rename from `/archive` merges (decision 75, not yet), the server answers at
-    `POST /jobs/{jobId}/archive`. Serves the stored zip the job's worker wrote, the one today's
-    `POST /result` serves. 200 means ready, with a link that expires in 1 hour, its expiry, the
+     Takes a `job_` or `batch_` id; a `run_` id is 404 (use `getPipelineRunResults`). Serves the
+    stored zip the job's worker wrote, the one today's `POST /result` serves. 200 means ready, with a
+    link that expires in 1 hour, its expiry, the
     size and the real `fileCount`, read from the zip itself. `truncated` is false, since a stored
     zip is never cut short. 202 means
     still preparing: the job or batch is still running, by the status `getJob` shows (a batch's is
