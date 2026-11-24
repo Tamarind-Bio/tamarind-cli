@@ -117,7 +117,7 @@ def test_the_results_zips_keep_their_names_and_ask_v1s_results_routes(on):
     run = respx.post(f"{V1}/pipelines/runs/run_1/results").mock(return_value=preparing)
     with Tamarind(api_key="k", api_base=CLASSIC) as client:
         assert client.jobs.archive(JOB) == {"status": "preparing"}
-        assert client.pipelines.archive_run("run_1", body={}) == {"status": "preparing"}
+        assert client.pipelines.archive_run("run_1") == {"status": "preparing"}
     assert job.called and run.called
 
 

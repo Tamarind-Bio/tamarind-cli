@@ -113,6 +113,10 @@ class Transport:
         request = build(**values)
         if json_body is not UNSET:
             request["json"] = json_body
+        elif isinstance(request.get("json"), Unset):
+            # A body the contract lets be null as well as left out: the generated builder
+            # puts its UNSET default in as the JSON. Left out means no body.
+            del request["json"]
         params = request.get("params")
         for name in COMMA_JOINED_QUERY.get(endpoint.__name__.rsplit(".", 1)[-1], ()):
             if params and isinstance(params.get(name), list):
