@@ -18,6 +18,7 @@ import json
 import math
 import os
 from pathlib import Path
+import shutil
 import sys
 import time
 from typing import Any, Mapping
@@ -217,30 +218,104 @@ def artifact_dir() -> Path:
     return path
 
 
+#: Where ``tm.checkpoint()`` puts each checkpoint it names itself, under the run dir.
+CHECKPOINTS_DIRNAME = "checkpoints"
+
+# The checkpoint directories this process created itself (no `path` given), oldest first, with
+# their objective score: the only directories the SDK ever deletes.
+_managed: list[tuple[Path, float | None]] = []
+
+
+def _objective() -> tuple[str, str] | None:
+    record = registered("training_run")
+    objective = ((record or {}).get("block") or {}).get("objective")
+    if not isinstance(objective, Mapping) or not isinstance(objective.get("metric"), str):
+        return None
+    return objective["metric"], "min" if objective.get("mode") == "min" else "max"
+
+
+def _score(metrics: Mapping[str, Any] | None, objective: tuple[str, str] | None) -> float | None:
+    if objective is None or not metrics:
+        return None
+    value = metrics.get(objective[0])
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _default_checkpoint_dir(step: int | None) -> Path:
+    """``checkpoints/step-00000412`` for a step, else the next free ``checkpoints/ckpt-0003``."""
+    root = run_dir() / CHECKPOINTS_DIRNAME
+    if isinstance(step, int) and not isinstance(step, bool) and step >= 0:
+        return root / f"step-{step:08d}"
+    index = len(_managed)
+    while (root / f"ckpt-{index:04d}").exists():
+        index += 1
+    return root / f"ckpt-{index:04d}"
+
+
+def _prune(keep_latest: Path, objective: tuple[str, str] | None) -> None:
+    """Delete the SDK's own checkpoint directories except the best so far and the latest.
+
+    The best is by the training run's objective over the metrics each checkpoint recorded; with
+    no objective, or no checkpoint that recorded its metric, only the latest is kept. A directory
+    the script named itself (`path=`) is never touched. Never raises.
+    """
+    global _managed
+    scored = [(path, score) for path, score in _managed if score is not None]
+    best = None
+    if objective is not None and scored:
+        pick = min if objective[1] == "min" else max
+        best = pick(scored, key=lambda item: item[1])[0]
+    kept = []
+    for path, score in _managed:
+        if path in (keep_latest, best):
+            kept.append((path, score))
+            continue
+        try:
+            shutil.rmtree(path)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            print(f"[tamarind] could not remove old checkpoint {path}: {exc}", file=sys.stderr)
+            kept.append((path, score))
+    _managed = kept
+
+
 def checkpoint(
     path: str | os.PathLike[str] | None = None,
     *,
     step: int | None = None,
     metrics: Mapping[str, Any] | None = None,
 ) -> Path:
-    """Record that a checkpoint was saved, tying it to its step and metrics.
+    """Start a checkpoint: returns the directory to save the model into, and records it.
 
-    Returns the directory to save into (``path``, or the artifact dir). The platform uses the
-    records to pick the best checkpoint by the declared objective.
+        model.save(tm.checkpoint(step=step, metrics={"val/spearman": rho}))
+
+    With no ``path`` each checkpoint gets its own directory (``checkpoints/step-00000412``), and
+    the SDK keeps only two of them: the best so far by the training run's ``objective`` (scored
+    on the ``metrics`` passed here) and this latest one. The platform registers the best one as
+    the model, with the metrics logged at its step; with no objective, the latest one. A ``path``
+    you pass is used as given and never deleted.
     """
     # Never raises: a directory that cannot be created is reported, and the path is still
     # returned so the script's own save shows the real error where it happens.
+    managed = path is None
     try:
-        target = Path(path) if path is not None else artifact_dir()
-        if path is not None and not target.is_absolute():
-            target = run_dir() / target
+        if managed:
+            target = _default_checkpoint_dir(step)
+        else:
+            target = Path(path)  # type: ignore[arg-type]
+            if not target.is_absolute():
+                target = run_dir() / target
         target = target.resolve()
     except Exception as exc:  # noqa: BLE001 - checkpoint recording must never end a training run
         print(f"[tamarind] could not resolve the checkpoint directory: {exc}", file=sys.stderr)
-        target = (
-            Path(path) if path is not None else Path(os.environ.get(ENV_ARTIFACT_DIR) or "model")
-        )
-        return target
+        return Path(path) if path is not None else Path(CHECKPOINTS_DIRNAME)
     try:
         target.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -256,6 +331,15 @@ def checkpoint(
         print(f"[tamarind] could not record the checkpoint: {exc}", file=sys.stderr)
         return target
     _append_line(records, record)
+    if managed:
+        try:
+            objective = _objective()
+            global _managed
+            _managed = [(p, sc) for p, sc in _managed if p != target]
+            _managed.append((target, _score(metrics, objective)))
+            _prune(target, objective)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[tamarind] could not tidy old checkpoints: {exc}", file=sys.stderr)
     return target
 
 
