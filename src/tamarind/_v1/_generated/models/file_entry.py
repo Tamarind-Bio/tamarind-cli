@@ -9,6 +9,7 @@ from attrs import field as _attrs_field
 from dateutil.parser import isoparse
 
 from ..models.file_entry_type import FileEntryType
+from ..types import UNSET, Unset
 
 T = TypeVar("T", bound="FileEntry")
 
@@ -23,12 +24,16 @@ class FileEntry:
         size_bytes (int | None): Null for a folder, and for a root file the catalog has no size for. For a signed or
             multipart upload that isn't finished yet, the size it was started for.
         type_ (FileEntryType):
+        job_name (None | str | Unset): On a top-level folder that holds a job's files under the job's id, that job's
+            name (what the app shows for the folder). Null for anything else. Not built yet (website#7801), so for now it's
+            absent.
     """
 
     modified_at: datetime.datetime | None
     path: str
     size_bytes: int | None
     type_: FileEntryType
+    job_name: None | str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -45,6 +50,12 @@ class FileEntry:
 
         type_ = self.type_.value
 
+        job_name: None | str | Unset
+        if isinstance(self.job_name, Unset):
+            job_name = UNSET
+        else:
+            job_name = self.job_name
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update(
@@ -55,6 +66,8 @@ class FileEntry:
                 "type": type_,
             }
         )
+        if job_name is not UNSET:
+            field_dict["jobName"] = job_name
 
         return field_dict
 
@@ -88,11 +101,21 @@ class FileEntry:
 
         type_ = FileEntryType(d.pop("type"))
 
+        def _parse_job_name(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        job_name = _parse_job_name(d.pop("jobName", UNSET))
+
         file_entry = cls(
             modified_at=modified_at,
             path=path,
             size_bytes=size_bytes,
             type_=type_,
+            job_name=job_name,
         )
 
         file_entry.additional_properties = d

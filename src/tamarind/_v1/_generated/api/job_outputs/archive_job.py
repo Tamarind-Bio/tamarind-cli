@@ -114,7 +114,7 @@ def sync_detailed(
     body: ArchiveRequest | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
 ) -> Response[ArchivePreparing | ArchiveReady | Problem]:
-    """Get a zip of a job's or a batch's outputs
+    r"""Get a zip of a job's or a batch's outputs
 
      Takes a `job_` or `batch_` id; a `run_` id is 404 (use `archivePipelineRun`). Serves the
     stored archive the job's worker wrote, the one today's `POST /result` serves. 200 means ready,
@@ -141,6 +141,16 @@ def sync_detailed(
     nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
     at `/glob`. A selection of every file answers the whole archive.
 
+    Once website#7802 merges (not yet): `bestStructures: true` answers one best structure per
+    job, as the app's \"PDBs only\" download does (see `ArchiveRequest`). When a batch has no
+    stored structures zip, one is built: past an 8-minute deadline the answer is 503
+    `jobs_dependency_unavailable` (retryable), a second build from your account while one runs is
+    429 `rate_limited`, and a server already running four is 503 `service_unavailable`.
+
+    Once website#7805 merges (not yet): when a batch's archive would be rebuilt, an organization
+    that has lost read access gets 403 `organization_export_disabled`. In practice v1 refuses such
+    an organization at authentication first, with 403 `organization_read_disabled`.
+
     Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
     `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
     rule refuses is the same 404.
@@ -148,8 +158,9 @@ def sync_detailed(
     Args:
         job_id (str):
         tamarind_version (str | Unset):
-        body (ArchiveRequest | Unset): Send at most one of `paths` and `glob`; send neither for
-            the whole archive. Not built yet (website#7799), so either is 422 `not_supported` for now.
+        body (ArchiveRequest | Unset): Send at most one of `paths`, `glob` and `bestStructures`;
+            send none for the whole archive. Not built yet (website#7799 for `paths` and `glob`,
+            website#7802 for `bestStructures`).
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -179,7 +190,7 @@ def sync(
     body: ArchiveRequest | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
 ) -> ArchivePreparing | ArchiveReady | Problem | None:
-    """Get a zip of a job's or a batch's outputs
+    r"""Get a zip of a job's or a batch's outputs
 
      Takes a `job_` or `batch_` id; a `run_` id is 404 (use `archivePipelineRun`). Serves the
     stored archive the job's worker wrote, the one today's `POST /result` serves. 200 means ready,
@@ -206,6 +217,16 @@ def sync(
     nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
     at `/glob`. A selection of every file answers the whole archive.
 
+    Once website#7802 merges (not yet): `bestStructures: true` answers one best structure per
+    job, as the app's \"PDBs only\" download does (see `ArchiveRequest`). When a batch has no
+    stored structures zip, one is built: past an 8-minute deadline the answer is 503
+    `jobs_dependency_unavailable` (retryable), a second build from your account while one runs is
+    429 `rate_limited`, and a server already running four is 503 `service_unavailable`.
+
+    Once website#7805 merges (not yet): when a batch's archive would be rebuilt, an organization
+    that has lost read access gets 403 `organization_export_disabled`. In practice v1 refuses such
+    an organization at authentication first, with 403 `organization_read_disabled`.
+
     Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
     `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
     rule refuses is the same 404.
@@ -213,8 +234,9 @@ def sync(
     Args:
         job_id (str):
         tamarind_version (str | Unset):
-        body (ArchiveRequest | Unset): Send at most one of `paths` and `glob`; send neither for
-            the whole archive. Not built yet (website#7799), so either is 422 `not_supported` for now.
+        body (ArchiveRequest | Unset): Send at most one of `paths`, `glob` and `bestStructures`;
+            send none for the whole archive. Not built yet (website#7799 for `paths` and `glob`,
+            website#7802 for `bestStructures`).
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -239,7 +261,7 @@ async def asyncio_detailed(
     body: ArchiveRequest | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
 ) -> Response[ArchivePreparing | ArchiveReady | Problem]:
-    """Get a zip of a job's or a batch's outputs
+    r"""Get a zip of a job's or a batch's outputs
 
      Takes a `job_` or `batch_` id; a `run_` id is 404 (use `archivePipelineRun`). Serves the
     stored archive the job's worker wrote, the one today's `POST /result` serves. 200 means ready,
@@ -266,6 +288,16 @@ async def asyncio_detailed(
     nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
     at `/glob`. A selection of every file answers the whole archive.
 
+    Once website#7802 merges (not yet): `bestStructures: true` answers one best structure per
+    job, as the app's \"PDBs only\" download does (see `ArchiveRequest`). When a batch has no
+    stored structures zip, one is built: past an 8-minute deadline the answer is 503
+    `jobs_dependency_unavailable` (retryable), a second build from your account while one runs is
+    429 `rate_limited`, and a server already running four is 503 `service_unavailable`.
+
+    Once website#7805 merges (not yet): when a batch's archive would be rebuilt, an organization
+    that has lost read access gets 403 `organization_export_disabled`. In practice v1 refuses such
+    an organization at authentication first, with 403 `organization_read_disabled`.
+
     Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
     `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
     rule refuses is the same 404.
@@ -273,8 +305,9 @@ async def asyncio_detailed(
     Args:
         job_id (str):
         tamarind_version (str | Unset):
-        body (ArchiveRequest | Unset): Send at most one of `paths` and `glob`; send neither for
-            the whole archive. Not built yet (website#7799), so either is 422 `not_supported` for now.
+        body (ArchiveRequest | Unset): Send at most one of `paths`, `glob` and `bestStructures`;
+            send none for the whole archive. Not built yet (website#7799 for `paths` and `glob`,
+            website#7802 for `bestStructures`).
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -302,7 +335,7 @@ async def asyncio(
     body: ArchiveRequest | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
 ) -> ArchivePreparing | ArchiveReady | Problem | None:
-    """Get a zip of a job's or a batch's outputs
+    r"""Get a zip of a job's or a batch's outputs
 
      Takes a `job_` or `batch_` id; a `run_` id is 404 (use `archivePipelineRun`). Serves the
     stored archive the job's worker wrote, the one today's `POST /result` serves. 200 means ready,
@@ -329,6 +362,16 @@ async def asyncio(
     nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
     at `/glob`. A selection of every file answers the whole archive.
 
+    Once website#7802 merges (not yet): `bestStructures: true` answers one best structure per
+    job, as the app's \"PDBs only\" download does (see `ArchiveRequest`). When a batch has no
+    stored structures zip, one is built: past an 8-minute deadline the answer is 503
+    `jobs_dependency_unavailable` (retryable), a second build from your account while one runs is
+    429 `rate_limited`, and a server already running four is 503 `service_unavailable`.
+
+    Once website#7805 merges (not yet): when a batch's archive would be rebuilt, an organization
+    that has lost read access gets 403 `organization_export_disabled`. In practice v1 refuses such
+    an organization at authentication first, with 403 `organization_read_disabled`.
+
     Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
     `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
     rule refuses is the same 404.
@@ -336,8 +379,9 @@ async def asyncio(
     Args:
         job_id (str):
         tamarind_version (str | Unset):
-        body (ArchiveRequest | Unset): Send at most one of `paths` and `glob`; send neither for
-            the whole archive. Not built yet (website#7799), so either is 422 `not_supported` for now.
+        body (ArchiveRequest | Unset): Send at most one of `paths`, `glob` and `bestStructures`;
+            send none for the whole archive. Not built yet (website#7799 for `paths` and `glob`,
+            website#7802 for `bestStructures`).
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

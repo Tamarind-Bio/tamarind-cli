@@ -2823,7 +2823,7 @@ paths:
     - $ref: '#/components/parameters/JobId'
     post:
       operationId: archiveJob
-      x-build: 'merged (website#7629, #7663, #7729); choosing files (`paths`, `glob`) in website#7799, open; another member''s job (decision 74) in website#7795, open'
+      x-build: 'merged (website#7629, #7663, #7729); choosing files (`paths`, `glob`) in website#7799, `bestStructures` in website#7802 and the data-export gate in website#7805, all open; another member''s job (decision 74) in website#7795, open'
       tags:
       - Job Outputs
       summary: Get a zip of a job's or a batch's outputs
@@ -2852,6 +2852,16 @@ paths:
         `/glob`. More than 10,000 files or 1 GiB of zipped data is 422 `out_of_range` at the field:
         nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
         at `/glob`. A selection of every file answers the whole archive.
+
+        Once website#7802 merges (not yet): `bestStructures: true` answers one best structure per
+        job, as the app's "PDBs only" download does (see `ArchiveRequest`). When a batch has no
+        stored structures zip, one is built: past an 8-minute deadline the answer is 503
+        `jobs_dependency_unavailable` (retryable), a second build from your account while one runs is
+        429 `rate_limited`, and a server already running four is 503 `service_unavailable`.
+
+        Once website#7805 merges (not yet): when a batch's archive would be rebuilt, an organization
+        that has lost read access gets 403 `organization_export_disabled`. In practice v1 refuses such
+        an organization at authentication first, with 403 `organization_read_disabled`.
 
         Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
         `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
@@ -3134,7 +3144,7 @@ paths:
     - $ref: '#/components/parameters/TamarindVersion'
     get:
       operationId: listFiles
-      x-build: 'merged (website#7632, #7654)'
+      x-build: 'merged (website#7632, #7654); `type` and `FileEntry.jobName` in website#7801, open'
       tags:
       - Files
       summary: List workspace files and folders
@@ -3154,7 +3164,8 @@ paths:
         Hidden files aren't listed or counted, as the app hides them: `.part` files, generated
         `result-*.zip` archives at the root, zips inside folders, and the top-level `msas-*` and
         `.git*` folders. You can still read or delete one by its exact path. Private export caches
-        aren't listed and answer 404.
+        answer 404 and nothing inside one is listed. Where the app lists it, the `_extract_features`
+        folder that holds them is listed by name (website#7801, not merged yet).
       x-change: reshaped
       x-replaces:
       - GET /files
@@ -3189,6 +3200,16 @@ paths:
           type: array
           items:
             type: string
+      - name: type
+        in: query
+        description: Only files (`file`) or only folders (`folder`). At the root, `folder` lists your top-level folders
+          by name, as the app does. With `recursive` or `extension`, which leave folders out, `folder` is 400. Not
+          built yet (website#7801), so for now `type` is ignored and both come back.
+        schema:
+          type: string
+          enum:
+          - file
+          - folder
       - name: search
         in: query
         description: A substring of the file's or folder's own name (not its whole path), ignoring case. Blank is 400.
@@ -6091,7 +6112,7 @@ paths:
         type: string
     post:
       operationId: archivePipelineRun
-      x-build: 'merged (website#7634)'
+      x-build: 'merged (website#7634); the data-export gate in website#7805, open'
       tags:
       - Pipelines
       summary: Get a zip of a pipeline run's outputs
@@ -6102,8 +6123,12 @@ paths:
         `Retry-After`). It is also 202 while the run (or the node run you named) hasn't finished: the
         zip is built only once it has. An archive that could not be built is 409 `archive_failed`,
         retryable after `Retry-After` (90 seconds), when the results service builds again. Building
-        the zip starts work, so an organization that can't start compute gets 403
+        the zip starts work, so for now an organization that can't start compute gets 403
         `organization_compute_disabled` unless the zip already exists.
+
+        Once website#7805 merges (not yet): an organization that has lost read access gets 403
+        `organization_export_disabled` unless the zip already exists. A suspended or inactive
+        organization still gets its archive.
       x-change: reshaped
       x-replaces:
       - GET /pipelines/runs/results
@@ -11421,13 +11446,14 @@ components:
           - boolean
           - 'null'
           description: True when the archive hit a size or file-count limit and is missing files. A job's or a
-            batch's archive is the stored one and never cut short, so it is false. Null when nothing records it,
+            batch's archive is the stored one and never cut short, so it is false; the exception, once website#7802
+            merges, is a batch's `bestStructures` zip past 500 structures or 2 GiB of them. Null when nothing records it,
             as for a pipeline run's archive.
     ArchiveRequest:
       type: object
       additionalProperties: false
-      description: Send at most one of `paths` and `glob`; send neither for the whole archive. Not built yet
-        (website#7799), so either is 422 `not_supported` for now.
+      description: Send at most one of `paths`, `glob` and `bestStructures`; send none for the whole archive. Not
+        built yet (website#7799 for `paths` and `glob`, website#7802 for `bestStructures`).
       properties:
         paths:
           type: array
@@ -11446,6 +11472,17 @@ components:
           maxLength: 1024
           description: Matches the whole path inside the archive, case-sensitive, with `*` also matching `/`. For
             example `*.pdb`.
+        bestStructures:
+          type: boolean
+          description: One best structure per job, as the app's "PDBs only" download gives. A job's or a batch's stored
+            structures zip when it has one. Otherwise, for a batch, a zip of each Complete job's best structure, chosen
+            by its tool, named after the job, at most 500 or 2 GiB of structures (`truncated` is true past either),
+            which may take a while (202, then poll). That build has an 8-minute deadline (past it, 503
+            `jobs_dependency_unavailable`, retryable), and runs one per account at a time (another is 429
+            `rate_limited`) and four per server (past that, 503 `service_unavailable`). A job without one is 422
+            `not_supported`. With `paths` or `glob` it is 422
+            `conditional_not_met` at `/bestStructures`. Not built yet (website#7802), so for now it is 422 as an
+            unknown field.
     AssayEstimate:
       type: object
       required:
@@ -13855,6 +13892,12 @@ components:
           format: date-time
           description: When the file was last written. Null for a folder, and for a signed or multipart upload
             that isn't finished yet. A root file listed from the catalog shows when it was uploaded.
+        jobName:
+          type:
+          - string
+          - 'null'
+          description: On a top-level folder that holds a job's files under the job's id, that job's name (what the
+            app shows for the folder). Null for anything else. Not built yet (website#7801), so for now it's absent.
     FileEntryPage:
       type: object
       required:
@@ -16924,7 +16967,7 @@ components:
             `redirect_needs_bearer`, `archive_failed`, `idempotency_key_reused`, `idempotency_in_progress`,
             `budget_exceeded`, `quota_exceeded`, `queue_full`, `upstream_unavailable`, `design_count_too_large`,
             `unclaimed_agent_credential_route`, `submission_plan_mismatch`, `organization_compute_disabled`,
-            `job_not_finished`, `inputs_still_ingesting`, `inputs_not_ingested`, `nothing_to_rerun`,
+            `organization_export_disabled` (website#7805, not merged yet), `job_not_finished`, `inputs_still_ingesting`, `inputs_not_ingested`, `nothing_to_rerun`,
             `rerun_incomplete`.
             Files: `folder_too_large`, `folder_changed`.
             Projects and notes: `project_name_taken`, `project_not_empty`, `project_move_required`,
@@ -16937,7 +16980,7 @@ components:
             `order_changed`, `cancel_unconfirmed`, `duplicate_order`, `assays_blocked`, `assays_in_flight`,
             `idempotency_order_unavailable`, `order_incomplete`, `provider_error`, `outcome_unknown`.
             Pipelines: `node_run_molecule_response_too_large`, `organization_compute_disabled`,
-            `molecule_group_view_only`, `molecules_import_ingestion_failed`, `molecules_import_ingestion_timeout`,
+            `organization_export_disabled` (website#7805, not merged yet), `molecule_group_view_only`, `molecules_import_ingestion_failed`, `molecules_import_ingestion_timeout`,
             `pg_pool_exhausted`, `pg_query_timeout`, and the pipelines service's own `pipeline_*` codes, which
             pass through unchanged.
             Molecules: their own `molecule_*` and `molecules_*` codes, plus `job_not_found` and

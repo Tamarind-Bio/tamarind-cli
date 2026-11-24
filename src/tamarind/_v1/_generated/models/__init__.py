@@ -160,6 +160,7 @@ from .list_assay_types_provider import ListAssayTypesProvider
 from .list_assays_response_200 import ListAssaysResponse200
 from .list_assays_scope import ListAssaysScope
 from .list_assays_status import ListAssaysStatus
+from .list_files_type import ListFilesType
 from .list_jobs_kind import ListJobsKind
 from .list_jobs_order import ListJobsOrder
 from .list_jobs_scope import ListJobsScope
@@ -565,6 +566,7 @@ __all__ = (
     "ListAssayTargetsProvider",
     "ListAssayTargetsResponse200",
     "ListAssayTypesProvider",
+    "ListFilesType",
     "ListJobsKind",
     "ListJobsOrder",
     "ListJobsScope",
