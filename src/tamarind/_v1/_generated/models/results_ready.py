@@ -8,23 +8,22 @@ from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 from dateutil.parser import isoparse
 
-T = TypeVar("T", bound="ArchiveReady")
+T = TypeVar("T", bound="ResultsReady")
 
 
 @_attrs_define
-class ArchiveReady:
+class ResultsReady:
     """
     Attributes:
         download_url (str): A short-lived signed link. Fetch it without your API key.
         expires_at (datetime.datetime): When `downloadUrl` stops working. Never later than the link's own expiry.
-        file_count (int | None): How many files the zip holds, from its own directory. A job's or a batch's archive
-            always has it. Null when nothing records it, as for a pipeline run's archive.
+        file_count (int | None): How many files the zip holds, from its own directory. A job's or a batch's zip always
+            has it. Null when nothing records it, as for a pipeline run's zip.
         size_bytes (int): The zip's size.
         status (Literal['ready']):
-        truncated (bool | None): True when the archive hit a size or file-count limit and is missing files. A job's or a
-            batch's archive is the stored one and never cut short, so it is false; the exception is a batch's
-            `bestStructures` zip past 500 structures or 2 GiB of them. Null when nothing records it, as for a pipeline run's
-            archive.
+        truncated (bool | None): True when the zip hit a size or file-count limit and is missing files. A job's or a
+            batch's zip is the stored one and never cut short, so it is false; the exception is a batch's `bestStructures`
+            zip past 500 structures or 2 GiB of them. Null when nothing records it, as for a pipeline run's zip.
     """
 
     download_url: str
@@ -92,7 +91,7 @@ class ArchiveReady:
 
         truncated = _parse_truncated(d.pop("truncated"))
 
-        archive_ready = cls(
+        results_ready = cls(
             download_url=download_url,
             expires_at=expires_at,
             file_count=file_count,
@@ -101,8 +100,8 @@ class ArchiveReady:
             truncated=truncated,
         )
 
-        archive_ready.additional_properties = d
-        return archive_ready
+        results_ready.additional_properties = d
+        return results_ready
 
     @property
     def additional_keys(self) -> list[str]:

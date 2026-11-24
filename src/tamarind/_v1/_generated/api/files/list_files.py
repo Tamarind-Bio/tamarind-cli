@@ -139,7 +139,7 @@ def sync_detailed(
 
     Below the root, the listing reads storage directly, so it is current the moment an upload or
     delete finishes, in path order. Each page reads at most 5,000 stored keys, so a sparse filter
-    or a pile of archives can end a page short, or even empty, with a `nextCursor`. The root, listed
+    or a pile of hidden zips can end a page short, or even empty, with a `nextCursor`. The root, listed
     without `recursive`, comes from the file catalog instead: your uploads newest first, then your
     top-level folders by name, reading at most 5,000 catalog rows a page. It follows storage by a
     few seconds. An organization that keeps files in its own bucket is always read from storage.
@@ -147,7 +147,7 @@ def sync_detailed(
     it came from; with others it is 400 `invalid_cursor`.
 
     Hidden files aren't listed or counted, as the app hides them: `.part` files, generated
-    `result-*.zip` archives at the root, zips inside folders, and the top-level `msas-*` and
+    `result-*.zip` files at the root, zips inside folders, and the top-level `msas-*` and
     `.git*` folders. You can still read or delete one by its exact path. Private export caches
     answer 404 and nothing inside one is listed. Where the app lists it, the `_extract_features`
     folder that holds them is listed by name.
@@ -207,7 +207,7 @@ def sync(
 
     Below the root, the listing reads storage directly, so it is current the moment an upload or
     delete finishes, in path order. Each page reads at most 5,000 stored keys, so a sparse filter
-    or a pile of archives can end a page short, or even empty, with a `nextCursor`. The root, listed
+    or a pile of hidden zips can end a page short, or even empty, with a `nextCursor`. The root, listed
     without `recursive`, comes from the file catalog instead: your uploads newest first, then your
     top-level folders by name, reading at most 5,000 catalog rows a page. It follows storage by a
     few seconds. An organization that keeps files in its own bucket is always read from storage.
@@ -215,7 +215,7 @@ def sync(
     it came from; with others it is 400 `invalid_cursor`.
 
     Hidden files aren't listed or counted, as the app hides them: `.part` files, generated
-    `result-*.zip` archives at the root, zips inside folders, and the top-level `msas-*` and
+    `result-*.zip` files at the root, zips inside folders, and the top-level `msas-*` and
     `.git*` folders. You can still read or delete one by its exact path. Private export caches
     answer 404 and nothing inside one is listed. Where the app lists it, the `_extract_features`
     folder that holds them is listed by name.
@@ -270,7 +270,7 @@ async def asyncio_detailed(
 
     Below the root, the listing reads storage directly, so it is current the moment an upload or
     delete finishes, in path order. Each page reads at most 5,000 stored keys, so a sparse filter
-    or a pile of archives can end a page short, or even empty, with a `nextCursor`. The root, listed
+    or a pile of hidden zips can end a page short, or even empty, with a `nextCursor`. The root, listed
     without `recursive`, comes from the file catalog instead: your uploads newest first, then your
     top-level folders by name, reading at most 5,000 catalog rows a page. It follows storage by a
     few seconds. An organization that keeps files in its own bucket is always read from storage.
@@ -278,7 +278,7 @@ async def asyncio_detailed(
     it came from; with others it is 400 `invalid_cursor`.
 
     Hidden files aren't listed or counted, as the app hides them: `.part` files, generated
-    `result-*.zip` archives at the root, zips inside folders, and the top-level `msas-*` and
+    `result-*.zip` files at the root, zips inside folders, and the top-level `msas-*` and
     `.git*` folders. You can still read or delete one by its exact path. Private export caches
     answer 404 and nothing inside one is listed. Where the app lists it, the `_extract_features`
     folder that holds them is listed by name.
@@ -336,7 +336,7 @@ async def asyncio(
 
     Below the root, the listing reads storage directly, so it is current the moment an upload or
     delete finishes, in path order. Each page reads at most 5,000 stored keys, so a sparse filter
-    or a pile of archives can end a page short, or even empty, with a `nextCursor`. The root, listed
+    or a pile of hidden zips can end a page short, or even empty, with a `nextCursor`. The root, listed
     without `recursive`, comes from the file catalog instead: your uploads newest first, then your
     top-level folders by name, reading at most 5,000 catalog rows a page. It follows storage by a
     few seconds. An organization that keeps files in its own bucket is always read from storage.
@@ -344,7 +344,7 @@ async def asyncio(
     it came from; with others it is 400 `invalid_cursor`.
 
     Hidden files aren't listed or counted, as the app hides them: `.part` files, generated
-    `result-*.zip` archives at the root, zips inside folders, and the top-level `msas-*` and
+    `result-*.zip` files at the root, zips inside folders, and the top-level `msas-*` and
     `.git*` folders. You can still read or delete one by its exact path. Private export caches
     answer 404 and nothing inside one is listed. Where the app lists it, the `_extract_features`
     folder that holds them is listed by name.

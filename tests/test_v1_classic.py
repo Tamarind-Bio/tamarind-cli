@@ -667,9 +667,9 @@ def test_results_come_from_the_v1_archive(env, tmp_path, monkeypatch, flag):
     monkeypatch.setattr("tamarind.cli.commands.jobs._download", lambda url, dest: 42)
     FakeClassic.answers["result"] = SIGNED
     env.v1.answers["jobs.list"] = _found()
-    env.v1.answers["jobs.archive"] = {"status": "ready", "downloadUrl": SIGNED}
+    env.v1.answers["jobs.results"] = {"status": "ready", "downloadUrl": SIGNED}
     same_output(env, "--json", "results", "n1", *([flag, str(tmp_path)] if flag == "--download" else [flag]))
-    assert env.v1.calls[-1] == ("jobs.archive", (JOB,), {"body": {}})
+    assert env.v1.calls[-1] == ("jobs.results", (JOB,), {"body": {}})
 
 
 def test_results_file_comes_from_get_job_file(env, tmp_path, monkeypatch):
@@ -686,13 +686,13 @@ def test_results_of_a_members_job_come_from_their_archive(env):
     FakeClassic.answers["jobs"] = {**CLASSIC_ROW, "User": PEER, "statuses": STATUSES_ONE}
     env.v1.answers["jobs.list"] = _found(createdBy=PEER)
     env.v1.answers["jobs.get"] = {**V1_JOB, "createdBy": PEER}
-    env.v1.answers["jobs.archive"] = {"status": "ready", "downloadUrl": SIGNED}
+    env.v1.answers["jobs.results"] = {"status": "ready", "downloadUrl": SIGNED}
     same_output(env, "--json", "results", "n1", "--show-url", "--email", PEER)
     # The owner is read from the job's row, as classic's /result needs it; the lookup is kept.
     assert [c for c in env.v1.calls if c[0] == "jobs.list"] == [
         ("jobs.list", (), {"name": "n1", "scope": "org", "created_by": PEER})
     ]
-    assert env.v1.calls[-1] == ("jobs.archive", (JOB,), {"body": {}})
+    assert env.v1.calls[-1] == ("jobs.results", (JOB,), {"body": {}})
     assert ("POST", "result", {"jobName": "n1", "jobEmail": PEER}) in classic_calls()
 
 
@@ -708,9 +708,9 @@ def test_results_file_of_a_members_job_comes_from_get_job_file(env):
 def test_results_pdbs_only_are_v1s_best_structures(env, kind, item_id):
     FakeClassic.answers["result"] = SIGNED
     env.v1.answers["jobs.list"] = _found(kind, item_id)
-    env.v1.answers["jobs.archive"] = {"status": "ready", "downloadUrl": SIGNED}
+    env.v1.answers["jobs.results"] = {"status": "ready", "downloadUrl": SIGNED}
     same_output(env, "--json", "results", "n1", "--show-url", "--pdbs-only")
-    assert env.v1.calls[-1] == ("jobs.archive", (item_id,), {"body": {"bestStructures": True}})
+    assert env.v1.calls[-1] == ("jobs.results", (item_id,), {"body": {"bestStructures": True}})
 
 
 def test_results_pdbs_only_of_a_job_with_none_reads_as_classic_words_it(env):
@@ -718,7 +718,7 @@ def test_results_pdbs_only_of_a_job_with_none_reads_as_classic_words_it(env):
     env.v1.answers["jobs.list"] = _found()
     refusal = problem(422, "validation_failed")
     refusal.errors = [{"pointer": "/bestStructures", "code": "not_supported", "detail": "no stored zip"}]
-    env.v1.answers["jobs.archive"] = refusal
+    env.v1.answers["jobs.results"] = refusal
     res = same_output(env, "--json", "results", "n1", "--show-url", "--pdbs-only")
     assert isinstance(res.exception, ValidationError) and res.exception.exit_code == 5 and classic.NO_BEST_STRUCTURES in str(res.exception)
 
@@ -728,7 +728,7 @@ def test_results_pdbs_only_waits_for_v1_to_build_a_batchs_zip(env, sleeps):
     env.v1.answers["jobs.list"] = _found("batch", BATCH)
     env.v1.answers["jobs.get"] = {"kind": "batch", "id": BATCH, "status": "Complete"}
     answers = iter([{"status": "preparing", "retryAfterSeconds": 10}, {"status": "ready", "downloadUrl": SIGNED}])
-    env.v1.answers["jobs.archive"] = lambda *a, **k: next(answers)
+    env.v1.answers["jobs.results"] = lambda *a, **k: next(answers)
     out = json.loads(env.run("v1", "--json", "results", "n1", "--show-url", "--pdbs-only").stdout)
     assert out["url"] == SIGNED and sleeps == [10.0]
 
@@ -744,7 +744,7 @@ def test_results_pdbs_only_stops_waiting_for_a_build_after_its_limit(env, monkey
     monkeypatch.setattr(classic.time, "sleep", sleep)
     env.v1.answers["jobs.list"] = _found("batch", BATCH)
     env.v1.answers["jobs.get"] = {"kind": "batch", "id": BATCH, "status": "Complete"}
-    env.v1.answers["jobs.archive"] = {"status": "preparing", "retryAfterSeconds": 10}
+    env.v1.answers["jobs.results"] = {"status": "preparing", "retryAfterSeconds": 10}
     monkeypatch.setattr(classic, "BEST_BUILD_SECONDS", 25.0)
     res = env.run("v1", "--json", "results", "n1", "--show-url", "--pdbs-only")
     assert type(res.exception) is TamarindError and "weren't ready after 25 s" in str(res.exception) and slept == [10.0, 10.0]
@@ -781,7 +781,7 @@ def test_a_runs_file_or_best_structures_is_classics_refusal(env, args, error):
 )
 def test_results_of_an_unfinished_job_read_as_classic_words_them(env, archive, status, message):
     env.v1.answers["jobs.list"] = _found(status=status)
-    env.v1.answers["jobs.archive"] = archive
+    env.v1.answers["jobs.results"] = archive
     env.v1.answers["jobs.get"] = {**V1_JOB, "status": status}
     res = env.run("v1", "--json", "results", "n1", "--show-url")
     assert isinstance(res.exception, ValidationError) and str(res.exception) == message and classic_calls() == []
@@ -791,14 +791,14 @@ RUN = "run_0f8fad5b-d9cb-469f-a165-70867728950e"
 READY = {"status": "ready", "downloadUrl": SIGNED}
 
 
-def test_results_of_a_pipeline_run_come_from_archive_pipeline_run(env):
+def test_results_of_a_pipeline_run_come_from_get_pipeline_run_results(env):
     env.v1.answers["jobs.list"] = _found("pipeline", RUN, status="Complete")
-    env.v1.answers["pipelines.archive_run"] = READY
+    env.v1.answers["pipelines.run_results"] = READY
     res = env.run("v1", "--json", "results", "n1", "--show-url")
     assert res.exit_code == 0, res.output
     assert json.loads(res.stdout)["url"] == SIGNED
-    assert ("pipelines.archive_run", (RUN,), {"body": {}}) in env.v1.calls
-    assert "jobs.archive" not in [c[0] for c in env.v1.calls]
+    assert ("pipelines.run_results", (RUN,), {"body": {}}) in env.v1.calls
+    assert "jobs.results" not in [c[0] for c in env.v1.calls]
 
 
 def _preparing_then_ready(times: int):
@@ -816,7 +816,7 @@ def sleeps(monkeypatch):
 def test_results_wait_asks_again_while_a_complete_batchs_archive_is_preparing(env, sleeps):
     env.v1.answers["jobs.list"] = _found("batch", BATCH, status="Complete")
     env.v1.answers["jobs.get"] = {"kind": "batch", "id": BATCH, "name": "n1", "status": "Complete"}
-    env.v1.answers["jobs.archive"] = _preparing_then_ready(2)
+    env.v1.answers["jobs.results"] = _preparing_then_ready(2)
     res = env.run("v1", "--json", "results", "n1", "--wait", "--poll-interval", "1", "--show-url")
     assert res.exit_code == 0, res.output
     assert json.loads(res.stdout)["url"] == SIGNED and sleeps == [10.0, 10.0]
@@ -825,7 +825,7 @@ def test_results_wait_asks_again_while_a_complete_batchs_archive_is_preparing(en
 def test_results_without_wait_says_the_archive_is_preparing(env, sleeps):
     env.v1.answers["jobs.list"] = _found("batch", BATCH, status="Complete")
     env.v1.answers["jobs.get"] = {"kind": "batch", "id": BATCH, "name": "n1", "status": "Complete"}
-    env.v1.answers["jobs.archive"] = _preparing_then_ready(1)
+    env.v1.answers["jobs.results"] = _preparing_then_ready(1)
     res = env.run("v1", "--json", "results", "n1", "--show-url")
     assert type(res.exception) is TamarindError and "still being prepared" in str(res.exception)
     assert sleeps == []
@@ -834,7 +834,7 @@ def test_results_without_wait_says_the_archive_is_preparing(env, sleeps):
 def test_results_wait_stops_at_its_timeout(env, sleeps):
     env.v1.answers["jobs.list"] = _found("batch", BATCH, status="Complete")
     env.v1.answers["jobs.get"] = {"kind": "batch", "id": BATCH, "name": "n1", "status": "Complete"}
-    env.v1.answers["jobs.archive"] = _preparing_then_ready(5)
+    env.v1.answers["jobs.results"] = _preparing_then_ready(5)
     res = env.run("v1", "--json", "results", "n1", "--wait", "--poll-interval", "1", "--timeout", "5", "--show-url")
     assert isinstance(res.exception, JobTimeoutError) and sleeps == []
 
@@ -844,7 +844,7 @@ def test_results_wait_counts_its_timeout_from_the_commands_start(env, sleeps, mo
     monkeypatch.setattr(classic.time, "monotonic", lambda: next(clock, 12.0))
     env.v1.answers["jobs.list"] = _found("batch", BATCH, status="Complete")
     env.v1.answers["jobs.get"] = {"kind": "batch", "id": BATCH, "name": "n1", "status": "Complete"}
-    env.v1.answers["jobs.archive"] = _preparing_then_ready(1)
+    env.v1.answers["jobs.results"] = _preparing_then_ready(1)
     res = env.run("v1", "--json", "results", "n1", "--wait", "--poll-interval", "1", "--timeout", "15", "--show-url")
     assert isinstance(res.exception, JobTimeoutError) and sleeps == []  # 12 + 10 > 15
 
@@ -866,7 +866,7 @@ def test_results_wait_bounds_each_archive_request_by_what_is_left(env, monkeypat
     seen: list[dict[str, Any]] = []
     env.v1.answers["jobs.list"] = _found()
     env.v1.answers["jobs.get"] = V1_JOB
-    env.v1.answers["jobs.archive"] = lambda *a, **k: (seen.append(made[-1]), READY)[1]
+    env.v1.answers["jobs.results"] = lambda *a, **k: (seen.append(made[-1]), READY)[1]
     res = env.run("v1", "--json", "results", "n1", "--wait", "--poll-interval", "1", "--timeout", "30", "--show-url")
     assert res.exit_code == 0, res.output
     assert seen and seen[0]["max_retries"] == 0 and 0 < seen[0]["timeout"] <= 30
@@ -882,7 +882,7 @@ def _archive_failed(retry_after: str = "90") -> ProblemError:
 def test_results_wait_asks_a_pipeline_run_to_rebuild_its_archive(env, sleeps):
     answers = [_archive_failed(), READY]
 
-    def archive_run(*a, **k):
+    def run_results(*a, **k):
         answer = answers.pop(0)
         if isinstance(answer, Exception):
             raise answer
@@ -890,7 +890,7 @@ def test_results_wait_asks_a_pipeline_run_to_rebuild_its_archive(env, sleeps):
 
     env.v1.answers["jobs.list"] = _found("pipeline", RUN, status="Complete")
     env.v1.answers["jobs.get"] = {"kind": "pipeline", "id": RUN, "name": "n1", "status": "Complete"}
-    env.v1.answers["pipelines.archive_run"] = archive_run
+    env.v1.answers["pipelines.run_results"] = run_results
     res = env.run("v1", "--json", "results", "n1", "--wait", "--poll-interval", "1", "--show-url")
     assert res.exit_code == 0, res.output
     assert json.loads(res.stdout)["url"] == SIGNED and sleeps == [90.0]
@@ -899,7 +899,7 @@ def test_results_wait_asks_a_pipeline_run_to_rebuild_its_archive(env, sleeps):
 def test_results_wait_stops_asking_for_a_rebuild_after_three_tries(env, sleeps):
     env.v1.answers["jobs.list"] = _found("pipeline", RUN, status="Complete")
     env.v1.answers["jobs.get"] = {"kind": "pipeline", "id": RUN, "name": "n1", "status": "Complete"}
-    env.v1.answers["pipelines.archive_run"] = _archive_failed("5")
+    env.v1.answers["pipelines.run_results"] = _archive_failed("5")
     res = env.run("v1", "--json", "results", "n1", "--wait", "--poll-interval", "1", "--show-url")
     assert isinstance(res.exception, ProblemError) and res.exception.code == "archive_failed"
     assert sleeps == [5.0, 5.0, 5.0]
@@ -907,7 +907,7 @@ def test_results_wait_stops_asking_for_a_rebuild_after_three_tries(env, sleeps):
 
 def test_results_without_wait_reports_a_runs_failed_archive(env, sleeps):
     env.v1.answers["jobs.list"] = _found("pipeline", RUN, status="Complete")
-    env.v1.answers["pipelines.archive_run"] = _archive_failed()
+    env.v1.answers["pipelines.run_results"] = _archive_failed()
     res = env.run("v1", "--json", "results", "n1", "--show-url")
     assert isinstance(res.exception, ProblemError) and sleeps == []
 

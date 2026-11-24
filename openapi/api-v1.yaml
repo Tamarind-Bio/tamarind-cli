@@ -42,14 +42,14 @@ info:
       counts) and its service account do. A member's batch (`getJob` of its `batch_` id, and
       `listJobs?batchId=`, with no `scope=org` needed) reads as today's batch read shows it, each
       of its jobs admitted on its own.
-    - A member's job's or batch's files, logs and archive
-      (`listJobFiles`, `getJobFile`, `getJobLogs`, `archiveJob`), follow today's `/result` rule for
+    - A member's job's or batch's files, logs and results zip
+      (`listJobFiles`, `getJobFile`, `getJobLogs`, `getJobResults`), follow today's `/result` rule for
       a key, which is stricter: on a job that records its organization, an admin's key has no admin
       exemption, and access comes from the organization sharing within itself, the job being
       shared with you, a project, or being the service account. A member's batch is read only when
-      that rule admits every job its archive holds, as today's archive check does. Today's API has
+      that rule admits every job its zip holds, as today's zip check does. Today's API has
       no key route that lists a member's files, so `listJobFiles` answers exactly the callers who
-      may download the archive. A check that can't be completed is 503
+      may download the zip. A check that can't be completed is 503
       `jobs_dependency_unavailable`, retryable.
     - `cancelJob` of a job and `updateJob`'s `projectId` (the project edit isn't built yet) open to
       an admin's key and to a key the job is shared with, only in an organization that doesn't share
@@ -88,7 +88,7 @@ info:
     The exceptions are file content and the CSV form of `getUsage` (`Accept: text/csv`). A create
     answers 201 with `Location`. A delete answers 204.
     An operation that hasn't finished its own work when it answers (a batch whose jobs are still
-    being created, an archive still being built) answers 202 with a resource to poll. A job or run
+    being created, a zip still being built) answers 202 with a resource to poll. A job or run
     created with 201 still runs after the answer: poll it for its status. Two carried operations keep
     today's 200 while their work goes on: `commitMoleculeImport` (poll `getMoleculeImport`) and
     `cancelCustomToolBuild` (keep polling the build's version); each says so.
@@ -189,7 +189,7 @@ info:
     **One list for everything you run.** `GET /jobs` lists jobs, batches and pipeline runs, told
     apart by `kind` (`job`, `batch`, `pipeline`). By default it holds what you started, as the
     app's Jobs page does: single jobs, batches and pipeline runs, not the jobs inside a batch or a
-    run (list those with `batchId=` or `pipelineRunId=`). `GET`, `cancel`, `rerun`, `archive`,
+    run (list those with `batchId=` or `pipelineRunId=`). `GET`, `cancel`, `rerun`, `results`,
     `files` and `delete` under `/jobs/{jobId}` take any of the three ids where it makes sense; each
     operation says which. A pipeline run's steps, node runs and molecules stay under
     `/pipelines/runs/{runId}`.
@@ -238,7 +238,7 @@ tags:
 - name: Jobs
   description: Run one tool on one input.
 - name: Job Outputs
-  description: Files, logs and archives a job produced.
+  description: Files, logs and zips a job produced.
 - name: Batches
   description: Run one tool across many independent inputs.
 - name: Files
@@ -1326,7 +1326,7 @@ paths:
     - $ref: '#/components/parameters/TamarindVersion'
     get:
       operationId: listTools
-      x-build: 'merged (website#7530, #7711, #7725, #7796, #7807, #7854); without a key behind the `api-v1-keyless-catalog` launch switch (on in staging, off in prod until launch)'
+      x-build: 'merged (website#7530, #7711, #7725, #7796, #7807, #7854, #7973); without a key behind the `api-v1-keyless-catalog` launch switch (on in staging, off in prod until launch)'
       tags:
       - Tools
       summary: Find tools
@@ -1335,7 +1335,12 @@ paths:
         first. Visibility rules live in this endpoint, not in clients: a tool a flag, a block or
         licensing hides from you isn't listed, and neither is one your submit would be refused (your
         organization's or team's policy, a licence such as Rosetta's, a GPL tool for a pharma
-        organization, or a domain restriction). As today's `GET /api/tools` does, the list also leaves
+        organization, or a domain restriction). One refusal stays listed, as today's `GET /api/tools` lists it: the four Rosetta tools the app shows to everyone
+        and refuses at submit without the Rosetta licence (`rfpeptides`, `idr`, `riffdiff` and
+        `bindome-bindcraft`) are listed for a caller without it, and a submit still refuses them (403
+        `tool_not_available`). Without the licence the eight other Rosetta tools stay hidden, and an
+        organization policy that denies one of the four still hides it. As today's `GET /api/tools`
+        does, the list also leaves
         out a tool with no display name of its own or one hidden from the app's tool pages, though it
         still answers by name on `getTool`, `getToolSchema` and a submit. `view=agent` lists the
         catalog as the Tamarind MCP and agents see it instead (see the parameter).
@@ -1441,7 +1446,7 @@ paths:
     - $ref: '#/components/parameters/TamarindVersion'
     get:
       operationId: getToolFacets
-      x-build: 'merged (website#7630, #7796, #7807, #7854)'
+      x-build: 'merged (website#7630, #7796, #7807, #7854, #7973)'
       tags:
       - Tools
       summary: List the modalities and functions you can filter tools by
@@ -1494,7 +1499,7 @@ paths:
     - $ref: '#/components/parameters/TamarindVersion'
     post:
       operationId: recommendTools
-      x-build: 'merged (website#7630, #7796, #7807, #7854)'
+      x-build: 'merged (website#7630, #7796, #7807, #7854, #7973)'
       tags:
       - Tools
       summary: Recommend tools for a task described in words
@@ -1560,14 +1565,15 @@ paths:
     - $ref: '#/components/parameters/ToolName'
     get:
       operationId: getTool
-      x-build: 'merged (website#7530, #7711, #7796, #7807)'
+      x-build: 'merged (website#7530, #7711, #7796, #7807, #7973)'
       tags:
       - Tools
       summary: Get a tool
       description: A built-in tool as `listTools` shows it to you, including one `listTools` leaves out only as
         today's list does (no display name of its own, or hidden from the app's tool pages). A tool hidden from
         you, or one your submit would be refused, answers exactly as an unknown name does, 404 `tool_not_found`,
-        and so does a custom tool's name (`getToolSchema` takes one).
+        and so does a custom tool's name (`getToolSchema` takes one). The four
+        Rosetta tools `listTools` lists without the Rosetta licence answer here too.
       x-change: new
       x-replaces: []
       x-clients:
@@ -1613,7 +1619,7 @@ paths:
     - $ref: '#/components/parameters/ToolName'
     get:
       operationId: getToolSchema
-      x-build: 'merged (website#7630, #7711, #7796, #7807, #7809)'
+      x-build: 'merged (website#7630, #7711, #7796, #7807, #7809, #7973)'
       tags:
       - Tools
       summary: Get a tool's settings schema and an example
@@ -1623,6 +1629,9 @@ paths:
         one, or `version`), and only when a submit would resolve it for you and you may read it, as
         today's schema route decides. A tool you can't see, a built-in your submit would be refused,
         and a custom tool you can't read all answer as one that doesn't exist, 404 `tool_not_found`.
+        The four Rosetta tools `listTools` lists without the Rosetta
+        licence answer with their schema, as today's schema route serves them; `validateJob` and a
+        submit still refuse them.
         Settings behind a flag that's off for you are left out, and so are settings limited to
         organizations you aren't in and settings that depend on one left out; settings limited to some
         surfaces, or to organizations you're in, are kept and annotated. `outputTypes` and
@@ -1687,7 +1696,7 @@ paths:
     - $ref: '#/components/parameters/TamarindVersion'
     get:
       operationId: listJobs
-      x-build: 'merged (website#7530, #7550, #7558, #7562, #7584, #7640, #7790, #7795, #7852)'
+      x-build: 'merged (website#7530, #7550, #7558, #7562, #7584, #7640, #7790, #7795, #7852, #7975)'
       tags:
       - Jobs
       summary: List your jobs, batches and pipeline runs, newest first
@@ -1774,7 +1783,10 @@ paths:
         description: Exact name of a job, batch or pipeline run (a run by its own name). Returns at most one
           item, the newest match that passes the other filters (every member's match with `allMatches`), and no
           `nextCursor`; a `cursor` with it is 400 `invalid_cursor`. At most 2,048 bytes. It can't be combined with
-          `batchId`, `pipelineRunId`, `batchName` or `includeSubjobs`.
+          `batchId`, `pipelineRunId`, `batchName` or `includeSubjobs`. A job a
+          pipeline run's step launched is found by its name too, yours or a member's with `createdBy`, as today's
+          `jobName=` finds it, though no list shows it (list a run's jobs with `pipelineRunId`). With `scope=org`
+          alone, or `allMatches`, it isn't, since today's organization read doesn't serve one.
         schema:
           type: string
           maxLength: 2048
@@ -2207,7 +2219,7 @@ paths:
     - $ref: '#/components/parameters/TamarindVersion'
     post:
       operationId: searchJobs
-      x-build: 'merged (website#7628, #7711, #7790, #7795)'
+      x-build: 'merged (website#7628, #7711, #7790, #7795, #7975)'
       tags:
       - Jobs
       summary: Look up many jobs by name or id in one call
@@ -2215,7 +2227,9 @@ paths:
         For polling or fetching a set of jobs, batches and pipeline runs. Use this instead of many
         `getJob` calls. Up to 200 `ids` and 200 `names`. An id is looked up as `getJob` looks it up
         (`job_`, `batch_` or `run_`), and a name as `listJobs?name=` does: the newest job, batch or run
-        with that name, jobs inside a batch included. Items come back ids first, then names, each item
+        with that name, jobs inside a batch included, and a job a
+        pipeline run's step launched wherever `listJobs?name=` finds one. Items come back ids first,
+        then names, each item
         once however many values found it. Values with no match are in `notFound`.
 
         With `includeSettings`, a job comes back as `Job`, and the request takes at most 50 distinct
@@ -2639,7 +2653,7 @@ paths:
         for a name only a pipeline run has. It deletes the run's row in the jobs table, the one the
         app's Results list shows, so deleting it again is 404. The run isn't stopped or archived, its
         jobs stay, and `getJob`, `listJobs` and `listPipelineRuns` still show it; the run's own
-        Archive in the app removes it from those. `archivePipelineRun`, which finds the run through
+        Archive in the app removes it from those. `getPipelineRunResults`, which finds the run through
         that row, is 404 from then on. Someone else's run, and a run with no such row, are 404. A
         single-tool run has no such row: it's listed as its job, so delete the `job_` id.
       x-change: reshaped
@@ -2906,49 +2920,51 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
         default:
           $ref: '#/components/responses/Error'
-  /jobs/{jobId}/archive:
+  /jobs/{jobId}/results:
     parameters:
     - $ref: '#/components/parameters/TamarindVersion'
     - $ref: '#/components/parameters/JobId'
     post:
-      operationId: archiveJob
-      x-build: 'merged (website#7629, #7663, #7729, #7795, #7799, #7802, #7805, #7839)'
+      operationId: getJobResults
+      x-build: 'merged (website#7629, #7663, #7729, #7795, #7799, #7802, #7805, #7839); the `/results` path (decision 75) not built yet, so the server answers at `/archive`'
       tags:
       - Job Outputs
       summary: Get a zip of a job's or a batch's outputs
       description: |
-        Takes a `job_` or `batch_` id; a `run_` id is 404 (use `archivePipelineRun`). Serves the
-        stored archive the job's worker wrote, the one today's `POST /result` serves. 200 means ready,
-        with a link that expires in 1 hour, its expiry, the size and the real `fileCount`, read from
-        the zip itself. `truncated` is false, since a stored archive is never cut short. 202 means
+        Takes a `job_` or `batch_` id; a `run_` id is 404 (use `getPipelineRunResults`). Until the
+        rename from `/archive` merges (decision 75, not yet), the server answers at
+        `POST /jobs/{jobId}/archive`. Serves the stored zip the job's worker wrote, the one today's
+        `POST /result` serves. 200 means ready, with a link that expires in 1 hour, its expiry, the
+        size and the real `fileCount`, read from the zip itself. `truncated` is false, since a stored
+        zip is never cut short. 202 means
         still preparing: the job or batch is still running, by the status `getJob` shows (a batch's is
-        its jobs'; a single-tool pipeline run's job is its run's), or a `Complete` batch's archive is
+        its jobs'; a single-tool pipeline run's job is its run's), or a `Complete` batch's zip is
         being rebuilt. Call again after
         `retryAfterSeconds`, which `Retry-After` also carries. 409 `archive_failed` when it ended
-        `Stopped` or `Failed` (only `Complete` work has an archive), when a single job has no stored
-        archive (list its files with `listJobFiles` instead), when a rebuild ended without one, or
+        `Stopped` or `Failed` (only `Complete` work has a zip), when a single job has no stored
+        zip (list its files with `listJobFiles` instead), when a rebuild ended without one, or
         when the stored zip is damaged. If storage fails while the zip is read, the answer is 503
         `jobs_dependency_unavailable`; retry.
 
         `paths` or `glob` (one of them) chooses files: the answer
-        is a zip of just those files of that archive, copied from it as they are. `paths` are paths
-        inside the archive: a job's are the paths `listJobFiles` shows, and a batch's archive holds
+        is a zip of just those files of the whole zip, copied from it as they are. `paths` are paths
+        inside the zip: a job's are the paths `listJobFiles` shows, and a batch's zip holds
         each of its jobs' files under the job's name, plus its combined files. `glob` matches the
-        whole path (`*` spans `/`, case-sensitive). The zip is kept beside the archive, and asking
-        again answers the same one. A path the archive has no file at is 422 `file_not_found` at
+        whole path (`*` spans `/`, case-sensitive). The smaller zip is kept beside the whole one, and asking
+        again answers the same one. A path the zip has no file at is 422 `file_not_found` at
         `/paths/<i>` (each one), and a `glob` that matches nothing is 422 `file_not_found` at
         `/glob`. More than 10,000 files, or a zip of more than 1 GiB, is 422 `out_of_range` at the
         field: nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
-        at `/glob`. A selection of every file answers the whole archive.
+        at `/glob`. A selection of every file answers the whole zip.
 
         `bestStructures: true` answers one best structure per job, as the app's "PDBs only" download
-        does (see `ArchiveRequest`). A job or a design batch (`numDesigns`) without a stored structures
+        does (see `ResultsRequest`). A job or a design batch (`numDesigns`) without a stored structures
         zip is 422 `not_supported`. When a batch submitted as a batch has none, one is built: past an
         8-minute deadline the answer is 503 `jobs_dependency_unavailable` (retryable), a second build
         from your account while one runs is 429 `rate_limited`, and a server already running two is
         503 `service_unavailable`.
 
-        When a batch's archive would be rebuilt, an organization that has lost read access gets 403
+        When a batch's zip would be rebuilt, an organization that has lost read access gets 403
         `organization_export_disabled`. In practice v1 refuses such an organization at authentication
         first, with 403 `organization_read_disabled`.
 
@@ -2959,22 +2975,22 @@ paths:
       x-replaces:
       - POST /result
       x-clients:
-        sdk: jobs.archive
+        sdk: jobs.results
         cli: jobs results
-        mcp: archiveJob
+        mcp: getJobResults
       requestBody:
         required: false
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ArchiveRequest'
+              $ref: '#/components/schemas/ResultsRequest'
       responses:
         '200':
           description: Ready to download.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ArchiveReady'
+                $ref: '#/components/schemas/ResultsReady'
           headers:
             Tamarind-Version:
               $ref: '#/components/headers/TamarindVersion'
@@ -2991,7 +3007,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ArchivePreparing'
+                $ref: '#/components/schemas/ResultsPreparing'
           headers:
             Retry-After:
               $ref: '#/components/headers/RetryAfter'
@@ -3042,7 +3058,7 @@ paths:
         `nextCursor` says there's more.
 
         Another member's job or batch is listed for exactly the callers who may download its
-        archive, under today's `/result` rule for a key (decision 74; today's API has no key route
+        zip, under today's `/result` rule for a key (decision 74; today's API has no key route
         that lists a member's files), a batch only when that rule admits every job in it, and one
         that rule refuses is the same 404.
       x-change: new
@@ -3250,7 +3266,7 @@ paths:
 
         Below the root, the listing reads storage directly, so it is current the moment an upload or
         delete finishes, in path order. Each page reads at most 5,000 stored keys, so a sparse filter
-        or a pile of archives can end a page short, or even empty, with a `nextCursor`. The root, listed
+        or a pile of hidden zips can end a page short, or even empty, with a `nextCursor`. The root, listed
         without `recursive`, comes from the file catalog instead: your uploads newest first, then your
         top-level folders by name, reading at most 5,000 catalog rows a page. It follows storage by a
         few seconds. An organization that keeps files in its own bucket is always read from storage.
@@ -3258,7 +3274,7 @@ paths:
         it came from; with others it is 400 `invalid_cursor`.
 
         Hidden files aren't listed or counted, as the app hides them: `.part` files, generated
-        `result-*.zip` archives at the root, zips inside folders, and the top-level `msas-*` and
+        `result-*.zip` files at the root, zips inside folders, and the top-level `msas-*` and
         `.git*` folders. You can still read or delete one by its exact path. Private export caches
         answer 404 and nothing inside one is listed. Where the app lists it, the `_extract_features`
         folder that holds them is listed by name.
@@ -6197,7 +6213,7 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
         default:
           $ref: '#/components/responses/Error'
-  /pipelines/runs/{runId}/archive:
+  /pipelines/runs/{runId}/results:
     parameters:
     - $ref: '#/components/parameters/TamarindVersion'
     - name: runId
@@ -6206,25 +6222,27 @@ paths:
       schema:
         type: string
     post:
-      operationId: archivePipelineRun
-      x-build: 'merged (website#7634, #7805)'
+      operationId: getPipelineRunResults
+      x-build: 'merged (website#7634, #7805); the `/results` path (decision 75) not built yet, so the server answers at `/archive`'
       tags:
       - Pipelines
       summary: Get a zip of a pipeline run's outputs
       description: |
-        Waits up to 25 seconds for the archive. 200 means ready, with the zip's size and the link's
-        expiry; `fileCount` and `truncated` are null, because nothing records them for a run's zip.
+        Until the rename from `/archive` merges (decision 75, not yet), the server answers at
+        `POST /pipelines/runs/{runId}/archive`. Waits up to 25 seconds for the zip. 200 means ready,
+        with the zip's size and the link's expiry; `fileCount` and `truncated` are null, because
+        nothing records them for a run's zip.
         202 means still preparing, so call again after `retryAfterSeconds` (10, also sent as
         `Retry-After`). It is also 202 while the run (or the node run you named) hasn't finished: the
-        zip is built only once it has. An archive that could not be built is 409 `archive_failed`,
+        zip is built only once it has. A zip that could not be built is 409 `archive_failed`,
         retryable after `Retry-After` (90 seconds), when the results service builds again. An
         organization that has lost read access gets 403 `organization_export_disabled` unless the zip
-        already exists. A suspended or inactive organization still gets its archive.
+        already exists. A suspended or inactive organization still gets its zip.
       x-change: reshaped
       x-replaces:
       - GET /pipelines/runs/results
       x-clients:
-        sdk: pipelines.archiveRun
+        sdk: pipelines.runResults
         cli: pipelines results
         mcp: getPipelineRunResults
       requestBody:
@@ -6235,7 +6253,7 @@ paths:
               type:
               - object
               - 'null'
-              description: Optional; no body, `null` or `{}` archives the whole run.
+              description: Optional; no body, `null` or `{}` is the whole run's zip.
               additionalProperties: false
               properties:
                 nodeRunId:
@@ -6250,7 +6268,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ArchiveReady'
+                $ref: '#/components/schemas/ResultsReady'
           headers:
             Tamarind-Version:
               $ref: '#/components/headers/TamarindVersion'
@@ -6267,7 +6285,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ArchivePreparing'
+                $ref: '#/components/schemas/ResultsPreparing'
           headers:
             Retry-After:
               $ref: '#/components/headers/RetryAfter'
@@ -10961,8 +10979,9 @@ components:
       in: query
       required: false
       description: '`agent` lists the catalog as the Tamarind MCP and agents see it: every tool you can run by name,
-        including the ones the product''s tool list leaves out, less those kept off the API or the assistant, plus a
-        Rosetta tool the app shows to everyone and refuses at submit. Unlike the MCP, a tool your organization''s
+        including the ones the product''s tool list leaves out, less those kept off the API or the assistant; like
+        the API catalog, it lists the four Rosetta tools the app shows to everyone and refuses at submit. Unlike the
+        MCP, a tool your organization''s
         policy denies you, or a GPL tool for a pharma organization, isn''t listed. Leave it out for the API
         catalog. Any other value is 422 `validation_failed`; on `listTools` without a key it is 400.'
       schema:
@@ -11502,7 +11521,7 @@ components:
       - note
       - entry
       type: object
-    ArchivePreparing:
+    ResultsPreparing:
       type: object
       required:
       - status
@@ -11515,7 +11534,7 @@ components:
           type: integer
           description: How long to wait, in seconds, before repeating the request. The `Retry-After` header says
             the same.
-    ArchiveReady:
+    ResultsReady:
       type: object
       required:
       - status
@@ -11543,26 +11562,26 @@ components:
           type:
           - integer
           - 'null'
-          description: How many files the zip holds, from its own directory. A job's or a batch's archive always
-            has it. Null when nothing records it, as for a pipeline run's archive.
+          description: How many files the zip holds, from its own directory. A job's or a batch's zip always
+            has it. Null when nothing records it, as for a pipeline run's zip.
         truncated:
           type:
           - boolean
           - 'null'
-          description: True when the archive hit a size or file-count limit and is missing files. A job's or a
-            batch's archive is the stored one and never cut short, so it is false; the exception is a batch's
+          description: True when the zip hit a size or file-count limit and is missing files. A job's or a
+            batch's zip is the stored one and never cut short, so it is false; the exception is a batch's
             `bestStructures` zip past 500 structures or 2 GiB of them. Null when nothing records it, as for a
-            pipeline run's archive.
-    ArchiveRequest:
+            pipeline run's zip.
+    ResultsRequest:
       type: object
       additionalProperties: false
-      description: Send at most one of `paths`, `glob` and `bestStructures`; send none for the whole archive.
+      description: Send at most one of `paths`, `glob` and `bestStructures`; send none for the whole zip.
       properties:
         paths:
           type: array
           minItems: 1
           maxItems: 10000
-          description: Paths inside the archive. A job's are the paths `listJobFiles` shows; a batch's archive
+          description: Paths inside the zip. A job's are the paths `listJobFiles` shows; a batch's zip
             holds each job's files under the job's name, plus its combined files.
           items:
             type: string
@@ -11573,7 +11592,7 @@ components:
           type: string
           minLength: 1
           maxLength: 1024
-          description: Matches the whole path inside the archive, case-sensitive, with `*` also matching `/`. For
+          description: Matches the whole path inside the zip, case-sensitive, with `*` also matching `/`. For
             example `*.pdb`.
         bestStructures:
           type: boolean

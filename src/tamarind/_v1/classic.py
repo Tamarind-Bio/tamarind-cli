@@ -651,8 +651,8 @@ def _retry_after(exc: Exception, default: float) -> float:
 def _archive(client: Router, item: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
     v1 = client.v1()
     if item.get("kind") == "pipeline":
-        return plain(v1.pipelines.archive_run(item["id"], body={}))
-    return plain(v1.jobs.archive(item["id"], body=request))
+        return plain(v1.pipelines.run_results(item["id"], body={}))
+    return plain(v1.jobs.results(item["id"], body=request))
 
 
 # Classic's 400 for `pdbsOnly` on a job (or a design batch) with no stored `-pdbs.zip`.
@@ -672,12 +672,13 @@ def _no_best_structures(exc: TamarindError) -> bool:
 
 
 def result(client: Router, body: dict[str, Any]) -> str:
-    """POST /result → archiveJob (archivePipelineRun for a run, getJobFile for
+    """POST /result → getJobResults (getPipelineRunResults for a run, getJobFile for
     ``fileName``); classic answers the signed link. v1's archive is the stored
     ``result-<folder>.zip`` classic serves, so the bytes are the same (the link itself is
     v1's, signed for the global endpoint). ``jobEmail`` names the member whose job it is
     (v1 judges their job by classic's results rule), and ``pdbsOnly`` asks for its best
     structures (``bestStructures``): a stored ``-pdbs.zip``, or for a batch one v1 builds.
+    The SDK's ``paths`` or ``glob`` (v1 only) pick files of a job's or a batch's zip.
 
     v1 can call a batch Complete before its archive is built, where classic's wait covers
     the build. So inside ``HTTPClient.results_wait`` (the CLI's ``--wait``) a Complete item
@@ -691,6 +692,9 @@ def result(client: Router, body: dict[str, Any]) -> str:
     if item is None:
         raise NotFoundError(f"Job {name} not found")
     file_name = body.get("fileName")
+    chosen = {key: body[key] for key in ("paths", "glob") if body.get(key) is not None}
+    if item.get("kind") == "pipeline" and chosen:
+        raise ValidationError(f"{name} is a pipeline run; paths and glob take a job or a batch.")
     if item.get("kind") == "pipeline" and (file_name or best):
         # Classic reads a run's jobs row, whose JobStatus is "Wrapper", so it refuses as not
         # complete; output.log skips that check and isn't in the row's folder. v1 has no file
@@ -701,7 +705,7 @@ def result(client: Router, body: dict[str, Any]) -> str:
     if file_name:  # classic reads the file, whatever pdbsOnly says
         link = plain(client.v1().jobs.get_file(item["id"], path=file_name, delivery="url"))
         return str(link.get("url"))
-    request = {"bestStructures": True} if best else {}
+    request = {"bestStructures": True} if best else chosen
     wait, deadline = client.results_deadline
     patient = wait or best
     if best and not wait:
@@ -739,7 +743,7 @@ def result(client: Router, body: dict[str, Any]) -> str:
                 raise ValidationError(NO_BEST_STRUCTURES) from exc
             code = getattr(exc, "code", None)
             if code == "archive_failed" and item.get("kind") == "pipeline" and wait and rebuilds < 3:
-                # archivePipelineRun's archive_failed is retryable: the results service builds
+                # getPipelineRunResults' archive_failed is retryable: the results service builds
                 # the zip of a finished run again after Retry-After (90 s). Asked a few times.
                 with client._bounded(remaining()):
                     current = plain(client.v1().jobs.get(item["id"]))

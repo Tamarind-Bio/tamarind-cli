@@ -137,7 +137,13 @@ def sync_detailed(
     first. Visibility rules live in this endpoint, not in clients: a tool a flag, a block or
     licensing hides from you isn't listed, and neither is one your submit would be refused (your
     organization's or team's policy, a licence such as Rosetta's, a GPL tool for a pharma
-    organization, or a domain restriction). As today's `GET /api/tools` does, the list also leaves
+    organization, or a domain restriction). One refusal stays listed, as today's `GET /api/tools` lists
+    it: the four Rosetta tools the app shows to everyone
+    and refuses at submit without the Rosetta licence (`rfpeptides`, `idr`, `riffdiff` and
+    `bindome-bindcraft`) are listed for a caller without it, and a submit still refuses them (403
+    `tool_not_available`). Without the licence the eight other Rosetta tools stay hidden, and an
+    organization policy that denies one of the four still hides it. As today's `GET /api/tools`
+    does, the list also leaves
     out a tool with no display name of its own or one hidden from the app's tool pages, though it
     still answers by name on `getTool`, `getToolSchema` and a submit. `view=agent` lists the
     catalog as the Tamarind MCP and agents see it instead (see the parameter).
@@ -215,7 +221,13 @@ def sync(
     first. Visibility rules live in this endpoint, not in clients: a tool a flag, a block or
     licensing hides from you isn't listed, and neither is one your submit would be refused (your
     organization's or team's policy, a licence such as Rosetta's, a GPL tool for a pharma
-    organization, or a domain restriction). As today's `GET /api/tools` does, the list also leaves
+    organization, or a domain restriction). One refusal stays listed, as today's `GET /api/tools` lists
+    it: the four Rosetta tools the app shows to everyone
+    and refuses at submit without the Rosetta licence (`rfpeptides`, `idr`, `riffdiff` and
+    `bindome-bindcraft`) are listed for a caller without it, and a submit still refuses them (403
+    `tool_not_available`). Without the licence the eight other Rosetta tools stay hidden, and an
+    organization policy that denies one of the four still hides it. As today's `GET /api/tools`
+    does, the list also leaves
     out a tool with no display name of its own or one hidden from the app's tool pages, though it
     still answers by name on `getTool`, `getToolSchema` and a submit. `view=agent` lists the
     catalog as the Tamarind MCP and agents see it instead (see the parameter).
@@ -288,7 +300,13 @@ async def asyncio_detailed(
     first. Visibility rules live in this endpoint, not in clients: a tool a flag, a block or
     licensing hides from you isn't listed, and neither is one your submit would be refused (your
     organization's or team's policy, a licence such as Rosetta's, a GPL tool for a pharma
-    organization, or a domain restriction). As today's `GET /api/tools` does, the list also leaves
+    organization, or a domain restriction). One refusal stays listed, as today's `GET /api/tools` lists
+    it: the four Rosetta tools the app shows to everyone
+    and refuses at submit without the Rosetta licence (`rfpeptides`, `idr`, `riffdiff` and
+    `bindome-bindcraft`) are listed for a caller without it, and a submit still refuses them (403
+    `tool_not_available`). Without the licence the eight other Rosetta tools stay hidden, and an
+    organization policy that denies one of the four still hides it. As today's `GET /api/tools`
+    does, the list also leaves
     out a tool with no display name of its own or one hidden from the app's tool pages, though it
     still answers by name on `getTool`, `getToolSchema` and a submit. `view=agent` lists the
     catalog as the Tamarind MCP and agents see it instead (see the parameter).
@@ -364,7 +382,13 @@ async def asyncio(
     first. Visibility rules live in this endpoint, not in clients: a tool a flag, a block or
     licensing hides from you isn't listed, and neither is one your submit would be refused (your
     organization's or team's policy, a licence such as Rosetta's, a GPL tool for a pharma
-    organization, or a domain restriction). As today's `GET /api/tools` does, the list also leaves
+    organization, or a domain restriction). One refusal stays listed, as today's `GET /api/tools` lists
+    it: the four Rosetta tools the app shows to everyone
+    and refuses at submit without the Rosetta licence (`rfpeptides`, `idr`, `riffdiff` and
+    `bindome-bindcraft`) are listed for a caller without it, and a submit still refuses them (403
+    `tool_not_available`). Without the licence the eight other Rosetta tools stay hidden, and an
+    organization policy that denies one of the four still hides it. As today's `GET /api/tools`
+    does, the list also leaves
     out a tool with no display name of its own or one hidden from the app's tool pages, though it
     still answers by name on `getTool`, `getToolSchema` and a submit. `view=agent` lists the
     catalog as the Tamarind MCP and agents see it instead (see the parameter).

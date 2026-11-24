@@ -96,7 +96,9 @@ def sync_detailed(
      For polling or fetching a set of jobs, batches and pipeline runs. Use this instead of many
     `getJob` calls. Up to 200 `ids` and 200 `names`. An id is looked up as `getJob` looks it up
     (`job_`, `batch_` or `run_`), and a name as `listJobs?name=` does: the newest job, batch or run
-    with that name, jobs inside a batch included. Items come back ids first, then names, each item
+    with that name, jobs inside a batch included, and a job a
+    pipeline run's step launched wherever `listJobs?name=` finds one. Items come back ids first,
+    then names, each item
     once however many values found it. Values with no match are in `notFound`.
 
     With `includeSettings`, a job comes back as `Job`, and the request takes at most 50 distinct
@@ -145,7 +147,9 @@ def sync(
      For polling or fetching a set of jobs, batches and pipeline runs. Use this instead of many
     `getJob` calls. Up to 200 `ids` and 200 `names`. An id is looked up as `getJob` looks it up
     (`job_`, `batch_` or `run_`), and a name as `listJobs?name=` does: the newest job, batch or run
-    with that name, jobs inside a batch included. Items come back ids first, then names, each item
+    with that name, jobs inside a batch included, and a job a
+    pipeline run's step launched wherever `listJobs?name=` finds one. Items come back ids first,
+    then names, each item
     once however many values found it. Values with no match are in `notFound`.
 
     With `includeSettings`, a job comes back as `Job`, and the request takes at most 50 distinct
@@ -189,7 +193,9 @@ async def asyncio_detailed(
      For polling or fetching a set of jobs, batches and pipeline runs. Use this instead of many
     `getJob` calls. Up to 200 `ids` and 200 `names`. An id is looked up as `getJob` looks it up
     (`job_`, `batch_` or `run_`), and a name as `listJobs?name=` does: the newest job, batch or run
-    with that name, jobs inside a batch included. Items come back ids first, then names, each item
+    with that name, jobs inside a batch included, and a job a
+    pipeline run's step launched wherever `listJobs?name=` finds one. Items come back ids first,
+    then names, each item
     once however many values found it. Values with no match are in `notFound`.
 
     With `includeSettings`, a job comes back as `Job`, and the request takes at most 50 distinct
@@ -236,7 +242,9 @@ async def asyncio(
      For polling or fetching a set of jobs, batches and pipeline runs. Use this instead of many
     `getJob` calls. Up to 200 `ids` and 200 `names`. An id is looked up as `getJob` looks it up
     (`job_`, `batch_` or `run_`), and a name as `listJobs?name=` does: the newest job, batch or run
-    with that name, jobs inside a batch included. Items come back ids first, then names, each item
+    with that name, jobs inside a batch included, and a job a
+    pipeline run's step launched wherever `listJobs?name=` finds one. Items come back ids first,
+    then names, each item
     once however many values found it. Values with no match are in `notFound`.
 
     With `includeSettings`, a job comes back as `Job`, and the request takes at most 50 distinct

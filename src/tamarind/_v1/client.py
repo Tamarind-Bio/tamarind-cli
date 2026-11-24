@@ -76,9 +76,9 @@ from tamarind._v1._generated.api.files import (
 )
 from tamarind._v1._generated.api.identity import get_me
 from tamarind._v1._generated.api.job_outputs import (
-    archive_job,
     get_job_file,
     get_job_logs,
+    get_job_results,
     list_job_files,
 )
 from tamarind._v1._generated.api.jobs import (
@@ -123,13 +123,13 @@ from tamarind._v1._generated.api.organization import (
     list_sub_organizations,
 )
 from tamarind._v1._generated.api.pipelines import (
-    archive_pipeline_run,
     cancel_pipeline_run,
     create_pipeline_template,
     delete_pipeline_template,
     duplicate_pipeline_template,
     estimate_pipeline,
     get_pipeline_run,
+    get_pipeline_run_results,
     get_pipeline_schema,
     get_pipeline_template,
     list_node_run_molecules,
@@ -385,7 +385,7 @@ class Jobs(_Resource):
     delete = Operation(delete_job, "job_id")
     cancel = Operation(cancel_job, "job_id", repeat_safe=True)
     rerun = Operation(rerun_job, "job_id")
-    archive = Operation(archive_job, "job_id", repeat_safe=True)
+    results = Operation(get_job_results, "job_id", repeat_safe=True)
     list_files = Operation(list_job_files, "job_id")
     get_file = Operation(get_job_file, "job_id")
     logs = Operation(get_job_logs, "job_id")
@@ -571,7 +571,7 @@ class Pipelines(_Resource):
     list_runs = Operation(list_pipeline_runs)
     submit = Operation(submit_pipeline)
     get_run = Operation(get_pipeline_run, "run_id")
-    archive_run = Operation(archive_pipeline_run, "run_id", repeat_safe=True)
+    run_results = Operation(get_pipeline_run_results, "run_id", repeat_safe=True)
     cancel_run = Operation(cancel_pipeline_run, "run_id", repeat_safe=True)
     list_node_run_molecules = Operation(list_node_run_molecules, "run_id", "node_run_id")
     schema = Operation(get_pipeline_schema)

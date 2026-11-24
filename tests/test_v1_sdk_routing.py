@@ -13,7 +13,7 @@ from tamarind import Tamarind, rest
 from tamarind._v1.classic import APIProblem, NotFoundProblem, ValidationProblem
 from tamarind._v1.errors import ProblemError
 from tamarind._v1.switch import V1NotEnabledError
-from tamarind.errors import APIError, AuthError, NotFoundError, ValidationError
+from tamarind.errors import APIError, AuthError, NotFoundError, UsageError, ValidationError
 from tamarind.http import HTTPClient
 
 from conftest import turn_v1_on
@@ -110,6 +110,106 @@ def test_v1_only_operations_work_with_v1_on(on):
     assert route.calls[0].request.url.params["limit"] == "10"
 
 
+def _named(kind: str, item_id: str) -> httpx.Response:
+    item = {"id": item_id, "kind": kind, "name": "n1", "status": "Complete", "createdAt": "2026-11-24T00:00:00Z"}
+    return httpx.Response(200, json={"items": [item], "nextCursor": None})
+
+
+@pytest.mark.parametrize("choice", [{"paths": ["out/a.pdb", "out/b.pdb"]}, {"glob": "*.pdb"}])
+@respx.mock
+def test_results_paths_or_glob_choose_the_zips_files_on_v1(on, choice):
+    respx.get(f"{V1}/jobs").mock(return_value=_named("job", JOB))
+    route = respx.post(f"{V1}/jobs/{JOB}/results").mock(
+        return_value=httpx.Response(200, json={"status": "ready", "downloadUrl": "https://s3.test/n1-some.zip"})
+    )
+    with Tamarind(api_key="k", api_base=CLASSIC) as client:
+        assert client.jobs.results("n1", **choice) == "https://s3.test/n1-some.zip"
+    assert json.loads(route.calls[0].request.content) == choice
+
+
+@respx.mock
+def test_results_without_paths_or_glob_asks_for_the_whole_zip(on):
+    respx.get(f"{V1}/jobs").mock(return_value=_named("job", JOB))
+    route = respx.post(f"{V1}/jobs/{JOB}/results").mock(
+        return_value=httpx.Response(200, json={"status": "ready", "downloadUrl": "https://s3.test/n1.zip"})
+    )
+    with Tamarind(api_key="k", api_base=CLASSIC) as client:
+        assert client.jobs.results("n1") == "https://s3.test/n1.zip"
+    assert json.loads(route.calls[0].request.content) == {}
+
+
+@respx.mock
+def test_results_paths_of_a_pipeline_run_are_refused(on):
+    respx.get(f"{V1}/jobs").mock(return_value=_named("pipeline", "run_1"))
+    results = respx.post(url__regex=r".*/results$")
+    with Tamarind(api_key="k", api_base=CLASSIC) as client:
+        with pytest.raises(ValidationError, match="paths and glob take a job or a batch"):
+            client.jobs.results("n1", glob="*.pdb")
+    assert not results.called
+
+
+@pytest.mark.parametrize(
+    "choice, message",
+    [
+        ({"paths": ["a.pdb"], "glob": "*.pdb"}, "not both"),
+        ({"paths": ["a.pdb"], "file_name": "a.pdb"}, "without file_name or pdbs_only"),
+        ({"glob": "*.pdb", "pdbs_only": True}, "without file_name or pdbs_only"),
+    ],
+)
+@respx.mock
+def test_results_paths_and_glob_misused_are_refused_before_any_request(choice, message):
+    everything = respx.route()
+    with Tamarind(api_key="k", api_base=CLASSIC) as client:
+        with pytest.raises(UsageError, match=message):
+            client.jobs.results("n1", **choice)
+    assert not everything.called
+
+
+@respx.mock
+def test_a_runs_results_zip_is_run_results(on):
+    route = respx.post(f"{V1}/pipelines/runs/run_1/results").mock(
+        return_value=httpx.Response(202, json={"status": "preparing"})
+    )
+    with Tamarind(api_key="k", api_base=CLASSIC) as client:
+        assert client.pipelines.run_results("run_1") == {"status": "preparing"}
+    assert route.calls[0].request.content == b""
+
+
+@pytest.mark.parametrize("choice", [{"paths": ["a.pdb"]}, {"glob": "*.pdb"}])
+@respx.mock
+def test_rest_get_result_with_paths_or_glob_needs_v1(choice):
+    everything = respx.route()
+    with HTTPClient(CLASSIC, "k") as client:
+        with pytest.raises(V1NotEnabledError, match="isn't enabled for this account yet"):
+            rest.get_result(client, job_name="n1", **choice)
+    assert not everything.called
+
+
+def test_no_public_results_method_is_named_archive():
+    with Tamarind(api_key="k", api_base=CLASSIC) as client:
+        assert [name for name in dir(client.jobs) + dir(client.pipelines) if "archive" in name] == []
+
+
+def test_every_v1_method_on_todays_resources_is_a_v1_operation():
+    from tamarind import resources
+    from tamarind._v1 import client as v1
+    from tamarind._v1.public import _class, v1_method
+    from tamarind.custom_tools import resources as custom_tools
+    from tamarind.pipelines import resources as pipelines
+
+    methods = [
+        member
+        for module in (resources, custom_tools, pipelines)
+        for owner in vars(module).values()
+        if isinstance(owner, type)
+        for member in vars(owner).values()
+        if isinstance(member, v1_method)
+    ]
+    assert len(methods) > 20
+    for method in methods:
+        assert isinstance(getattr(_class((method._resource,)), method._name, None), v1.Operation), method._name
+
+
 @pytest.mark.parametrize(
     "call",
     [
@@ -123,6 +223,9 @@ def test_v1_only_operations_work_with_v1_on(on):
         lambda c: c.custom_tools.validate_config({}),
         lambda c: c.jobs.list(kind="batch"),
         lambda c: c.jobs.list(status=["Running"]),
+        lambda c: c.jobs.results("n1", paths=["a.pdb"]),
+        lambda c: c.jobs.results("n1", glob="*.pdb", organization=True),
+        lambda c: c.pipelines.run_results("run_1"),
         lambda c: Tamarind.paginate(c.projects.list),
     ],
 )

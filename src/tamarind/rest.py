@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import attribution
-from .errors import APIError
+from .errors import APIError, UsageError
 from .http import HTTPClient
 
 # Query params that the API expects as the literal string "true" rather than a
@@ -158,6 +158,26 @@ def get_jobs(
     return client.get_json("jobs", params=params, timeout=timeout)
 
 
+def check_result_choice(
+    client: HTTPClient,
+    *,
+    file_name: str | None,
+    pdbs_only: bool | None,
+    paths: list[str] | None,
+    glob: str | None,
+) -> None:
+    """``paths`` and ``glob`` are v1's (getJobResults): one or the other, without
+    ``file_name`` or ``pdbs_only``, and only when v1 is on for the key. Checked before
+    anything is sent."""
+    if paths is None and glob is None:
+        return
+    if paths is not None and glob is not None:
+        raise UsageError("Results take paths or glob, not both.")
+    if file_name is not None or pdbs_only:
+        raise UsageError("Results take paths or glob without file_name or pdbs_only.")
+    client.require_v1("A results request with paths or glob")
+
+
 def get_result(
     client: HTTPClient,
     *,
@@ -165,8 +185,13 @@ def get_result(
     job_email: str | None = None,
     file_name: str | None = None,
     pdbs_only: bool | None = None,
+    paths: list[str] | None = None,
+    glob: str | None = None,
 ) -> Any:
-    """POST /result — returns an S3 presigned URL (string) for the result bundle."""
+    """POST /result — returns an S3 presigned URL (string) for the result bundle.
+
+    ``paths`` and ``glob`` are v1's (getJobResults; see :func:`check_result_choice`)."""
+    check_result_choice(client, file_name=file_name, pdbs_only=pdbs_only, paths=paths, glob=glob)
     body: dict[str, Any] = {"jobName": job_name}
     if job_email is not None:
         body["jobEmail"] = job_email
@@ -174,6 +199,10 @@ def get_result(
         body["fileName"] = file_name
     if pdbs_only is not None:
         body["pdbsOnly"] = pdbs_only
+    if paths is not None:
+        body["paths"] = list(paths)
+    if glob is not None:
+        body["glob"] = glob
     return client.post_json("result", json=body)
 
 

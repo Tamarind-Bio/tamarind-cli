@@ -7,12 +7,12 @@ from attrs import define as _attrs_define
 
 from ..types import UNSET, Unset
 
-T = TypeVar("T", bound="ArchivePipelineRunBodyType0")
+T = TypeVar("T", bound="GetPipelineRunResultsBodyType0")
 
 
 @_attrs_define
-class ArchivePipelineRunBodyType0:
-    """Optional; no body, `null` or `{}` archives the whole run.
+class GetPipelineRunResultsBodyType0:
+    """Optional; no body, `null` or `{}` is the whole run's zip.
 
     Attributes:
         node_run_id (None | str | Unset): Only this node run's outputs (the `id` of an entry in the run's `nodeRuns`).
@@ -49,8 +49,8 @@ class ArchivePipelineRunBodyType0:
 
         node_run_id = _parse_node_run_id(d.pop("nodeRunId", UNSET))
 
-        archive_pipeline_run_body_type_0 = cls(
+        get_pipeline_run_results_body_type_0 = cls(
             node_run_id=node_run_id,
         )
 
-        return archive_pipeline_run_body_type_0
+        return get_pipeline_run_results_body_type_0

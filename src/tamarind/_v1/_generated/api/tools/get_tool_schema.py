@@ -106,6 +106,9 @@ def sync_detailed(
     one, or `version`), and only when a submit would resolve it for you and you may read it, as
     today's schema route decides. A tool you can't see, a built-in your submit would be refused,
     and a custom tool you can't read all answer as one that doesn't exist, 404 `tool_not_found`.
+    The four Rosetta tools `listTools` lists without the Rosetta
+    licence answer with their schema, as today's schema route serves them; `validateJob` and a
+    submit still refuse them.
     Settings behind a flag that's off for you are left out, and so are settings limited to
     organizations you aren't in and settings that depend on one left out; settings limited to some
     surfaces, or to organizations you're in, are kept and annotated. `outputTypes` and
@@ -157,6 +160,9 @@ def sync(
     one, or `version`), and only when a submit would resolve it for you and you may read it, as
     today's schema route decides. A tool you can't see, a built-in your submit would be refused,
     and a custom tool you can't read all answer as one that doesn't exist, 404 `tool_not_found`.
+    The four Rosetta tools `listTools` lists without the Rosetta
+    licence answer with their schema, as today's schema route serves them; `validateJob` and a
+    submit still refuse them.
     Settings behind a flag that's off for you are left out, and so are settings limited to
     organizations you aren't in and settings that depend on one left out; settings limited to some
     surfaces, or to organizations you're in, are kept and annotated. `outputTypes` and
@@ -203,6 +209,9 @@ async def asyncio_detailed(
     one, or `version`), and only when a submit would resolve it for you and you may read it, as
     today's schema route decides. A tool you can't see, a built-in your submit would be refused,
     and a custom tool you can't read all answer as one that doesn't exist, 404 `tool_not_found`.
+    The four Rosetta tools `listTools` lists without the Rosetta
+    licence answer with their schema, as today's schema route serves them; `validateJob` and a
+    submit still refuse them.
     Settings behind a flag that's off for you are left out, and so are settings limited to
     organizations you aren't in and settings that depend on one left out; settings limited to some
     surfaces, or to organizations you're in, are kept and annotated. `outputTypes` and
@@ -252,6 +261,9 @@ async def asyncio(
     one, or `version`), and only when a submit would resolve it for you and you may read it, as
     today's schema route decides. A tool you can't see, a built-in your submit would be refused,
     and a custom tool you can't read all answer as one that doesn't exist, 404 `tool_not_found`.
+    The four Rosetta tools `listTools` lists without the Rosetta
+    licence answer with their schema, as today's schema route serves them; `validateJob` and a
+    submit still refuse them.
     Settings behind a flag that's off for you are left out, and so are settings limited to
     organizations you aren't in and settings that depend on one left out; settings limited to some
     surfaces, or to organizations you're in, are kept and annotated. `outputTypes` and

@@ -95,7 +95,8 @@ def sync_detailed(
      A built-in tool as `listTools` shows it to you, including one `listTools` leaves out only as today's
     list does (no display name of its own, or hidden from the app's tool pages). A tool hidden from you,
     or one your submit would be refused, answers exactly as an unknown name does, 404 `tool_not_found`,
-    and so does a custom tool's name (`getToolSchema` takes one).
+    and so does a custom tool's name (`getToolSchema` takes one). The four Rosetta tools `listTools`
+    lists without the Rosetta licence answer here too.
 
     Args:
         tool (str):
@@ -132,7 +133,8 @@ def sync(
      A built-in tool as `listTools` shows it to you, including one `listTools` leaves out only as today's
     list does (no display name of its own, or hidden from the app's tool pages). A tool hidden from you,
     or one your submit would be refused, answers exactly as an unknown name does, 404 `tool_not_found`,
-    and so does a custom tool's name (`getToolSchema` takes one).
+    and so does a custom tool's name (`getToolSchema` takes one). The four Rosetta tools `listTools`
+    lists without the Rosetta licence answer here too.
 
     Args:
         tool (str):
@@ -164,7 +166,8 @@ async def asyncio_detailed(
      A built-in tool as `listTools` shows it to you, including one `listTools` leaves out only as today's
     list does (no display name of its own, or hidden from the app's tool pages). A tool hidden from you,
     or one your submit would be refused, answers exactly as an unknown name does, 404 `tool_not_found`,
-    and so does a custom tool's name (`getToolSchema` takes one).
+    and so does a custom tool's name (`getToolSchema` takes one). The four Rosetta tools `listTools`
+    lists without the Rosetta licence answer here too.
 
     Args:
         tool (str):
@@ -199,7 +202,8 @@ async def asyncio(
      A built-in tool as `listTools` shows it to you, including one `listTools` leaves out only as today's
     list does (no display name of its own, or hidden from the app's tool pages). A tool hidden from you,
     or one your submit would be refused, answers exactly as an unknown name does, 404 `tool_not_found`,
-    and so does a custom tool's name (`getToolSchema` takes one).
+    and so does a custom tool's name (`getToolSchema` takes one). The four Rosetta tools `listTools`
+    lists without the Rosetta licence answer here too.
 
     Args:
         tool (str):

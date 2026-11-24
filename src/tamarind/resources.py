@@ -31,7 +31,6 @@ class Jobs:
     search = v1_method("jobs")
     update = v1_method("jobs")
     rerun = v1_method("jobs")
-    archive = v1_method("jobs")
     list_files = v1_method("jobs")
     get_file = v1_method("jobs")
     logs = v1_method("jobs")
@@ -103,15 +102,24 @@ class Jobs:
     def results(
         self, name: str, *, job_email: str | None = None, file_name: str | None = None,
         pdbs_only: bool | None = None, organization: bool = False,
+        paths: list[str] | None = None, glob: str | None = None,
     ) -> Any:
         """Get a presigned result URL (POST /result).
 
         ``organization`` finds the owner across your org's members first.
+
+        v1 only: ``paths`` (paths inside the results zip) or ``glob`` (``"*.pdb"``, matching
+        the whole path) gets a zip of just those files (getJobResults). Send one or the
+        other, without ``file_name`` or ``pdbs_only``. When v1 isn't on for the key they
+        raise ``V1NotEnabledError`` and send nothing.
         """
+        # Before the owner lookup, so nothing is sent when they're refused.
+        rest.check_result_choice(self._http, file_name=file_name, pdbs_only=pdbs_only, paths=paths, glob=glob)
         if organization and job_email is None:
             job_email = resolve_owner(self._http, name, organization=True)
         return rest.get_result(
             self._http, job_name=name, job_email=job_email, file_name=file_name, pdbs_only=pdbs_only,
+            paths=paths, glob=glob,
         )
 
     def cancel(self, *, name: str | None = None, job_id: str | None = None) -> dict:

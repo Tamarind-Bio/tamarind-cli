@@ -130,7 +130,7 @@ def sync_detailed(
     `nextCursor` says there's more.
 
     Another member's job or batch is listed for exactly the callers who may download its
-    archive, under today's `/result` rule for a key (decision 74; today's API has no key route
+    zip, under today's `/result` rule for a key (decision 74; today's API has no key route
     that lists a member's files), a batch only when that rule admits every job in it, and one
     that rule refuses is the same 404.
 
@@ -189,7 +189,7 @@ def sync(
     `nextCursor` says there's more.
 
     Another member's job or batch is listed for exactly the callers who may download its
-    archive, under today's `/result` rule for a key (decision 74; today's API has no key route
+    zip, under today's `/result` rule for a key (decision 74; today's API has no key route
     that lists a member's files), a batch only when that rule admits every job in it, and one
     that rule refuses is the same 404.
 
@@ -243,7 +243,7 @@ async def asyncio_detailed(
     `nextCursor` says there's more.
 
     Another member's job or batch is listed for exactly the callers who may download its
-    archive, under today's `/result` rule for a key (decision 74; today's API has no key route
+    zip, under today's `/result` rule for a key (decision 74; today's API has no key route
     that lists a member's files), a batch only when that rule admits every job in it, and one
     that rule refuses is the same 404.
 
@@ -300,7 +300,7 @@ async def asyncio(
     `nextCursor` says there's more.
 
     Another member's job or batch is listed for exactly the callers who may download its
-    archive, under today's `/result` rule for a key (decision 74; today's API has no key route
+    zip, under today's `/result` rule for a key (decision 74; today's API has no key route
     that lists a member's files), a batch only when that rule admits every job in it, and one
     that rule refuses is the same 404.
 

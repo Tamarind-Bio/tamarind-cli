@@ -754,12 +754,30 @@ def test_plain_http_storage_only_for_a_local_api() -> None:
                 sdk.files.upload(b"abc", "m.bin", multipart=True)
 
 
+@pytest.mark.parametrize("body", [{}, {"body": None}])
+@pytest.mark.parametrize(
+    "operation, path",
+    [
+        ("pipelines.run_results", "/pipelines/runs/x1/results"),
+        ("pipelines.duplicate_template", "/pipelines/templates/x1/duplicate"),
+        ("pipelines.validate_template", "/pipelines/templates/x1/validate"),
+        ("molecules.commit_import", "/molecules/imports/x1/commit"),
+    ],
+)
+@respx.mock
+def test_a_body_that_may_be_null_can_be_left_out(client: Tamarind, operation: str, path: str, body: dict) -> None:
+    resource, name = operation.split(".")
+    route = respx.post(f"{BASE}{path}").mock(return_value=httpx.Response(200, json={}))
+    getattr(getattr(client, resource), name)("x1", **body)
+    assert route.calls[0].request.content == b""
+
+
 @respx.mock
 def test_archives_repeat_but_lab_estimates_do_not(client: Tamarind) -> None:
-    archive = respx.post(f"{BASE}/jobs/job_1/archive").mock(
+    archive = respx.post(f"{BASE}/jobs/job_1/results").mock(
         side_effect=[httpx.ReadTimeout("lost"), httpx.Response(202, json={"status": "preparing"})]
     )
-    assert client.jobs.archive("job_1") == {"status": "preparing"}
+    assert client.jobs.results("job_1") == {"status": "preparing"}
     assert archive.call_count == 2
     estimate = respx.post(f"{BASE}/assays/estimate").mock(side_effect=httpx.ReadTimeout("lost"))
     with pytest.raises(TamarindError):
