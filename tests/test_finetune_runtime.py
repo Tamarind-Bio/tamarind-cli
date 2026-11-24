@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import tamarind as tm
-from tamarind.finetune import decorators, runtime
+from tamarind.finetune import FinetuneSpecError, decorators, runtime
 
 
 @pytest.fixture(autouse=True)
@@ -535,3 +535,40 @@ def test_a_directory_that_could_not_be_created_is_not_enrolled(
     tm.checkpoint(step=2, metrics={"val/spearman": 0.99})
     monkeypatch.setattr(Path, "mkdir", real_mkdir)
     assert all(path.name != "step-00000002" for path, _ in runtime._managed)
+
+
+# ---- plots ----
+
+
+def test_plots_go_on_the_block() -> None:
+    plots = [
+        {"type": "curve", "metric": "val/spearman"},
+        {"type": "distribution", "metric": "val/spearman"},
+        {"type": "scatter", "metric": "val/spearman", "x": "lr"},
+    ]
+
+    @tm.training_run(hyperparameters={"lr": tm.Float(1e-4)}, plots=plots)
+    def main():
+        return None
+
+    assert decorators.registered("training_run")["block"]["plots"] == plots
+
+
+@pytest.mark.parametrize(
+    ("plots", "message"),
+    [
+        ("curve", "must be a list"),
+        ([{"type": "pie", "metric": "m"}], "type must be one of"),
+        ([{"type": "curve"}], "metric must name"),
+        (
+            [{"type": "scatter", "metric": "m", "x": "nope"}],
+            "x must name one of the hyperparameters",
+        ),
+        ([{"type": "curve", "metric": "m", "x": "lr"}], "only a scatter plot takes an x"),
+        ([{"type": "curve", "metric": "m", "color": "red"}], "unknown keys"),
+        ([{"type": "curve", "metric": "m"}] * 13, "at most 12"),
+    ],
+)
+def test_bad_plots_fail_at_decoration(plots, message) -> None:
+    with pytest.raises(FinetuneSpecError, match=message):
+        tm.training_run(hyperparameters={"lr": tm.Float(1e-4)}, plots=plots)

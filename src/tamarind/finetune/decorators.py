@@ -57,6 +57,7 @@ def training_run(
     hyperparameters: Mapping[str, Any] | None = None,
     objective: Any = None,
     artifact: str | None = None,
+    plots: Any = None,
 ) -> Callable[[F], F]:
     """Mark the function the platform invokes to train.
 
@@ -72,13 +73,17 @@ def training_run(
     chosen values with `tm.hyperparameters()`. `objective` names the metric, and whether higher
     ("max") or lower ("min") is better, that picks which `tm.checkpoint` becomes the model.
     `artifact` is the directory under the run's output registered as the model when the run
-    saved no checkpoints (default "model").
+    saved no checkpoints (default "model"). `plots` are the plots the tool's Runs tab and run
+    page open with (each viewer can change them): ``{"type": "curve", "metric": m}`` (a metric
+    over the run's steps), ``{"type": "distribution", "metric": m}`` (its best-checkpoint values
+    across runs) or ``{"type": "scatter", "metric": m, "x": hyperparameter}``.
     """
     block = _spec.training_run_block(
         timeout_hours=timeout_hours,
         hyperparameters=hyperparameters,
         objective=objective,
         artifact=artifact,
+        plots=plots,
     )
     resources = {
         k: v for k, v in (("gpuType", gpu), ("memory", memory), ("cpu", cpu)) if v is not None
