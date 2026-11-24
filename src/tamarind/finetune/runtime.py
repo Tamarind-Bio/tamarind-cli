@@ -383,10 +383,14 @@ def checkpoint(
                 )
                 target = Path(tempfile.mkdtemp(prefix="checkpoint-", dir=run_dir()))
                 enroll = False
+            elif target.exists() and not any(p == target for p, _ in _managed):
+                # Left by an earlier process (a second local run, a restarted job): saving into it
+                # would mix its files with the new weights, and it is not ours to delete. Use a
+                # fresh directory beside it, which this run owns.
+                target = Path(tempfile.mkdtemp(prefix=f"{target.name}-", dir=_checkpoint_root()))
+                enroll = True
             else:
-                # Only a directory this SDK creates (or created earlier in this run) is ever
-                # deleted: not one left by an earlier process.
-                enroll = not target.exists() or any(p == target for p, _ in _managed)
+                enroll = True
         else:
             target = Path(path)  # type: ignore[arg-type]
             if not target.is_absolute():

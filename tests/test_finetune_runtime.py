@@ -441,7 +441,11 @@ def test_a_directory_left_by_an_earlier_process_is_not_deleted(tmp_path: Path) -
     earlier = tmp_path / "tamarind_run" / "checkpoints" / "step-00000001"
     earlier.mkdir(parents=True)
     (earlier / "w").write_text("x")
-    tm.checkpoint(step=1)  # same name, but this process did not create it
+    fresh = tm.checkpoint(step=1)  # same name, but this process did not create it
+    assert fresh != earlier
+    assert fresh.parent == earlier.parent
+    assert fresh.name.startswith("step-00000001-")
+    assert list(fresh.iterdir()) == []  # nothing of the earlier run's mixed in
     for step in (2, 3, 4):
         _save(step, None)
     assert (earlier / "w").is_file()
