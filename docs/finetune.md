@@ -90,7 +90,9 @@ model.save(tm.checkpoint(step=step, metrics=metrics))
 ```
 
 - Each call returns a new directory, `checkpoints/step-00000412` under the run (`checkpoints/ckpt-0003` without a `step`). Save that checkpoint's weights into it.
-- The SDK keeps two of these directories and deletes the rest as the run goes: the best so far by the `objective`, scored on the `metrics` you passed, and the latest one. With no `objective`, only the latest is kept. The record of every checkpoint stays in `checkpoints.jsonl`.
+- The SDK deletes its earlier checkpoint directories as the run goes, keeping the best so far by the `objective` (scored on the `metrics` you passed), the previous one, and the new one. The previous one stays until the next checkpoint starts, so a save that fails part-way never leaves the run without a complete checkpoint. With no `objective`, the previous and the latest are kept. The record of every checkpoint stays in `checkpoints.jsonl`.
+- The objective comes from `@tm.training_run`, or on the platform from `TAMARIND_OBJECTIVE`, which it sets from the tool's `finetune` block, so a hand-written block works the same.
+- Only directories the SDK created in this run are ever deleted: never a symlink at a checkpoint name, and never one left by an earlier process.
 - When the run ends, the platform registers the best checkpoint as the model. Its `metrics` and `bestStep` are the values logged at that checkpoint's step, so the model is labelled with the numbers of the weights it holds. With no `objective`, or no checkpoint that recorded its metric, the latest checkpoint is the model.
 - A run that saved no checkpoints registers the `artifact` directory (`tm.artifact_dir()`), as before.
 - A `path` you pass (`tm.checkpoint("epoch_3", ...)`) is used as given and never deleted; it is still a candidate for the model.
