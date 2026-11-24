@@ -11,8 +11,8 @@ There is no fallback. What v1 refuses is raised as v1's error, a ``ProblemError`
 that is also the classic error class for its status (``NotFoundError`` for a 404...),
 so existing ``except`` clauses still match. The few requests v1 has no form for yet
 go to classic on purpose (:class:`OnClassic`): the catalog, and an organization's
-read of a name or batch with ``includeSubjobs`` (classic's organization read then
-admits a batch's own jobs; v1 takes ``includeSubjobs`` with neither).
+lookup of a name with ``includeSubjobs`` (classic's organization name read then admits
+a batch's own jobs; v1's ``allMatches`` doesn't take ``includeSubjobs``).
 
 A v1 failure with no answer, a 5xx or a 409 ``idempotency_in_progress`` is raised the
 way the classic client raises one, so callers' "outcome may be ambiguous" handling
@@ -368,12 +368,10 @@ def get_jobs(client: Router, params: dict[str, Any]) -> dict[str, Any]:
     subjobs = bool(params.get("includeSubjobs"))
     if name and filters:
         raise ValidationError(f"{', '.join(filters)} can't be combined with job_name.")
-    if organization and subjobs and (name or batch):
-        # Classic's organization read of a name or batch then admits a batch's own jobs;
-        # v1 takes includeSubjobs with neither. (A name or batch read of your own jobs or
-        # a member's never reads includeSubjobs, so there it is left out.)
-        if filters:
-            raise ValidationError(f"{', '.join(filters)} can't be combined with organization, batch and include_subjobs yet.")
+    if organization and subjobs and name:
+        # Classic's organization name read then admits a batch's own jobs; v1's allMatches
+        # doesn't take includeSubjobs. (A name read of your own jobs or a member's never reads
+        # includeSubjobs, so there it is left out.)
         raise OnClassic
     peer = member is not None or organization
     scope = _member_scope(member) if member is not None else {"scope": "org"} if organization else {}
@@ -390,8 +388,8 @@ def get_jobs(client: Router, params: dict[str, Any]) -> dict[str, Any]:
         if params.get("startKey"):
             query["cursor"] = params["startKey"]
         if batch:
-            query["batch_name"] = batch
-        elif subjobs:
+            query["batch_name"] = batch  # classic's batch read: it reads includeSubjobs only for the organization
+        if subjobs:
             query["include_subjobs"] = True
         page = plain(client.v1().jobs.list(**{k: v for k, v in query.items() if v is not None}))
         rows = [job_row(item, batch_name=batch or _batch_name(client, item), user=peer) for item in page.get("items") or []]
@@ -884,10 +882,11 @@ def job_logs(client: Router, name: str, params: dict[str, Any]) -> dict[str, Any
     known, and the offsets are null.
 
     Classic's access check reads the name as ``GET /jobs?jobName=`` does, which never
-    answers a pipeline run, so a run (or no match) is classic's "not found or you don't
-    have access". A log v1 has nothing of is classic's "No log file found"."""
-    item = client.find(name)
-    if item is None or item.get("kind") == "pipeline":
+    answers a pipeline run: so only a job or batch of that name is read (a newer run of the
+    same name doesn't hide it), and a name only a run has, or none, is classic's "not found
+    or you don't have access". A log v1 has nothing of is classic's "No log file found"."""
+    item = client.find(name, kinds=("job", "batch"))
+    if item is None:
         return {"error": f"Job '{name}' not found or you don't have access to it"}
     chunk = plain(client.v1().jobs.logs(item["id"], max_bytes=LOG_PAGE_BYTES))
     raw = str(chunk.get("content") or "").encode()

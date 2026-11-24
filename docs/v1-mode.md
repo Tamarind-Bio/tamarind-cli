@@ -85,11 +85,11 @@ These have no v1 form yet, so they stay on classic even with v1 on:
   `tamarind.catalog` and `Tamarind().tools.list/schema/modalities/functions/example`.
   Pending: once website#7796 and #7807 land (catalog visibility and fields), they move to
   v1, with v1's schema mapped back to today's parameter list;
-- `jobs --batch B --organization --include-subjobs`, and in the SDK `include_subjobs` with
-  `organization` and `job_name` or `batch`: classic's organization read of a name or a
-  batch then admits a batch's own jobs, and v1 takes `includeSubjobs` with neither. (For
-  your own jobs or one member's, classic's name and batch reads never read
-  `includeSubjobs`, so there it is left out and the read goes to v1.)
+- in the SDK, `include_subjobs` with `organization` and `job_name`: classic's organization
+  name read then admits a batch's own jobs, and v1's `allMatches` doesn't take
+  `includeSubjobs`. (A name read of your own jobs or one member's never reads
+  `includeSubjobs`, so there it is left out and the read goes to v1. With `batch` both are
+  sent: classic's batch read, which v1's `batchName` is, decides.)
 
 ## Differences from classic mode
 
