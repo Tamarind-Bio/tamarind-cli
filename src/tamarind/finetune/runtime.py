@@ -291,21 +291,41 @@ def _inside_root(path: Path) -> bool:
     return path.resolve().parent == root.resolve()
 
 
+def _holds_a_file(path: Path) -> bool:
+    """True when ``path`` is a real directory with at least one regular file under it (no symlinks)."""
+    try:
+        if path.is_symlink() or not path.is_dir():
+            return False
+        for root, dirs, files in os.walk(path):
+            dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(root, d))]
+            for name in files:
+                full = os.path.join(root, name)
+                if not os.path.islink(full) and os.path.isfile(full):
+                    return True
+    except OSError:
+        return False
+    return False
+
+
 def _prune(new: Path, objective: tuple[str, str] | None) -> None:
     """Delete the SDK's own earlier checkpoint directories, keeping three.
 
-    Kept: the best of the earlier checkpoints by the objective (scored on the metrics each one
-    recorded), the previous one, and the new one. The previous one stays because this call runs
+    Kept: the best of the earlier checkpoints that hold a file, by the objective (scored on the
+    metrics each one recorded), the previous such one, and the new one. The previous one stays because this call runs
     BEFORE the script saves into ``new``: if that save fails, the run still has its last complete
     checkpoint. With no objective, no earlier checkpoint is "best". A directory the script named
     itself (``path=``) is never in this list, so never touched. Never raises.
     """
     global _managed
     earlier = [(path, score) for path, score in _managed if path != new]
+    # Only a directory holding a file counts as a checkpoint, as at registration: a save that failed
+    # (and that the script caught) or a directory that was never created must not stand in for the
+    # previous or the best one and push out a directory that holds real weights.
+    complete = [(path, score) for path, score in earlier if _holds_a_file(path)]
     keep = {new}
-    if earlier:
-        keep.add(earlier[-1][0])
-        scored = [(path, score) for path, score in earlier if score is not None]
+    if complete:
+        keep.add(complete[-1][0])
+        scored = [(path, score) for path, score in complete if score is not None]
         if objective is not None and scored:
             pick = min if objective[1] == "min" else max
             keep.add(pick(scored, key=lambda item: item[1])[0])
@@ -396,7 +416,7 @@ def checkpoint(
     if managed and recorded:
         try:
             objective = _objective()
-            if enroll and _inside_root(target):
+            if enroll and target.is_dir() and _inside_root(target):
                 _prune(target, objective)
                 _managed = [(p, sc) for p, sc in _managed if p != target]
                 _managed.append((target, _score(metrics, objective)))

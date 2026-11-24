@@ -494,3 +494,40 @@ def test_an_unrecorded_checkpoint_never_prunes_a_recorded_one(tmp_path: Path) ->
     _save(3, 0.5)
     _save(4, 0.4)
     assert "step-00000001" in _left(tmp_path)
+
+
+def test_a_caught_failed_save_does_not_push_out_the_last_good_checkpoint(tmp_path: Path) -> None:
+    """The script catches a failed save and carries on: the empty directory is neither the
+    previous nor the best checkpoint, so the last one with weights survives."""
+    _declare_objective(None)
+    _save(1, None)
+    tm.checkpoint(step=2)  # model.save() raised; the loop caught it and went on
+    tm.checkpoint(step=3)  # this save fails too
+    assert (tmp_path / "tamarind_run" / "checkpoints" / "step-00000001" / "weights.pt").is_file()
+
+
+def test_an_empty_directory_is_never_the_best(tmp_path: Path) -> None:
+    _declare_objective()
+    _save(1, 0.5)
+    tm.checkpoint(step=2, metrics={"val/spearman": 0.99})  # recorded, never saved into
+    _save(3, 0.4)
+    _save(4, 0.3)
+    assert "step-00000001" in _left(tmp_path)
+
+
+def test_a_directory_that_could_not_be_created_is_not_enrolled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _declare_objective()
+    _save(1, 0.5)
+    real_mkdir = Path.mkdir
+
+    def failing_mkdir(self, *args, **kwargs):
+        if self.name == "step-00000002":
+            raise OSError("no space left on device")
+        return real_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", failing_mkdir)
+    tm.checkpoint(step=2, metrics={"val/spearman": 0.99})
+    monkeypatch.setattr(Path, "mkdir", real_mkdir)
+    assert all(path.name != "step-00000002" for path, _ in runtime._managed)
