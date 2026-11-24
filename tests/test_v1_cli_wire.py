@@ -35,6 +35,8 @@ def wire(monkeypatch, tmp_path):
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
         answer = routes.get((request.method, request.url.path))
+        if callable(answer):
+            answer = answer(request)
         if answer is None:
             return httpx.Response(404, json={"type": "about:blank", "title": "Not Found", "status": 404, "code": "not_found", "detail": "no route", "requestId": "req_1"})
         status, body = answer
@@ -150,3 +152,50 @@ def test_results_pdbs_only_send_best_structures(wire, tmp_path):
     assert res.exit_code == 0, res.output
     assert json.loads(seen[-1].content) == {"bestStructures": True}
     assert json.loads(res.stdout)["url"] == "https://s3.test/n-pdbs.zip"
+
+
+def test_a_batch_and_subjobs_ask_for_classics_reads(wire):
+    seen, routes = wire
+    item = {"kind": "job", "id": "job_00000000-0000-0000-0000-000000000001", "name": "b-1", "status": "Complete"}
+    routes[("GET", "/jobs")] = (200, {"items": [item], "nextCursor": None})
+    for args, expected in (
+        (["jobs", "--batch", "b", "--organization"], {"batchName": "b", "scope": "org"}),
+        (["jobs", "--include-subjobs", "--email", "p@example.com"], {"includeSubjobs": "true", "createdBy": "p@example.com"}),
+    ):
+        res = runner.invoke(app, ["--json", *args])
+        assert res.exit_code == 0, res.output
+        assert {key: seen[-1].url.params.get(key) for key in expected} == expected
+
+
+def test_an_organizations_name_asks_for_all_matches(wire):
+    seen, routes = wire
+    job = "job_00000000-0000-0000-0000-000000000001"
+    routes[("GET", "/jobs")] = (200, {"items": [{"kind": "job", "id": job, "name": "n", "createdBy": "p@example.com"}], "nextCursor": None})
+    routes[("GET", f"/jobs/{job}")] = (200, {"kind": "job", "id": job, "name": "n", "status": "Complete", "createdBy": "p@example.com"})
+    res = runner.invoke(app, ["--json", "status", "n", "--organization"])
+    assert res.exit_code == 0, res.output
+    lookup = seen[0].url.params
+    assert (lookup["name"], lookup["scope"], lookup["allMatches"]) == ("n", "org", "true")
+    assert json.loads(res.stdout)["User"] == "p@example.com"
+
+
+def test_a_batchs_logs_and_a_runs_delete_use_their_ids(wire):
+    seen, routes = wire
+    batch, run = "batch_00000000-0000-0000-0000-000000000001", "run_00000000-0000-0000-0000-000000000001"
+    routes[("GET", "/jobs")] = (200, {"items": [{"kind": "batch", "id": batch, "name": "b"}], "nextCursor": None})
+    routes[("GET", f"/jobs/{batch}/logs")] = (200, {"content": "done\n", "nextCursor": None, "complete": True})
+    res = runner.invoke(app, ["--json", "logs", "b"])
+    assert res.exit_code == 0, res.output
+    assert json.loads(res.stdout)["log"] == "done\n"
+
+    def only_a_run(request: httpx.Request) -> Any:
+        found = [{"kind": "pipeline", "id": run, "name": "r"}] if request.url.params.get("kind") == "pipeline" else []
+        return 200, {"items": found, "nextCursor": None}
+
+    routes[("GET", "/jobs")] = only_a_run
+    routes[("DELETE", f"/jobs/{run}")] = (204, None)
+    seen.clear()
+    res = runner.invoke(app, ["--json", "delete", "r", "--yes"])
+    assert res.exit_code == 0, res.output
+    assert [r.url.params.get("kind") for r in seen if r.method == "GET"] == ["job", "batch", "pipeline"]
+    assert (seen[-1].method, seen[-1].url.path) == ("DELETE", f"/jobs/{run}")
