@@ -31,7 +31,7 @@ class Jobs:
     search = v1_method("jobs")
     update = v1_method("jobs")
     rerun = v1_method("jobs")
-    archive = v1_method("jobs")
+    archive = v1_method("jobs", "results")  # v1's getJobResults; `results` is today's download
     list_files = v1_method("jobs")
     get_file = v1_method("jobs")
     logs = v1_method("jobs")

@@ -5,17 +5,17 @@ from urllib.parse import quote
 import httpx
 
 from ...client import AuthenticatedClient, Client
-from ...models.archive_preparing import ArchivePreparing
-from ...models.archive_ready import ArchiveReady
-from ...models.archive_request import ArchiveRequest
 from ...models.problem import Problem
+from ...models.results_preparing import ResultsPreparing
+from ...models.results_ready import ResultsReady
+from ...models.results_request import ResultsRequest
 from ...types import UNSET, Response, Unset
 
 
 def _get_kwargs(
     job_id: str,
     *,
-    body: ArchiveRequest | Unset = UNSET,
+    body: ResultsRequest | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
@@ -24,7 +24,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/jobs/{job_id}/archive".format(
+        "url": "/jobs/{job_id}/results".format(
             job_id=quote(str(job_id), safe=""),
         ),
     }
@@ -40,14 +40,14 @@ def _get_kwargs(
 
 def _parse_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> ArchivePreparing | ArchiveReady | Problem:
+) -> Problem | ResultsPreparing | ResultsReady:
     if response.status_code == 200:
-        response_200 = ArchiveReady.from_dict(response.json())
+        response_200 = ResultsReady.from_dict(response.json())
 
         return response_200
 
     if response.status_code == 202:
-        response_202 = ArchivePreparing.from_dict(response.json())
+        response_202 = ResultsPreparing.from_dict(response.json())
 
         return response_202
 
@@ -98,7 +98,7 @@ def _parse_response(
 
 def _build_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[ArchivePreparing | ArchiveReady | Problem]:
+) -> Response[Problem | ResultsPreparing | ResultsReady]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -111,43 +111,45 @@ def sync_detailed(
     job_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: ArchiveRequest | Unset = UNSET,
+    body: ResultsRequest | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
-) -> Response[ArchivePreparing | ArchiveReady | Problem]:
+) -> Response[Problem | ResultsPreparing | ResultsReady]:
     r"""Get a zip of a job's or a batch's outputs
 
-     Takes a `job_` or `batch_` id; a `run_` id is 404 (use `archivePipelineRun`). Serves the
-    stored archive the job's worker wrote, the one today's `POST /result` serves. 200 means ready,
-    with a link that expires in 1 hour, its expiry, the size and the real `fileCount`, read from
-    the zip itself. `truncated` is false, since a stored archive is never cut short. 202 means
+     Takes a `job_` or `batch_` id; a `run_` id is 404 (use `getPipelineRunResults`). Until the
+    rename from `/archive` merges (decision 75, not yet), the server answers at
+    `POST /jobs/{jobId}/archive`. Serves the stored zip the job's worker wrote, the one today's
+    `POST /result` serves. 200 means ready, with a link that expires in 1 hour, its expiry, the
+    size and the real `fileCount`, read from the zip itself. `truncated` is false, since a stored
+    zip is never cut short. 202 means
     still preparing: the job or batch is still running, by the status `getJob` shows (a batch's is
-    its jobs'; a single-tool pipeline run's job is its run's), or a `Complete` batch's archive is
+    its jobs'; a single-tool pipeline run's job is its run's), or a `Complete` batch's zip is
     being rebuilt. Call again after
     `retryAfterSeconds`, which `Retry-After` also carries. 409 `archive_failed` when it ended
-    `Stopped` or `Failed` (only `Complete` work has an archive), when a single job has no stored
-    archive (list its files with `listJobFiles` instead), when a rebuild ended without one, or
+    `Stopped` or `Failed` (only `Complete` work has a zip), when a single job has no stored
+    zip (list its files with `listJobFiles` instead), when a rebuild ended without one, or
     when the stored zip is damaged. If storage fails while the zip is read, the answer is 503
     `jobs_dependency_unavailable`; retry.
 
     `paths` or `glob` (one of them) chooses files: the answer
-    is a zip of just those files of that archive, copied from it as they are. `paths` are paths
-    inside the archive: a job's are the paths `listJobFiles` shows, and a batch's archive holds
+    is a zip of just those files of the whole zip, copied from it as they are. `paths` are paths
+    inside the zip: a job's are the paths `listJobFiles` shows, and a batch's zip holds
     each of its jobs' files under the job's name, plus its combined files. `glob` matches the
-    whole path (`*` spans `/`, case-sensitive). The zip is kept beside the archive, and asking
-    again answers the same one. A path the archive has no file at is 422 `file_not_found` at
+    whole path (`*` spans `/`, case-sensitive). The smaller zip is kept beside the whole one, and asking
+    again answers the same one. A path the zip has no file at is 422 `file_not_found` at
     `/paths/<i>` (each one), and a `glob` that matches nothing is 422 `file_not_found` at
     `/glob`. More than 10,000 files, or a zip of more than 1 GiB, is 422 `out_of_range` at the
     field: nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
-    at `/glob`. A selection of every file answers the whole archive.
+    at `/glob`. A selection of every file answers the whole zip.
 
     `bestStructures: true` answers one best structure per job, as the app's \"PDBs only\" download
-    does (see `ArchiveRequest`). A job or a design batch (`numDesigns`) without a stored structures
+    does (see `ResultsRequest`). A job or a design batch (`numDesigns`) without a stored structures
     zip is 422 `not_supported`. When a batch submitted as a batch has none, one is built: past an
     8-minute deadline the answer is 503 `jobs_dependency_unavailable` (retryable), a second build
     from your account while one runs is 429 `rate_limited`, and a server already running two is
     503 `service_unavailable`.
 
-    When a batch's archive would be rebuilt, an organization that has lost read access gets 403
+    When a batch's zip would be rebuilt, an organization that has lost read access gets 403
     `organization_export_disabled`. In practice v1 refuses such an organization at authentication
     first, with 403 `organization_read_disabled`.
 
@@ -158,15 +160,15 @@ def sync_detailed(
     Args:
         job_id (str):
         tamarind_version (str | Unset):
-        body (ArchiveRequest | Unset): Send at most one of `paths`, `glob` and `bestStructures`;
-            send none for the whole archive.
+        body (ResultsRequest | Unset): Send at most one of `paths`, `glob` and `bestStructures`;
+            send none for the whole zip.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ArchivePreparing | ArchiveReady | Problem]
+        Response[Problem | ResultsPreparing | ResultsReady]
     """
 
     kwargs = _get_kwargs(
@@ -186,43 +188,45 @@ def sync(
     job_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: ArchiveRequest | Unset = UNSET,
+    body: ResultsRequest | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
-) -> ArchivePreparing | ArchiveReady | Problem | None:
+) -> Problem | ResultsPreparing | ResultsReady | None:
     r"""Get a zip of a job's or a batch's outputs
 
-     Takes a `job_` or `batch_` id; a `run_` id is 404 (use `archivePipelineRun`). Serves the
-    stored archive the job's worker wrote, the one today's `POST /result` serves. 200 means ready,
-    with a link that expires in 1 hour, its expiry, the size and the real `fileCount`, read from
-    the zip itself. `truncated` is false, since a stored archive is never cut short. 202 means
+     Takes a `job_` or `batch_` id; a `run_` id is 404 (use `getPipelineRunResults`). Until the
+    rename from `/archive` merges (decision 75, not yet), the server answers at
+    `POST /jobs/{jobId}/archive`. Serves the stored zip the job's worker wrote, the one today's
+    `POST /result` serves. 200 means ready, with a link that expires in 1 hour, its expiry, the
+    size and the real `fileCount`, read from the zip itself. `truncated` is false, since a stored
+    zip is never cut short. 202 means
     still preparing: the job or batch is still running, by the status `getJob` shows (a batch's is
-    its jobs'; a single-tool pipeline run's job is its run's), or a `Complete` batch's archive is
+    its jobs'; a single-tool pipeline run's job is its run's), or a `Complete` batch's zip is
     being rebuilt. Call again after
     `retryAfterSeconds`, which `Retry-After` also carries. 409 `archive_failed` when it ended
-    `Stopped` or `Failed` (only `Complete` work has an archive), when a single job has no stored
-    archive (list its files with `listJobFiles` instead), when a rebuild ended without one, or
+    `Stopped` or `Failed` (only `Complete` work has a zip), when a single job has no stored
+    zip (list its files with `listJobFiles` instead), when a rebuild ended without one, or
     when the stored zip is damaged. If storage fails while the zip is read, the answer is 503
     `jobs_dependency_unavailable`; retry.
 
     `paths` or `glob` (one of them) chooses files: the answer
-    is a zip of just those files of that archive, copied from it as they are. `paths` are paths
-    inside the archive: a job's are the paths `listJobFiles` shows, and a batch's archive holds
+    is a zip of just those files of the whole zip, copied from it as they are. `paths` are paths
+    inside the zip: a job's are the paths `listJobFiles` shows, and a batch's zip holds
     each of its jobs' files under the job's name, plus its combined files. `glob` matches the
-    whole path (`*` spans `/`, case-sensitive). The zip is kept beside the archive, and asking
-    again answers the same one. A path the archive has no file at is 422 `file_not_found` at
+    whole path (`*` spans `/`, case-sensitive). The smaller zip is kept beside the whole one, and asking
+    again answers the same one. A path the zip has no file at is 422 `file_not_found` at
     `/paths/<i>` (each one), and a `glob` that matches nothing is 422 `file_not_found` at
     `/glob`. More than 10,000 files, or a zip of more than 1 GiB, is 422 `out_of_range` at the
     field: nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
-    at `/glob`. A selection of every file answers the whole archive.
+    at `/glob`. A selection of every file answers the whole zip.
 
     `bestStructures: true` answers one best structure per job, as the app's \"PDBs only\" download
-    does (see `ArchiveRequest`). A job or a design batch (`numDesigns`) without a stored structures
+    does (see `ResultsRequest`). A job or a design batch (`numDesigns`) without a stored structures
     zip is 422 `not_supported`. When a batch submitted as a batch has none, one is built: past an
     8-minute deadline the answer is 503 `jobs_dependency_unavailable` (retryable), a second build
     from your account while one runs is 429 `rate_limited`, and a server already running two is
     503 `service_unavailable`.
 
-    When a batch's archive would be rebuilt, an organization that has lost read access gets 403
+    When a batch's zip would be rebuilt, an organization that has lost read access gets 403
     `organization_export_disabled`. In practice v1 refuses such an organization at authentication
     first, with 403 `organization_read_disabled`.
 
@@ -233,15 +237,15 @@ def sync(
     Args:
         job_id (str):
         tamarind_version (str | Unset):
-        body (ArchiveRequest | Unset): Send at most one of `paths`, `glob` and `bestStructures`;
-            send none for the whole archive.
+        body (ResultsRequest | Unset): Send at most one of `paths`, `glob` and `bestStructures`;
+            send none for the whole zip.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ArchivePreparing | ArchiveReady | Problem
+        Problem | ResultsPreparing | ResultsReady
     """
 
     return sync_detailed(
@@ -256,43 +260,45 @@ async def asyncio_detailed(
     job_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: ArchiveRequest | Unset = UNSET,
+    body: ResultsRequest | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
-) -> Response[ArchivePreparing | ArchiveReady | Problem]:
+) -> Response[Problem | ResultsPreparing | ResultsReady]:
     r"""Get a zip of a job's or a batch's outputs
 
-     Takes a `job_` or `batch_` id; a `run_` id is 404 (use `archivePipelineRun`). Serves the
-    stored archive the job's worker wrote, the one today's `POST /result` serves. 200 means ready,
-    with a link that expires in 1 hour, its expiry, the size and the real `fileCount`, read from
-    the zip itself. `truncated` is false, since a stored archive is never cut short. 202 means
+     Takes a `job_` or `batch_` id; a `run_` id is 404 (use `getPipelineRunResults`). Until the
+    rename from `/archive` merges (decision 75, not yet), the server answers at
+    `POST /jobs/{jobId}/archive`. Serves the stored zip the job's worker wrote, the one today's
+    `POST /result` serves. 200 means ready, with a link that expires in 1 hour, its expiry, the
+    size and the real `fileCount`, read from the zip itself. `truncated` is false, since a stored
+    zip is never cut short. 202 means
     still preparing: the job or batch is still running, by the status `getJob` shows (a batch's is
-    its jobs'; a single-tool pipeline run's job is its run's), or a `Complete` batch's archive is
+    its jobs'; a single-tool pipeline run's job is its run's), or a `Complete` batch's zip is
     being rebuilt. Call again after
     `retryAfterSeconds`, which `Retry-After` also carries. 409 `archive_failed` when it ended
-    `Stopped` or `Failed` (only `Complete` work has an archive), when a single job has no stored
-    archive (list its files with `listJobFiles` instead), when a rebuild ended without one, or
+    `Stopped` or `Failed` (only `Complete` work has a zip), when a single job has no stored
+    zip (list its files with `listJobFiles` instead), when a rebuild ended without one, or
     when the stored zip is damaged. If storage fails while the zip is read, the answer is 503
     `jobs_dependency_unavailable`; retry.
 
     `paths` or `glob` (one of them) chooses files: the answer
-    is a zip of just those files of that archive, copied from it as they are. `paths` are paths
-    inside the archive: a job's are the paths `listJobFiles` shows, and a batch's archive holds
+    is a zip of just those files of the whole zip, copied from it as they are. `paths` are paths
+    inside the zip: a job's are the paths `listJobFiles` shows, and a batch's zip holds
     each of its jobs' files under the job's name, plus its combined files. `glob` matches the
-    whole path (`*` spans `/`, case-sensitive). The zip is kept beside the archive, and asking
-    again answers the same one. A path the archive has no file at is 422 `file_not_found` at
+    whole path (`*` spans `/`, case-sensitive). The smaller zip is kept beside the whole one, and asking
+    again answers the same one. A path the zip has no file at is 422 `file_not_found` at
     `/paths/<i>` (each one), and a `glob` that matches nothing is 422 `file_not_found` at
     `/glob`. More than 10,000 files, or a zip of more than 1 GiB, is 422 `out_of_range` at the
     field: nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
-    at `/glob`. A selection of every file answers the whole archive.
+    at `/glob`. A selection of every file answers the whole zip.
 
     `bestStructures: true` answers one best structure per job, as the app's \"PDBs only\" download
-    does (see `ArchiveRequest`). A job or a design batch (`numDesigns`) without a stored structures
+    does (see `ResultsRequest`). A job or a design batch (`numDesigns`) without a stored structures
     zip is 422 `not_supported`. When a batch submitted as a batch has none, one is built: past an
     8-minute deadline the answer is 503 `jobs_dependency_unavailable` (retryable), a second build
     from your account while one runs is 429 `rate_limited`, and a server already running two is
     503 `service_unavailable`.
 
-    When a batch's archive would be rebuilt, an organization that has lost read access gets 403
+    When a batch's zip would be rebuilt, an organization that has lost read access gets 403
     `organization_export_disabled`. In practice v1 refuses such an organization at authentication
     first, with 403 `organization_read_disabled`.
 
@@ -303,15 +309,15 @@ async def asyncio_detailed(
     Args:
         job_id (str):
         tamarind_version (str | Unset):
-        body (ArchiveRequest | Unset): Send at most one of `paths`, `glob` and `bestStructures`;
-            send none for the whole archive.
+        body (ResultsRequest | Unset): Send at most one of `paths`, `glob` and `bestStructures`;
+            send none for the whole zip.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ArchivePreparing | ArchiveReady | Problem]
+        Response[Problem | ResultsPreparing | ResultsReady]
     """
 
     kwargs = _get_kwargs(
@@ -329,43 +335,45 @@ async def asyncio(
     job_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: ArchiveRequest | Unset = UNSET,
+    body: ResultsRequest | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
-) -> ArchivePreparing | ArchiveReady | Problem | None:
+) -> Problem | ResultsPreparing | ResultsReady | None:
     r"""Get a zip of a job's or a batch's outputs
 
-     Takes a `job_` or `batch_` id; a `run_` id is 404 (use `archivePipelineRun`). Serves the
-    stored archive the job's worker wrote, the one today's `POST /result` serves. 200 means ready,
-    with a link that expires in 1 hour, its expiry, the size and the real `fileCount`, read from
-    the zip itself. `truncated` is false, since a stored archive is never cut short. 202 means
+     Takes a `job_` or `batch_` id; a `run_` id is 404 (use `getPipelineRunResults`). Until the
+    rename from `/archive` merges (decision 75, not yet), the server answers at
+    `POST /jobs/{jobId}/archive`. Serves the stored zip the job's worker wrote, the one today's
+    `POST /result` serves. 200 means ready, with a link that expires in 1 hour, its expiry, the
+    size and the real `fileCount`, read from the zip itself. `truncated` is false, since a stored
+    zip is never cut short. 202 means
     still preparing: the job or batch is still running, by the status `getJob` shows (a batch's is
-    its jobs'; a single-tool pipeline run's job is its run's), or a `Complete` batch's archive is
+    its jobs'; a single-tool pipeline run's job is its run's), or a `Complete` batch's zip is
     being rebuilt. Call again after
     `retryAfterSeconds`, which `Retry-After` also carries. 409 `archive_failed` when it ended
-    `Stopped` or `Failed` (only `Complete` work has an archive), when a single job has no stored
-    archive (list its files with `listJobFiles` instead), when a rebuild ended without one, or
+    `Stopped` or `Failed` (only `Complete` work has a zip), when a single job has no stored
+    zip (list its files with `listJobFiles` instead), when a rebuild ended without one, or
     when the stored zip is damaged. If storage fails while the zip is read, the answer is 503
     `jobs_dependency_unavailable`; retry.
 
     `paths` or `glob` (one of them) chooses files: the answer
-    is a zip of just those files of that archive, copied from it as they are. `paths` are paths
-    inside the archive: a job's are the paths `listJobFiles` shows, and a batch's archive holds
+    is a zip of just those files of the whole zip, copied from it as they are. `paths` are paths
+    inside the zip: a job's are the paths `listJobFiles` shows, and a batch's zip holds
     each of its jobs' files under the job's name, plus its combined files. `glob` matches the
-    whole path (`*` spans `/`, case-sensitive). The zip is kept beside the archive, and asking
-    again answers the same one. A path the archive has no file at is 422 `file_not_found` at
+    whole path (`*` spans `/`, case-sensitive). The smaller zip is kept beside the whole one, and asking
+    again answers the same one. A path the zip has no file at is 422 `file_not_found` at
     `/paths/<i>` (each one), and a `glob` that matches nothing is 422 `file_not_found` at
     `/glob`. More than 10,000 files, or a zip of more than 1 GiB, is 422 `out_of_range` at the
     field: nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
-    at `/glob`. A selection of every file answers the whole archive.
+    at `/glob`. A selection of every file answers the whole zip.
 
     `bestStructures: true` answers one best structure per job, as the app's \"PDBs only\" download
-    does (see `ArchiveRequest`). A job or a design batch (`numDesigns`) without a stored structures
+    does (see `ResultsRequest`). A job or a design batch (`numDesigns`) without a stored structures
     zip is 422 `not_supported`. When a batch submitted as a batch has none, one is built: past an
     8-minute deadline the answer is 503 `jobs_dependency_unavailable` (retryable), a second build
     from your account while one runs is 429 `rate_limited`, and a server already running two is
     503 `service_unavailable`.
 
-    When a batch's archive would be rebuilt, an organization that has lost read access gets 403
+    When a batch's zip would be rebuilt, an organization that has lost read access gets 403
     `organization_export_disabled`. In practice v1 refuses such an organization at authentication
     first, with 403 `organization_read_disabled`.
 
@@ -376,15 +384,15 @@ async def asyncio(
     Args:
         job_id (str):
         tamarind_version (str | Unset):
-        body (ArchiveRequest | Unset): Send at most one of `paths`, `glob` and `bestStructures`;
-            send none for the whole archive.
+        body (ResultsRequest | Unset): Send at most one of `paths`, `glob` and `bestStructures`;
+            send none for the whole zip.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ArchivePreparing | ArchiveReady | Problem
+        Problem | ResultsPreparing | ResultsReady
     """
 
     return (

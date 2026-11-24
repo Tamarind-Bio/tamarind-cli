@@ -110,6 +110,37 @@ def test_v1_only_operations_work_with_v1_on(on):
     assert route.calls[0].request.url.params["limit"] == "10"
 
 
+@respx.mock
+def test_the_results_zips_keep_their_names_and_ask_v1s_results_routes(on):
+    preparing = httpx.Response(202, json={"status": "preparing"})
+    job = respx.post(f"{V1}/jobs/{JOB}/results").mock(return_value=preparing)
+    run = respx.post(f"{V1}/pipelines/runs/run_1/results").mock(return_value=preparing)
+    with Tamarind(api_key="k", api_base=CLASSIC) as client:
+        assert client.jobs.archive(JOB) == {"status": "preparing"}
+        assert client.pipelines.archive_run("run_1", body={}) == {"status": "preparing"}
+    assert job.called and run.called
+
+
+def test_every_v1_method_on_todays_resources_is_a_v1_operation():
+    from tamarind import resources
+    from tamarind._v1 import client as v1
+    from tamarind._v1.public import _class, v1_method
+    from tamarind.custom_tools import resources as custom_tools
+    from tamarind.pipelines import resources as pipelines
+
+    methods = [
+        member
+        for module in (resources, custom_tools, pipelines)
+        for owner in vars(module).values()
+        if isinstance(owner, type)
+        for member in vars(owner).values()
+        if isinstance(member, v1_method)
+    ]
+    assert len(methods) > 20
+    for method in methods:
+        assert isinstance(getattr(_class((method._resource,)), method._name, None), v1.Operation), method._name
+
+
 @pytest.mark.parametrize(
     "call",
     [

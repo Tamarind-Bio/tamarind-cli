@@ -7,12 +7,12 @@ from attrs import define as _attrs_define
 
 from ..types import UNSET, Unset
 
-T = TypeVar("T", bound="ArchiveRequest")
+T = TypeVar("T", bound="ResultsRequest")
 
 
 @_attrs_define
-class ArchiveRequest:
-    """Send at most one of `paths`, `glob` and `bestStructures`; send none for the whole archive.
+class ResultsRequest:
+    """Send at most one of `paths`, `glob` and `bestStructures`; send none for the whole zip.
 
     Attributes:
         best_structures (bool | Unset): One best structure per job, as the app's "PDBs only" download gives. A job's or
@@ -23,10 +23,10 @@ class ArchiveRequest:
             `rate_limited`) and two per server (past that, 503 `service_unavailable`). A job or a design batch
             (`numDesigns`) without one is 422 `not_supported`. With `paths` or `glob` it is 422 `conditional_not_met` at
             `/bestStructures`.
-        glob (str | Unset): Matches the whole path inside the archive, case-sensitive, with `*` also matching `/`. For
+        glob (str | Unset): Matches the whole path inside the zip, case-sensitive, with `*` also matching `/`. For
             example `*.pdb`.
-        paths (list[str] | Unset): Paths inside the archive. A job's are the paths `listJobFiles` shows; a batch's
-            archive holds each job's files under the job's name, plus its combined files.
+        paths (list[str] | Unset): Paths inside the zip. A job's are the paths `listJobFiles` shows; a batch's zip holds
+            each job's files under the job's name, plus its combined files.
     """
 
     best_structures: bool | Unset = UNSET
@@ -63,10 +63,10 @@ class ArchiveRequest:
 
         paths = cast(list[str], d.pop("paths", UNSET))
 
-        archive_request = cls(
+        results_request = cls(
             best_structures=best_structures,
             glob=glob,
             paths=paths,
         )
 
-        return archive_request
+        return results_request

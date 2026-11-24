@@ -756,10 +756,10 @@ def test_plain_http_storage_only_for_a_local_api() -> None:
 
 @respx.mock
 def test_archives_repeat_but_lab_estimates_do_not(client: Tamarind) -> None:
-    archive = respx.post(f"{BASE}/jobs/job_1/archive").mock(
+    archive = respx.post(f"{BASE}/jobs/job_1/results").mock(
         side_effect=[httpx.ReadTimeout("lost"), httpx.Response(202, json={"status": "preparing"})]
     )
-    assert client.jobs.archive("job_1") == {"status": "preparing"}
+    assert client.jobs.results("job_1") == {"status": "preparing"}
     assert archive.call_count == 2
     estimate = respx.post(f"{BASE}/assays/estimate").mock(side_effect=httpx.ReadTimeout("lost"))
     with pytest.raises(TamarindError):

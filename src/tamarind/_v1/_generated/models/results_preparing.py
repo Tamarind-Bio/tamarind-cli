@@ -6,11 +6,11 @@ from typing import Any, Literal, TypeVar, cast
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
-T = TypeVar("T", bound="ArchivePreparing")
+T = TypeVar("T", bound="ResultsPreparing")
 
 
 @_attrs_define
-class ArchivePreparing:
+class ResultsPreparing:
     """
     Attributes:
         retry_after_seconds (int): How long to wait, in seconds, before repeating the request. The `Retry-After` header
@@ -47,13 +47,13 @@ class ArchivePreparing:
         if status != "preparing":
             raise ValueError(f"status must match const 'preparing', got '{status}'")
 
-        archive_preparing = cls(
+        results_preparing = cls(
             retry_after_seconds=retry_after_seconds,
             status=status,
         )
 
-        archive_preparing.additional_properties = d
-        return archive_preparing
+        results_preparing.additional_properties = d
+        return results_preparing
 
     @property
     def additional_keys(self) -> list[str]:

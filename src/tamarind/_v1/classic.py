@@ -651,8 +651,8 @@ def _retry_after(exc: Exception, default: float) -> float:
 def _archive(client: Router, item: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
     v1 = client.v1()
     if item.get("kind") == "pipeline":
-        return plain(v1.pipelines.archive_run(item["id"], body={}))
-    return plain(v1.jobs.archive(item["id"], body=request))
+        return plain(v1.pipelines.run_results(item["id"], body={}))
+    return plain(v1.jobs.results(item["id"], body=request))
 
 
 # Classic's 400 for `pdbsOnly` on a job (or a design batch) with no stored `-pdbs.zip`.
@@ -672,7 +672,7 @@ def _no_best_structures(exc: TamarindError) -> bool:
 
 
 def result(client: Router, body: dict[str, Any]) -> str:
-    """POST /result → archiveJob (archivePipelineRun for a run, getJobFile for
+    """POST /result → getJobResults (getPipelineRunResults for a run, getJobFile for
     ``fileName``); classic answers the signed link. v1's archive is the stored
     ``result-<folder>.zip`` classic serves, so the bytes are the same (the link itself is
     v1's, signed for the global endpoint). ``jobEmail`` names the member whose job it is
@@ -739,7 +739,7 @@ def result(client: Router, body: dict[str, Any]) -> str:
                 raise ValidationError(NO_BEST_STRUCTURES) from exc
             code = getattr(exc, "code", None)
             if code == "archive_failed" and item.get("kind") == "pipeline" and wait and rebuilds < 3:
-                # archivePipelineRun's archive_failed is retryable: the results service builds
+                # getPipelineRunResults' archive_failed is retryable: the results service builds
                 # the zip of a finished run again after Retry-After (90 s). Asked a few times.
                 with client._bounded(remaining()):
                     current = plain(client.v1().jobs.get(item["id"]))

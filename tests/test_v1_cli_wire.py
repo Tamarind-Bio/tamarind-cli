@@ -147,7 +147,7 @@ def test_results_pdbs_only_send_best_structures(wire, tmp_path):
     seen, routes = wire
     job = "job_00000000-0000-0000-0000-000000000001"
     routes[("GET", "/jobs")] = (200, {"items": [{"kind": "job", "id": job, "name": "n", "status": "Complete"}], "nextCursor": None})
-    routes[("POST", f"/jobs/{job}/archive")] = (200, {"status": "ready", "downloadUrl": "https://s3.test/n-pdbs.zip"})
+    routes[("POST", f"/jobs/{job}/results")] = (200, {"status": "ready", "downloadUrl": "https://s3.test/n-pdbs.zip"})
     res = runner.invoke(app, ["--json", "results", "n", "--show-url", "--pdbs-only"])
     assert res.exit_code == 0, res.output
     assert json.loads(seen[-1].content) == {"bestStructures": True}

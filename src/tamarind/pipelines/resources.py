@@ -82,7 +82,7 @@ class Pipelines:
     estimate = v1_method("pipelines")
     list_runs = v1_method("pipelines")
     submit = v1_method("pipelines")
-    archive_run = v1_method("pipelines")
+    archive_run = v1_method("pipelines", "run_results")  # v1's getPipelineRunResults
     cancel_run = v1_method("pipelines")
     list_node_run_molecules = v1_method("pipelines")
     schema = v1_method("pipelines")

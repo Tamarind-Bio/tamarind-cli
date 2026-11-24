@@ -39,8 +39,8 @@ enabled for this account yet" (exit 2) and send nothing.
 | `validate`, the check `submit` makes first, `batch --prevalidate` | validateJob |
 | `submit`, `batch` | submitJob |
 | `cancel`, `cancel --batch` | cancelJob |
-| `results` (download, `--show-url`, `--file`) | archiveJob (archivePipelineRun for a run), getJobFile |
-| `results --pdbs-only` | archiveJob with `bestStructures` |
+| `results` (download, `--show-url`, `--file`) | getJobResults (getPipelineRunResults for a run), getJobFile |
+| `results --pdbs-only` | getJobResults with `bestStructures` |
 | `delete` | deleteJob (a run's `run_` id when only a pipeline run has the name) |
 | `logs` | getJobLogs (a job's or a batch's) |
 | `files list`, `files stats` | listFiles |
@@ -133,7 +133,7 @@ null, because v1 pages back with a cursor rather than byte offsets. A log v1 has
 of is classic's "No log file found for job 'X'." (with its `hint`); that includes a
 0-byte `output.log`, which classic reads as an empty log.
 
-**results RUN** (the whole run, no `--file` or `--pdbs-only`): v1's archivePipelineRun,
+**results RUN** (the whole run, no `--file` or `--pdbs-only`): v1's getPipelineRunResults,
 the run's results. Classic refuses it, as it refuses every `/result` of a run ("Job RUN
 is not complete. Status: Wrapper").
 

@@ -115,7 +115,7 @@ def sync_detailed(
     for a name only a pipeline run has. It deletes the run's row in the jobs table, the one the
     app's Results list shows, so deleting it again is 404. The run isn't stopped or archived, its
     jobs stay, and `getJob`, `listJobs` and `listPipelineRuns` still show it; the run's own
-    Archive in the app removes it from those. `archivePipelineRun`, which finds the run through
+    Archive in the app removes it from those. `getPipelineRunResults`, which finds the run through
     that row, is 404 from then on. Someone else's run, and a run with no such row, are 404. A
     single-tool run has no such row: it's listed as its job, so delete the `job_` id.
 
@@ -166,7 +166,7 @@ def sync(
     for a name only a pipeline run has. It deletes the run's row in the jobs table, the one the
     app's Results list shows, so deleting it again is 404. The run isn't stopped or archived, its
     jobs stay, and `getJob`, `listJobs` and `listPipelineRuns` still show it; the run's own
-    Archive in the app removes it from those. `archivePipelineRun`, which finds the run through
+    Archive in the app removes it from those. `getPipelineRunResults`, which finds the run through
     that row, is 404 from then on. Someone else's run, and a run with no such row, are 404. A
     single-tool run has no such row: it's listed as its job, so delete the `job_` id.
 
@@ -212,7 +212,7 @@ async def asyncio_detailed(
     for a name only a pipeline run has. It deletes the run's row in the jobs table, the one the
     app's Results list shows, so deleting it again is 404. The run isn't stopped or archived, its
     jobs stay, and `getJob`, `listJobs` and `listPipelineRuns` still show it; the run's own
-    Archive in the app removes it from those. `archivePipelineRun`, which finds the run through
+    Archive in the app removes it from those. `getPipelineRunResults`, which finds the run through
     that row, is 404 from then on. Someone else's run, and a run with no such row, are 404. A
     single-tool run has no such row: it's listed as its job, so delete the `job_` id.
 
@@ -261,7 +261,7 @@ async def asyncio(
     for a name only a pipeline run has. It deletes the run's row in the jobs table, the one the
     app's Results list shows, so deleting it again is 404. The run isn't stopped or archived, its
     jobs stay, and `getJob`, `listJobs` and `listPipelineRuns` still show it; the run's own
-    Archive in the app removes it from those. `archivePipelineRun`, which finds the run through
+    Archive in the app removes it from those. `getPipelineRunResults`, which finds the run through
     that row, is 404 from then on. Someone else's run, and a run with no such row, are 404. A
     single-tool run has no such row: it's listed as its job, so delete the `job_` id.
 
