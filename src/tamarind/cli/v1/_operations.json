@@ -586,7 +586,7 @@
    "body": null,
    "cli": "tools list",
    "confirmFirst": false,
-   "description": "The built-in tools your account may run, in the catalog's display order rather than newest first. Visibility rules live in this endpoint, not in clients: a tool a flag, a block or licensing hides from you isn't listed. Your organization's custom tools aren't listed here yet (`custom=true` is 400); see `listCustomTools`.",
+   "description": "The built-in tools your account may run, in the catalog's display order rather than newest first. Visibility rules live in this endpoint, not in clients: a tool a flag, a block or licensing hides from you isn't listed, and neither is one your submit would be refused (your organization's or team's policy, a licence such as Rosetta's, a GPL tool for a pharma organization, or a domain restriction). As today's `GET /api/tools` does, the list also leaves out a tool with no display name of its own or one hidden from the app's tool pages, though it still answers by name on `getTool`, `getToolSchema`…",
    "headers": [],
    "links": true,
    "method": "GET",
@@ -617,7 +617,7 @@
      "type": "string"
     },
     {
-     "description": "Only your organization's custom tools.",
+     "description": "`true` lists your organization's custom tools instead of the built-in ones; `false` changes nothing.",
      "name": "custom",
      "option": "custom",
      "required": false,
@@ -652,6 +652,16 @@
      "option": "cursor",
      "required": false,
      "type": "string"
+    },
+    {
+     "description": "`agent` lists the catalog as the Tamarind MCP and agents see it: every tool you can run by name, including the ones the product's tool list leaves out, less those kept off the API or the assistant, plus a Rosetta tool the app shows to ever…",
+     "enum": [
+      "agent"
+     ],
+     "name": "view",
+     "option": "view",
+     "required": false,
+     "type": "string"
     }
    ],
    "sdk": "tools.list",
@@ -667,7 +677,7 @@
    "body": null,
    "cli": "tools facets",
    "confirmFirst": false,
-   "description": "Modalities and functions, lower-cased, each with the number of tools you can see, so a count matches what `listTools` returns for it. Most tools first, then by name. No labels or descriptions.",
+   "description": "Modalities and functions, lower-cased, each with the number of tools you can see, so a count matches what `listTools` returns for it, and the curated taxonomy's label and description. Every value the taxonomy defines is listed, so a count can be 0. Most tools first, then by name. With `view=agent`, the counts are over the agent view's tools.",
    "headers": [],
    "links": false,
    "method": "GET",
@@ -675,7 +685,18 @@
    "paged": false,
    "path": "/tools/facets",
    "pathParams": [],
-   "query": [],
+   "query": [
+    {
+     "description": "`agent` lists the catalog as the Tamarind MCP and agents see it: every tool you can run by name, including the ones the product's tool list leaves out, less those kept off the API or the assistant, plus a Rosetta tool the app shows to ever…",
+     "enum": [
+      "agent"
+     ],
+     "name": "view",
+     "option": "view",
+     "required": false,
+     "type": "string"
+    }
+   ],
    "sdk": "tools.facets",
    "success": {
     "200": [
@@ -695,7 +716,7 @@
    },
    "cli": "tools recommend",
    "confirmFirst": false,
-   "description": "Ranks tools for a structure-prediction or co-folding task from benchmark evidence, narrowed to the tools you can see: tools you can't see are left out and never named, and when that leaves none the answer abstains. A synchronous call, bounded to finish inside the gateway's 30 seconds: a request that takes more than 25 seconds is 503 and retryable (most take 12 to 18 seconds). Behind the `model-router` flag, and refused for an unclaimed agent account: both are 403 `forbidden`. At most two requests per account run at once on each server; more is 429. A deployment without the recommendation serv…",
+   "description": "Ranks tools for a structure-prediction or co-folding task from benchmark evidence, narrowed to the tools `listTools` shows you in the same `view`: others are left out and never named, and when that leaves none the answer abstains with `abstainReason` `not_available_to_your_account`. An abstention says why in `abstainReason`, and `retryable` says whether asking again may help. A synchronous call, bounded to finish inside the gateway's 30 seconds: a request that takes more than 25 seconds is 503 and retryable (most take 12 to 18 seconds). Behind the `model-router` flag, and refused for an uncla…",
    "headers": [],
    "links": false,
    "method": "POST",
@@ -703,7 +724,18 @@
    "paged": false,
    "path": "/tools/recommend",
    "pathParams": [],
-   "query": [],
+   "query": [
+    {
+     "description": "`agent` lists the catalog as the Tamarind MCP and agents see it: every tool you can run by name, including the ones the product's tool list leaves out, less those kept off the API or the assistant, plus a Rosetta tool the app shows to ever…",
+     "enum": [
+      "agent"
+     ],
+     "name": "view",
+     "option": "view",
+     "required": false,
+     "type": "string"
+    }
+   ],
    "sdk": "tools.recommend",
    "success": {
     "200": [
@@ -717,7 +749,7 @@
    "body": null,
    "cli": "tools get",
    "confirmFirst": false,
-   "description": "A built-in tool as `listTools` shows it to you. A tool hidden from you answers exactly as an unknown name does, 404 `tool_not_found`, and so does a custom tool's name for now.",
+   "description": "A built-in tool as `listTools` shows it to you, including one `listTools` leaves out only as today's list does (no display name of its own, or hidden from the app's tool pages). A tool hidden from you, or one your submit would be refused, answers exactly as an unknown name does, 404 `tool_not_found`, and so does a custom tool's name (`getToolSchema` takes one).",
    "headers": [],
    "links": true,
    "method": "GET",
@@ -744,7 +776,7 @@
    "body": null,
    "cli": "tools schema",
    "confirmFirst": false,
-   "description": "Built-in tools only for now: any other name, or a tool hidden from you, is 404 `tool_not_found`. Settings behind a flag that's off for you are left out, and so are settings that depend on one left out; settings limited to some organizations or surfaces are kept and annotated.",
+   "description": "A built-in tool, or your organization's custom tool by its name (`mytool`, or `org/mytool` as a job's `tool` names it). A custom tool answers in the version a submit would run (its published one, or `version`), and only when a submit would resolve it for you and you may read it, as today's schema route decides. A tool you can't see, a built-in your submit would be refused, and a custom tool you can't read all answer as one that doesn't exist, 404 `tool_not_found`. Settings behind a flag that's off for you are left out, and so are settings limited to organizations you aren't in and settings th…",
    "headers": [],
    "links": false,
    "method": "GET",
@@ -759,7 +791,7 @@
    ],
    "query": [
     {
-     "description": "A custom tool version.",
+     "description": "A custom tool version (`v3`) or source revision, as `toolVersion` on submit takes it.",
      "name": "version",
      "option": "version",
      "required": false,
@@ -906,12 +938,35 @@
      "type": "string"
     },
     {
-     "description": "Another member's email, with `scope=org`.",
+     "description": "Another member's email, with `scope=org` (400 without it).",
      "format": "email",
      "name": "createdBy",
      "option": "created-by",
      "required": false,
      "type": "string"
+    },
+    {
+     "default": false,
+     "description": "Today's `includeSubjobs`.",
+     "name": "includeSubjobs",
+     "option": "include-subjobs",
+     "required": false,
+     "type": "boolean"
+    },
+    {
+     "description": "Today's `batch=`.",
+     "name": "batchName",
+     "option": "batch-name",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "default": false,
+     "description": "With `name` and `scope=org` (no `createdBy` or `includeSubjobs`), every member's match, newest first, not only the newest.",
+     "name": "allMatches",
+     "option": "all-matches",
+     "required": false,
+     "type": "boolean"
     },
     {
      "description": "Not built yet, so any value is 400.",
@@ -1135,7 +1190,7 @@
    "body": null,
    "cli": "jobs delete",
    "confirmFirst": false,
-   "description": "Takes a `job_` or `batch_` id; a `run_` id is 404. This is the app's Delete button: the job, or a batch with every job in it, is marked deleted and reads as 404 everywhere from then on, so deleting it again is 404 too. Its outputs stay in storage. A tool run that is still running is stopped first; if stopping its jobs isn't confirmed, the answer is 502 `upstream_unavailable` and nothing is deleted yet, so delete again.",
+   "description": "Takes a `job_`, `batch_` or `run_` id. This is the app's Delete button: the job, or a batch with every job in it, is marked deleted and reads as 404 everywhere from then on, so deleting it again is 404 too. Its outputs stay in storage. A tool run that is still running is stopped first; if stopping its jobs isn't confirmed, the answer is 502 `upstream_unavailable` and nothing is deleted yet, so delete again.",
    "headers": [],
    "links": false,
    "method": "DELETE",
@@ -1153,7 +1208,7 @@
    "success": {
     "204": []
    },
-   "summary": "Delete a job or a batch",
+   "summary": "Delete a job, a batch or a pipeline run's job row",
    "tag": "Jobs"
   },
   {
@@ -1327,7 +1382,7 @@
    "body": null,
    "cli": "jobs download",
    "confirmFirst": false,
-   "description": "Takes a `job_` or `batch_` id and a `path` from `listJobFiles`; a `run_` id is 404, and so is a path with no file. A `path` that could leave the job's folder (a leading `/`, a backslash, a control character or an empty, `.` or `..` segment) is 422. `inline` content is gzip-encoded when the client accepts gzip, as every response is. Another member's job or batch is 404 for now; once website#7795 merges, it follows today's `/result` rule for a key (decision 74), and one that rule refuses is the same 404.",
+   "description": "Takes a `job_` or `batch_` id and a `path` from `listJobFiles`; a `run_` id is 404, and so is a path with no file. A `path` that could leave the job's folder (a leading `/`, a backslash, a control character or an empty, `.` or `..` segment) is 422. `inline` content is gzip-encoded when the client accepts gzip, as every response is. Another member's job or batch follows today's `/result` rule for a key (decision 74), a batch only when that rule admits every job in it, and one that rule refuses is the same 404.",
    "headers": [],
    "links": true,
    "method": "GET",
@@ -1376,7 +1431,7 @@
    "body": null,
    "cli": "jobs logs",
    "confirmFirst": false,
-   "description": "Takes a `job_` id only; a `batch_` or `run_` id is 404. Returns the most recent output first, up to `maxBytes`, starting at a line (or else at a character). Follow `nextCursor` to page back through older output; the pages put back together are the log byte for byte. A window is at least 4 bytes, one whole UTF-8 character, so `maxBytes` of 1 to 3 reads 4. A job with no log yet answers 200 with empty `content`. A cursor is bound to the job's current attempt: once the job is re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again without one.",
+   "description": "Takes a `job_` or a `batch_` id; a `run_` id is 404. Returns the most recent output first, up to `maxBytes`, starting at a line (or else at a character). Follow `nextCursor` to page back through older output; the pages put back together are the log byte for byte. A window is at least 4 bytes, one whole UTF-8 character, so `maxBytes` of 1 to 3 reads 4. A job with no log yet answers 200 with empty `content`. A cursor is bound to the id it was minted for and the row's current attempt: once the job is re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again without one.",
    "headers": [],
    "links": false,
    "method": "GET",
@@ -1412,7 +1467,7 @@
      "application/json"
     ]
    },
-   "summary": "Read a job's logs",
+   "summary": "Read a job's or a batch's logs",
    "tag": "Job Outputs"
   },
   {
@@ -2469,7 +2524,7 @@
    },
    "cli": "pipelines results",
    "confirmFirst": false,
-   "description": "Waits up to 25 seconds for the archive. 200 means ready, with the zip's size and the link's expiry; `fileCount` and `truncated` are null, because nothing records them for a run's zip. 202 means still preparing, so call again after `retryAfterSeconds` (10, also sent as `Retry-After`). It is also 202 while the run (or the node run you named) hasn't finished: the zip is built only once it has. An archive that could not be built is 409 `archive_failed`, retryable after `Retry-After` (90 seconds), when the results service builds again. Building the zip starts work, so for now an organization that…",
+   "description": "Waits up to 25 seconds for the archive. 200 means ready, with the zip's size and the link's expiry; `fileCount` and `truncated` are null, because nothing records them for a run's zip. 202 means still preparing, so call again after `retryAfterSeconds` (10, also sent as `Retry-After`). It is also 202 while the run (or the node run you named) hasn't finished: the zip is built only once it has. An archive that could not be built is 409 `archive_failed`, retryable after `Retry-After` (90 seconds), when the results service builds again. An organization that has lost read access gets 403 `organizati…",
    "headers": [],
    "links": true,
    "method": "POST",

@@ -13,8 +13,9 @@ T = TypeVar("T", bound="JobLogChunk")
 class JobLogChunk:
     """
     Attributes:
-        complete (bool): Whether the job has finished (`Complete`, `Stopped` or `Failed`, by the status `getJob` shows),
-            so nothing more will be written. False while the job may still write to its log.
+        complete (bool): Whether the job or batch has finished (`Complete`, `Stopped` or `Failed`, by the status
+            `getJob` shows), so nothing more will be written. False while it may still write to its log. A batch is finished
+            once every job in it is.
         content (str):
         next_cursor (None | str): Fetches OLDER output. Null when at the start of the log.
     """

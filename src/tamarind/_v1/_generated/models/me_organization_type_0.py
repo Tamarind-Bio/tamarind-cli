@@ -19,8 +19,9 @@ class MeOrganizationType0:
         name (str): The organization's slug for now.
         role (MeOrganizationType0Role): EFFECTIVE role for THIS credential, which may be lower than the person's role in
             the app. A service account's key is `admin`; any other API key is `member`, an organization admin's own key
-            included. That key acts as admin on `/service-accounts` and `GET /api-keys?scope=org`, and in reading, canceling
-            and refiling members' jobs as far as today's API lets an admin's key (decision 74, not built yet).
+            included. That key acts as admin on `/service-accounts` and `GET /api-keys?scope=org`, and in reading and
+            canceling members' jobs as far as today's API lets an admin's key (decision 74), and, once built, in refiling
+            them.
         slug (str):
     """
 

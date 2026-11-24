@@ -150,7 +150,7 @@ def sync_detailed(
     `result-*.zip` archives at the root, zips inside folders, and the top-level `msas-*` and
     `.git*` folders. You can still read or delete one by its exact path. Private export caches
     answer 404 and nothing inside one is listed. Where the app lists it, the `_extract_features`
-    folder that holds them is listed by name (website#7801, not merged yet).
+    folder that holds them is listed by name.
 
     Args:
         folder (str | Unset):
@@ -218,7 +218,7 @@ def sync(
     `result-*.zip` archives at the root, zips inside folders, and the top-level `msas-*` and
     `.git*` folders. You can still read or delete one by its exact path. Private export caches
     answer 404 and nothing inside one is listed. Where the app lists it, the `_extract_features`
-    folder that holds them is listed by name (website#7801, not merged yet).
+    folder that holds them is listed by name.
 
     Args:
         folder (str | Unset):
@@ -281,7 +281,7 @@ async def asyncio_detailed(
     `result-*.zip` archives at the root, zips inside folders, and the top-level `msas-*` and
     `.git*` folders. You can still read or delete one by its exact path. Private export caches
     answer 404 and nothing inside one is listed. Where the app lists it, the `_extract_features`
-    folder that holds them is listed by name (website#7801, not merged yet).
+    folder that holds them is listed by name.
 
     Args:
         folder (str | Unset):
@@ -347,7 +347,7 @@ async def asyncio(
     `result-*.zip` archives at the root, zips inside folders, and the top-level `msas-*` and
     `.git*` folders. You can still read or delete one by its exact path. Private export caches
     answer 404 and nothing inside one is listed. Where the app lists it, the `_extract_features`
-    folder that holds them is listed by name (website#7801, not merged yet).
+    folder that holds them is listed by name.
 
     Args:
         folder (str | Unset):

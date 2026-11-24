@@ -108,19 +108,26 @@ def sync_detailed(
     cursor: str | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
 ) -> Response[JobLogChunk | Problem]:
-    """Read a job's logs
+    r"""Read a job's or a batch's logs
 
-     Takes a `job_` id only; a `batch_` or `run_` id is 404. Returns the most recent output first,
-    up to `maxBytes`, starting at a line (or else at a character). Follow `nextCursor` to page back
-    through older output; the pages put back together are the log byte for byte. A window is at
-    least 4 bytes, one whole UTF-8 character, so `maxBytes` of 1 to 3 reads 4. A job with no log
-    yet answers 200 with empty `content`. A cursor is bound to the job's current attempt: once the
-    job is re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again
-    without one.
+     Takes a `job_` or a `batch_` id; a `run_` id is 404. Returns the most recent output first, up
+    to `maxBytes`, starting at a line (or else at a
+    character). Follow `nextCursor` to page back through older output; the pages put back
+    together are the log byte for byte. A window is at least 4 bytes, one whole UTF-8 character,
+    so `maxBytes` of 1 to 3 reads 4. A job with no log yet answers 200 with empty `content`. A
+    cursor is bound to the id it was minted for and the row's current attempt: once the job is
+    re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again without
+    one.
 
-    Another member's job is 404 for now; once website#7795 merges, it follows today's
-    `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
-    rule refuses is the same 404.
+    A batch's log is its own
+    `output.log`, the file today's `getJobLogs` reads for a batch's name. A design batch
+    (`numDesigns`) is its first job, so that's the job's log. A batch submitted as a batch writes
+    none, so it answers 200 with empty `content` (today's catalog says \"No log file found\"). Each
+    job in a batch has its own log at its `job_` id.
+
+    Another member's job or batch follows today's `/result` rule for a key (decision 74, and
+    Authentication in the introduction), a batch only when that rule admits every job in it, and
+    one that rule refuses is the same 404.
 
     Args:
         job_id (str):
@@ -158,19 +165,26 @@ def sync(
     cursor: str | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
 ) -> JobLogChunk | Problem | None:
-    """Read a job's logs
+    r"""Read a job's or a batch's logs
 
-     Takes a `job_` id only; a `batch_` or `run_` id is 404. Returns the most recent output first,
-    up to `maxBytes`, starting at a line (or else at a character). Follow `nextCursor` to page back
-    through older output; the pages put back together are the log byte for byte. A window is at
-    least 4 bytes, one whole UTF-8 character, so `maxBytes` of 1 to 3 reads 4. A job with no log
-    yet answers 200 with empty `content`. A cursor is bound to the job's current attempt: once the
-    job is re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again
-    without one.
+     Takes a `job_` or a `batch_` id; a `run_` id is 404. Returns the most recent output first, up
+    to `maxBytes`, starting at a line (or else at a
+    character). Follow `nextCursor` to page back through older output; the pages put back
+    together are the log byte for byte. A window is at least 4 bytes, one whole UTF-8 character,
+    so `maxBytes` of 1 to 3 reads 4. A job with no log yet answers 200 with empty `content`. A
+    cursor is bound to the id it was minted for and the row's current attempt: once the job is
+    re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again without
+    one.
 
-    Another member's job is 404 for now; once website#7795 merges, it follows today's
-    `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
-    rule refuses is the same 404.
+    A batch's log is its own
+    `output.log`, the file today's `getJobLogs` reads for a batch's name. A design batch
+    (`numDesigns`) is its first job, so that's the job's log. A batch submitted as a batch writes
+    none, so it answers 200 with empty `content` (today's catalog says \"No log file found\"). Each
+    job in a batch has its own log at its `job_` id.
+
+    Another member's job or batch follows today's `/result` rule for a key (decision 74, and
+    Authentication in the introduction), a batch only when that rule admits every job in it, and
+    one that rule refuses is the same 404.
 
     Args:
         job_id (str):
@@ -203,19 +217,26 @@ async def asyncio_detailed(
     cursor: str | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
 ) -> Response[JobLogChunk | Problem]:
-    """Read a job's logs
+    r"""Read a job's or a batch's logs
 
-     Takes a `job_` id only; a `batch_` or `run_` id is 404. Returns the most recent output first,
-    up to `maxBytes`, starting at a line (or else at a character). Follow `nextCursor` to page back
-    through older output; the pages put back together are the log byte for byte. A window is at
-    least 4 bytes, one whole UTF-8 character, so `maxBytes` of 1 to 3 reads 4. A job with no log
-    yet answers 200 with empty `content`. A cursor is bound to the job's current attempt: once the
-    job is re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again
-    without one.
+     Takes a `job_` or a `batch_` id; a `run_` id is 404. Returns the most recent output first, up
+    to `maxBytes`, starting at a line (or else at a
+    character). Follow `nextCursor` to page back through older output; the pages put back
+    together are the log byte for byte. A window is at least 4 bytes, one whole UTF-8 character,
+    so `maxBytes` of 1 to 3 reads 4. A job with no log yet answers 200 with empty `content`. A
+    cursor is bound to the id it was minted for and the row's current attempt: once the job is
+    re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again without
+    one.
 
-    Another member's job is 404 for now; once website#7795 merges, it follows today's
-    `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
-    rule refuses is the same 404.
+    A batch's log is its own
+    `output.log`, the file today's `getJobLogs` reads for a batch's name. A design batch
+    (`numDesigns`) is its first job, so that's the job's log. A batch submitted as a batch writes
+    none, so it answers 200 with empty `content` (today's catalog says \"No log file found\"). Each
+    job in a batch has its own log at its `job_` id.
+
+    Another member's job or batch follows today's `/result` rule for a key (decision 74, and
+    Authentication in the introduction), a batch only when that rule admits every job in it, and
+    one that rule refuses is the same 404.
 
     Args:
         job_id (str):
@@ -251,19 +272,26 @@ async def asyncio(
     cursor: str | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
 ) -> JobLogChunk | Problem | None:
-    """Read a job's logs
+    r"""Read a job's or a batch's logs
 
-     Takes a `job_` id only; a `batch_` or `run_` id is 404. Returns the most recent output first,
-    up to `maxBytes`, starting at a line (or else at a character). Follow `nextCursor` to page back
-    through older output; the pages put back together are the log byte for byte. A window is at
-    least 4 bytes, one whole UTF-8 character, so `maxBytes` of 1 to 3 reads 4. A job with no log
-    yet answers 200 with empty `content`. A cursor is bound to the job's current attempt: once the
-    job is re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again
-    without one.
+     Takes a `job_` or a `batch_` id; a `run_` id is 404. Returns the most recent output first, up
+    to `maxBytes`, starting at a line (or else at a
+    character). Follow `nextCursor` to page back through older output; the pages put back
+    together are the log byte for byte. A window is at least 4 bytes, one whole UTF-8 character,
+    so `maxBytes` of 1 to 3 reads 4. A job with no log yet answers 200 with empty `content`. A
+    cursor is bound to the id it was minted for and the row's current attempt: once the job is
+    re-dispatched, or its log is gone, the cursor is 400 `invalid_cursor`; start again without
+    one.
 
-    Another member's job is 404 for now; once website#7795 merges, it follows today's
-    `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
-    rule refuses is the same 404.
+    A batch's log is its own
+    `output.log`, the file today's `getJobLogs` reads for a batch's name. A design batch
+    (`numDesigns`) is its first job, so that's the job's log. A batch submitted as a batch writes
+    none, so it answers 200 with empty `content` (today's catalog says \"No log file found\"). Each
+    job in a batch has its own log at its `job_` id.
+
+    Another member's job or batch follows today's `/result` rule for a key (decision 74, and
+    Authentication in the introduction), a batch only when that rule admits every job in it, and
+    one that rule refuses is the same 404.
 
     Args:
         job_id (str):

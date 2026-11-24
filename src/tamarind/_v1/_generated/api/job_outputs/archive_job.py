@@ -127,40 +127,39 @@ def sync_detailed(
     `Stopped` or `Failed` (only `Complete` work has an archive), when a single job has no stored
     archive (list its files with `listJobFiles` instead), when a rebuild ended without one, or
     when the stored zip is damaged. If storage fails while the zip is read, the answer is 503
-    `jobs_dependency_unavailable`; retry. Choosing files (`paths`, `glob`) isn't built yet, so
-    either is 422 `not_supported` at its field.
+    `jobs_dependency_unavailable`; retry.
 
-    Once website#7799 merges (not yet): `paths` or `glob` (one of them) chooses files: the answer
+    `paths` or `glob` (one of them) chooses files: the answer
     is a zip of just those files of that archive, copied from it as they are. `paths` are paths
     inside the archive: a job's are the paths `listJobFiles` shows, and a batch's archive holds
     each of its jobs' files under the job's name, plus its combined files. `glob` matches the
     whole path (`*` spans `/`, case-sensitive). The zip is kept beside the archive, and asking
     again answers the same one. A path the archive has no file at is 422 `file_not_found` at
     `/paths/<i>` (each one), and a `glob` that matches nothing is 422 `file_not_found` at
-    `/glob`. More than 10,000 files or 1 GiB of zipped data is 422 `out_of_range` at the field:
-    nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
+    `/glob`. More than 10,000 files, or a zip of more than 1 GiB, is 422 `out_of_range` at the
+    field: nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
     at `/glob`. A selection of every file answers the whole archive.
 
-    Once website#7802 merges (not yet): `bestStructures: true` answers one best structure per
-    job, as the app's \"PDBs only\" download does (see `ArchiveRequest`). When a batch has no
-    stored structures zip, one is built: past an 8-minute deadline the answer is 503
-    `jobs_dependency_unavailable` (retryable), a second build from your account while one runs is
-    429 `rate_limited`, and a server already running four is 503 `service_unavailable`.
+    `bestStructures: true` answers one best structure per job, as the app's \"PDBs only\" download
+    does (see `ArchiveRequest`). A job or a design batch (`numDesigns`) without a stored structures
+    zip is 422 `not_supported`. When a batch submitted as a batch has none, one is built: past an
+    8-minute deadline the answer is 503 `jobs_dependency_unavailable` (retryable), a second build
+    from your account while one runs is 429 `rate_limited`, and a server already running two is
+    503 `service_unavailable`.
 
-    Once website#7805 merges (not yet): when a batch's archive would be rebuilt, an organization
-    that has lost read access gets 403 `organization_export_disabled`. In practice v1 refuses such
-    an organization at authentication first, with 403 `organization_read_disabled`.
+    When a batch's archive would be rebuilt, an organization that has lost read access gets 403
+    `organization_export_disabled`. In practice v1 refuses such an organization at authentication
+    first, with 403 `organization_read_disabled`.
 
-    Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
-    `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
-    rule refuses is the same 404.
+    Another member's job or batch follows today's `/result` rule for a key (decision 74, and
+    Authentication in the introduction), a batch only when that rule admits every job in it, and
+    one that rule refuses is the same 404.
 
     Args:
         job_id (str):
         tamarind_version (str | Unset):
         body (ArchiveRequest | Unset): Send at most one of `paths`, `glob` and `bestStructures`;
-            send none for the whole archive. Not built yet (website#7799 for `paths` and `glob`,
-            website#7802 for `bestStructures`).
+            send none for the whole archive.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -203,40 +202,39 @@ def sync(
     `Stopped` or `Failed` (only `Complete` work has an archive), when a single job has no stored
     archive (list its files with `listJobFiles` instead), when a rebuild ended without one, or
     when the stored zip is damaged. If storage fails while the zip is read, the answer is 503
-    `jobs_dependency_unavailable`; retry. Choosing files (`paths`, `glob`) isn't built yet, so
-    either is 422 `not_supported` at its field.
+    `jobs_dependency_unavailable`; retry.
 
-    Once website#7799 merges (not yet): `paths` or `glob` (one of them) chooses files: the answer
+    `paths` or `glob` (one of them) chooses files: the answer
     is a zip of just those files of that archive, copied from it as they are. `paths` are paths
     inside the archive: a job's are the paths `listJobFiles` shows, and a batch's archive holds
     each of its jobs' files under the job's name, plus its combined files. `glob` matches the
     whole path (`*` spans `/`, case-sensitive). The zip is kept beside the archive, and asking
     again answers the same one. A path the archive has no file at is 422 `file_not_found` at
     `/paths/<i>` (each one), and a `glob` that matches nothing is 422 `file_not_found` at
-    `/glob`. More than 10,000 files or 1 GiB of zipped data is 422 `out_of_range` at the field:
-    nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
+    `/glob`. More than 10,000 files, or a zip of more than 1 GiB, is 422 `out_of_range` at the
+    field: nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
     at `/glob`. A selection of every file answers the whole archive.
 
-    Once website#7802 merges (not yet): `bestStructures: true` answers one best structure per
-    job, as the app's \"PDBs only\" download does (see `ArchiveRequest`). When a batch has no
-    stored structures zip, one is built: past an 8-minute deadline the answer is 503
-    `jobs_dependency_unavailable` (retryable), a second build from your account while one runs is
-    429 `rate_limited`, and a server already running four is 503 `service_unavailable`.
+    `bestStructures: true` answers one best structure per job, as the app's \"PDBs only\" download
+    does (see `ArchiveRequest`). A job or a design batch (`numDesigns`) without a stored structures
+    zip is 422 `not_supported`. When a batch submitted as a batch has none, one is built: past an
+    8-minute deadline the answer is 503 `jobs_dependency_unavailable` (retryable), a second build
+    from your account while one runs is 429 `rate_limited`, and a server already running two is
+    503 `service_unavailable`.
 
-    Once website#7805 merges (not yet): when a batch's archive would be rebuilt, an organization
-    that has lost read access gets 403 `organization_export_disabled`. In practice v1 refuses such
-    an organization at authentication first, with 403 `organization_read_disabled`.
+    When a batch's archive would be rebuilt, an organization that has lost read access gets 403
+    `organization_export_disabled`. In practice v1 refuses such an organization at authentication
+    first, with 403 `organization_read_disabled`.
 
-    Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
-    `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
-    rule refuses is the same 404.
+    Another member's job or batch follows today's `/result` rule for a key (decision 74, and
+    Authentication in the introduction), a batch only when that rule admits every job in it, and
+    one that rule refuses is the same 404.
 
     Args:
         job_id (str):
         tamarind_version (str | Unset):
         body (ArchiveRequest | Unset): Send at most one of `paths`, `glob` and `bestStructures`;
-            send none for the whole archive. Not built yet (website#7799 for `paths` and `glob`,
-            website#7802 for `bestStructures`).
+            send none for the whole archive.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -274,40 +272,39 @@ async def asyncio_detailed(
     `Stopped` or `Failed` (only `Complete` work has an archive), when a single job has no stored
     archive (list its files with `listJobFiles` instead), when a rebuild ended without one, or
     when the stored zip is damaged. If storage fails while the zip is read, the answer is 503
-    `jobs_dependency_unavailable`; retry. Choosing files (`paths`, `glob`) isn't built yet, so
-    either is 422 `not_supported` at its field.
+    `jobs_dependency_unavailable`; retry.
 
-    Once website#7799 merges (not yet): `paths` or `glob` (one of them) chooses files: the answer
+    `paths` or `glob` (one of them) chooses files: the answer
     is a zip of just those files of that archive, copied from it as they are. `paths` are paths
     inside the archive: a job's are the paths `listJobFiles` shows, and a batch's archive holds
     each of its jobs' files under the job's name, plus its combined files. `glob` matches the
     whole path (`*` spans `/`, case-sensitive). The zip is kept beside the archive, and asking
     again answers the same one. A path the archive has no file at is 422 `file_not_found` at
     `/paths/<i>` (each one), and a `glob` that matches nothing is 422 `file_not_found` at
-    `/glob`. More than 10,000 files or 1 GiB of zipped data is 422 `out_of_range` at the field:
-    nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
+    `/glob`. More than 10,000 files, or a zip of more than 1 GiB, is 422 `out_of_range` at the
+    field: nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
     at `/glob`. A selection of every file answers the whole archive.
 
-    Once website#7802 merges (not yet): `bestStructures: true` answers one best structure per
-    job, as the app's \"PDBs only\" download does (see `ArchiveRequest`). When a batch has no
-    stored structures zip, one is built: past an 8-minute deadline the answer is 503
-    `jobs_dependency_unavailable` (retryable), a second build from your account while one runs is
-    429 `rate_limited`, and a server already running four is 503 `service_unavailable`.
+    `bestStructures: true` answers one best structure per job, as the app's \"PDBs only\" download
+    does (see `ArchiveRequest`). A job or a design batch (`numDesigns`) without a stored structures
+    zip is 422 `not_supported`. When a batch submitted as a batch has none, one is built: past an
+    8-minute deadline the answer is 503 `jobs_dependency_unavailable` (retryable), a second build
+    from your account while one runs is 429 `rate_limited`, and a server already running two is
+    503 `service_unavailable`.
 
-    Once website#7805 merges (not yet): when a batch's archive would be rebuilt, an organization
-    that has lost read access gets 403 `organization_export_disabled`. In practice v1 refuses such
-    an organization at authentication first, with 403 `organization_read_disabled`.
+    When a batch's archive would be rebuilt, an organization that has lost read access gets 403
+    `organization_export_disabled`. In practice v1 refuses such an organization at authentication
+    first, with 403 `organization_read_disabled`.
 
-    Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
-    `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
-    rule refuses is the same 404.
+    Another member's job or batch follows today's `/result` rule for a key (decision 74, and
+    Authentication in the introduction), a batch only when that rule admits every job in it, and
+    one that rule refuses is the same 404.
 
     Args:
         job_id (str):
         tamarind_version (str | Unset):
         body (ArchiveRequest | Unset): Send at most one of `paths`, `glob` and `bestStructures`;
-            send none for the whole archive. Not built yet (website#7799 for `paths` and `glob`,
-            website#7802 for `bestStructures`).
+            send none for the whole archive.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -348,40 +345,39 @@ async def asyncio(
     `Stopped` or `Failed` (only `Complete` work has an archive), when a single job has no stored
     archive (list its files with `listJobFiles` instead), when a rebuild ended without one, or
     when the stored zip is damaged. If storage fails while the zip is read, the answer is 503
-    `jobs_dependency_unavailable`; retry. Choosing files (`paths`, `glob`) isn't built yet, so
-    either is 422 `not_supported` at its field.
+    `jobs_dependency_unavailable`; retry.
 
-    Once website#7799 merges (not yet): `paths` or `glob` (one of them) chooses files: the answer
+    `paths` or `glob` (one of them) chooses files: the answer
     is a zip of just those files of that archive, copied from it as they are. `paths` are paths
     inside the archive: a job's are the paths `listJobFiles` shows, and a batch's archive holds
     each of its jobs' files under the job's name, plus its combined files. `glob` matches the
     whole path (`*` spans `/`, case-sensitive). The zip is kept beside the archive, and asking
     again answers the same one. A path the archive has no file at is 422 `file_not_found` at
     `/paths/<i>` (each one), and a `glob` that matches nothing is 422 `file_not_found` at
-    `/glob`. More than 10,000 files or 1 GiB of zipped data is 422 `out_of_range` at the field:
-    nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
+    `/glob`. More than 10,000 files, or a zip of more than 1 GiB, is 422 `out_of_range` at the
+    field: nothing is cut short, so `truncated` stays false. Sending both is 422 `conditional_not_met`
     at `/glob`. A selection of every file answers the whole archive.
 
-    Once website#7802 merges (not yet): `bestStructures: true` answers one best structure per
-    job, as the app's \"PDBs only\" download does (see `ArchiveRequest`). When a batch has no
-    stored structures zip, one is built: past an 8-minute deadline the answer is 503
-    `jobs_dependency_unavailable` (retryable), a second build from your account while one runs is
-    429 `rate_limited`, and a server already running four is 503 `service_unavailable`.
+    `bestStructures: true` answers one best structure per job, as the app's \"PDBs only\" download
+    does (see `ArchiveRequest`). A job or a design batch (`numDesigns`) without a stored structures
+    zip is 422 `not_supported`. When a batch submitted as a batch has none, one is built: past an
+    8-minute deadline the answer is 503 `jobs_dependency_unavailable` (retryable), a second build
+    from your account while one runs is 429 `rate_limited`, and a server already running two is
+    503 `service_unavailable`.
 
-    Once website#7805 merges (not yet): when a batch's archive would be rebuilt, an organization
-    that has lost read access gets 403 `organization_export_disabled`. In practice v1 refuses such
-    an organization at authentication first, with 403 `organization_read_disabled`.
+    When a batch's archive would be rebuilt, an organization that has lost read access gets 403
+    `organization_export_disabled`. In practice v1 refuses such an organization at authentication
+    first, with 403 `organization_read_disabled`.
 
-    Another member's job or batch is 404 for now; once website#7795 merges, it follows today's
-    `/result` rule for a key (decision 74, and Authentication in the introduction), and one that
-    rule refuses is the same 404.
+    Another member's job or batch follows today's `/result` rule for a key (decision 74, and
+    Authentication in the introduction), a batch only when that rule admits every job in it, and
+    one that rule refuses is the same 404.
 
     Args:
         job_id (str):
         tamarind_version (str | Unset):
         body (ArchiveRequest | Unset): Send at most one of `paths`, `glob` and `bestStructures`;
-            send none for the whole archive. Not built yet (website#7799 for `paths` and `glob`,
-            website#7802 for `bestStructures`).
+            send none for the whole archive.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

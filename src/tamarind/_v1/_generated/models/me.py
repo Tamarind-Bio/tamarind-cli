@@ -12,6 +12,7 @@ from ..models.me_tier import MeTier
 
 if TYPE_CHECKING:
     from ..models.budget import Budget
+    from ..models.me_clients import MeClients
     from ..models.me_credential import MeCredential
     from ..models.me_limits import MeLimits
     from ..models.me_organization_type_0 import MeOrganizationType0
@@ -31,6 +32,7 @@ class Me:
             budget whenever one applies; the organization's, teams' and models' only for a service account, or when your
             organization lets members see budgets. Only budgets with a limit are listed, so `limit` and `remaining` are
             numbers. The lowest `remaining` binds.
+        clients (MeClients):
         credential (MeCredential):
         limits (MeLimits):
         organization (MeOrganizationType0 | None): Null for a personal account.
@@ -40,6 +42,7 @@ class Me:
 
     as_of: datetime.datetime
     budgets: list[Budget]
+    clients: MeClients
     credential: MeCredential
     limits: MeLimits
     organization: MeOrganizationType0 | None
@@ -56,6 +59,8 @@ class Me:
         for budgets_item_data in self.budgets:
             budgets_item = budgets_item_data.to_dict()
             budgets.append(budgets_item)
+
+        clients = self.clients.to_dict()
 
         credential = self.credential.to_dict()
 
@@ -77,6 +82,7 @@ class Me:
             {
                 "asOf": as_of,
                 "budgets": budgets,
+                "clients": clients,
                 "credential": credential,
                 "limits": limits,
                 "organization": organization,
@@ -90,6 +96,7 @@ class Me:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.budget import Budget
+        from ..models.me_clients import MeClients
         from ..models.me_credential import MeCredential
         from ..models.me_limits import MeLimits
         from ..models.me_organization_type_0 import MeOrganizationType0
@@ -104,6 +111,8 @@ class Me:
             budgets_item = Budget.from_dict(budgets_item_data)
 
             budgets.append(budgets_item)
+
+        clients = MeClients.from_dict(d.pop("clients"))
 
         credential = MeCredential.from_dict(d.pop("credential"))
 
@@ -131,6 +140,7 @@ class Me:
         me = cls(
             as_of=as_of,
             budgets=budgets,
+            clients=clients,
             credential=credential,
             limits=limits,
             organization=organization,

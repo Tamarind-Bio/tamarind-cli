@@ -30,6 +30,9 @@ def _get_kwargs(
     api_key_id: str | Unset = UNSET,
     scope: ListJobsScope | Unset = ListJobsScope.MINE,
     created_by: str | Unset = UNSET,
+    include_subjobs: bool | Unset = False,
+    batch_name: str | Unset = UNSET,
+    all_matches: bool | Unset = False,
     created_after: datetime.datetime | Unset = UNSET,
     created_before: datetime.datetime | Unset = UNSET,
     limit: int | Unset = 50,
@@ -90,6 +93,12 @@ def _get_kwargs(
     params["scope"] = json_scope
 
     params["createdBy"] = created_by
+
+    params["includeSubjobs"] = include_subjobs
+
+    params["batchName"] = batch_name
+
+    params["allMatches"] = all_matches
 
     json_created_after: str | Unset = UNSET
     if not isinstance(created_after, Unset):
@@ -187,6 +196,9 @@ def sync_detailed(
     api_key_id: str | Unset = UNSET,
     scope: ListJobsScope | Unset = ListJobsScope.MINE,
     created_by: str | Unset = UNSET,
+    include_subjobs: bool | Unset = False,
+    batch_name: str | Unset = UNSET,
+    all_matches: bool | Unset = False,
     created_after: datetime.datetime | Unset = UNSET,
     created_before: datetime.datetime | Unset = UNSET,
     limit: int | Unset = 50,
@@ -213,11 +225,10 @@ def sync_detailed(
 
     A value `kind`, `status`, `source`, `order` or `scope` doesn't take is 400
     `validation_failed`, and so are these, not built yet, rather than a silently wider list:
-    `projectId`, `apiKeyId`, `createdAfter`, `createdBefore`, `scope=org`, and `createdBy`
-    naming anyone but you. Past its 15-second deadline a read is 503
-    `jobs_dependency_unavailable`.
+    `projectId`, `apiKeyId`, `createdAfter` and `createdBefore`. Past its 15-second deadline a
+    read is 503 `jobs_dependency_unavailable`.
 
-    Organization scope (website#7795, not merged yet; until then the 400 above). With
+    Organization scope (decision 74). With
     `scope=org` the list is the organization's jobs and batches, not pipeline runs (those list
     under `listPipelineRuns?scope=org`), as today's API shows them: every member's when the
     organization shares within itself or you're its admin or its service account, otherwise
@@ -227,6 +238,24 @@ def sync_detailed(
     `batchId`, `pipelineRunId`, `search`, `source`, `order=asc` and `kind=pipeline` can't be
     combined with `scope=org` yet (400). `batchId=` of another member's batch needs no
     `scope=org`: it lists the batch's jobs as today's batch read does, each admitted on its own.
+
+    Today's list options. Each one is answered by the same reader today's `GET /jobs` uses, so it
+    lists what today's API lists.
+
+    - `includeSubjobs=true`: your list, or a member's with `createdBy`, holds every batch's own
+      jobs as well, each with its `batchId`. With `scope=org` alone the list is unchanged, because
+      today's organization list never had a batch's jobs. Pipeline runs aren't in it.
+    - `batchName=`: the jobs of every batch with that exact name in the scope you ask for, which
+      is yours, one member's (`scope=org&createdBy=`) or the organization's (`scope=org`). A name
+      with nothing you can see answers an empty page. Today's organization batch read keeps only
+      rows the organization's own list would show, and a batch's jobs almost never are, so with
+      `scope=org` alone it is mostly empty, as it is today.
+    - `allMatches=true`, with `name` and `scope=org` and no `createdBy`: every member's match,
+      newest first, rather than only the newest. It is still one page with no `nextCursor`.
+
+    With `includeSubjobs` or `batchName`, `kind`, `status` and `tool` filter each page. `name`,
+    `batchId`, `pipelineRunId`, `search`, `source`, `order=asc` and `kind=pipeline` can't be
+    combined with them (400). `allMatches` anywhere else is 400.
 
     Args:
         name (str | Unset):
@@ -245,6 +274,9 @@ def sync_detailed(
         api_key_id (str | Unset):
         scope (ListJobsScope | Unset):  Default: ListJobsScope.MINE.
         created_by (str | Unset):
+        include_subjobs (bool | Unset):  Default: False.
+        batch_name (str | Unset):
+        all_matches (bool | Unset):  Default: False.
         created_after (datetime.datetime | Unset):
         created_before (datetime.datetime | Unset):
         limit (int | Unset):  Default: 50.
@@ -273,6 +305,9 @@ def sync_detailed(
         api_key_id=api_key_id,
         scope=scope,
         created_by=created_by,
+        include_subjobs=include_subjobs,
+        batch_name=batch_name,
+        all_matches=all_matches,
         created_after=created_after,
         created_before=created_before,
         limit=limit,
@@ -303,6 +338,9 @@ def sync(
     api_key_id: str | Unset = UNSET,
     scope: ListJobsScope | Unset = ListJobsScope.MINE,
     created_by: str | Unset = UNSET,
+    include_subjobs: bool | Unset = False,
+    batch_name: str | Unset = UNSET,
+    all_matches: bool | Unset = False,
     created_after: datetime.datetime | Unset = UNSET,
     created_before: datetime.datetime | Unset = UNSET,
     limit: int | Unset = 50,
@@ -329,11 +367,10 @@ def sync(
 
     A value `kind`, `status`, `source`, `order` or `scope` doesn't take is 400
     `validation_failed`, and so are these, not built yet, rather than a silently wider list:
-    `projectId`, `apiKeyId`, `createdAfter`, `createdBefore`, `scope=org`, and `createdBy`
-    naming anyone but you. Past its 15-second deadline a read is 503
-    `jobs_dependency_unavailable`.
+    `projectId`, `apiKeyId`, `createdAfter` and `createdBefore`. Past its 15-second deadline a
+    read is 503 `jobs_dependency_unavailable`.
 
-    Organization scope (website#7795, not merged yet; until then the 400 above). With
+    Organization scope (decision 74). With
     `scope=org` the list is the organization's jobs and batches, not pipeline runs (those list
     under `listPipelineRuns?scope=org`), as today's API shows them: every member's when the
     organization shares within itself or you're its admin or its service account, otherwise
@@ -343,6 +380,24 @@ def sync(
     `batchId`, `pipelineRunId`, `search`, `source`, `order=asc` and `kind=pipeline` can't be
     combined with `scope=org` yet (400). `batchId=` of another member's batch needs no
     `scope=org`: it lists the batch's jobs as today's batch read does, each admitted on its own.
+
+    Today's list options. Each one is answered by the same reader today's `GET /jobs` uses, so it
+    lists what today's API lists.
+
+    - `includeSubjobs=true`: your list, or a member's with `createdBy`, holds every batch's own
+      jobs as well, each with its `batchId`. With `scope=org` alone the list is unchanged, because
+      today's organization list never had a batch's jobs. Pipeline runs aren't in it.
+    - `batchName=`: the jobs of every batch with that exact name in the scope you ask for, which
+      is yours, one member's (`scope=org&createdBy=`) or the organization's (`scope=org`). A name
+      with nothing you can see answers an empty page. Today's organization batch read keeps only
+      rows the organization's own list would show, and a batch's jobs almost never are, so with
+      `scope=org` alone it is mostly empty, as it is today.
+    - `allMatches=true`, with `name` and `scope=org` and no `createdBy`: every member's match,
+      newest first, rather than only the newest. It is still one page with no `nextCursor`.
+
+    With `includeSubjobs` or `batchName`, `kind`, `status` and `tool` filter each page. `name`,
+    `batchId`, `pipelineRunId`, `search`, `source`, `order=asc` and `kind=pipeline` can't be
+    combined with them (400). `allMatches` anywhere else is 400.
 
     Args:
         name (str | Unset):
@@ -361,6 +416,9 @@ def sync(
         api_key_id (str | Unset):
         scope (ListJobsScope | Unset):  Default: ListJobsScope.MINE.
         created_by (str | Unset):
+        include_subjobs (bool | Unset):  Default: False.
+        batch_name (str | Unset):
+        all_matches (bool | Unset):  Default: False.
         created_after (datetime.datetime | Unset):
         created_before (datetime.datetime | Unset):
         limit (int | Unset):  Default: 50.
@@ -390,6 +448,9 @@ def sync(
         api_key_id=api_key_id,
         scope=scope,
         created_by=created_by,
+        include_subjobs=include_subjobs,
+        batch_name=batch_name,
+        all_matches=all_matches,
         created_after=created_after,
         created_before=created_before,
         limit=limit,
@@ -414,6 +475,9 @@ async def asyncio_detailed(
     api_key_id: str | Unset = UNSET,
     scope: ListJobsScope | Unset = ListJobsScope.MINE,
     created_by: str | Unset = UNSET,
+    include_subjobs: bool | Unset = False,
+    batch_name: str | Unset = UNSET,
+    all_matches: bool | Unset = False,
     created_after: datetime.datetime | Unset = UNSET,
     created_before: datetime.datetime | Unset = UNSET,
     limit: int | Unset = 50,
@@ -440,11 +504,10 @@ async def asyncio_detailed(
 
     A value `kind`, `status`, `source`, `order` or `scope` doesn't take is 400
     `validation_failed`, and so are these, not built yet, rather than a silently wider list:
-    `projectId`, `apiKeyId`, `createdAfter`, `createdBefore`, `scope=org`, and `createdBy`
-    naming anyone but you. Past its 15-second deadline a read is 503
-    `jobs_dependency_unavailable`.
+    `projectId`, `apiKeyId`, `createdAfter` and `createdBefore`. Past its 15-second deadline a
+    read is 503 `jobs_dependency_unavailable`.
 
-    Organization scope (website#7795, not merged yet; until then the 400 above). With
+    Organization scope (decision 74). With
     `scope=org` the list is the organization's jobs and batches, not pipeline runs (those list
     under `listPipelineRuns?scope=org`), as today's API shows them: every member's when the
     organization shares within itself or you're its admin or its service account, otherwise
@@ -454,6 +517,24 @@ async def asyncio_detailed(
     `batchId`, `pipelineRunId`, `search`, `source`, `order=asc` and `kind=pipeline` can't be
     combined with `scope=org` yet (400). `batchId=` of another member's batch needs no
     `scope=org`: it lists the batch's jobs as today's batch read does, each admitted on its own.
+
+    Today's list options. Each one is answered by the same reader today's `GET /jobs` uses, so it
+    lists what today's API lists.
+
+    - `includeSubjobs=true`: your list, or a member's with `createdBy`, holds every batch's own
+      jobs as well, each with its `batchId`. With `scope=org` alone the list is unchanged, because
+      today's organization list never had a batch's jobs. Pipeline runs aren't in it.
+    - `batchName=`: the jobs of every batch with that exact name in the scope you ask for, which
+      is yours, one member's (`scope=org&createdBy=`) or the organization's (`scope=org`). A name
+      with nothing you can see answers an empty page. Today's organization batch read keeps only
+      rows the organization's own list would show, and a batch's jobs almost never are, so with
+      `scope=org` alone it is mostly empty, as it is today.
+    - `allMatches=true`, with `name` and `scope=org` and no `createdBy`: every member's match,
+      newest first, rather than only the newest. It is still one page with no `nextCursor`.
+
+    With `includeSubjobs` or `batchName`, `kind`, `status` and `tool` filter each page. `name`,
+    `batchId`, `pipelineRunId`, `search`, `source`, `order=asc` and `kind=pipeline` can't be
+    combined with them (400). `allMatches` anywhere else is 400.
 
     Args:
         name (str | Unset):
@@ -472,6 +553,9 @@ async def asyncio_detailed(
         api_key_id (str | Unset):
         scope (ListJobsScope | Unset):  Default: ListJobsScope.MINE.
         created_by (str | Unset):
+        include_subjobs (bool | Unset):  Default: False.
+        batch_name (str | Unset):
+        all_matches (bool | Unset):  Default: False.
         created_after (datetime.datetime | Unset):
         created_before (datetime.datetime | Unset):
         limit (int | Unset):  Default: 50.
@@ -500,6 +584,9 @@ async def asyncio_detailed(
         api_key_id=api_key_id,
         scope=scope,
         created_by=created_by,
+        include_subjobs=include_subjobs,
+        batch_name=batch_name,
+        all_matches=all_matches,
         created_after=created_after,
         created_before=created_before,
         limit=limit,
@@ -528,6 +615,9 @@ async def asyncio(
     api_key_id: str | Unset = UNSET,
     scope: ListJobsScope | Unset = ListJobsScope.MINE,
     created_by: str | Unset = UNSET,
+    include_subjobs: bool | Unset = False,
+    batch_name: str | Unset = UNSET,
+    all_matches: bool | Unset = False,
     created_after: datetime.datetime | Unset = UNSET,
     created_before: datetime.datetime | Unset = UNSET,
     limit: int | Unset = 50,
@@ -554,11 +644,10 @@ async def asyncio(
 
     A value `kind`, `status`, `source`, `order` or `scope` doesn't take is 400
     `validation_failed`, and so are these, not built yet, rather than a silently wider list:
-    `projectId`, `apiKeyId`, `createdAfter`, `createdBefore`, `scope=org`, and `createdBy`
-    naming anyone but you. Past its 15-second deadline a read is 503
-    `jobs_dependency_unavailable`.
+    `projectId`, `apiKeyId`, `createdAfter` and `createdBefore`. Past its 15-second deadline a
+    read is 503 `jobs_dependency_unavailable`.
 
-    Organization scope (website#7795, not merged yet; until then the 400 above). With
+    Organization scope (decision 74). With
     `scope=org` the list is the organization's jobs and batches, not pipeline runs (those list
     under `listPipelineRuns?scope=org`), as today's API shows them: every member's when the
     organization shares within itself or you're its admin or its service account, otherwise
@@ -568,6 +657,24 @@ async def asyncio(
     `batchId`, `pipelineRunId`, `search`, `source`, `order=asc` and `kind=pipeline` can't be
     combined with `scope=org` yet (400). `batchId=` of another member's batch needs no
     `scope=org`: it lists the batch's jobs as today's batch read does, each admitted on its own.
+
+    Today's list options. Each one is answered by the same reader today's `GET /jobs` uses, so it
+    lists what today's API lists.
+
+    - `includeSubjobs=true`: your list, or a member's with `createdBy`, holds every batch's own
+      jobs as well, each with its `batchId`. With `scope=org` alone the list is unchanged, because
+      today's organization list never had a batch's jobs. Pipeline runs aren't in it.
+    - `batchName=`: the jobs of every batch with that exact name in the scope you ask for, which
+      is yours, one member's (`scope=org&createdBy=`) or the organization's (`scope=org`). A name
+      with nothing you can see answers an empty page. Today's organization batch read keeps only
+      rows the organization's own list would show, and a batch's jobs almost never are, so with
+      `scope=org` alone it is mostly empty, as it is today.
+    - `allMatches=true`, with `name` and `scope=org` and no `createdBy`: every member's match,
+      newest first, rather than only the newest. It is still one page with no `nextCursor`.
+
+    With `includeSubjobs` or `batchName`, `kind`, `status` and `tool` filter each page. `name`,
+    `batchId`, `pipelineRunId`, `search`, `source`, `order=asc` and `kind=pipeline` can't be
+    combined with them (400). `allMatches` anywhere else is 400.
 
     Args:
         name (str | Unset):
@@ -586,6 +693,9 @@ async def asyncio(
         api_key_id (str | Unset):
         scope (ListJobsScope | Unset):  Default: ListJobsScope.MINE.
         created_by (str | Unset):
+        include_subjobs (bool | Unset):  Default: False.
+        batch_name (str | Unset):
+        all_matches (bool | Unset):  Default: False.
         created_after (datetime.datetime | Unset):
         created_before (datetime.datetime | Unset):
         limit (int | Unset):  Default: 50.
@@ -616,6 +726,9 @@ async def asyncio(
             api_key_id=api_key_id,
             scope=scope,
             created_by=created_by,
+            include_subjobs=include_subjobs,
+            batch_name=batch_name,
+            all_matches=all_matches,
             created_after=created_after,
             created_before=created_before,
             limit=limit,

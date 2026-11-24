@@ -92,8 +92,10 @@ def sync_detailed(
 ) -> Response[Problem | Tool]:
     """Get a tool
 
-     A built-in tool as `listTools` shows it to you. A tool hidden from you answers exactly as an unknown
-    name does, 404 `tool_not_found`, and so does a custom tool's name for now.
+     A built-in tool as `listTools` shows it to you, including one `listTools` leaves out only as today's
+    list does (no display name of its own, or hidden from the app's tool pages). A tool hidden from you,
+    or one your submit would be refused, answers exactly as an unknown name does, 404 `tool_not_found`,
+    and so does a custom tool's name (`getToolSchema` takes one).
 
     Args:
         tool (str):
@@ -127,8 +129,10 @@ def sync(
 ) -> Problem | Tool | None:
     """Get a tool
 
-     A built-in tool as `listTools` shows it to you. A tool hidden from you answers exactly as an unknown
-    name does, 404 `tool_not_found`, and so does a custom tool's name for now.
+     A built-in tool as `listTools` shows it to you, including one `listTools` leaves out only as today's
+    list does (no display name of its own, or hidden from the app's tool pages). A tool hidden from you,
+    or one your submit would be refused, answers exactly as an unknown name does, 404 `tool_not_found`,
+    and so does a custom tool's name (`getToolSchema` takes one).
 
     Args:
         tool (str):
@@ -157,8 +161,10 @@ async def asyncio_detailed(
 ) -> Response[Problem | Tool]:
     """Get a tool
 
-     A built-in tool as `listTools` shows it to you. A tool hidden from you answers exactly as an unknown
-    name does, 404 `tool_not_found`, and so does a custom tool's name for now.
+     A built-in tool as `listTools` shows it to you, including one `listTools` leaves out only as today's
+    list does (no display name of its own, or hidden from the app's tool pages). A tool hidden from you,
+    or one your submit would be refused, answers exactly as an unknown name does, 404 `tool_not_found`,
+    and so does a custom tool's name (`getToolSchema` takes one).
 
     Args:
         tool (str):
@@ -190,8 +196,10 @@ async def asyncio(
 ) -> Problem | Tool | None:
     """Get a tool
 
-     A built-in tool as `listTools` shows it to you. A tool hidden from you answers exactly as an unknown
-    name does, 404 `tool_not_found`, and so does a custom tool's name for now.
+     A built-in tool as `listTools` shows it to you, including one `listTools` leaves out only as today's
+    list does (no display name of its own, or hidden from the app's tool pages). A tool hidden from you,
+    or one your submit would be refused, answers exactly as an unknown name does, 404 `tool_not_found`,
+    and so does a custom tool's name (`getToolSchema` takes one).
 
     Args:
         tool (str):

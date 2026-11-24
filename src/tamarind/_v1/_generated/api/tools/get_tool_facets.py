@@ -4,6 +4,7 @@ from typing import Any
 import httpx
 
 from ...client import AuthenticatedClient, Client
+from ...models.get_tool_facets_view import GetToolFacetsView
 from ...models.problem import Problem
 from ...models.tool_facets import ToolFacets
 from ...types import UNSET, Response, Unset
@@ -11,15 +12,27 @@ from ...types import UNSET, Response, Unset
 
 def _get_kwargs(
     *,
+    view: GetToolFacetsView | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
     if not isinstance(tamarind_version, Unset):
         headers["Tamarind-Version"] = tamarind_version
 
+    params: dict[str, Any] = {}
+
+    json_view: str | Unset = UNSET
+    if not isinstance(view, Unset):
+        json_view = view.value
+
+    params["view"] = json_view
+
+    params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
+
     _kwargs: dict[str, Any] = {
         "method": "get",
         "url": "/tools/facets",
+        "params": params,
     }
 
     _kwargs["headers"] = headers
@@ -78,14 +91,18 @@ def _build_response(
 def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
+    view: GetToolFacetsView | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
 ) -> Response[Problem | ToolFacets]:
     """List the modalities and functions you can filter tools by
 
      Modalities and functions, lower-cased, each with the number of tools you can see, so a count matches
-    what `listTools` returns for it. Most tools first, then by name. No labels or descriptions.
+    what `listTools` returns for it, and the curated taxonomy's label and description. Every value the
+    taxonomy defines is listed, so a count can be 0. Most tools first, then by name. With `view=agent`,
+    the counts are over the agent view's tools.
 
     Args:
+        view (GetToolFacetsView | Unset):
         tamarind_version (str | Unset):
 
     Raises:
@@ -97,6 +114,7 @@ def sync_detailed(
     """
 
     kwargs = _get_kwargs(
+        view=view,
         tamarind_version=tamarind_version,
     )
 
@@ -110,14 +128,18 @@ def sync_detailed(
 def sync(
     *,
     client: AuthenticatedClient | Client,
+    view: GetToolFacetsView | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
 ) -> Problem | ToolFacets | None:
     """List the modalities and functions you can filter tools by
 
      Modalities and functions, lower-cased, each with the number of tools you can see, so a count matches
-    what `listTools` returns for it. Most tools first, then by name. No labels or descriptions.
+    what `listTools` returns for it, and the curated taxonomy's label and description. Every value the
+    taxonomy defines is listed, so a count can be 0. Most tools first, then by name. With `view=agent`,
+    the counts are over the agent view's tools.
 
     Args:
+        view (GetToolFacetsView | Unset):
         tamarind_version (str | Unset):
 
     Raises:
@@ -130,6 +152,7 @@ def sync(
 
     return sync_detailed(
         client=client,
+        view=view,
         tamarind_version=tamarind_version,
     ).parsed
 
@@ -137,14 +160,18 @@ def sync(
 async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
+    view: GetToolFacetsView | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
 ) -> Response[Problem | ToolFacets]:
     """List the modalities and functions you can filter tools by
 
      Modalities and functions, lower-cased, each with the number of tools you can see, so a count matches
-    what `listTools` returns for it. Most tools first, then by name. No labels or descriptions.
+    what `listTools` returns for it, and the curated taxonomy's label and description. Every value the
+    taxonomy defines is listed, so a count can be 0. Most tools first, then by name. With `view=agent`,
+    the counts are over the agent view's tools.
 
     Args:
+        view (GetToolFacetsView | Unset):
         tamarind_version (str | Unset):
 
     Raises:
@@ -156,6 +183,7 @@ async def asyncio_detailed(
     """
 
     kwargs = _get_kwargs(
+        view=view,
         tamarind_version=tamarind_version,
     )
 
@@ -167,14 +195,18 @@ async def asyncio_detailed(
 async def asyncio(
     *,
     client: AuthenticatedClient | Client,
+    view: GetToolFacetsView | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
 ) -> Problem | ToolFacets | None:
     """List the modalities and functions you can filter tools by
 
      Modalities and functions, lower-cased, each with the number of tools you can see, so a count matches
-    what `listTools` returns for it. Most tools first, then by name. No labels or descriptions.
+    what `listTools` returns for it, and the curated taxonomy's label and description. Every value the
+    taxonomy defines is listed, so a count can be 0. Most tools first, then by name. With `view=agent`,
+    the counts are over the agent view's tools.
 
     Args:
+        view (GetToolFacetsView | Unset):
         tamarind_version (str | Unset):
 
     Raises:
@@ -188,6 +220,7 @@ async def asyncio(
     return (
         await asyncio_detailed(
             client=client,
+            view=view,
             tamarind_version=tamarind_version,
         )
     ).parsed
