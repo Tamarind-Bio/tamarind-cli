@@ -154,10 +154,12 @@ def sync_detailed(
     `upstream_unavailable`; cancel again. A `reason` on a pipeline run or a tool run is 422 at
     `/reason`, because the run has nowhere to keep it.
 
-    Another member's job is 404 for now. Once built (decision 74), it follows today's API: only in
-    an organization that doesn't share within itself, for its admin's own key, or for a key the
-    job is shared with; a refusal of a job you can read is 403, otherwise 404. Another member's
-    batch or run stays theirs.
+    Another member's job follows today's API (decision 74): only in an organization that doesn't
+    share within itself, for its live admin's own key, or for a key the job is shared with, and
+    only while the job's owner is on the organization's roster. A refusal of a job you can read is
+    403 `forbidden`, otherwise 404. On another member's job, the answer's `settings` is `{}` and
+    `modelId` null. Another member's batch, wrapper or tool run stays theirs. A roster that can't
+    be read is 503 `jobs_dependency_unavailable`, retryable.
 
     Args:
         job_id (str):
@@ -207,10 +209,12 @@ def sync(
     `upstream_unavailable`; cancel again. A `reason` on a pipeline run or a tool run is 422 at
     `/reason`, because the run has nowhere to keep it.
 
-    Another member's job is 404 for now. Once built (decision 74), it follows today's API: only in
-    an organization that doesn't share within itself, for its admin's own key, or for a key the
-    job is shared with; a refusal of a job you can read is 403, otherwise 404. Another member's
-    batch or run stays theirs.
+    Another member's job follows today's API (decision 74): only in an organization that doesn't
+    share within itself, for its live admin's own key, or for a key the job is shared with, and
+    only while the job's owner is on the organization's roster. A refusal of a job you can read is
+    403 `forbidden`, otherwise 404. On another member's job, the answer's `settings` is `{}` and
+    `modelId` null. Another member's batch, wrapper or tool run stays theirs. A roster that can't
+    be read is 503 `jobs_dependency_unavailable`, retryable.
 
     Args:
         job_id (str):
@@ -255,10 +259,12 @@ async def asyncio_detailed(
     `upstream_unavailable`; cancel again. A `reason` on a pipeline run or a tool run is 422 at
     `/reason`, because the run has nowhere to keep it.
 
-    Another member's job is 404 for now. Once built (decision 74), it follows today's API: only in
-    an organization that doesn't share within itself, for its admin's own key, or for a key the
-    job is shared with; a refusal of a job you can read is 403, otherwise 404. Another member's
-    batch or run stays theirs.
+    Another member's job follows today's API (decision 74): only in an organization that doesn't
+    share within itself, for its live admin's own key, or for a key the job is shared with, and
+    only while the job's owner is on the organization's roster. A refusal of a job you can read is
+    403 `forbidden`, otherwise 404. On another member's job, the answer's `settings` is `{}` and
+    `modelId` null. Another member's batch, wrapper or tool run stays theirs. A roster that can't
+    be read is 503 `jobs_dependency_unavailable`, retryable.
 
     Args:
         job_id (str):
@@ -306,10 +312,12 @@ async def asyncio(
     `upstream_unavailable`; cancel again. A `reason` on a pipeline run or a tool run is 422 at
     `/reason`, because the run has nowhere to keep it.
 
-    Another member's job is 404 for now. Once built (decision 74), it follows today's API: only in
-    an organization that doesn't share within itself, for its admin's own key, or for a key the
-    job is shared with; a refusal of a job you can read is 403, otherwise 404. Another member's
-    batch or run stays theirs.
+    Another member's job follows today's API (decision 74): only in an organization that doesn't
+    share within itself, for its live admin's own key, or for a key the job is shared with, and
+    only while the job's owner is on the organization's roster. A refusal of a job you can read is
+    403 `forbidden`, otherwise 404. On another member's job, the answer's `settings` is `{}` and
+    `modelId` null. Another member's batch, wrapper or tool run stays theirs. A roster that can't
+    be read is 503 `jobs_dependency_unavailable`, retryable.
 
     Args:
         job_id (str):

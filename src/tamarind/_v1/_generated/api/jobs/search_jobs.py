@@ -101,15 +101,14 @@ def sync_detailed(
 
     With `includeSettings`, a job comes back as `Job`, and the request takes at most 50 distinct
     values and 4.3 MB of settings in all; past either it's 422 at `/includeSettings`. A name over
-    2,048 bytes is 422 at `/names/{i}`. `scope: org` and another member's `createdBy` are 422
-    `not_supported` for now. Once website#7795 merges, they look up `names` among the jobs
-    `listJobs?scope=org` shows you: `ids` and `includeSettings` are 422 `not_supported` with
-    them, another member's `createdBy` without `scope: org` is 422 `needs_scope_org`, and a
-    member whose jobs you can't see is 403 `forbidden`. The batches one request counts share one
-    budget of 40,000 jobs; past it the answer is 503 `jobs_dependency_unavailable`. A search runs
-    in the same lane as a `listJobs` page, so a second one from your account while the first runs
-    is 429; website#7790 (not merged yet) runs a search of up to 4 values in the job-detail lane
-    instead, four per account, as a `listJobs?name=` lookup.
+    2,048 bytes is 422 at `/names/{i}`. `scope: org` and another member's `createdBy` look up
+    `names` among the jobs `listJobs?scope=org` shows you: `ids` and `includeSettings` are 422
+    `not_supported` with them, another member's `createdBy` without `scope: org` is 422
+    `needs_scope_org`, and a member whose jobs you can't see is 403 `forbidden`. The batches one
+    request counts share one budget of 40,000 jobs; past it the answer is 503
+    `jobs_dependency_unavailable`. A search of up to 4 values runs in the job-detail lane, four
+    per account, as a `listJobs?name=` lookup does; a bigger one runs in the same lane as a
+    `listJobs` page, so a second one from your account while the first runs is 429.
 
     Args:
         tamarind_version (str | Unset):
@@ -151,15 +150,14 @@ def sync(
 
     With `includeSettings`, a job comes back as `Job`, and the request takes at most 50 distinct
     values and 4.3 MB of settings in all; past either it's 422 at `/includeSettings`. A name over
-    2,048 bytes is 422 at `/names/{i}`. `scope: org` and another member's `createdBy` are 422
-    `not_supported` for now. Once website#7795 merges, they look up `names` among the jobs
-    `listJobs?scope=org` shows you: `ids` and `includeSettings` are 422 `not_supported` with
-    them, another member's `createdBy` without `scope: org` is 422 `needs_scope_org`, and a
-    member whose jobs you can't see is 403 `forbidden`. The batches one request counts share one
-    budget of 40,000 jobs; past it the answer is 503 `jobs_dependency_unavailable`. A search runs
-    in the same lane as a `listJobs` page, so a second one from your account while the first runs
-    is 429; website#7790 (not merged yet) runs a search of up to 4 values in the job-detail lane
-    instead, four per account, as a `listJobs?name=` lookup.
+    2,048 bytes is 422 at `/names/{i}`. `scope: org` and another member's `createdBy` look up
+    `names` among the jobs `listJobs?scope=org` shows you: `ids` and `includeSettings` are 422
+    `not_supported` with them, another member's `createdBy` without `scope: org` is 422
+    `needs_scope_org`, and a member whose jobs you can't see is 403 `forbidden`. The batches one
+    request counts share one budget of 40,000 jobs; past it the answer is 503
+    `jobs_dependency_unavailable`. A search of up to 4 values runs in the job-detail lane, four
+    per account, as a `listJobs?name=` lookup does; a bigger one runs in the same lane as a
+    `listJobs` page, so a second one from your account while the first runs is 429.
 
     Args:
         tamarind_version (str | Unset):
@@ -196,15 +194,14 @@ async def asyncio_detailed(
 
     With `includeSettings`, a job comes back as `Job`, and the request takes at most 50 distinct
     values and 4.3 MB of settings in all; past either it's 422 at `/includeSettings`. A name over
-    2,048 bytes is 422 at `/names/{i}`. `scope: org` and another member's `createdBy` are 422
-    `not_supported` for now. Once website#7795 merges, they look up `names` among the jobs
-    `listJobs?scope=org` shows you: `ids` and `includeSettings` are 422 `not_supported` with
-    them, another member's `createdBy` without `scope: org` is 422 `needs_scope_org`, and a
-    member whose jobs you can't see is 403 `forbidden`. The batches one request counts share one
-    budget of 40,000 jobs; past it the answer is 503 `jobs_dependency_unavailable`. A search runs
-    in the same lane as a `listJobs` page, so a second one from your account while the first runs
-    is 429; website#7790 (not merged yet) runs a search of up to 4 values in the job-detail lane
-    instead, four per account, as a `listJobs?name=` lookup.
+    2,048 bytes is 422 at `/names/{i}`. `scope: org` and another member's `createdBy` look up
+    `names` among the jobs `listJobs?scope=org` shows you: `ids` and `includeSettings` are 422
+    `not_supported` with them, another member's `createdBy` without `scope: org` is 422
+    `needs_scope_org`, and a member whose jobs you can't see is 403 `forbidden`. The batches one
+    request counts share one budget of 40,000 jobs; past it the answer is 503
+    `jobs_dependency_unavailable`. A search of up to 4 values runs in the job-detail lane, four
+    per account, as a `listJobs?name=` lookup does; a bigger one runs in the same lane as a
+    `listJobs` page, so a second one from your account while the first runs is 429.
 
     Args:
         tamarind_version (str | Unset):
@@ -244,15 +241,14 @@ async def asyncio(
 
     With `includeSettings`, a job comes back as `Job`, and the request takes at most 50 distinct
     values and 4.3 MB of settings in all; past either it's 422 at `/includeSettings`. A name over
-    2,048 bytes is 422 at `/names/{i}`. `scope: org` and another member's `createdBy` are 422
-    `not_supported` for now. Once website#7795 merges, they look up `names` among the jobs
-    `listJobs?scope=org` shows you: `ids` and `includeSettings` are 422 `not_supported` with
-    them, another member's `createdBy` without `scope: org` is 422 `needs_scope_org`, and a
-    member whose jobs you can't see is 403 `forbidden`. The batches one request counts share one
-    budget of 40,000 jobs; past it the answer is 503 `jobs_dependency_unavailable`. A search runs
-    in the same lane as a `listJobs` page, so a second one from your account while the first runs
-    is 429; website#7790 (not merged yet) runs a search of up to 4 values in the job-detail lane
-    instead, four per account, as a `listJobs?name=` lookup.
+    2,048 bytes is 422 at `/names/{i}`. `scope: org` and another member's `createdBy` look up
+    `names` among the jobs `listJobs?scope=org` shows you: `ids` and `includeSettings` are 422
+    `not_supported` with them, another member's `createdBy` without `scope: org` is 422
+    `needs_scope_org`, and a member whose jobs you can't see is 403 `forbidden`. The batches one
+    request counts share one budget of 40,000 jobs; past it the answer is 503
+    `jobs_dependency_unavailable`. A search of up to 4 values runs in the job-detail lane, four
+    per account, as a `listJobs?name=` lookup does; a bigger one runs in the same lane as a
+    `listJobs` page, so a second one from your account while the first runs is 429.
 
     Args:
         tamarind_version (str | Unset):

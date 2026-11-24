@@ -25,8 +25,7 @@ class FileEntry:
             multipart upload that isn't finished yet, the size it was started for.
         type_ (FileEntryType):
         job_name (None | str | Unset): On a top-level folder that holds a job's files under the job's id, that job's
-            name (what the app shows for the folder). Null for anything else. Not built yet (website#7801), so for now it's
-            absent.
+            name (what the app shows for the folder). Null for anything else.
     """
 
     modified_at: datetime.datetime | None

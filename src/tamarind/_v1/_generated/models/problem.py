@@ -38,8 +38,8 @@ class Problem:
                 `redirect_needs_bearer`, `archive_failed`, `idempotency_key_reused`, `idempotency_in_progress`,
                 `budget_exceeded`, `quota_exceeded`, `queue_full`, `upstream_unavailable`, `design_count_too_large`,
                 `unclaimed_agent_credential_route`, `submission_plan_mismatch`, `organization_compute_disabled`,
-                `organization_export_disabled` (website#7805, not merged yet), `job_not_finished`, `inputs_still_ingesting`,
-                `inputs_not_ingested`, `nothing_to_rerun`,
+                `organization_export_disabled`, `job_not_finished`, `inputs_still_ingesting`, `inputs_not_ingested`,
+                `nothing_to_rerun`,
                 `rerun_incomplete`.
                 Files: `folder_too_large`, `folder_changed`.
                 Projects and notes: `project_name_taken`, `project_not_empty`, `project_move_required`,
@@ -52,8 +52,8 @@ class Problem:
                 `order_changed`, `cancel_unconfirmed`, `duplicate_order`, `assays_blocked`, `assays_in_flight`,
                 `idempotency_order_unavailable`, `order_incomplete`, `provider_error`, `outcome_unknown`.
                 Pipelines: `node_run_molecule_response_too_large`, `organization_compute_disabled`,
-                `organization_export_disabled` (website#7805, not merged yet), `molecule_group_view_only`,
-                `molecules_import_ingestion_failed`, `molecules_import_ingestion_timeout`,
+                `organization_export_disabled`, `molecule_group_view_only`, `molecules_import_ingestion_failed`,
+                `molecules_import_ingestion_timeout`,
                 `pg_pool_exhausted`, `pg_query_timeout`, and the pipelines service's own `pipeline_*` codes, which
                 pass through unchanged.
                 Molecules: their own `molecule_*` and `molecules_*` codes, plus `job_not_found` and

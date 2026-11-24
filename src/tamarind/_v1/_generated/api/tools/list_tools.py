@@ -4,6 +4,7 @@ from typing import Any
 import httpx
 
 from ...client import AuthenticatedClient, Client
+from ...models.list_tools_view import ListToolsView
 from ...models.problem import Problem
 from ...models.tool_page import ToolPage
 from ...types import UNSET, Response, Unset
@@ -19,6 +20,7 @@ def _get_kwargs(
     pipeline_tools: bool | Unset = False,
     limit: int | Unset = 50,
     cursor: str | Unset = UNSET,
+    view: ListToolsView | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
@@ -42,6 +44,12 @@ def _get_kwargs(
     params["limit"] = limit
 
     params["cursor"] = cursor
+
+    json_view: str | Unset = UNSET
+    if not isinstance(view, Unset):
+        json_view = view.value
+
+    params["view"] = json_view
 
     params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
 
@@ -120,19 +128,32 @@ def sync_detailed(
     pipeline_tools: bool | Unset = False,
     limit: int | Unset = 50,
     cursor: str | Unset = UNSET,
+    view: ListToolsView | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
 ) -> Response[Problem | ToolPage]:
     """Find tools
 
      The built-in tools your account may run, in the catalog's display order rather than newest
     first. Visibility rules live in this endpoint, not in clients: a tool a flag, a block or
-    licensing hides from you isn't listed. Your organization's custom tools aren't listed here yet
-    (`custom=true` is 400); see `listCustomTools`.
+    licensing hides from you isn't listed, and neither is one your submit would be refused (your
+    organization's or team's policy, a licence such as Rosetta's, a GPL tool for a pharma
+    organization, or a domain restriction). As today's `GET /api/tools` does, the list also leaves
+    out a tool with no display name of its own or one hidden from the app's tool pages, though it
+    still answers by name on `getTool`, `getToolSchema` and a submit. `view=agent` lists the
+    catalog as the Tamarind MCP and agents see it instead (see the parameter).
+
+    `custom=true` lists your organization's custom tools instead, as the MCP lists them: each one
+    whose current version is deployed and published, by name, in name order, with the same
+    filters; `view` doesn't change it. A tool whose current version is private or a draft isn't
+    listed, even when an earlier version was published. With no organization, or only a personal
+    one, the list is empty. A custom tool's `finetune` is true only when it trains models and your
+    organization has custom finetuning. To manage custom tools, see `listCustomTools`.
 
     At launch this answers without a key too, like today's public `/tools.json`: without a key you
     get the public catalog, the tools a signed-out reader of the docs may see; with one, the tools
     its owner may run. Requests without a key share one overall rate limit. Until launch it needs a
-    key like every v1 operation, because the `api-v1` flag decides by the caller.
+    key like every v1 operation, because the `api-v1` flag decides by the caller. Without a key,
+    `custom` and `view` are 400.
 
     Args:
         search (str | Unset):
@@ -143,6 +164,7 @@ def sync_detailed(
         pipeline_tools (bool | Unset):  Default: False.
         limit (int | Unset):  Default: 50.
         cursor (str | Unset):
+        view (ListToolsView | Unset):
         tamarind_version (str | Unset):
 
     Raises:
@@ -162,6 +184,7 @@ def sync_detailed(
         pipeline_tools=pipeline_tools,
         limit=limit,
         cursor=cursor,
+        view=view,
         tamarind_version=tamarind_version,
     )
 
@@ -183,19 +206,32 @@ def sync(
     pipeline_tools: bool | Unset = False,
     limit: int | Unset = 50,
     cursor: str | Unset = UNSET,
+    view: ListToolsView | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
 ) -> Problem | ToolPage | None:
     """Find tools
 
      The built-in tools your account may run, in the catalog's display order rather than newest
     first. Visibility rules live in this endpoint, not in clients: a tool a flag, a block or
-    licensing hides from you isn't listed. Your organization's custom tools aren't listed here yet
-    (`custom=true` is 400); see `listCustomTools`.
+    licensing hides from you isn't listed, and neither is one your submit would be refused (your
+    organization's or team's policy, a licence such as Rosetta's, a GPL tool for a pharma
+    organization, or a domain restriction). As today's `GET /api/tools` does, the list also leaves
+    out a tool with no display name of its own or one hidden from the app's tool pages, though it
+    still answers by name on `getTool`, `getToolSchema` and a submit. `view=agent` lists the
+    catalog as the Tamarind MCP and agents see it instead (see the parameter).
+
+    `custom=true` lists your organization's custom tools instead, as the MCP lists them: each one
+    whose current version is deployed and published, by name, in name order, with the same
+    filters; `view` doesn't change it. A tool whose current version is private or a draft isn't
+    listed, even when an earlier version was published. With no organization, or only a personal
+    one, the list is empty. A custom tool's `finetune` is true only when it trains models and your
+    organization has custom finetuning. To manage custom tools, see `listCustomTools`.
 
     At launch this answers without a key too, like today's public `/tools.json`: without a key you
     get the public catalog, the tools a signed-out reader of the docs may see; with one, the tools
     its owner may run. Requests without a key share one overall rate limit. Until launch it needs a
-    key like every v1 operation, because the `api-v1` flag decides by the caller.
+    key like every v1 operation, because the `api-v1` flag decides by the caller. Without a key,
+    `custom` and `view` are 400.
 
     Args:
         search (str | Unset):
@@ -206,6 +242,7 @@ def sync(
         pipeline_tools (bool | Unset):  Default: False.
         limit (int | Unset):  Default: 50.
         cursor (str | Unset):
+        view (ListToolsView | Unset):
         tamarind_version (str | Unset):
 
     Raises:
@@ -226,6 +263,7 @@ def sync(
         pipeline_tools=pipeline_tools,
         limit=limit,
         cursor=cursor,
+        view=view,
         tamarind_version=tamarind_version,
     ).parsed
 
@@ -241,19 +279,32 @@ async def asyncio_detailed(
     pipeline_tools: bool | Unset = False,
     limit: int | Unset = 50,
     cursor: str | Unset = UNSET,
+    view: ListToolsView | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
 ) -> Response[Problem | ToolPage]:
     """Find tools
 
      The built-in tools your account may run, in the catalog's display order rather than newest
     first. Visibility rules live in this endpoint, not in clients: a tool a flag, a block or
-    licensing hides from you isn't listed. Your organization's custom tools aren't listed here yet
-    (`custom=true` is 400); see `listCustomTools`.
+    licensing hides from you isn't listed, and neither is one your submit would be refused (your
+    organization's or team's policy, a licence such as Rosetta's, a GPL tool for a pharma
+    organization, or a domain restriction). As today's `GET /api/tools` does, the list also leaves
+    out a tool with no display name of its own or one hidden from the app's tool pages, though it
+    still answers by name on `getTool`, `getToolSchema` and a submit. `view=agent` lists the
+    catalog as the Tamarind MCP and agents see it instead (see the parameter).
+
+    `custom=true` lists your organization's custom tools instead, as the MCP lists them: each one
+    whose current version is deployed and published, by name, in name order, with the same
+    filters; `view` doesn't change it. A tool whose current version is private or a draft isn't
+    listed, even when an earlier version was published. With no organization, or only a personal
+    one, the list is empty. A custom tool's `finetune` is true only when it trains models and your
+    organization has custom finetuning. To manage custom tools, see `listCustomTools`.
 
     At launch this answers without a key too, like today's public `/tools.json`: without a key you
     get the public catalog, the tools a signed-out reader of the docs may see; with one, the tools
     its owner may run. Requests without a key share one overall rate limit. Until launch it needs a
-    key like every v1 operation, because the `api-v1` flag decides by the caller.
+    key like every v1 operation, because the `api-v1` flag decides by the caller. Without a key,
+    `custom` and `view` are 400.
 
     Args:
         search (str | Unset):
@@ -264,6 +315,7 @@ async def asyncio_detailed(
         pipeline_tools (bool | Unset):  Default: False.
         limit (int | Unset):  Default: 50.
         cursor (str | Unset):
+        view (ListToolsView | Unset):
         tamarind_version (str | Unset):
 
     Raises:
@@ -283,6 +335,7 @@ async def asyncio_detailed(
         pipeline_tools=pipeline_tools,
         limit=limit,
         cursor=cursor,
+        view=view,
         tamarind_version=tamarind_version,
     )
 
@@ -302,19 +355,32 @@ async def asyncio(
     pipeline_tools: bool | Unset = False,
     limit: int | Unset = 50,
     cursor: str | Unset = UNSET,
+    view: ListToolsView | Unset = UNSET,
     tamarind_version: str | Unset = UNSET,
 ) -> Problem | ToolPage | None:
     """Find tools
 
      The built-in tools your account may run, in the catalog's display order rather than newest
     first. Visibility rules live in this endpoint, not in clients: a tool a flag, a block or
-    licensing hides from you isn't listed. Your organization's custom tools aren't listed here yet
-    (`custom=true` is 400); see `listCustomTools`.
+    licensing hides from you isn't listed, and neither is one your submit would be refused (your
+    organization's or team's policy, a licence such as Rosetta's, a GPL tool for a pharma
+    organization, or a domain restriction). As today's `GET /api/tools` does, the list also leaves
+    out a tool with no display name of its own or one hidden from the app's tool pages, though it
+    still answers by name on `getTool`, `getToolSchema` and a submit. `view=agent` lists the
+    catalog as the Tamarind MCP and agents see it instead (see the parameter).
+
+    `custom=true` lists your organization's custom tools instead, as the MCP lists them: each one
+    whose current version is deployed and published, by name, in name order, with the same
+    filters; `view` doesn't change it. A tool whose current version is private or a draft isn't
+    listed, even when an earlier version was published. With no organization, or only a personal
+    one, the list is empty. A custom tool's `finetune` is true only when it trains models and your
+    organization has custom finetuning. To manage custom tools, see `listCustomTools`.
 
     At launch this answers without a key too, like today's public `/tools.json`: without a key you
     get the public catalog, the tools a signed-out reader of the docs may see; with one, the tools
     its owner may run. Requests without a key share one overall rate limit. Until launch it needs a
-    key like every v1 operation, because the `api-v1` flag decides by the caller.
+    key like every v1 operation, because the `api-v1` flag decides by the caller. Without a key,
+    `custom` and `view` are 400.
 
     Args:
         search (str | Unset):
@@ -325,6 +391,7 @@ async def asyncio(
         pipeline_tools (bool | Unset):  Default: False.
         limit (int | Unset):  Default: 50.
         cursor (str | Unset):
+        view (ListToolsView | Unset):
         tamarind_version (str | Unset):
 
     Raises:
@@ -346,6 +413,7 @@ async def asyncio(
             pipeline_tools=pipeline_tools,
             limit=limit,
             cursor=cursor,
+            view=view,
             tamarind_version=tamarind_version,
         )
     ).parsed

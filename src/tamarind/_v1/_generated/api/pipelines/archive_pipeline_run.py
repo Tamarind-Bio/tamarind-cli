@@ -123,13 +123,9 @@ def sync_detailed(
     202 means still preparing, so call again after `retryAfterSeconds` (10, also sent as
     `Retry-After`). It is also 202 while the run (or the node run you named) hasn't finished: the
     zip is built only once it has. An archive that could not be built is 409 `archive_failed`,
-    retryable after `Retry-After` (90 seconds), when the results service builds again. Building
-    the zip starts work, so for now an organization that can't start compute gets 403
-    `organization_compute_disabled` unless the zip already exists.
-
-    Once website#7805 merges (not yet): an organization that has lost read access gets 403
-    `organization_export_disabled` unless the zip already exists. A suspended or inactive
-    organization still gets its archive.
+    retryable after `Retry-After` (90 seconds), when the results service builds again. An
+    organization that has lost read access gets 403 `organization_export_disabled` unless the zip
+    already exists. A suspended or inactive organization still gets its archive.
 
     Args:
         run_id (str):
@@ -172,13 +168,9 @@ def sync(
     202 means still preparing, so call again after `retryAfterSeconds` (10, also sent as
     `Retry-After`). It is also 202 while the run (or the node run you named) hasn't finished: the
     zip is built only once it has. An archive that could not be built is 409 `archive_failed`,
-    retryable after `Retry-After` (90 seconds), when the results service builds again. Building
-    the zip starts work, so for now an organization that can't start compute gets 403
-    `organization_compute_disabled` unless the zip already exists.
-
-    Once website#7805 merges (not yet): an organization that has lost read access gets 403
-    `organization_export_disabled` unless the zip already exists. A suspended or inactive
-    organization still gets its archive.
+    retryable after `Retry-After` (90 seconds), when the results service builds again. An
+    organization that has lost read access gets 403 `organization_export_disabled` unless the zip
+    already exists. A suspended or inactive organization still gets its archive.
 
     Args:
         run_id (str):
@@ -216,13 +208,9 @@ async def asyncio_detailed(
     202 means still preparing, so call again after `retryAfterSeconds` (10, also sent as
     `Retry-After`). It is also 202 while the run (or the node run you named) hasn't finished: the
     zip is built only once it has. An archive that could not be built is 409 `archive_failed`,
-    retryable after `Retry-After` (90 seconds), when the results service builds again. Building
-    the zip starts work, so for now an organization that can't start compute gets 403
-    `organization_compute_disabled` unless the zip already exists.
-
-    Once website#7805 merges (not yet): an organization that has lost read access gets 403
-    `organization_export_disabled` unless the zip already exists. A suspended or inactive
-    organization still gets its archive.
+    retryable after `Retry-After` (90 seconds), when the results service builds again. An
+    organization that has lost read access gets 403 `organization_export_disabled` unless the zip
+    already exists. A suspended or inactive organization still gets its archive.
 
     Args:
         run_id (str):
@@ -263,13 +251,9 @@ async def asyncio(
     202 means still preparing, so call again after `retryAfterSeconds` (10, also sent as
     `Retry-After`). It is also 202 while the run (or the node run you named) hasn't finished: the
     zip is built only once it has. An archive that could not be built is 409 `archive_failed`,
-    retryable after `Retry-After` (90 seconds), when the results service builds again. Building
-    the zip starts work, so for now an organization that can't start compute gets 403
-    `organization_compute_disabled` unless the zip already exists.
-
-    Once website#7805 merges (not yet): an organization that has lost read access gets 403
-    `organization_export_disabled` unless the zip already exists. A suspended or inactive
-    organization still gets its archive.
+    retryable after `Retry-After` (90 seconds), when the results service builds again. An
+    organization that has lost read access gets 403 `organization_export_disabled` unless the zip
+    already exists. A suspended or inactive organization still gets its archive.
 
     Args:
         run_id (str):

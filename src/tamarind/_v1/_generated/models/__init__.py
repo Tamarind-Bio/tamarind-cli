@@ -137,6 +137,7 @@ from .get_file_delivery import GetFileDelivery
 from .get_job_file_delivery import GetJobFileDelivery
 from .get_pipeline_schema_response_200 import GetPipelineSchemaResponse200
 from .get_pipeline_schema_response_200_schema import GetPipelineSchemaResponse200Schema
+from .get_tool_facets_view import GetToolFacetsView
 from .get_usage_group_by_item import GetUsageGroupByItem
 from .get_usage_metric import GetUsageMetric
 from .get_usage_scope import GetUsageScope
@@ -168,7 +169,9 @@ from .list_molecules_view import ListMoleculesView
 from .list_pipeline_runs_scope_type_0 import ListPipelineRunsScopeType0
 from .list_pipeline_runs_source_type_0 import ListPipelineRunsSourceType0
 from .list_pipeline_templates_scope_type_0 import ListPipelineTemplatesScopeType0
+from .list_tools_view import ListToolsView
 from .me import Me
+from .me_clients import MeClients
 from .me_credential import MeCredential
 from .me_credential_type import MeCredentialType
 from .me_limits import MeLimits
@@ -299,6 +302,7 @@ from .publish_pipeline_template_request import PublishPipelineTemplateRequest
 from .publish_response import PublishResponse
 from .read_entry_response import ReadEntryResponse
 from .read_notes_response import ReadNotesResponse
+from .recommend_tools_view import RecommendToolsView
 from .recommendation_ccd_input import RecommendationCcdInput
 from .recommendation_sequence_input import RecommendationSequenceInput
 from .recommendation_smiles_input import RecommendationSmilesInput
@@ -361,8 +365,23 @@ from .tool import Tool
 from .tool_facets import ToolFacets
 from .tool_facets_functions_item import ToolFacetsFunctionsItem
 from .tool_facets_modalities_item import ToolFacetsModalitiesItem
+from .tool_output_column import ToolOutputColumn
+from .tool_output_contract import ToolOutputContract
+from .tool_output_contract_by_task_type_0 import ToolOutputContractByTaskType0
+from .tool_output_contract_produces_item import ToolOutputContractProducesItem
+from .tool_output_task_contract import ToolOutputTaskContract
+from .tool_output_task_contract_generates_type_0_item import (
+    ToolOutputTaskContractGeneratesType0Item,
+)
 from .tool_page import ToolPage
 from .tool_recommendation import ToolRecommendation
+from .tool_recommendation_abstain_reason_type_1 import ToolRecommendationAbstainReasonType1
+from .tool_recommendation_abstain_reason_type_2_type_1 import (
+    ToolRecommendationAbstainReasonType2Type1,
+)
+from .tool_recommendation_abstain_reason_type_3_type_1 import (
+    ToolRecommendationAbstainReasonType3Type1,
+)
 from .tool_recommendation_request import ToolRecommendationRequest
 from .tool_schema import ToolSchema
 from .tool_schema_example import ToolSchemaExample
@@ -543,6 +562,7 @@ __all__ = (
     "GetJobFileDelivery",
     "GetPipelineSchemaResponse200",
     "GetPipelineSchemaResponse200Schema",
+    "GetToolFacetsView",
     "GetUsageGroupByItem",
     "GetUsageMetric",
     "GetUsageScope",
@@ -574,7 +594,9 @@ __all__ = (
     "ListPipelineRunsScopeType0",
     "ListPipelineRunsSourceType0",
     "ListPipelineTemplatesScopeType0",
+    "ListToolsView",
     "Me",
+    "MeClients",
     "MeCredential",
     "MeCredentialType",
     "MeLimits",
@@ -699,6 +721,7 @@ __all__ = (
     "RecommendationSequenceInput",
     "RecommendationSmilesInput",
     "RecommendedTool",
+    "RecommendToolsView",
     "RefreshUsageBody",
     "RefreshUsageResponse202",
     "RefreshUsageResponse202Status",
@@ -745,8 +768,17 @@ __all__ = (
     "ToolFacets",
     "ToolFacetsFunctionsItem",
     "ToolFacetsModalitiesItem",
+    "ToolOutputColumn",
+    "ToolOutputContract",
+    "ToolOutputContractByTaskType0",
+    "ToolOutputContractProducesItem",
+    "ToolOutputTaskContract",
+    "ToolOutputTaskContractGeneratesType0Item",
     "ToolPage",
     "ToolRecommendation",
+    "ToolRecommendationAbstainReasonType1",
+    "ToolRecommendationAbstainReasonType2Type1",
+    "ToolRecommendationAbstainReasonType3Type1",
     "ToolRecommendationRequest",
     "ToolSchema",
     "ToolSchemaExample",

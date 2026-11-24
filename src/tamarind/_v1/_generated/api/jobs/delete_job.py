@@ -98,9 +98,9 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     tamarind_version: str | Unset = UNSET,
 ) -> Response[Any | Problem]:
-    """Delete a job or a batch
+    """Delete a job, a batch or a pipeline run's job row
 
-     Takes a `job_` or `batch_` id; a `run_` id is 404. This is the app's Delete button: the job,
+     Takes a `job_`, `batch_` or `run_` id. This is the app's Delete button: the job,
     or a batch with every job in it, is marked deleted and reads as 404 everywhere from then on,
     so deleting it again is 404 too. Its outputs stay in storage. A tool run that is still running
     is stopped first; if stopping its jobs isn't confirmed, the answer is 502
@@ -110,6 +110,14 @@ def sync_detailed(
     with 503 `service_unavailable`, and repeating the call finishes it. Deleting a batch's jobs one
     by one until none is left stops the batch. A tool run submitted less than 15 minutes ago,
     whose run can't be reached yet, is 409 `job_still_starting` with `Retry-After: 60`.
+
+    A `run_` id does what today's `DELETE /delete-job` does
+    for a name only a pipeline run has. It deletes the run's row in the jobs table, the one the
+    app's Results list shows, so deleting it again is 404. The run isn't stopped or archived, its
+    jobs stay, and `getJob`, `listJobs` and `listPipelineRuns` still show it; the run's own
+    Archive in the app removes it from those. `archivePipelineRun`, which finds the run through
+    that row, is 404 from then on. Someone else's run, and a run with no such row, are 404. A
+    single-tool run has no such row: it's listed as its job, so delete the `job_` id.
 
     Args:
         job_id (str):
@@ -141,9 +149,9 @@ def sync(
     client: AuthenticatedClient | Client,
     tamarind_version: str | Unset = UNSET,
 ) -> Any | Problem | None:
-    """Delete a job or a batch
+    """Delete a job, a batch or a pipeline run's job row
 
-     Takes a `job_` or `batch_` id; a `run_` id is 404. This is the app's Delete button: the job,
+     Takes a `job_`, `batch_` or `run_` id. This is the app's Delete button: the job,
     or a batch with every job in it, is marked deleted and reads as 404 everywhere from then on,
     so deleting it again is 404 too. Its outputs stay in storage. A tool run that is still running
     is stopped first; if stopping its jobs isn't confirmed, the answer is 502
@@ -153,6 +161,14 @@ def sync(
     with 503 `service_unavailable`, and repeating the call finishes it. Deleting a batch's jobs one
     by one until none is left stops the batch. A tool run submitted less than 15 minutes ago,
     whose run can't be reached yet, is 409 `job_still_starting` with `Retry-After: 60`.
+
+    A `run_` id does what today's `DELETE /delete-job` does
+    for a name only a pipeline run has. It deletes the run's row in the jobs table, the one the
+    app's Results list shows, so deleting it again is 404. The run isn't stopped or archived, its
+    jobs stay, and `getJob`, `listJobs` and `listPipelineRuns` still show it; the run's own
+    Archive in the app removes it from those. `archivePipelineRun`, which finds the run through
+    that row, is 404 from then on. Someone else's run, and a run with no such row, are 404. A
+    single-tool run has no such row: it's listed as its job, so delete the `job_` id.
 
     Args:
         job_id (str):
@@ -179,9 +195,9 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     tamarind_version: str | Unset = UNSET,
 ) -> Response[Any | Problem]:
-    """Delete a job or a batch
+    """Delete a job, a batch or a pipeline run's job row
 
-     Takes a `job_` or `batch_` id; a `run_` id is 404. This is the app's Delete button: the job,
+     Takes a `job_`, `batch_` or `run_` id. This is the app's Delete button: the job,
     or a batch with every job in it, is marked deleted and reads as 404 everywhere from then on,
     so deleting it again is 404 too. Its outputs stay in storage. A tool run that is still running
     is stopped first; if stopping its jobs isn't confirmed, the answer is 502
@@ -191,6 +207,14 @@ async def asyncio_detailed(
     with 503 `service_unavailable`, and repeating the call finishes it. Deleting a batch's jobs one
     by one until none is left stops the batch. A tool run submitted less than 15 minutes ago,
     whose run can't be reached yet, is 409 `job_still_starting` with `Retry-After: 60`.
+
+    A `run_` id does what today's `DELETE /delete-job` does
+    for a name only a pipeline run has. It deletes the run's row in the jobs table, the one the
+    app's Results list shows, so deleting it again is 404. The run isn't stopped or archived, its
+    jobs stay, and `getJob`, `listJobs` and `listPipelineRuns` still show it; the run's own
+    Archive in the app removes it from those. `archivePipelineRun`, which finds the run through
+    that row, is 404 from then on. Someone else's run, and a run with no such row, are 404. A
+    single-tool run has no such row: it's listed as its job, so delete the `job_` id.
 
     Args:
         job_id (str):
@@ -220,9 +244,9 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     tamarind_version: str | Unset = UNSET,
 ) -> Any | Problem | None:
-    """Delete a job or a batch
+    """Delete a job, a batch or a pipeline run's job row
 
-     Takes a `job_` or `batch_` id; a `run_` id is 404. This is the app's Delete button: the job,
+     Takes a `job_`, `batch_` or `run_` id. This is the app's Delete button: the job,
     or a batch with every job in it, is marked deleted and reads as 404 everywhere from then on,
     so deleting it again is 404 too. Its outputs stay in storage. A tool run that is still running
     is stopped first; if stopping its jobs isn't confirmed, the answer is 502
@@ -232,6 +256,14 @@ async def asyncio(
     with 503 `service_unavailable`, and repeating the call finishes it. Deleting a batch's jobs one
     by one until none is left stops the batch. A tool run submitted less than 15 minutes ago,
     whose run can't be reached yet, is 409 `job_still_starting` with `Retry-After: 60`.
+
+    A `run_` id does what today's `DELETE /delete-job` does
+    for a name only a pipeline run has. It deletes the run's row in the jobs table, the one the
+    app's Results list shows, so deleting it again is 404. The run isn't stopped or archived, its
+    jobs stay, and `getJob`, `listJobs` and `listPipelineRuns` still show it; the run's own
+    Archive in the app removes it from those. `archivePipelineRun`, which finds the run through
+    that row, is 404 from then on. Someone else's run, and a run with no such row, are 404. A
+    single-tool run has no such row: it's listed as its job, so delete the `job_` id.
 
     Args:
         job_id (str):

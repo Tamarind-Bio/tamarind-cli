@@ -129,7 +129,9 @@ def sync_detailed(
 
     200 means the check ran, whatever the verdict, and problems with `settings` are reported in it:
     blocking ones in `errors`, and the validator's non-blocking findings in `warnings`, the same
-    `warnings` `submitJob` returns. A tool hidden from you is a `tool_not_found` error in the
+    `warnings` `submitJob` returns. A required setting left out, or sent as null, is an error
+    (`required` at its pointer), as today's JS routes refuse it, a batch's rows included. A tool
+    hidden from you is a `tool_not_found` error in the
     verdict. With `lowPriority: true`, a caller or job that can't have the tier is an error at
     `/lowPriority` with the same `code` `submitJob` would refuse with. A body that fails this
     request schema, such as one with no `tool` or an unknown top-level field, is 422, because there
@@ -199,7 +201,9 @@ def sync(
 
     200 means the check ran, whatever the verdict, and problems with `settings` are reported in it:
     blocking ones in `errors`, and the validator's non-blocking findings in `warnings`, the same
-    `warnings` `submitJob` returns. A tool hidden from you is a `tool_not_found` error in the
+    `warnings` `submitJob` returns. A required setting left out, or sent as null, is an error
+    (`required` at its pointer), as today's JS routes refuse it, a batch's rows included. A tool
+    hidden from you is a `tool_not_found` error in the
     verdict. With `lowPriority: true`, a caller or job that can't have the tier is an error at
     `/lowPriority` with the same `code` `submitJob` would refuse with. A body that fails this
     request schema, such as one with no `tool` or an unknown top-level field, is 422, because there
@@ -264,7 +268,9 @@ async def asyncio_detailed(
 
     200 means the check ran, whatever the verdict, and problems with `settings` are reported in it:
     blocking ones in `errors`, and the validator's non-blocking findings in `warnings`, the same
-    `warnings` `submitJob` returns. A tool hidden from you is a `tool_not_found` error in the
+    `warnings` `submitJob` returns. A required setting left out, or sent as null, is an error
+    (`required` at its pointer), as today's JS routes refuse it, a batch's rows included. A tool
+    hidden from you is a `tool_not_found` error in the
     verdict. With `lowPriority: true`, a caller or job that can't have the tier is an error at
     `/lowPriority` with the same `code` `submitJob` would refuse with. A body that fails this
     request schema, such as one with no `tool` or an unknown top-level field, is 422, because there
@@ -332,7 +338,9 @@ async def asyncio(
 
     200 means the check ran, whatever the verdict, and problems with `settings` are reported in it:
     blocking ones in `errors`, and the validator's non-blocking findings in `warnings`, the same
-    `warnings` `submitJob` returns. A tool hidden from you is a `tool_not_found` error in the
+    `warnings` `submitJob` returns. A required setting left out, or sent as null, is an error
+    (`required` at its pointer), as today's JS routes refuse it, a batch's rows included. A tool
+    hidden from you is a `tool_not_found` error in the
     verdict. With `lowPriority: true`, a caller or job that can't have the tier is an error at
     `/lowPriority` with the same `code` `submitJob` would refuse with. A body that fails this
     request schema, such as one with no `tool` or an unknown top-level field, is 422, because there

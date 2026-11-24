@@ -101,10 +101,15 @@ def sync_detailed(
 ) -> Response[Problem | ToolSchema]:
     """Get a tool's settings schema and an example
 
-     Built-in tools only for now: any other name, or a tool hidden from you, is 404
-    `tool_not_found`. Settings behind a flag that's off for you are left out, and so are settings
-    that depend on one left out; settings limited to some organizations or surfaces are kept and
-    annotated.
+     A built-in tool, or your organization's custom tool by its name (`mytool`, or `org/mytool` as a
+    job's `tool` names it). A custom tool answers in the version a submit would run (its published
+    one, or `version`), and only when a submit would resolve it for you and you may read it, as
+    today's schema route decides. A tool you can't see, a built-in your submit would be refused,
+    and a custom tool you can't read all answer as one that doesn't exist, 404 `tool_not_found`.
+    Settings behind a flag that's off for you are left out, and so are settings limited to
+    organizations you aren't in and settings that depend on one left out; settings limited to some
+    surfaces, or to organizations you're in, are kept and annotated. `outputTypes` and
+    `outputContract` say what the results look like.
 
     `example` is a `settings` object built from each setting's example or default, for one task
     branch, so clients don't have to strip conditional fields themselves. It isn't guaranteed to
@@ -147,10 +152,15 @@ def sync(
 ) -> Problem | ToolSchema | None:
     """Get a tool's settings schema and an example
 
-     Built-in tools only for now: any other name, or a tool hidden from you, is 404
-    `tool_not_found`. Settings behind a flag that's off for you are left out, and so are settings
-    that depend on one left out; settings limited to some organizations or surfaces are kept and
-    annotated.
+     A built-in tool, or your organization's custom tool by its name (`mytool`, or `org/mytool` as a
+    job's `tool` names it). A custom tool answers in the version a submit would run (its published
+    one, or `version`), and only when a submit would resolve it for you and you may read it, as
+    today's schema route decides. A tool you can't see, a built-in your submit would be refused,
+    and a custom tool you can't read all answer as one that doesn't exist, 404 `tool_not_found`.
+    Settings behind a flag that's off for you are left out, and so are settings limited to
+    organizations you aren't in and settings that depend on one left out; settings limited to some
+    surfaces, or to organizations you're in, are kept and annotated. `outputTypes` and
+    `outputContract` say what the results look like.
 
     `example` is a `settings` object built from each setting's example or default, for one task
     branch, so clients don't have to strip conditional fields themselves. It isn't guaranteed to
@@ -188,10 +198,15 @@ async def asyncio_detailed(
 ) -> Response[Problem | ToolSchema]:
     """Get a tool's settings schema and an example
 
-     Built-in tools only for now: any other name, or a tool hidden from you, is 404
-    `tool_not_found`. Settings behind a flag that's off for you are left out, and so are settings
-    that depend on one left out; settings limited to some organizations or surfaces are kept and
-    annotated.
+     A built-in tool, or your organization's custom tool by its name (`mytool`, or `org/mytool` as a
+    job's `tool` names it). A custom tool answers in the version a submit would run (its published
+    one, or `version`), and only when a submit would resolve it for you and you may read it, as
+    today's schema route decides. A tool you can't see, a built-in your submit would be refused,
+    and a custom tool you can't read all answer as one that doesn't exist, 404 `tool_not_found`.
+    Settings behind a flag that's off for you are left out, and so are settings limited to
+    organizations you aren't in and settings that depend on one left out; settings limited to some
+    surfaces, or to organizations you're in, are kept and annotated. `outputTypes` and
+    `outputContract` say what the results look like.
 
     `example` is a `settings` object built from each setting's example or default, for one task
     branch, so clients don't have to strip conditional fields themselves. It isn't guaranteed to
@@ -232,10 +247,15 @@ async def asyncio(
 ) -> Problem | ToolSchema | None:
     """Get a tool's settings schema and an example
 
-     Built-in tools only for now: any other name, or a tool hidden from you, is 404
-    `tool_not_found`. Settings behind a flag that's off for you are left out, and so are settings
-    that depend on one left out; settings limited to some organizations or surfaces are kept and
-    annotated.
+     A built-in tool, or your organization's custom tool by its name (`mytool`, or `org/mytool` as a
+    job's `tool` names it). A custom tool answers in the version a submit would run (its published
+    one, or `version`), and only when a submit would resolve it for you and you may read it, as
+    today's schema route decides. A tool you can't see, a built-in your submit would be refused,
+    and a custom tool you can't read all answer as one that doesn't exist, 404 `tool_not_found`.
+    Settings behind a flag that's off for you are left out, and so are settings limited to
+    organizations you aren't in and settings that depend on one left out; settings limited to some
+    surfaces, or to organizations you're in, are kept and annotated. `outputTypes` and
+    `outputContract` say what the results look like.
 
     `example` is a `settings` object built from each setting's example or default, for one task
     branch, so clients don't have to strip conditional fields themselves. It isn't guaranteed to
