@@ -282,7 +282,7 @@ class HTTPClient:
                 if renewed is not None:
                     resp = send(renewed)
         except httpx.HTTPError as exc:
-            raise TamarindError(f"Network error talking to {self.base_url}: {exc}") from exc
+            raise TamarindError(f"Network error talking to {self.base_url}: {exc}") from detached(exc)
 
         if resp.is_success:
             return resp
@@ -358,7 +358,7 @@ class HTTPClient:
                     if renewed is not None:
                         resp = await send(renewed)
         except httpx.HTTPError as exc:
-            raise TamarindError(f"Network error talking to {self.base_url}: {exc}") from exc
+            raise TamarindError(f"Network error talking to {self.base_url}: {exc}") from detached(exc)
 
         if resp.is_success:
             return resp
@@ -425,6 +425,14 @@ def _parse_json(resp: httpx.Response) -> Any:
     except ValueError:
         # Some endpoints (e.g. /result) return a bare presigned URL string.
         return text
+
+
+def detached(exc: httpx.HTTPError) -> httpx.HTTPError:
+    """``exc`` without the request httpx attached to it, whose headers hold the API key or
+    access token. Chained errors keep their type, which callers read (a network error
+    means the outcome is unclear); anything that reports a cause can't reach the key."""
+    exc._request = None
+    return exc
 
 
 def _with_token(headers: dict[str, Any] | None, token: str | None) -> dict[str, Any] | None:

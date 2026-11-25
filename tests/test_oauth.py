@@ -574,3 +574,42 @@ def test_cli_login_prompts_for_the_secret_without_echoing_it(env):
     assert res.exit_code == 0, res.output
     assert SECRET not in res.output
     assert json.loads((env / "config.json").read_text())["profiles"]["default"]["client_secret"] == SECRET
+
+
+# -- network errors keep their type, not the request ------------------------------------
+
+
+def _request_of(error: BaseException | None) -> httpx.Request | None:
+    try:
+        return error.request if isinstance(error, httpx.HTTPError) else None
+    except RuntimeError:  # httpx: "The .request property has not been set."
+        return None
+
+
+@respx.mock
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_a_network_error_is_chained_without_the_token(asynchronous):
+    respx.post(TOKEN_URL).mock(return_value=granted("tok_live_123"))
+    respx.get(f"{API}jobs").mock(side_effect=httpx.ConnectError("refused"))
+    with HTTPClient(API, None, credentials=make()) as client:
+        with pytest.raises(TamarindError) as raised:
+            if asynchronous:
+                asyncio.run(client.request_async("GET", "jobs"))
+            else:
+                client.request("GET", "jobs")
+    # The type is kept (outcome_unclear and the build-timeout check read it) ...
+    assert isinstance(raised.value.__cause__, httpx.ConnectError)
+    # ... and the request, with the token in x-api-key, is not.
+    assert _request_of(raised.value.__cause__) is None
+    assert _request_of(raised.value.__context__) is None
+
+
+@respx.mock
+def test_a_v1_network_error_is_chained_without_the_token():
+    respx.post(TOKEN_URL).mock(return_value=granted("tok_live_123"))
+    respx.get(f"{V1}/me").mock(side_effect=httpx.ConnectError("refused"))
+    with V1Client(base_url=V1, credentials=make(), max_retries=0) as client:
+        with pytest.raises(TamarindError) as raised:
+            client.me.get()
+    assert isinstance(raised.value.__cause__, httpx.ConnectError)
+    assert _request_of(raised.value.__cause__) is None

@@ -26,6 +26,7 @@ from dateutil.parser import isoparse
 
 from tamarind.attribution import client_headers
 from tamarind.errors import TamarindError
+from tamarind.http import detached
 from tamarind._v1._contract import COMMA_JOINED_QUERY
 from tamarind._v1._generated.types import UNSET, Unset
 from tamarind._v1.errors import ProblemError
@@ -244,7 +245,7 @@ class Transport:
                     self._sleep(_backoff(attempt))
                     attempt += 1
                     continue
-                raise TamarindError(f"Network error: {exc}") from exc
+                raise TamarindError(f"Network error: {exc}") from detached(exc)
             if response.is_success:
                 return response
             error = ProblemError.from_response(response) if api else _storage_error(response)
