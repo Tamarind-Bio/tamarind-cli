@@ -7,6 +7,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import stat
 import threading
 import time
@@ -533,7 +534,8 @@ def test_cli_login_stores_the_pair_and_replaces_a_stored_key(env):
     path = env / "config.json"
     stored = json.loads(path.read_text())["profiles"]["default"]
     assert stored == {"client_id": CLIENT_ID, "client_secret": SECRET}
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if os.name == "posix":  # the file is made private on POSIX only (config._write_store)
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
     human = runner.invoke(app, ["--no-json", "auth", "status"])
     assert human.exit_code == 0 and f"client id:    {CLIENT_ID} (verified)" in human.stdout
