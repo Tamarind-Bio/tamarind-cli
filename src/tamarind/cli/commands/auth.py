@@ -44,13 +44,10 @@ def login(
     client_id: Optional[str] = typer.Option(
         None,
         "--client-id",
-        help="Store a service account's client ID and secret instead of an API key.",
-        show_default=False,
-    ),
-    client_secret: Optional[str] = typer.Option(
-        None,
-        "--client-secret",
-        help="The service account's client secret. If omitted, you'll be prompted.",
+        help=(
+            "Store a service account's client ID and secret instead of an API key. "
+            "You'll be prompted for the secret."
+        ),
         show_default=False,
     ),
     no_verify: bool = typer.Option(False, "--no-verify", help="Skip verifying the key."),
@@ -60,17 +57,18 @@ def login(
 
     Get a key from https://app.tamarind.bio (Settings → API), or set
     TAMARIND_API_KEY in the environment to skip storing one. A service account that
-    signs in with OAuth has a client ID and secret instead: pass --client-id, or set
-    TAMARIND_CLIENT_ID and TAMARIND_CLIENT_SECRET.
+    signs in with OAuth has a client ID and secret instead: pass --client-id and enter
+    the secret when asked, or set TAMARIND_CLIENT_ID and TAMARIND_CLIENT_SECRET. The
+    secret is never taken from the command line, where other users and logs can see it.
     """
     state = ctx.obj
     cfg = state.config()
-    if client_id is not None or client_secret is not None:
+    if client_id is not None:
         if api_key is not None:
-            raise UsageError("Pass --api-key, or --client-id and --client-secret, not both.")
-        if not client_id or not client_id.strip():
-            raise UsageError("--client-secret needs --client-id.")
-        _login_client(state, cfg, client_id.strip(), client_secret, verify=not no_verify)
+            raise UsageError("Pass --api-key or --client-id, not both.")
+        if not client_id.strip():
+            raise UsageError("--client-id is empty.")
+        _login_client(state, cfg, client_id.strip(), verify=not no_verify)
         return
     key = api_key or typer.prompt("Tamarind API key", hide_input=True)
     key = key.strip()
@@ -86,8 +84,9 @@ def login(
     )
 
 
-def _login_client(state, cfg, client_id: str, client_secret: str | None, *, verify: bool) -> None:
-    secret = (client_secret or typer.prompt("Client secret", hide_input=True)).strip()
+def _login_client(state, cfg, client_id: str, *, verify: bool) -> None:
+    # On stderr, so --json output stays one document.
+    secret = typer.prompt("Client secret", hide_input=True, err=True).strip()
     if not secret:
         raise UsageError("The client secret is empty.")
     if verify:

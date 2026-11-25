@@ -50,7 +50,6 @@ _active_output_mode = OutputMode(json=not output.is_tty(), quiet=False)
 _GLOBAL_VALUE_OPTIONS = {
     "--api-key",
     "--client-id",
-    "--client-secret",
     "--api-base",
     "--catalog-base",
     "--profile",
@@ -180,13 +179,11 @@ def main(
     client_id: Optional[str] = typer.Option(
         None,
         "--client-id",
-        help="A service account's client ID, for OAuth (overrides TAMARIND_CLIENT_ID and the profile).",
-        show_default=False,
-    ),
-    client_secret: Optional[str] = typer.Option(
-        None,
-        "--client-secret",
-        help="The service account's client secret (overrides TAMARIND_CLIENT_SECRET and the profile).",
+        help=(
+            "A service account's client ID, for OAuth (overrides TAMARIND_CLIENT_ID and the profile). "
+            "Its secret is never taken from the command line: set TAMARIND_CLIENT_SECRET or run "
+            "`tamarind auth login --client-id`."
+        ),
         show_default=False,
     ),
     api_base: Optional[str] = typer.Option(
@@ -214,7 +211,6 @@ def main(
         _kwargs={
             "api_key": api_key,
             "client_id": client_id,
-            "client_secret": client_secret,
             "api_base": api_base,
             "catalog_base": catalog_base,
             "profile": profile,

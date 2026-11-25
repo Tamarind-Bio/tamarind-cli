@@ -66,6 +66,7 @@ class Transport:
         if api_key:
             headers["x-api-key"] = api_key
         self._credentials = credentials
+        self._timeout = timeout
         self.base_url = base_url.rstrip("/")
         self.max_retries = max_retries
         self.version = version
@@ -162,6 +163,9 @@ class Transport:
         merged.update(headers or {})
         repeat_safe = repeat_safe or method in _SAFE_METHODS
         credentials = self._credentials
+        # A client made for one try (a wait's bounded request: no retries, the remaining
+        # deadline as its timeout) gets its token within that timeout too.
+        budget = self._timeout if self.max_retries == 0 else None
         renewed = False
 
         def request(token: str | None) -> httpx.Response:
@@ -175,12 +179,12 @@ class Transport:
 
         def attempt() -> httpx.Response:
             nonlocal renewed
-            token = credentials.token() if credentials is not None else None
+            token = credentials.token(budget=budget) if credentials is not None else None
             response = request(token)
             # A 401 is refused before any work, so sending again is safe; once per call.
             if response.status_code == 401 and credentials is not None and not renewed:
                 renewed = True
-                fresh = credentials.renew(token)
+                fresh = credentials.renew(token, budget=budget)
                 if fresh is not None:
                     response = request(fresh)
             return response

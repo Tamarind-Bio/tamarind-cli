@@ -319,9 +319,9 @@ def test_neither_the_secret_nor_a_token_reaches_an_error_or_a_log(caplog, answer
     )
     for secret in (SECRET, pair, "tok_leaked_shape"):
         assert secret not in shown
-    # Never chained to an httpx error, which carries the request and its Basic header.
-    assert raised.value.__cause__ is None
-    assert raised.value.__context__ is None or raised.value.__suppress_context__
+    # A cause keeps its type, never the request that carries the Basic header.
+    assert _request_of(raised.value.__cause__) is None
+    assert _request_of(raised.value.__context__) is None
 
 
 @respx.mock
@@ -503,13 +503,12 @@ def test_half_a_pair_is_an_error_even_beside_a_key(env, monkeypatch, variables, 
 
 
 @respx.mock
-def test_cli_flags_use_client_credentials_over_a_key_in_the_environment(env, monkeypatch):
+def test_a_cli_flag_uses_client_credentials_over_a_key_in_the_environment(env, monkeypatch):
     monkeypatch.setenv("TAMARIND_API_KEY", "sk_env")
+    monkeypatch.setenv("TAMARIND_CLIENT_SECRET", SECRET)
     respx.post(TOKEN_URL).mock(return_value=granted("tok_1"))
     jobs = respx.get(f"{API}jobs").mock(return_value=httpx.Response(200, json={"jobs": []}))
-    res = runner.invoke(
-        app, ["--json", "--client-id", CLIENT_ID, "--client-secret", SECRET, "auth", "status"]
-    )
+    res = runner.invoke(app, ["--json", "--client-id", CLIENT_ID, "auth", "status"])
     assert res.exit_code == 0, res.output
     assert json.loads(res.stdout) == {
         "profile": "default",
@@ -527,7 +526,7 @@ def test_cli_login_stores_the_pair_and_replaces_a_stored_key(env):
     config.save_profile("default", api_key="sk_profile")
     respx.post(TOKEN_URL).mock(return_value=granted("tok_1"))
     respx.get(f"{API}jobs").mock(return_value=httpx.Response(200, json={"jobs": []}))
-    res = runner.invoke(app, ["--json", "auth", "login", "--client-id", CLIENT_ID, "--client-secret", SECRET])
+    res = runner.invoke(app, ["--json", "auth", "login", "--client-id", CLIENT_ID], input=SECRET + "\n")
     assert res.exit_code == 0, res.output
     assert json.loads(res.stdout) == {"ok": True, "profile": "default", "clientId": CLIENT_ID, "verified": True}
     assert SECRET not in res.output and "tok_1" not in res.output
@@ -552,7 +551,7 @@ def test_cli_login_stores_the_pair_and_replaces_a_stored_key(env):
 @respx.mock
 def test_cli_login_keeps_the_token_endpoints_reason_and_saves_nothing(env):
     respx.post(TOKEN_URL).mock(return_value=httpx.Response(404, json={"error": "not_found"}))
-    res = runner.invoke(app, ["--json", "auth", "login", "--client-id", CLIENT_ID, "--client-secret", SECRET])
+    res = runner.invoke(app, ["--json", "auth", "login", "--client-id", CLIENT_ID], input=SECRET + "\n")
     assert res.exception is not None and res.exception.exit_code == ExitCode.AUTH
     assert "aren't enabled" in str(res.exception) and "Not saved" in str(res.exception)
     assert SECRET not in str(res.exception)
@@ -562,8 +561,12 @@ def test_cli_login_keeps_the_token_endpoints_reason_and_saves_nothing(env):
 def test_cli_login_refuses_a_key_and_a_client_together(env):
     res = runner.invoke(app, ["--json", "auth", "login", "--api-key", "k", "--client-id", CLIENT_ID])
     assert isinstance(res.exception, UsageError)
-    res = runner.invoke(app, ["--json", "auth", "login", "--client-secret", SECRET])
-    assert isinstance(res.exception, UsageError) and SECRET not in str(res.exception)
+
+
+@pytest.mark.parametrize("argv", [["--client-secret", SECRET, "auth", "status"], ["auth", "login", "--client-id", CLIENT_ID, "--client-secret", SECRET]])
+def test_the_secret_is_never_taken_from_the_command_line(env, argv):
+    res = runner.invoke(app, ["--json", *argv])
+    assert res.exit_code != 0 and "No such option" in res.output
 
 
 @respx.mock
@@ -613,3 +616,74 @@ def test_a_v1_network_error_is_chained_without_the_token():
             client.me.get()
     assert isinstance(raised.value.__cause__, httpx.ConnectError)
     assert _request_of(raised.value.__cause__) is None
+
+
+# -- a renewal that fails early, and a bounded request ----------------------------------
+
+
+@respx.mock
+def test_an_early_renewal_that_fails_keeps_the_token_until_it_runs_out():
+    clock = Clock()
+    sleeps: list[float] = []
+    route = respx.post(TOKEN_URL).mock(
+        side_effect=[granted("tok_1")] + [httpx.Response(503, json={"error": "temporarily_unavailable"})] * 6
+    )
+    credentials = make(clock, sleeps)
+    assert credentials.token() == "tok_1"
+    clock.now += 3600 - 59  # inside the last minute
+    assert credentials.token() == "tok_1" and route.call_count == 2 and sleeps == []
+    clock.now += 5
+    assert credentials.token() == "tok_1" and route.call_count == 2  # tried again only after 10 s
+    clock.now += 6
+    assert credentials.token() == "tok_1" and route.call_count == 3
+    clock.now = 1000 + 3600 - 5  # too close to the end to send it
+    with pytest.raises(TamarindError, match="503"):
+        credentials.token()
+    assert route.call_count == 7 and len(sleeps) == 3  # a patient fetch again
+
+
+@respx.mock
+def test_an_early_renewal_refused_outright_is_raised():
+    clock = Clock()
+    respx.post(TOKEN_URL).mock(side_effect=[granted("tok_1"), httpx.Response(401, json={"error": "invalid_client"})])
+    credentials = make(clock)
+    credentials.token()
+    clock.now += 3600 - 59
+    with pytest.raises(AuthError):
+        credentials.token()
+
+
+@respx.mock
+def test_a_budget_means_one_try_within_it():
+    sleeps: list[float] = []
+    route = respx.post(TOKEN_URL).mock(return_value=httpx.Response(503, headers={"retry-after": "1"}))
+    with pytest.raises(TamarindError):
+        make(sleeps=sleeps).token(budget=2.5)
+    assert route.call_count == 1 and sleeps == []
+    assert route.calls[0].request.extensions["timeout"]["read"] == 2.5
+
+
+def test_a_budget_bounds_the_wait_for_another_fetch():
+    credentials = oauth.ClientCredentials(CLIENT_ID, SECRET, token_url=TOKEN_URL)
+    credentials._lock.acquire()  # another request is fetching
+    try:
+        started = time.monotonic()
+        with pytest.raises(TamarindError, match="Timed out waiting for an access token"):
+            credentials.token(budget=0.05)
+        assert time.monotonic() - started < 1
+    finally:
+        credentials._lock.release()
+
+
+@respx.mock
+def test_bounded_requests_pass_their_deadline_to_the_token_fetch():
+    route = respx.post(TOKEN_URL).mock(return_value=granted("tok_1"))
+    respx.get(f"{API}jobs").mock(return_value=httpx.Response(200, json={"jobs": []}))
+    respx.get(f"{V1}/me").mock(return_value=httpx.Response(200, json={"user": {}}))
+    with HTTPClient(API, None, credentials=make()) as client:
+        client.request("GET", "jobs", timeout=3.0)
+    with V1Client(base_url=V1, credentials=make(), timeout=4.0, max_retries=0) as client:
+        client.me.get()
+    with V1Client(base_url=V1, credentials=make(), timeout=4.0) as client:  # retries: unbounded
+        client.me.get()
+    assert [c.request.extensions["timeout"]["read"] for c in route.calls] == [3.0, 4.0, 30.0]

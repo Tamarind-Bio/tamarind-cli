@@ -59,7 +59,7 @@ endpoint (`POST https://app.tamarind.bio/api/oauth/token`) and renew it themselv
 export TAMARIND_CLIENT_ID="..."        # the service account's client ID
 export TAMARIND_CLIENT_SECRET="..."
 # or
-tamarind auth login --client-id ...    # prompts for the secret, stores both
+tamarind auth login --client-id ...    # asks for the secret, stores both
 ```
 
 ```python
@@ -74,6 +74,8 @@ client = Tamarind(client_id="...", client_secret="...")
   command is its own process and asks for its own token. The token endpoint allows 600 tokens
   an hour per account (and 300 requests in 10 minutes per network), so a loop that runs many
   commands a minute should use the SDK instead.
+- The secret is never taken from the command line, where other users and logs can see it: use
+  the environment variable, the profile, or the `auth login` prompt.
 - When both an API key and client credentials are set, the one set more specifically wins (a
   flag over an environment variable, an environment variable over the profile). At the same
   level the API key wins.
@@ -274,7 +276,7 @@ Run `tamarind <command> --help` for full options.
 |---|---|---|---|
 | API key | `--api-key` | `TAMARIND_API_KEY` | — |
 | Service account client ID | `--client-id` | `TAMARIND_CLIENT_ID` | — |
-| Service account client secret | `--client-secret` | `TAMARIND_CLIENT_SECRET` | — |
+| Service account client secret | — | `TAMARIND_CLIENT_SECRET` | — |
 | Job API base | `--api-base` | `TAMARIND_API_BASE` | `https://app.tamarind.bio/api/` |
 | Catalog base | `--catalog-base` | `TAMARIND_CATALOG_BASE` | `https://mcp.tamarind.bio` |
 | Profile | `--profile` | `TAMARIND_PROFILE` | `default` |

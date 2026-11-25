@@ -274,11 +274,12 @@ class HTTPClient:
             )
 
         try:
-            token = self.credentials.token() if self.credentials is not None else None
+            # A request its caller bounds (`timeout`) gets its token within the same bound.
+            token = self.credentials.token(budget=timeout) if self.credentials is not None else None
             resp = send(token)
             if resp.status_code == 401 and self.credentials is not None:
                 # Refused before any work was done, so sending it again is safe.
-                renewed = self.credentials.renew(token)
+                renewed = self.credentials.renew(token, budget=timeout)
                 if renewed is not None:
                     resp = send(renewed)
         except httpx.HTTPError as exc:
@@ -351,10 +352,14 @@ class HTTPClient:
                     )
 
                 # A token fetch is a blocking request: it runs in a thread, like the v1 question.
-                token = await asyncio.to_thread(credentials.token) if credentials is not None else None
+                token = (
+                    await asyncio.to_thread(credentials.token, budget=timeout)
+                    if credentials is not None
+                    else None
+                )
                 resp = await send(token)
                 if resp.status_code == 401 and credentials is not None:
-                    renewed = await asyncio.to_thread(credentials.renew, token)
+                    renewed = await asyncio.to_thread(credentials.renew, token, budget=timeout)
                     if renewed is not None:
                         resp = await send(renewed)
         except httpx.HTTPError as exc:

@@ -13,8 +13,9 @@ is predictable for both humans and agents (an agent typically just exports
 ``TAMARIND_API_KEY``).
 
 The credential is an API key, or a service account's OAuth client ID and secret
-(``--client-id`` / ``--client-secret``, ``TAMARIND_CLIENT_ID`` /
-``TAMARIND_CLIENT_SECRET``, or the profile's ``client_id`` / ``client_secret``), which
+(``--client-id`` or ``client_id=``, ``TAMARIND_CLIENT_ID`` / ``TAMARIND_CLIENT_SECRET``,
+or the profile's ``client_id`` / ``client_secret``; the CLI never takes the secret from the
+command line, where other users and logs can see it), which
 are traded for one-hour access tokens (:mod:`tamarind.oauth`). Each value resolves in the
 order above. When both kinds are set, the one set at the more specific level wins: an
 explicit value over the environment, the environment over the profile. At the same level
@@ -144,7 +145,10 @@ def load_config(
     )
     problem = None
     if resolved_id and not resolved_secret:
-        problem = "A client ID needs its client secret: set TAMARIND_CLIENT_SECRET or pass --client-secret."
+        problem = (
+            "A client ID needs its client secret: set TAMARIND_CLIENT_SECRET or run "
+            "`tamarind auth login --client-id`."
+        )
     elif resolved_secret and not resolved_id:
         problem = "A client secret needs its client ID: set TAMARIND_CLIENT_ID or pass --client-id."
     pair_level = (
