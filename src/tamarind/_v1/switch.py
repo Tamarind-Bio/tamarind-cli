@@ -162,12 +162,20 @@ class FileFlagCache:
 _PROCESS_CACHE = MemoryFlagCache()
 
 
-def probe(v1_base: str, api_key: str | ClientCredentials, *, timeout: float = PROBE_TIMEOUT) -> bool:
+def probe(
+    v1_base: str,
+    api_key: str | ClientCredentials,
+    *,
+    timeout: float = PROBE_TIMEOUT,
+    budget: float | None = None,
+) -> bool:
     """Ask v1 ``GET /me`` once (no retries): True only for ``clients.useV1: true``.
 
     ``api_key`` may be a service account's client credentials: the question is asked with
     their token, renewed once if it is refused with 401. A token that can't be had raises
-    the token endpoint's error, as the request after this question would.
+    the token endpoint's error, as the request after this question would. ``budget``, the
+    deadline of the request that needs the answer, bounds getting the token
+    (:meth:`~tamarind.oauth.ClientCredentials.token`).
     """
     from tamarind import __version__
 
@@ -177,7 +185,7 @@ def probe(v1_base: str, api_key: str | ClientCredentials, *, timeout: float = PR
         "User-Agent": f"tamarind-cli/{__version__}",
         **client_headers(),
     }
-    token = api_key if isinstance(api_key, str) else api_key.token()
+    token = api_key if isinstance(api_key, str) else api_key.token(budget=budget)
     try:
         with httpx.Client(timeout=timeout) as client:
 
@@ -188,7 +196,7 @@ def probe(v1_base: str, api_key: str | ClientCredentials, *, timeout: float = PR
 
             response = ask(token)
             if response.status_code == 401 and credentials is not None:
-                renewed = credentials.renew(token)
+                renewed = credentials.renew(token, budget=budget)
                 if renewed is not None:
                     response = ask(renewed)
         if response.status_code != 200:
@@ -256,7 +264,9 @@ class Switch:
         """The last answer kept (``--help`` lists v1 commands by it), however old."""
         return self.cached(max_age=KEEP_SECONDS)
 
-    def on(self) -> bool:
+    def on(self, *, budget: float | None = None) -> bool:
+        """Whether this key uses v1, asking the server once if no cache knows. ``budget``
+        is the deadline of the request that needs the answer (see :func:`probe`)."""
         key = self._key()
         if key is None:
             return False
@@ -268,7 +278,7 @@ class Switch:
                 assert self.v1_base is not None
                 asked_with = self.credentials if self.credentials is not None else self.api_key
                 assert asked_with is not None
-                known = probe(self.v1_base, asked_with)
+                known = probe(self.v1_base, asked_with, budget=budget)
                 for cache in self._caches():
                     cache.set(key, known)
             # Kept for this client's life, however it was learned: a long wait never

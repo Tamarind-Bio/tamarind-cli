@@ -687,3 +687,26 @@ def test_bounded_requests_pass_their_deadline_to_the_token_fetch():
     with V1Client(base_url=V1, credentials=make(), timeout=4.0) as client:  # retries: unbounded
         client.me.get()
     assert [c.request.extensions["timeout"]["read"] for c in route.calls] == [3.0, 4.0, 30.0]
+
+
+@respx.mock
+def test_a_bounded_request_bounds_the_v1_questions_token_too(monkeypatch):
+    monkeypatch.setattr(switch, "probe", _PROBE)
+    route = respx.post(TOKEN_URL).mock(return_value=granted("tok_1"))
+    respx.get(f"{V1}/me").mock(return_value=httpx.Response(200, json={"clients": {"useV1": False}}))
+    jobs = respx.get(f"{API}jobs").mock(return_value=httpx.Response(200, json={"jobs": []}))
+    with HTTPClient(API, None, credentials=make()) as client:
+        client.get_json("jobs", timeout=2.0)  # the first request: v1 is asked first
+    assert route.calls[0].request.extensions["timeout"]["read"] == 2.0
+    assert route.call_count == 1 and jobs.call_count == 1
+
+
+@respx.mock
+def test_a_bounded_raw_request_bounds_the_v1_questions_token_too(monkeypatch):
+    monkeypatch.setattr(switch, "probe", _PROBE)
+    route = respx.post(TOKEN_URL).mock(return_value=granted("tok_1"))
+    respx.get(f"{V1}/me").mock(return_value=httpx.Response(200, json={"clients": {"useV1": False}}))
+    respx.get(f"{API}custom-tools").mock(return_value=httpx.Response(200, json={"items": []}))
+    with HTTPClient(API, None, credentials=make()) as client:
+        asyncio.run(client.request_async("GET", "custom-tools", timeout=1.5))
+    assert route.calls[0].request.extensions["timeout"]["read"] == 1.5

@@ -125,9 +125,11 @@ class HTTPClient:
     def v1_base(self) -> str | None:
         return self._switch.v1_base
 
-    def uses_v1(self) -> bool:
-        """Whether this key's requests go to the v1 API (asks the server once, cached)."""
-        return self._switch.on()
+    def uses_v1(self, *, budget: float | None = None) -> bool:
+        """Whether this key's requests go to the v1 API (asks the server once, cached).
+        ``budget``: the deadline of the request that needs the answer, which bounds
+        getting a client-credentials token for the question."""
+        return self._switch.on(budget=budget)
 
     def cached_uses_v1(self) -> bool | None:
         """The last answer kept for this key, however old (what ``--help`` lists v1
@@ -191,15 +193,17 @@ class HTTPClient:
         from ._v1 import classic as on_v1
 
         handler = on_v1.route(method, path.strip("/")) or catalog_on_v1.route(method, path.strip("/"))
-        if handler is None or not self.has_credentials or not self.uses_v1():
+        if handler is None or not self.has_credentials or not self.uses_v1(budget=timeout):
             return classic()
         return self._routes().serve(handler, payload, classic, timeout=timeout)
 
-    def _same_path_on_v1(self, path: str) -> bool:
+    def _same_path_on_v1(self, path: str, timeout: float | None = None) -> bool:
         """Whether a request the v1 API serves at the same path (custom tools, pipeline
         runs) goes to its base: v1 is on for this key. May ask the server, once."""
         return bool(
-            self.has_credentials and _SAME_PATH_ON_V1.match(path.lstrip("/")) and self.uses_v1()
+            self.has_credentials
+            and _SAME_PATH_ON_V1.match(path.lstrip("/"))
+            and self.uses_v1(budget=timeout)
         )
 
     def _v1_same_path_client(self) -> "HTTPClient":
@@ -214,10 +218,10 @@ class HTTPClient:
             self._v1_raw._answers_for_v1 = True
         return self._v1_raw
 
-    def _raw_client(self, path: str) -> "HTTPClient":
+    def _raw_client(self, path: str, timeout: float | None = None) -> "HTTPClient":
         """The client a raw request goes through: v1's base for the paths it serves alike
         when v1 is on for this key, otherwise this one."""
-        return self._v1_same_path_client() if self._same_path_on_v1(path) else self
+        return self._v1_same_path_client() if self._same_path_on_v1(path, timeout) else self
 
     def _error(self, resp: httpx.Response, path: str) -> TamarindError:
         error = _map_error(resp, request_path=path)
@@ -238,7 +242,7 @@ class HTTPClient:
         json: Any | None = None,
         timeout: float | None = None,
     ) -> httpx.Response:
-        client = self._raw_client(path)
+        client = self._raw_client(path, timeout)
         if client is self:
             return client._classic_request(
                 method, path, params=params, headers=headers, json=json, timeout=timeout
@@ -308,7 +312,7 @@ class HTTPClient:
         # runs in a thread, so it never stalls the event loop or delays a cancellation. The
         # thread only decides; the v1 client is made here, so a cancelled request whose
         # thread finishes later leaves nothing open behind it.
-        on_v1 = await asyncio.to_thread(self._same_path_on_v1, path)
+        on_v1 = await asyncio.to_thread(self._same_path_on_v1, path, timeout)
         client = self._v1_same_path_client() if on_v1 else self
         if client is self:
             return await client._classic_request_async(
