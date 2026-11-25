@@ -49,6 +49,35 @@ tamarind auth login                    # stores it in ~/.tamarind/config.json
 tamarind auth status
 ```
 
+### Service accounts (OAuth client credentials)
+
+A service account that signs in with OAuth has a client ID and a client secret instead of an
+API key. The CLI and the SDK trade them for a one-hour access token at the website's token
+endpoint (`POST https://app.tamarind.bio/api/oauth/token`) and renew it themselves:
+
+```bash
+export TAMARIND_CLIENT_ID="..."        # the service account's client ID
+export TAMARIND_CLIENT_SECRET="..."
+# or
+tamarind auth login --client-id ...    # prompts for the secret, stores both
+```
+
+```python
+from tamarind import Tamarind
+
+client = Tamarind(client_id="...", client_secret="...")
+```
+
+- The token is kept in memory only, never on disk or in a log. It is renewed a minute before
+  it runs out, and once more if a request is refused with 401.
+- Every client in one Python process with the same ID and secret shares one token. Each CLI
+  command is its own process and asks for its own token. The token endpoint allows 600 tokens
+  an hour per account (and 300 requests in 10 minutes per network), so a loop that runs many
+  commands a minute should use the SDK instead.
+- When both an API key and client credentials are set, the one set more specifically wins (a
+  flag over an environment variable, an environment variable over the profile). At the same
+  level the API key wins.
+
 ## Quickstart
 
 ```bash
@@ -244,6 +273,8 @@ Run `tamarind <command> --help` for full options.
 | Setting | Flag | Env var | Default |
 |---|---|---|---|
 | API key | `--api-key` | `TAMARIND_API_KEY` | — |
+| Service account client ID | `--client-id` | `TAMARIND_CLIENT_ID` | — |
+| Service account client secret | `--client-secret` | `TAMARIND_CLIENT_SECRET` | — |
 | Job API base | `--api-base` | `TAMARIND_API_BASE` | `https://app.tamarind.bio/api/` |
 | Catalog base | `--catalog-base` | `TAMARIND_CATALOG_BASE` | `https://mcp.tamarind.bio` |
 | Profile | `--profile` | `TAMARIND_PROFILE` | `default` |
@@ -253,7 +284,7 @@ Every request says whether it came from the CLI or the SDK, and which AI agent (
 Codex, Claude Science, ...) is running it when that can be told from the environment. Tamarind
 uses this only to count usage by channel and platform.
 
-Profiles (key + endpoints) are stored in `~/.tamarind/config.json`. Use a
+Profiles (key or client credentials + endpoints) are stored in `~/.tamarind/config.json`. Use a
 profile to point at staging:
 
 ```bash

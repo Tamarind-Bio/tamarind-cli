@@ -17,6 +17,10 @@ from tamarind.resources import Files, Jobs, Tools
 class Tamarind:
     """Configured Tamarind SDK session.
 
+    It authenticates with an API key, or with a service account's ``client_id`` and
+    ``client_secret``, traded for one-hour access tokens that the client renews itself
+    (:mod:`tamarind.oauth`). Settings resolve as in :mod:`tamarind.config`.
+
     Whether its requests go to the v1 API is the server's answer for this key, asked
     once on the first request v1 can answer and cached for a few minutes. Every method
     behaves the same either way; ``docs/v1-mode.md`` lists the small differences.
@@ -31,14 +35,26 @@ class Tamarind:
         self,
         *,
         api_key: str | None = None,
+        client_id: str | None = None,
+        client_secret: str | None = None,
         api_base: str | None = None,
         profile: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         _flag_cache: Any = None,
     ):
-        config = load_config(api_key=api_key, api_base=api_base, profile=profile)
+        config = load_config(
+            api_key=api_key,
+            client_id=client_id,
+            client_secret=client_secret,
+            api_base=api_base,
+            profile=profile,
+        )
         self._http = HTTPClient(
-            config.api_base, config.api_key, timeout=timeout, flag_cache=_flag_cache
+            config.api_base,
+            config.api_key,
+            timeout=timeout,
+            flag_cache=_flag_cache,
+            credentials=config.client_credentials(),
         )
         self.custom_tools = CustomTools(
             GeneratedCustomToolsTransport(self._http),

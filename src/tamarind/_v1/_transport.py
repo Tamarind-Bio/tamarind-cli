@@ -1,9 +1,11 @@
 """Send v1 requests built by the generated client: auth, retries, idempotency, errors.
 
 The generated endpoint modules own the wire shape (method, path, query and header
-names, body). This module adds what every call shares: the ``x-api-key`` header,
-an ``Idempotency-Key`` on the operations that take one, retries with backoff on 429
-and 5xx that honor ``Retry-After``, and :class:`ProblemError` for every failure.
+names, body). This module adds what every call shares: the ``x-api-key`` header (an
+API key, or a service account's access token from :mod:`tamarind.oauth`, renewed once
+when a call is refused with 401), an ``Idempotency-Key`` on the operations that take one,
+retries with backoff on 429 and 5xx that honor ``Retry-After``, and
+:class:`ProblemError` for every failure.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ import types
 import typing
 import uuid
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from dateutil.parser import isoparse
@@ -27,6 +29,9 @@ from tamarind.errors import TamarindError
 from tamarind._v1._contract import COMMA_JOINED_QUERY
 from tamarind._v1._generated.types import UNSET, Unset
 from tamarind._v1.errors import ProblemError
+
+if TYPE_CHECKING:
+    from tamarind.oauth import ClientCredentials
 
 DEFAULT_BASE_URL = "https://api.tamarind.bio"
 DEFAULT_TIMEOUT = 60.0
@@ -50,6 +55,7 @@ class Transport:
         version: str | None,
         http_client: httpx.Client | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        credentials: ClientCredentials | None = None,
     ):
         headers = {
             "Accept": "application/json",
@@ -58,6 +64,7 @@ class Transport:
         }
         if api_key:
             headers["x-api-key"] = api_key
+        self._credentials = credentials
         self.base_url = base_url.rstrip("/")
         self.max_retries = max_retries
         self.version = version
@@ -153,14 +160,31 @@ class Transport:
         merged = httpx.Headers(self._headers)
         merged.update(headers or {})
         repeat_safe = repeat_safe or method in _SAFE_METHODS
-        return self._with_retries(
+        credentials = self._credentials
+        renewed = False
+
+        def request(token: str | None) -> httpx.Response:
+            sent = httpx.Headers(merged)
+            if token is not None:
+                sent["x-api-key"] = token
             # Never follow a redirect with the key, even on a caller's client that would.
-            lambda: self._client.request(
-                method, url, params=params, headers=merged, json=json, follow_redirects=False
-            ),
-            repeat_safe=repeat_safe,
-            api=True,
-        )
+            return self._client.request(
+                method, url, params=params, headers=sent, json=json, follow_redirects=False
+            )
+
+        def attempt() -> httpx.Response:
+            nonlocal renewed
+            token = credentials.token() if credentials is not None else None
+            response = request(token)
+            # A 401 is refused before any work, so sending again is safe; once per call.
+            if response.status_code == 401 and credentials is not None and not renewed:
+                renewed = True
+                fresh = credentials.renew(token)
+                if fresh is not None:
+                    response = request(fresh)
+            return response
+
+        return self._with_retries(attempt, repeat_safe=repeat_safe, api=True)
 
     # -- storage (signed URLs) --------------------------------------------
     def require_secure(self, url: object) -> None:

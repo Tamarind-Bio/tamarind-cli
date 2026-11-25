@@ -643,7 +643,8 @@ class Tamarind:
 
     ``api_key`` defaults to ``TAMARIND_API_KEY`` and ``base_url`` to
     ``https://api.tamarind.bio``; :class:`tamarind.http.HTTPClient` passes the v1 base of
-    its own environment (``tamarind._v1.switch``). ``version`` pins the
+    its own environment (``tamarind._v1.switch``). ``credentials``, a service account's
+    :class:`tamarind.oauth.ClientCredentials`, is used in place of a key. ``version`` pins the
     ``Tamarind-Version`` header (``YYYY-MM-DD``); without it the API answers with its
     first version. ``max_retries`` bounds retries of a failed request.
     """
@@ -657,9 +658,15 @@ class Tamarind:
         max_retries: int = DEFAULT_MAX_RETRIES,
         version: str | None = None,
         http_client: httpx.Client | None = None,
+        credentials: Any = None,
     ):
+        if credentials is not None:
+            api_key = None
+        else:
+            api_key = api_key or os.environ.get("TAMARIND_API_KEY") or None
         self._transport = Transport(
-            api_key=api_key or os.environ.get("TAMARIND_API_KEY") or None,
+            api_key=api_key,
+            credentials=credentials,
             base_url=base_url or DEFAULT_BASE_URL,
             timeout=timeout,
             max_retries=max_retries,

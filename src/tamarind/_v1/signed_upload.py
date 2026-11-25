@@ -25,7 +25,7 @@ def _raise_classic(exc: TamarindError) -> NoReturn:
 
 def upload_url(http: Any, filename: str, content_type: str) -> dict[str, Any] | None:
     """Classic's ``{uploadUrl, key}`` from v1, or None when v1 isn't on for this key."""
-    if not http.api_key or not http.uses_v1():
+    if not http.has_credentials or not http.uses_v1():
         return None
     try:
         v1 = http.v1()

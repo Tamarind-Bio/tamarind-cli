@@ -984,7 +984,7 @@ def route(method: str, path: str) -> Route | None:
 def upload(http: Any, path: Path, remote: str, content_type: str | None = None) -> dict[str, Any] | None:
     """An upload on v1 (uploadFile, the PUTs, completeFileUpload), answered as classic's
     upload is: ``{ok, filename, bytes}``. None when v1 isn't on for this key."""
-    if not http.api_key or not http.uses_v1():
+    if not http.has_credentials or not http.uses_v1():
         return None
     try:
         http.v1().files.upload(path, path=remote, content_type=content_type)

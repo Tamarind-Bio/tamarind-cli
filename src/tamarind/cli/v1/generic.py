@@ -267,11 +267,17 @@ def _client_for(ctx: click.Context) -> HTTPClient:
     argv = sys.argv[1:]
     cfg = load_config(
         api_key=_argv_option(argv, "--api-key"),
+        client_id=_argv_option(argv, "--client-id"),
+        client_secret=_argv_option(argv, "--client-secret"),
         api_base=_argv_option(argv, "--api-base"),
         profile=_argv_option(argv, "--profile"),
     )
     return HTTPClient(
-        cfg.api_base, cfg.api_key, v1_base=v1_base_for(cfg.api_base), flag_cache=FileFlagCache(config_dir())
+        cfg.api_base,
+        cfg.api_key,
+        v1_base=v1_base_for(cfg.api_base),
+        flag_cache=FileFlagCache(config_dir()),
+        credentials=cfg.client_credentials(),
     )
 
 
