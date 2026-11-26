@@ -29,6 +29,7 @@ _ORG_LOOKUP_HELP = (
 _EMAIL_LOOKUP_HELP = "The job belongs to this org member."
 
 
+# Hidden until the low-priority tier launches. The options still work, and the API refuses them off the flag.
 _LOW_PRIORITY_HELP = (
     "Run at low priority: 20% off, no completion guarantee, and a job not started "
     "within 7 days stops with no charge. Refused if unavailable for this job."
@@ -433,7 +434,7 @@ def register(app: typer.Typer) -> None:
         poll_interval: float = typer.Option(10.0, "--poll-interval", help="Seconds between polls when --wait."),
         timeout: Optional[float] = typer.Option(None, "--timeout", help="With --wait, give up after N seconds."),
         download: Optional[Path] = typer.Option(None, "--download", help="With --wait, download results to this directory."),
-        low_priority: bool = typer.Option(False, "--low-priority", help=_LOW_PRIORITY_HELP),
+        low_priority: bool = typer.Option(False, "--low-priority", help=_LOW_PRIORITY_HELP, hidden=True),
     ) -> None:
         """Submit a single job. Validates first unless --skip-validate."""
         state = ctx.obj
@@ -539,7 +540,7 @@ def register(app: typer.Typer) -> None:
     def batch(
         ctx: typer.Context,
         tool: str = typer.Argument(..., help="Tool name applied to every job in the batch."),
-        input: str = typer.Option(..., "--input", "-i", help="YAML/JSON list of per-job settings, or a {batchName,type,settings[],jobNames,lowPriority} object."),
+        input: str = typer.Option(..., "--input", "-i", help="YAML/JSON list of per-job settings, or a {batchName,type,settings[],jobNames} object."),
         name: Optional[str] = typer.Option(None, "--name", "-n", help="Batch name (default: auto)."),
         max_runtime: Optional[int] = typer.Option(None, "--max-runtime", help="Max runtime seconds per job."),
         prevalidate: bool = typer.Option(
@@ -547,7 +548,7 @@ def register(app: typer.Typer) -> None:
             "--prevalidate",
             help="Validate every item before submitting.",
         ),
-        low_priority: bool = typer.Option(False, "--low-priority", help=_LOW_PRIORITY_HELP),
+        low_priority: bool = typer.Option(False, "--low-priority", help=_LOW_PRIORITY_HELP, hidden=True),
     ) -> None:
         """Submit many jobs as one batch (preferred over looping submit)."""
         state = ctx.obj

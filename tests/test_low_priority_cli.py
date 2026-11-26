@@ -1,9 +1,11 @@
 """`tamarind submit --low-priority` and `tamarind batch --low-priority`.
 
 The request bodies are what these pin: a flag the CLI accepted and didn't send would bill full price.
+The options are hidden until the tier launches, and keep working.
 """
 
 import json
+import re
 
 import httpx
 import pytest
@@ -12,7 +14,7 @@ from typer.testing import CliRunner
 
 from tamarind.cli import output
 from tamarind.cli.main import app
-from tamarind import Tamarind
+from tamarind import Tamarind, rest
 from tamarind.errors import ExitCode, ValidationError
 
 API = "https://app.tamarind.bio/api/"
@@ -144,3 +146,18 @@ def test_the_sdk_passes_it_through(asked):
     for route in (job, batch):
         body = json.loads(route.calls.last.request.content)
         assert body.get("lowPriority", False) is asked
+
+
+@pytest.mark.parametrize("command", ["submit", "batch"])
+def test_help_does_not_show_the_tier(command):
+    result = runner.invoke(app, [command, "--help"], env=ENV, terminal_width=200)
+    assert result.exit_code == 0, result.output
+    assert "low-priority" not in result.output.lower() and "lowpriority" not in result.output.lower()
+    assert "20% off" not in result.output
+
+
+def test_root_help_and_the_sdk_docstrings_do_not_show_the_tier():
+    assert "low-priority" not in runner.invoke(app, ["--help"], env=ENV).output.lower()
+    client = Tamarind(api_key="k")
+    for method in (client.jobs.submit, client.jobs.submit_batch, rest.submit_job, rest.submit_batch):
+        assert not re.search(r"low.?priority", method.__doc__, re.IGNORECASE), method
