@@ -21,7 +21,9 @@ catalog lookup, schema lookup, and validation before a release. Changes to the
 server contract should update the CLI tests in the same change or release train.
 
 These calls go directly to the job API (`https://app.tamarind.bio/api/`) with
-the `x-api-key` header.
+the `x-api-key` header. For a service account that signs in with OAuth, the header
+carries a one-hour access token from `POST /api/oauth/token` instead of a key
+([`oauth.py`](../src/tamarind/oauth.py)).
 
 ### 2. Discovery surface — source of truth: a shared catalog module
 

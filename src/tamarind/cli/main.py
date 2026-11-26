@@ -47,7 +47,13 @@ Abort = typer.Abort
 # unwound its context. A process executes one CLI invocation, so this is scoped
 # to exactly the lifecycle it represents.
 _active_output_mode = OutputMode(json=not output.is_tty(), quiet=False)
-_GLOBAL_VALUE_OPTIONS = {"--api-key", "--api-base", "--catalog-base", "--profile"}
+_GLOBAL_VALUE_OPTIONS = {
+    "--api-key",
+    "--client-id",
+    "--api-base",
+    "--catalog-base",
+    "--profile",
+}
 _GLOBAL_FLAG_OPTIONS = {"--json", "--no-json", "--quiet", "-q"}
 # Groups that need a subcommand (`jobs`, `tools` and `usage` run on their own).
 _COMMAND_GROUPS = {
@@ -115,6 +121,7 @@ class State:
             cfg.api_key,
             v1_base=v1_base_for(cfg.api_base),
             flag_cache=FileFlagCache(config_dir()),
+            credentials=cfg.client_credentials(),
         )
 
     def rest_client(self) -> HTTPClient:
@@ -132,6 +139,8 @@ class State:
         cfg = self.config()
         return Tamarind(
             api_key=cfg.api_key,
+            client_id=cfg.client_id,
+            client_secret=cfg.client_secret,
             api_base=cfg.api_base,
             profile=cfg.profile,
             _flag_cache=FileFlagCache(config_dir()),
@@ -143,7 +152,8 @@ app = typer.Typer(
     help=(
         "Tamarind Bio CLI — discover tools, submit and monitor protein/molecule "
         "jobs, and download results.\n\n"
-        "Auth: export TAMARIND_API_KEY, or run `tamarind auth login`.\n"
+        "Auth: export TAMARIND_API_KEY, or run `tamarind auth login`. A service account: "
+        "export TAMARIND_CLIENT_ID and TAMARIND_CLIENT_SECRET.\n"
         "Agents: pass --json (the default when stdout is not a terminal)."
     ),
     no_args_is_help=True,
@@ -161,8 +171,20 @@ def _version_callback(value: bool) -> None:
 @app.callback()
 def main(
     ctx: typer.Context,
+    # No envvar here: config reads TAMARIND_API_KEY itself, so a flag beats the environment
+    # when the API key and client credentials are set in different places.
     api_key: Optional[str] = typer.Option(
-        None, "--api-key", envvar="TAMARIND_API_KEY", help="API key (overrides env/profile).", show_default=False
+        None, "--api-key", help="API key (overrides TAMARIND_API_KEY and the profile).", show_default=False
+    ),
+    client_id: Optional[str] = typer.Option(
+        None,
+        "--client-id",
+        help=(
+            "A service account's client ID, for OAuth (overrides TAMARIND_CLIENT_ID and the profile). "
+            "Its secret is never taken from the command line: set TAMARIND_CLIENT_SECRET or run "
+            "`tamarind auth login --client-id`."
+        ),
+        show_default=False,
     ),
     api_base: Optional[str] = typer.Option(
         None, "--api-base", envvar="TAMARIND_API_BASE", help="Job API base URL.", show_default=False
@@ -188,6 +210,7 @@ def main(
         output=_active_output_mode,
         _kwargs={
             "api_key": api_key,
+            "client_id": client_id,
             "api_base": api_base,
             "catalog_base": catalog_base,
             "profile": profile,

@@ -2,7 +2,9 @@
 
 Wraps ``httpx.Client`` with the ``x-api-key`` header the Tamarind API expects,
 and maps non-2xx responses onto the typed errors in :mod:`tamarind.errors` so
-callers (and the CLI's exit codes) get consistent behaviour.
+callers (and the CLI's exit codes) get consistent behaviour. With a service
+account's client credentials (:mod:`tamarind.oauth`) the header carries an access
+token instead of a key, renewed once when a request is refused with 401.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ import re
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -35,16 +37,23 @@ from .errors import (
     ValidationError,
 )
 
+if TYPE_CHECKING:
+    from .oauth import ClientCredentials
+
 DEFAULT_TIMEOUT = 120.0
 USER_AGENT = "tamarind-cli"
-_NO_KEY = "No API key configured. Set TAMARIND_API_KEY, pass --api-key, or run `tamarind auth login`."
+_NO_KEY = (
+    "No API key configured. Set TAMARIND_API_KEY (or, for a service account, TAMARIND_CLIENT_ID "
+    "and TAMARIND_CLIENT_SECRET), pass --api-key, or run `tamarind auth login`."
+)
 _DERIVED: Any = object()
 # Paths the v1 API serves exactly as here (the custom-tools router wraps this one's).
 _SAME_PATH_ON_V1 = re.compile(r"^(?:custom-tools(?:/|$)|pipelines/runs/[^/]+(?:/node-runs/[^/]+/molecules)?$)")
 
 
 class HTTPClient:
-    """A small wrapper around ``httpx.Client`` keyed by base URL + API key."""
+    """A small wrapper around ``httpx.Client`` keyed by base URL + API key (or a service
+    account's client credentials, ``credentials``)."""
 
     def __init__(
         self,
@@ -54,16 +63,25 @@ class HTTPClient:
         timeout: float = DEFAULT_TIMEOUT,
         v1_base: Any = _DERIVED,
         flag_cache: Any = None,
+        credentials: ClientCredentials | None = None,
     ):
         from ._v1.switch import Switch, v1_base_for
 
+        if api_key and credentials is not None:
+            raise ValueError("Pass an API key or client credentials, not both.")
         self.base_url = base_url
         self.api_key = api_key
+        self.credentials = credentials
         self._timeout = timeout
         # Whether this key's requests go to the v1 API: the server says (`GET /me`,
         # asked on the first request v1 can answer). `v1_base` defaults to the v1 API
         # of this base's environment; None means classic only.
-        self._switch = Switch(api_key, v1_base_for(base_url) if v1_base is _DERIVED else v1_base, flag_cache)
+        self._switch = Switch(
+            api_key,
+            v1_base_for(base_url) if v1_base is _DERIVED else v1_base,
+            flag_cache,
+            credentials=credentials,
+        )
         self._v1: Any = None
         self._v1_raw: HTTPClient | None = None
         self._router: Any = None
@@ -82,6 +100,11 @@ class HTTPClient:
             headers["x-api-key"] = api_key
         self._headers = headers
         self._client = httpx.Client(base_url=base_url, headers=headers, timeout=timeout)
+
+    @property
+    def has_credentials(self) -> bool:
+        """Whether requests carry an API key or a client-credentials token."""
+        return bool(self.api_key) or self.credentials is not None
 
     # -- lifecycle ---------------------------------------------------------
     def close(self) -> None:
@@ -102,9 +125,11 @@ class HTTPClient:
     def v1_base(self) -> str | None:
         return self._switch.v1_base
 
-    def uses_v1(self) -> bool:
-        """Whether this key's requests go to the v1 API (asks the server once, cached)."""
-        return self._switch.on()
+    def uses_v1(self, *, budget: float | None = None) -> bool:
+        """Whether this key's requests go to the v1 API (asks the server once, cached).
+        ``budget``: the deadline of the request that needs the answer, which bounds
+        getting a client-credentials token for the question."""
+        return self._switch.on(budget=budget)
 
     def cached_uses_v1(self) -> bool | None:
         """The last answer kept for this key, however old (what ``--help`` lists v1
@@ -115,14 +140,16 @@ class HTTPClient:
         from ._v1.client import Tamarind as V1
 
         options.setdefault("timeout", self._timeout)
-        return V1(self.api_key, base_url=self._switch.v1_base, **options)
+        return V1(
+            self.api_key, base_url=self._switch.v1_base, credentials=self.credentials, **options
+        )
 
     def require_v1(self, what: str) -> None:
         """Raise unless v1 is on for this key: no key is classic's AuthError, and a
         key v1 isn't on for is :class:`~tamarind._v1.switch.V1NotEnabledError`."""
         from ._v1.switch import V1NotEnabledError
 
-        if not self.api_key:
+        if not self.has_credentials:
             raise AuthError(_NO_KEY)
         if not self.uses_v1():
             raise V1NotEnabledError(what)
@@ -166,27 +193,35 @@ class HTTPClient:
         from ._v1 import classic as on_v1
 
         handler = on_v1.route(method, path.strip("/")) or catalog_on_v1.route(method, path.strip("/"))
-        if handler is None or not self.api_key or not self.uses_v1():
+        if handler is None or not self.has_credentials or not self.uses_v1(budget=timeout):
             return classic()
         return self._routes().serve(handler, payload, classic, timeout=timeout)
 
-    def _same_path_on_v1(self, path: str) -> bool:
+    def _same_path_on_v1(self, path: str, timeout: float | None = None) -> bool:
         """Whether a request the v1 API serves at the same path (custom tools, pipeline
         runs) goes to its base: v1 is on for this key. May ask the server, once."""
-        return bool(self.api_key and _SAME_PATH_ON_V1.match(path.lstrip("/")) and self.uses_v1())
+        return bool(
+            self.has_credentials
+            and _SAME_PATH_ON_V1.match(path.lstrip("/"))
+            and self.uses_v1(budget=timeout)
+        )
 
     def _v1_same_path_client(self) -> "HTTPClient":
         if self._v1_raw is None:
             self._v1_raw = HTTPClient(
-                str(self._switch.v1_base), self.api_key, timeout=self._timeout, v1_base=None
+                str(self._switch.v1_base),
+                self.api_key,
+                timeout=self._timeout,
+                v1_base=None,
+                credentials=self.credentials,
             )
             self._v1_raw._answers_for_v1 = True
         return self._v1_raw
 
-    def _raw_client(self, path: str) -> "HTTPClient":
+    def _raw_client(self, path: str, timeout: float | None = None) -> "HTTPClient":
         """The client a raw request goes through: v1's base for the paths it serves alike
         when v1 is on for this key, otherwise this one."""
-        return self._v1_same_path_client() if self._same_path_on_v1(path) else self
+        return self._v1_same_path_client() if self._same_path_on_v1(path, timeout) else self
 
     def _error(self, resp: httpx.Response, path: str) -> TamarindError:
         error = _map_error(resp, request_path=path)
@@ -207,7 +242,7 @@ class HTTPClient:
         json: Any | None = None,
         timeout: float | None = None,
     ) -> httpx.Response:
-        client = self._raw_client(path)
+        client = self._raw_client(path, timeout)
         if client is self:
             return client._classic_request(
                 method, path, params=params, headers=headers, json=json, timeout=timeout
@@ -227,21 +262,32 @@ class HTTPClient:
         json: Any | None = None,
         timeout: float | None = None,
     ) -> httpx.Response:
-        if not self.api_key:
+        if not self.has_credentials:
             raise AuthError(_NO_KEY)
         clean_params = _without_none_values(params)
         clean_headers = _without_none_values(headers)
-        try:
-            resp = self._client.request(
+
+        def send(token: str | None) -> httpx.Response:
+            return self._client.request(
                 method,
                 path.lstrip("/"),
                 params=clean_params,
-                headers=clean_headers,
+                headers=_with_token(clean_headers, token),
                 json=json,
                 timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
             )
+
+        try:
+            # A request its caller bounds (`timeout`) gets its token within the same bound.
+            token = self.credentials.token(budget=timeout) if self.credentials is not None else None
+            resp = send(token)
+            if resp.status_code == 401 and self.credentials is not None:
+                # Refused before any work was done, so sending it again is safe.
+                renewed = self.credentials.renew(token, budget=timeout)
+                if renewed is not None:
+                    resp = send(renewed)
         except httpx.HTTPError as exc:
-            raise TamarindError(f"Network error talking to {self.base_url}: {exc}") from exc
+            raise TamarindError(f"Network error talking to {self.base_url}: {exc}") from detached(exc)
 
         if resp.is_success:
             return resp
@@ -266,7 +312,7 @@ class HTTPClient:
         # runs in a thread, so it never stalls the event loop or delays a cancellation. The
         # thread only decides; the v1 client is made here, so a cancelled request whose
         # thread finishes later leaves nothing open behind it.
-        on_v1 = await asyncio.to_thread(self._same_path_on_v1, path)
+        on_v1 = await asyncio.to_thread(self._same_path_on_v1, path, timeout)
         client = self._v1_same_path_client() if on_v1 else self
         if client is self:
             return await client._classic_request_async(
@@ -287,26 +333,41 @@ class HTTPClient:
         json: Any | None = None,
         timeout: float | None = None,
     ) -> httpx.Response:
-        if not self.api_key:
+        if not self.has_credentials:
             raise AuthError(_NO_KEY)
         clean_params = _without_none_values(params)
         clean_headers = _without_none_values(headers)
+        credentials = self.credentials
         try:
             async with httpx.AsyncClient(
                 base_url=self.base_url,
                 headers=self._headers,
                 timeout=self._timeout,
             ) as client:
-                resp = await client.request(
-                    method,
-                    path.lstrip("/"),
-                    params=clean_params,
-                    headers=clean_headers,
-                    json=json,
-                    timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
+
+                async def send(token: str | None) -> httpx.Response:
+                    return await client.request(
+                        method,
+                        path.lstrip("/"),
+                        params=clean_params,
+                        headers=_with_token(clean_headers, token),
+                        json=json,
+                        timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
+                    )
+
+                # A token fetch is a blocking request: it runs in a thread, like the v1 question.
+                token = (
+                    await asyncio.to_thread(credentials.token, budget=timeout)
+                    if credentials is not None
+                    else None
                 )
+                resp = await send(token)
+                if resp.status_code == 401 and credentials is not None:
+                    renewed = await asyncio.to_thread(credentials.renew, token, budget=timeout)
+                    if renewed is not None:
+                        resp = await send(renewed)
         except httpx.HTTPError as exc:
-            raise TamarindError(f"Network error talking to {self.base_url}: {exc}") from exc
+            raise TamarindError(f"Network error talking to {self.base_url}: {exc}") from detached(exc)
 
         if resp.is_success:
             return resp
@@ -373,6 +434,22 @@ def _parse_json(resp: httpx.Response) -> Any:
     except ValueError:
         # Some endpoints (e.g. /result) return a bare presigned URL string.
         return text
+
+
+def detached(exc: httpx.HTTPError) -> httpx.HTTPError:
+    """``exc`` without the request httpx attached to it, whose headers hold the API key or
+    access token. Chained errors keep their type, which callers read (a network error
+    means the outcome is unclear); anything that reports a cause can't reach the key."""
+    exc._request = None
+    return exc
+
+
+def _with_token(headers: dict[str, Any] | None, token: str | None) -> dict[str, Any] | None:
+    """A request's headers with a client-credentials token in ``x-api-key``; an API key
+    is already among the client's headers."""
+    if token is None:
+        return headers
+    return {**(headers or {}), "x-api-key": token}
 
 
 def _without_none_values(values: dict[str, Any] | None) -> dict[str, Any] | None:

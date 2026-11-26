@@ -4,7 +4,9 @@ The server answers on v1 ``GET /me`` as ``clients.useV1``, from the per-user fla
 ``cli-sdk-v1-api``. Anything but an explicit ``true`` means classic: no answer (no DNS
 yet), a 401, a 404 (a caller outside v1), a body that isn't JSON, the field missing or
 false. The answer is cached for a few minutes per (v1 base, key); the cache never holds
-the key itself, only a hash of it.
+the key itself, only a hash of it. For a service account's client credentials
+(:mod:`tamarind.oauth`) the answer is kept per client ID, which stays the same as the
+hourly tokens change.
 
 The v1 base comes from the classic one, so one setting names the environment. A base
 this module doesn't know (a local server) has no v1, and stays classic.
@@ -21,12 +23,15 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import httpx
 
 from tamarind.attribution import client_headers
 from tamarind.errors import UsageError
+
+if TYPE_CHECKING:
+    from tamarind.oauth import ClientCredentials
 
 FLAG = "cli-sdk-v1-api"
 PROBE_TIMEOUT = 5.0
@@ -157,19 +162,43 @@ class FileFlagCache:
 _PROCESS_CACHE = MemoryFlagCache()
 
 
-def probe(v1_base: str, api_key: str, *, timeout: float = PROBE_TIMEOUT) -> bool:
-    """Ask v1 ``GET /me`` once (no retries): True only for ``clients.useV1: true``."""
+def probe(
+    v1_base: str,
+    api_key: str | ClientCredentials,
+    *,
+    timeout: float = PROBE_TIMEOUT,
+    budget: float | None = None,
+) -> bool:
+    """Ask v1 ``GET /me`` once (no retries): True only for ``clients.useV1: true``.
+
+    ``api_key`` may be a service account's client credentials: the question is asked with
+    their token, renewed once if it is refused with 401. A token that can't be had raises
+    the token endpoint's error, as the request after this question would. ``budget``, the
+    deadline of the request that needs the answer, bounds getting the token
+    (:meth:`~tamarind.oauth.ClientCredentials.token`).
+    """
     from tamarind import __version__
 
+    credentials = None if isinstance(api_key, str) else api_key
     headers = {
         "Accept": "application/json",
         "User-Agent": f"tamarind-cli/{__version__}",
         **client_headers(),
-        "x-api-key": api_key,
     }
+    token = api_key if isinstance(api_key, str) else api_key.token(budget=budget)
     try:
         with httpx.Client(timeout=timeout) as client:
-            response = client.get(f"{v1_base}/me", headers=headers, follow_redirects=False)
+
+            def ask(key: str) -> httpx.Response:
+                return client.get(
+                    f"{v1_base}/me", headers={**headers, "x-api-key": key}, follow_redirects=False
+                )
+
+            response = ask(token)
+            if response.status_code == 401 and credentials is not None:
+                renewed = credentials.renew(token, budget=budget)
+                if renewed is not None:
+                    response = ask(renewed)
         if response.status_code != 200:
             return False
         body = response.json()
@@ -185,17 +214,26 @@ class Switch:
     client reads the shared cache, so a changed flag reaches the next command (or client)
     within :data:`CACHE_SECONDS`."""
 
-    def __init__(self, api_key: str | None, v1_base: str | None, cache: FlagCache | None = None):
+    def __init__(
+        self,
+        api_key: str | None,
+        v1_base: str | None,
+        cache: FlagCache | None = None,
+        *,
+        credentials: ClientCredentials | None = None,
+    ):
         self.api_key = api_key
+        self.credentials = credentials
         self.v1_base = v1_base.rstrip("/") if v1_base else None
         self._cache = cache
         self._lock = threading.Lock()
         self._known: bool | None = None
 
     def _key(self) -> str | None:
-        if not self.api_key or not self.v1_base or disabled():
+        identity = self.credentials.flag_identity if self.credentials is not None else self.api_key
+        if not identity or not self.v1_base or disabled():
             return None
-        return cache_key(self.v1_base, self.api_key)
+        return cache_key(self.v1_base, identity)
 
     def _caches(self) -> list[FlagCache]:
         # This process's answers first, then the given cache (the CLI's file): a cache
@@ -226,7 +264,9 @@ class Switch:
         """The last answer kept (``--help`` lists v1 commands by it), however old."""
         return self.cached(max_age=KEEP_SECONDS)
 
-    def on(self) -> bool:
+    def on(self, *, budget: float | None = None) -> bool:
+        """Whether this key uses v1, asking the server once if no cache knows. ``budget``
+        is the deadline of the request that needs the answer (see :func:`probe`)."""
         key = self._key()
         if key is None:
             return False
@@ -235,8 +275,10 @@ class Switch:
                 return self._known
             known = self._read(key, CACHE_SECONDS)
             if known is None:
-                assert self.v1_base is not None and self.api_key is not None
-                known = probe(self.v1_base, self.api_key)
+                assert self.v1_base is not None
+                asked_with = self.credentials if self.credentials is not None else self.api_key
+                assert asked_with is not None
+                known = probe(self.v1_base, asked_with, budget=budget)
                 for cache in self._caches():
                     cache.set(key, known)
             # Kept for this client's life, however it was learned: a long wait never
